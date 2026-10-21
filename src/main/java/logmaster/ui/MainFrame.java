@@ -472,6 +472,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 e -> openFolderSearch(null)));
         file.add(item("Close Tab", KeyStroke.getKeyStroke(KeyEvent.VK_W, MENU), e -> closeTab(tabs.getSelectedIndex())));
         file.addSeparator();
+        JMenu export = new JMenu("Export");
+        export.add(item("Lines Shown by Filters…", KeyStroke.getKeyStroke(KeyEvent.VK_E, MENU | InputEvent.SHIFT_DOWN_MASK),
+                e -> exportLines("filtered")));
+        export.add(item("Find Results…", null, e -> exportLines("find")));
+        export.add(item("Selected Lines…", null, e -> exportLines("selection")));
+        export.add(item("Everything in the View…", null, e -> exportLines("view")));
+        file.add(export);
+        file.addSeparator();
         file.add(item(isMac() ? "Quit" : "Exit", isMac() ? null : KeyStroke.getKeyStroke(KeyEvent.VK_Q, MENU), e -> dispose()));
         bar.add(file);
 
@@ -636,6 +644,68 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         if (t != null && !t.nextError(forward)) {
             Toolkit.getDefaultToolkit().beep();
         }
+    }
+
+    /** Saves lines of the current log to a file: filtered, find results, selection or view. */
+    void exportLines(String what) {
+        LogTab t = currentTab();
+        if (t == null) {
+            return;
+        }
+        logmaster.core.LineExporter.Runs runs;
+        String suffix;
+        switch (what) {
+            case "filtered" -> {
+                if (!t.isFiltering()) {
+                    JOptionPane.showMessageDialog(this, "No filters are active: add a filter first,"
+                            + " or use Export → Everything in the View.");
+                    return;
+                }
+                runs = t.filteredRuns();
+                suffix = "-filtered";
+            }
+            case "find" -> {
+                if (t.search() == null) {
+                    JOptionPane.showMessageDialog(this, "Run Find All first.");
+                    return;
+                }
+                runs = logmaster.core.LineExporter.of(t.search().hits());
+                suffix = "-found";
+            }
+            case "selection" -> {
+                runs = t.selectionRuns();
+                suffix = "-selection";
+            }
+            default -> {
+                runs = t.visibleRuns();
+                suffix = "-view";
+            }
+        }
+        String name = t.document().path().getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        FileDialog fd = new FileDialog(this, "Export Lines", FileDialog.SAVE);
+        fd.setDirectory(t.document().path().getParent().toString());
+        fd.setFile(base + suffix + ".log");
+        fd.setVisible(true);
+        if (fd.getFile() == null) {
+            return;
+        }
+        Path out = Path.of(fd.getDirectory(), fd.getFile());
+        if (out.toAbsolutePath().normalize().equals(t.document().path())) {
+            JOptionPane.showMessageDialog(this, "Choose a different file than the log itself.");
+            return;
+        }
+        exportTo(t, runs, out, n -> status.setText(String.format("Exported %,d lines to %s", n, out)));
+    }
+
+    /** Exports in the background with progress; {@code done} gets the number of lines. */
+    void exportTo(LogTab t, logmaster.core.LineExporter.Runs runs, Path out,
+                  java.util.function.LongConsumer done) {
+        ProgressDialog.run(this, "Exporting lines…",
+                (progress, cancelled) -> logmaster.core.LineExporter.export(t.document(), runs, out,
+                        progress, cancelled),
+                n -> done.accept(n));
     }
 
     private void goToLineDialog() {

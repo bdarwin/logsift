@@ -1259,6 +1259,51 @@ class VisualTest {
         });
     }
 
+    @Test
+    @Order(19)
+    void exportFilteredLines() throws Exception {
+        onEdt(() -> {
+            frame.openFile(big);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        onEdt(() -> {
+            for (FilterDef d : tab.filterPanel().filters()) {
+                d.enabled = false;
+            }
+            FilterDef d = tab.filterPanel().addFilter("Payment failed", FilterDef.Action.SHOW);
+            d.matchCase = true;
+            tab.filtersChanged();
+            return null;
+        });
+        FilterResult r = waitForFilters(tab, System.nanoTime());
+        Path out = dir.resolve("exported.log");
+        Files.deleteIfExists(out);
+        long[] written = {-1};
+        long t0 = System.nanoTime();
+        onEdt(() -> {
+            frame.exportTo(tab, tab.filteredRuns(), out, n -> written[0] = n);
+            return null;
+        });
+        waitFor(() -> written[0] >= 0, 120_000, "export finished");
+        long exportMs = ms(t0);
+        assertEquals(r.count(), written[0], "lines written");
+        List<String> got = Files.readAllLines(out);
+        assertEquals(r.count(), got.size());
+        for (int i = 0; i < got.size(); i += Math.max(1, got.size() / 500)) {
+            assertEquals(tab.document().line(r.lineAt(i)), got.get(i), "exported line " + i);
+        }
+        summary.put("Export filtered lines", String.format("%,d lines in %d ms", written[0], exportMs));
+        Files.delete(out);
+        onEdt(() -> {
+            for (FilterDef d : tab.filterPanel().filters()) {
+                d.enabled = false;
+            }
+            tab.filtersChanged();
+            return null;
+        });
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {

@@ -1060,6 +1060,50 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
     }
 
+    /** Lines the log view shows now: matching lines in "Matching only", else every line. */
+    logmaster.core.LineExporter.Runs visibleRuns() {
+        FilterResult r = filterResult;
+        long n = doc.lineCount();
+        return matchingOnly ? c -> r.forEachRun(n, c) : c -> c.run(0, n);
+    }
+
+    /** Lines that pass the filters (with context lines), whatever the view shows. */
+    logmaster.core.LineExporter.Runs filteredRuns() {
+        FilterResult r = filterResult;
+        long n = doc.lineCount();
+        return c -> r.forEachRun(n, c);
+    }
+
+    boolean isFiltering() {
+        return filterResult.isFiltering();
+    }
+
+    /** The selected lines of the log view (or the current line). */
+    logmaster.core.LineExporter.Runs selectionRuns() {
+        int[] rows = main.selectedRows();
+        LogView.RowSource src = main.source();
+        return c -> {
+            if (rows == null) {
+                return;
+            }
+            long runStart = -1;
+            long prev = -2;
+            for (int row = rows[0]; row <= rows[1]; row++) {
+                long line = src.lineNumber(row);
+                if (line != prev + 1) {
+                    if (runStart >= 0) {
+                        c.run(runStart, prev + 1);
+                    }
+                    runStart = line;
+                }
+                prev = line;
+            }
+            if (runStart >= 0) {
+                c.run(runStart, prev + 1);
+            }
+        };
+    }
+
     /** Shows or hides the Filters / Find results area. */
     void toggleBottom() {
         boolean show = !bottom.isVisible();

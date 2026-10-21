@@ -127,6 +127,48 @@ public final class FilterResult {
         return l.comp ? line - start - before : before;
     }
 
+    /** Receives runs of consecutive lines: {@code [from, to)}. */
+    public interface RunConsumer {
+        void run(long from, long to) throws java.io.IOException;
+    }
+
+    /**
+     * Calls {@code out} for each run of consecutive shown lines, in order, up to
+     * {@code lineCount} (lines beyond what was checked count as shown).
+     */
+    public void forEachRun(long lineCount, RunConsumer out) throws java.io.IOException {
+        Lines l = shown;
+        long lo = start;
+        long hi = Math.min(end, lineCount);
+        if (!l.comp) {
+            int i = 0;
+            while (i < l.n) {
+                long a = l.a[i];
+                int j = i;
+                while (j + 1 < l.n && l.a[j + 1] == l.a[j] + 1) {
+                    j++;
+                }
+                out.run(a, l.a[j] + 1);
+                i = j + 1;
+            }
+            if (universe < hi) {
+                out.run(Math.max(lo, universe), hi); // not checked yet: shown
+            }
+            return;
+        }
+        long next = lo;
+        for (int i = 0; i < l.n; i++) {
+            long e = l.a[i];
+            if (e > next) {
+                out.run(next, Math.min(e, hi));
+            }
+            next = Math.max(next, e + 1);
+        }
+        if (next < hi) {
+            out.run(next, hi);
+        }
+    }
+
     /** Whether {@code line} is shown (lines not yet checked count as shown). */
     public boolean contains(long line) {
         return in(shown, line);

@@ -45,6 +45,7 @@ Make a test log:
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Merge logs by time | Ctrl+Shift+M |
 | Columns view | Ctrl+Shift+K |
+| Export lines shown by filters | Ctrl+Shift+E |
 | Go to line | Ctrl+L |
 | Go to time | Ctrl+Shift+L |
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
@@ -73,6 +74,10 @@ When a log has timestamps, a timeline above it shows how much was logged over ti
 - **Drag** across it to show only that time range. The range works with the filters: drag over an incident, add an ERROR filter, and you see just the errors of the incident. Click ✕ on the range to show all times again.
 - The status bar shows the time of the current line.
 - Recognized formats: `2026-10-21 10:02:13`, ISO with `T`, `2026/10/21`, `21-10-2026`, `21.10.2026`, `21-Oct-2026`, syslog `Oct 21 10:02:13`, Apache `[21/Oct/2026:10:02:13 +0000]`, timestamps inside JSON lines, time only, and epoch seconds or milliseconds. Times are shown as written in the log (time zones are not converted).
+
+## Export
+
+**File → Export** saves lines to a new file: the **lines shown by filters** (Ctrl+Shift+E), the **Find results**, the **selected lines**, or **everything in the view**. The original bytes are copied (line endings and encoding unchanged), in runs of consecutive lines, so even large exports take seconds.
 
 ## Columns and levels
 
