@@ -68,7 +68,8 @@ class AppPlumbingTest {
             for (int i = 0; i < 50 && got.size() < 2; i++) {
                 Thread.sleep(20);
             }
-            assertEquals(List.of(Path.of("/var/log/a.log"), Path.of("/tmp/b c.log")), got);
+            // paths arrive absolute (on Windows "/var/log/a.log" becomes "C:\\var\\log\\a.log")
+            assertEquals(List.of(Path.of("/var/log/a.log").toAbsolutePath(), Path.of("/tmp/b c.log").toAbsolutePath()), got);
             // a wrong secret is ignored
             Files.writeString(dir.resolve("instance"),
                     Files.readAllLines(dir.resolve("instance")).get(0) + "\nwrong\n");
