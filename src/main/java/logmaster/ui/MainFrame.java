@@ -49,7 +49,7 @@ import logmaster.core.SearchQuery;
 import logmaster.core.SearchSession;
 
 /** The application window. */
-public final class MainFrame extends JFrame implements LogTab.Host {
+public final class MainFrame extends JFrame implements LogTab.Host, FolderSearchTab.Host {
     private static final Preferences PREFS = Preferences.userNodeForPackage(MainFrame.class);
     private static final int MENU = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
 
@@ -115,7 +115,7 @@ public final class MainFrame extends JFrame implements LogTab.Host {
     public void openFile(Path path) {
         Path abs = path.toAbsolutePath().normalize();
         for (int i = 0; i < tabs.getTabCount(); i++) {
-            if (((LogTab) tabs.getComponentAt(i)).document().path().equals(abs)) {
+            if (tabs.getComponentAt(i) instanceof LogTab lt && lt.document().path().equals(abs)) {
                 tabs.setSelectedIndex(i);
                 return;
             }
@@ -142,8 +142,95 @@ public final class MainFrame extends JFrame implements LogTab.Host {
         }
     }
 
+    /** Opens a new Folder Search tab (folder null = the current file's folder or the last one). */
+    public FolderSearchTab openFolderSearch(Path folder) {
+        if (folder == null && currentTab() != null) {
+            folder = currentTab().document().path().getParent();
+        }
+        String text = findField.getText().isEmpty() ? null : findField.getText();
+        FolderSearchTab tab = new FolderSearchTab(this, folder, text);
+        tab.resultsView().setFontSize(fontSize);
+        tabs.addTab(tab.title(), tab);
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        updateEmptyState();
+        SwingUtilities.invokeLater(tab::focusFind);
+        return tab;
+    }
+
+    @Override
+    public void folderTabChanged(FolderSearchTab tab) {
+        int i = tabs.indexOfComponent(tab);
+        if (i >= 0) {
+            tabs.setTitleAt(i, tab.title());
+        }
+        refreshStatus();
+    }
+
+    /** Unpacked copies of compressed files, so opening the same hit twice is instant. */
+    private final java.util.Map<String, Path> unpacked = new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Override
+    public void openHit(logmaster.core.FolderSearch.FileResult f, long line, SearchQuery q) {
+        if (!f.isCompressed()) {
+            openAt(f.file(), line, q);
+            return;
+        }
+        String name = f.entry() != null ? f.entry().substring(f.entry().lastIndexOf('/') + 1)
+                : f.file().getFileName().toString().replaceFirst("(?i)\\.gz$", "");
+        status.setText("Unpacking " + name + "…");
+        Thread t = new Thread(() -> {
+            try {
+                Path out = unpack(f, name);
+                SwingUtilities.invokeLater(() -> openAt(out, line, q));
+            } catch (IOException | RuntimeException e) {
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        "Cannot unpack " + name + ":\n" + e.getMessage(), "Open",
+                        JOptionPane.ERROR_MESSAGE));
+            }
+        }, "lm-unpack");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private Path unpack(logmaster.core.FolderSearch.FileResult f, String name) throws IOException {
+        String key = f.file() + "!" + f.entry() + "@" + Files.getLastModifiedTime(f.file()).toMillis();
+        Path done = unpacked.get(key);
+        if (done != null && Files.exists(done)) {
+            return done;
+        }
+        Path dir = Files.createTempDirectory("logmaster-");
+        dir.toFile().deleteOnExit();
+        Path out = dir.resolve(name.isEmpty() ? "entry.log" : name);
+        if (f.entry() != null) {
+            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(f.file().toFile())) {
+                java.util.zip.ZipEntry e = zip.getEntry(f.entry());
+                try (var in = zip.getInputStream(e)) {
+                    Files.copy(in, out);
+                }
+            }
+        } else {
+            try (var in = new java.util.zip.GZIPInputStream(Files.newInputStream(f.file()), 1 << 16)) {
+                Files.copy(in, out);
+            }
+        }
+        out.toFile().deleteOnExit();
+        unpacked.put(key, out);
+        return out;
+    }
+
+    /** Opens a file at a line and runs Find All for the query there. */
+    private void openAt(Path file, long line, SearchQuery q) {
+        openFile(file);
+        LogTab t = currentTab();
+        if (t != null && t.document().path().equals(file.toAbsolutePath().normalize())) {
+            findAll(q);
+            t.showLineWhenAvailable(line);
+            t.mainView().focusView();
+        }
+    }
+
     public LogTab currentTab() {
-        return (LogTab) tabs.getSelectedComponent();
+        return tabs.getSelectedComponent() instanceof LogTab t ? t : null;
     }
 
     /** Runs Find All in the current tab with the given query (also fills the toolbar). */
@@ -244,6 +331,8 @@ public final class MainFrame extends JFrame implements LogTab.Host {
 
         JMenu file = new JMenu("File");
         file.add(item("Open…", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU), e -> openDialog()));
+        file.add(item("Search in Folder…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU | InputEvent.SHIFT_DOWN_MASK),
+                e -> openFolderSearch(null)));
         file.add(item("Close Tab", KeyStroke.getKeyStroke(KeyEvent.VK_W, MENU), e -> closeTab(tabs.getSelectedIndex())));
         file.addSeparator();
         file.add(item(isMac() ? "Quit" : "Exit", isMac() ? null : KeyStroke.getKeyStroke(KeyEvent.VK_Q, MENU), e -> dispose()));
@@ -352,9 +441,13 @@ public final class MainFrame extends JFrame implements LogTab.Host {
         if (index < 0 || index >= tabs.getTabCount()) {
             return;
         }
-        LogTab t = (LogTab) tabs.getComponentAt(index);
+        java.awt.Component c = tabs.getComponentAt(index);
         tabs.removeTabAt(index);
-        t.close();
+        if (c instanceof LogTab t) {
+            t.close();
+        } else if (c instanceof FolderSearchTab f) {
+            f.close();
+        }
         updateEmptyState();
     }
 
@@ -422,6 +515,11 @@ public final class MainFrame extends JFrame implements LogTab.Host {
             t.mainView().setFontSize(fontSize);
             t.resultsView().setFontSize(fontSize);
         }
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof FolderSearchTab f) {
+                f.resultsView().setFontSize(fontSize);
+            }
+        }
     }
 
     void toggleDark() {
@@ -433,7 +531,9 @@ public final class MainFrame extends JFrame implements LogTab.Host {
     private List<LogTab> allTabs() {
         List<LogTab> out = new ArrayList<>();
         for (int i = 0; i < tabs.getTabCount(); i++) {
-            out.add((LogTab) tabs.getComponentAt(i));
+            if (tabs.getComponentAt(i) instanceof LogTab t) {
+                out.add(t);
+            }
         }
         return out;
     }
@@ -453,6 +553,14 @@ public final class MainFrame extends JFrame implements LogTab.Host {
 
     private void refreshStatus() {
         LogTab t = currentTab();
+        if (tabs.getSelectedComponent() instanceof FolderSearchTab f) {
+            setTitle(f.title() + " — LogMaster");
+            status.setText(f.statusText());
+            statusRight.setText(memory());
+            progress.setVisible(f.isSearching());
+            progress.setValue((int) (1000 * f.progress()));
+            return;
+        }
         if (t == null) {
             status.setText(" ");
             statusRight.setText(memory());
@@ -533,7 +641,11 @@ public final class MainFrame extends JFrame implements LogTab.Host {
                 List<File> files = (List<File>) s.getTransferable()
                         .getTransferData(DataFlavor.javaFileListFlavor);
                 for (File f : files) {
-                    openFile(f.toPath());
+                    if (f.isDirectory()) {
+                        openFolderSearch(f.toPath()); // a dropped folder: search in it
+                    } else {
+                        openFile(f.toPath());
+                    }
                 }
                 return true;
             } catch (Exception e) {

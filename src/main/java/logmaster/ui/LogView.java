@@ -51,6 +51,12 @@ public final class LogView extends JPanel {
         /** Fills {@code out[0..count)} with the text of rows {@code first..}; null if missing. */
         void texts(int first, int count, String[] out);
 
+        /** Largest line number shown (sizes the gutter). Negative line numbers show blank. */
+        default long maxLineNumber() {
+            int n = rowCount();
+            return n == 0 ? 0 : lineNumber(n - 1);
+        }
+
         /** Rows drawn grayed out (for example, lines the filters remove). */
         default boolean dimmed(int row) {
             return false;
@@ -815,8 +821,7 @@ public final class LogView extends JPanel {
     // ---------------------------------------------------------------- painting
 
     private int gutterWidth() {
-        int n = source.rowCount();
-        long maxLine = n == 0 ? 1 : source.lineNumber(n - 1) + 1;
+        long maxLine = Math.max(1, source.maxLineNumber() + 1);
         int digits = Math.max(4, Long.toString(maxLine).length());
         return digits * charWidth + 16;
     }
@@ -1053,7 +1058,8 @@ public final class LogView extends JPanel {
                 }
 
                 // gutter line number
-                String num = Long.toString(source.lineNumber(row) + 1);
+                long lineNo = source.lineNumber(row);
+                String num = lineNo < 0 ? "" : Long.toString(lineNo + 1);
                 g.setColor(row == lead ? fg : Theme.gutterForeground());
                 g.drawString(num, gutter - 12 - fm.stringWidth(num), y + ascent);
             }

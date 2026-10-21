@@ -573,6 +573,125 @@ class VisualTest {
         shot("13-highlight-bar-sparse-errors");
     }
 
+    @Test
+    @Order(12)
+    void folderSearch() throws Exception {
+        // A folder like a real log directory: plain, rotated .gz and a .zip of old logs
+        Path folder = dir.resolve("folder");
+        if (Files.exists(folder)) {
+            try (var walk = Files.walk(folder)) {
+                for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.delete(p);
+                }
+            }
+        }
+        Files.createDirectories(folder.resolve("node2"));
+        long size = 12L << 20;
+        LogGenerator.generate(folder.resolve("app.log"), size, 1);
+        LogGenerator.generate(folder.resolve("node2/app.log"), size, 2);
+        Path tmp = folder.resolve("tmp.log");
+        LogGenerator.generate(tmp, size, 3);
+        try (var out = new java.util.zip.GZIPOutputStream(Files.newOutputStream(folder.resolve("app.log.1.gz")))) {
+            Files.copy(tmp, out);
+        }
+        LogGenerator.generate(tmp, size, 4);
+        try (var z = new java.util.zip.ZipOutputStream(Files.newOutputStream(folder.resolve("archive.zip")))) {
+            z.putNextEntry(new java.util.zip.ZipEntry("2026-10/old.log"));
+            Files.copy(tmp, z);
+        }
+        Files.delete(tmp);
+        Files.writeString(folder.resolve("notes.txt"), "Payment failed (not a .log file)\n");
+
+        SearchQuery q = new SearchQuery("Payment failed", true, false, false);
+        long t0 = System.nanoTime();
+        FolderSearchTab tab = onEdt(() -> {
+            FolderSearchTab t = frame.openFolderSearch(folder);
+            t.search(folder, "*.log", q);
+            return t;
+        });
+        logmaster.core.FolderSearch fs = onEdt(tab::search);
+        assertTrue(fs.awaitDone(120_000), "folder search finished");
+        long searchMs = ms(t0);
+        settle();
+
+        // naive counts, reading each file (unpacked) line by line
+        Map<String, Long> expected = new java.util.TreeMap<>();
+        expected.put("app.log", naiveCount(Files.newInputStream(folder.resolve("app.log"))));
+        expected.put("node2/app.log", naiveCount(Files.newInputStream(folder.resolve("node2/app.log"))));
+        expected.put("app.log.1.gz", naiveCount(new java.util.zip.GZIPInputStream(
+                Files.newInputStream(folder.resolve("app.log.1.gz")))));
+        try (var zip = new java.util.zip.ZipFile(folder.resolve("archive.zip").toFile())) {
+            expected.put("archive.zip!2026-10/old.log",
+                    naiveCount(zip.getInputStream(zip.getEntry("2026-10/old.log"))));
+        }
+        Map<String, Long> actual = new java.util.TreeMap<>();
+        for (var r : fs.results()) {
+            actual.put(folder.relativize(r.file()).toString().replace('\\', '/')
+                    + (r.entry() == null ? "" : "!" + r.entry()), r.hitCount());
+        }
+        assertEquals(expected, actual, "hits per file");
+        summary.put("Folder search (4 files, 48 MB)", String.format("%,d lines in %d ms",
+                fs.totalHits(), searchMs));
+        shot("14-folder-search");
+        onEdt(() -> {
+            tab.collapseAll(true);
+            return null;
+        });
+        settle();
+        shot("14b-folder-search-collapsed");
+        onEdt(() -> {
+            tab.collapseAll(false);
+            return null;
+        });
+
+        // double-click a hit inside the zip: unpacks it and opens the file at that line
+        var zipResult = fs.results().stream().filter(r -> r.entry() != null).findFirst().orElseThrow();
+        long zipLine = zipResult.hit(2).line();
+        onEdt(() -> {
+            LogView v = tab.resultsView();
+            int n = v.source().rowCount();
+            String[] buf = new String[n];
+            v.source().texts(0, n, buf);
+            for (int row = 0; row < n; row++) {
+                if (buf[row] != null && buf[row].contains("archive.zip › 2026-10/old.log")) {
+                    v.goToRow(row + 3, true); // the third hit of that file
+                    tab.openSelected();
+                    return null;
+                }
+            }
+            throw new AssertionError("zip entry not in results");
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> {
+                    LogTab t = frame.currentTab();
+                    return t != null && t.title().equals("old.log") && t.currentLine() == zipLine;
+                });
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "opened old.log from the zip at line " + zipLine);
+        LogTab opened = onEdt(frame::currentTab);
+        assertTrue(opened.search() != null && opened.search().query().equals(q),
+                "Find All runs in the opened file");
+        waitForSearch(opened);
+        settle();
+        shot("15-opened-from-folder-search");
+    }
+
+    private static long naiveCount(InputStream in) throws IOException {
+        long n = 0;
+        try (var r = new java.io.BufferedReader(new java.io.InputStreamReader(in, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (line.contains("Payment failed")) {
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private long filterMillis;

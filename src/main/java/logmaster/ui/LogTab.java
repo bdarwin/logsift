@@ -66,6 +66,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private FilterResult filterResult;   // EDT only
     private Formula appliedFormula;
     private boolean matchingOnly;
+    private long pendingLine = -1; // line to show once indexing reaches it
     private long indexMillis = -1;
     private long searchMillis = -1;
     private String error;
@@ -363,6 +364,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     private void onDocChanged() {
         main.rowsChanged();
+        if (pendingLine >= 0 && (doc.lineCount() > pendingLine || !doc.isIndexing())) {
+            long line = pendingLine;
+            pendingLine = -1;
+            showLine(line);
+        }
         results.rowsChanged();
         host.tabStatusChanged(this);
     }
@@ -392,6 +398,15 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         goNear(line);
         host.tabStatusChanged(this);
+    }
+
+    /** Shows a line now, or as soon as indexing has reached it (for a file just opened). */
+    void showLineWhenAvailable(long line) {
+        if (doc.lineCount() > line || !doc.isIndexing()) {
+            showLine(line);
+        } else {
+            pendingLine = line;
+        }
     }
 
     /** Goes to the line, or the next one shown if it is filtered out. */

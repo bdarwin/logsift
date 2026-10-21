@@ -41,6 +41,7 @@ Make a test log:
 | Close results | Shift+Esc |
 | Jump from a result to the line | click it, or move with the arrow keys in the results |
 | Next / previous error | F8 / Shift+F8 |
+| Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Go to line | Ctrl+L |
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
 | Show or hide the Filters panel | Ctrl+J |
@@ -50,6 +51,15 @@ Make a test log:
 | Search for the selected text | Ctrl+F (fills the Find box, like text editors) |
 | Font size | Ctrl+= / Ctrl+- |
 | Dark mode | View → Toggle Dark Mode |
+
+## Folder search
+
+**File → Search in Folder…** (Ctrl+Shift+F, ⇧⌘F on macOS), or drop a folder on the window, opens a search tab like folder search tools:
+
+- Pick a folder, file name patterns (`*.log;*.txt`), and whether to include subfolders and archives.
+- Rotated logs count as the log they came from: `*.log` also finds `app.log.1`, `app.log.2026-10-21`, `app.log.2.gz`, and `.log` files inside any `.zip`.
+- All files are searched in parallel with the same fast search as Find All. Binary files are skipped. Results are grouped by file and appear while the search runs.
+- Double-click a line to open the file at that line, with Find All already run there. Files from `.gz` or `.zip` are unpacked to a temporary file first. Double-click a file name to fold it.
 
 ## Highlight bar
 
@@ -123,10 +133,13 @@ logmaster.core   (no UI code; could later back a VS Code extension or a CLI)
   Formula         AND / OR / NOT of filter letters (parser and auto formula)
   FilterEngine    one live search per filter; merges their sorted hits by the formula
   FilterResult    the passing lines: a sorted list, or "all lines except a list"
+  FolderSearch    parallel search of a folder's files, streaming; .gz and .zip inside
 logmaster.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
   LogTab          log view + Filters and Find results panels for one file
   FilterPanel     the filter rows, formula field and All lines / Matching only switch
+  OverviewBar     highlight bar beside the scrollbar (errors, warnings, filters, hits)
+  FolderSearchTab folder search form and results grouped by file
   MainFrame       window, toolbar, menus, status bar, drag & drop
 logmaster.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
@@ -153,9 +166,9 @@ Design choices:
 ## Roadmap
 
 1. ✅ Open, scroll and jump in huge files; Find All with a results panel; tail with live search; highlighting
-1. ✅ Text selection; multiple filters (Show / Hide / Mark) combined with AND / OR / NOT
-1. Next: text wrap; keep stack traces with their log line when filtering; context lines (±N)
-2. Folder search (folder search tools-like): folder + glob, parallel over files, `.gz`/`.zip`, results tree
+1. ✅ Text selection; multiple filters (Show / Hide / Mark) combined with AND / OR / NOT; highlight bar
+2. ✅ Folder search (folder search tools-like): folder + file patterns, parallel over files, `.gz`/`.zip`, results by file
+2. Next: text wrap; keep stack traces with their log line when filtering; context lines (±N)
 3. Log formats (log analyzers-like): pattern → columns (time, level, thread, logger, message), multi-line entries, filter by level and time, merge files by timestamp
 4. Editable highlight rules, saved searches, bookmarks, recent files, filter view ("show only matching")
 5. Native installers with `jpackage` (Windows .msi, macOS .dmg, Linux .deb/.rpm)
