@@ -72,7 +72,7 @@ jobs:
           COMMON=(--name Logsift --input build/install/logsift/lib
                   --main-jar "logsift-$VERSION.jar" --main-class logsift.ui.LogsiftApp
                   --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
-                  --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec
+                  --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets
                   --vendor bdarwin --description "Viewer for very large log files")
           mkdir -p dist
           case "${{ matrix.target }}" in
