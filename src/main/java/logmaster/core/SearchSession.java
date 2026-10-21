@@ -64,9 +64,22 @@ public final class SearchSession implements AutoCloseable {
 
     /** @throws java.util.regex.PatternSyntaxException for an invalid regex */
     public SearchSession(LogDocument doc, SearchQuery query) {
+        this(doc, query, LineMatcher.of(query));
+    }
+
+    /**
+     * A live list of the continuation lines (lines that don't start a new entry, such as stack
+     * traces) of a document, for the given entry format.
+     */
+    public static SearchSession continuationLines(LogDocument doc, EntryFormat format) {
+        return new SearchSession(doc, SearchQuery.literal("entries: " + format.name()),
+                new LineMatcher.Continuations(format));
+    }
+
+    SearchSession(LogDocument doc, SearchQuery query, LineMatcher matcher) {
         this.doc = doc;
         this.query = query;
-        this.matcher = LineMatcher.of(query);
+        this.matcher = matcher;
         this.coordinator = Executors.newSingleThreadExecutor(LogDocument.daemon("lm-search"));
         this.generation = doc.generation();
         this.coveredGeneration = generation;

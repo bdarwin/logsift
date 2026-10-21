@@ -79,6 +79,8 @@ The **Filters** panel below the log holds any number of filters (up to 26). Each
 
 **All lines / Matching only** (Ctrl+Shift+H, ⇧⌘H on macOS) switches between every line, with filtered-out lines grayed, and only the lines that pass. Your place in the file is kept when you switch, so you can filter down, click a line, switch back and see everything around it.
 
+**Keep stack traces** (on by default) treats a log line and the lines under it (stack traces, wrapped messages) as one entry: if any line of the entry matches, the whole entry is shown, and Hide filters hide whole entries. LogMaster detects how entries start from the first lines of the file (a date, a time, a syslog date, a level word, or `{` for JSON lines); the checkbox tooltip shows what it found. **Context ±N** adds N grayed lines before and after each match, with a dashed line where lines were skipped, like `grep -C`.
+
 Quick ways to add filters: select text in the log, right-click, then choose **Show / Hide / Mark lines with "…"**. Filter sets can be saved and loaded (the ⋯ menu), and filters keep working while the file grows.
 
 Find All keeps running on a growing file. New matching lines show up in the results as they are written.
@@ -171,7 +173,7 @@ Design choices:
 1. ✅ Open, scroll and jump in huge files; Find All with a results panel; tail with live search; highlighting
 1. ✅ Text selection; multiple filters (Show / Hide / Mark) combined with AND / OR / NOT; highlight bar
 2. ✅ Folder search (folder search tools-like): folder + file patterns, parallel over files, `.gz`/`.zip`, results by file
-2. Next: text wrap; keep stack traces with their log line when filtering; context lines (±N)
+2. ✅ Text wrap; keep stack traces with their log line when filtering; context lines (±N)
 3. Log formats (log analyzers-like): pattern → columns (time, level, thread, logger, message), multi-line entries, filter by level and time, merge files by timestamp
 4. Editable highlight rules, saved searches, bookmarks, recent files, filter view ("show only matching")
 5. Native installers with `jpackage` (Windows .msi, macOS .dmg, Linux .deb/.rpm)

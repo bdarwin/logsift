@@ -87,6 +87,127 @@ class FilterEngineTest {
         }
     }
 
+    /** A log with entries: a dated line, then sometimes stack traces and blank lines. */
+    private static String entryLog(Random rnd, int entries) {
+        String[] words = {"error", "warn", "user=42 ", "timeout", "äöü", "retry", "ok"};
+        StringBuilder sb = new StringBuilder();
+        sb.append("\tat orphan continuation before the first entry\n");
+        for (int i = 0; i < entries; i++) {
+            sb.append(String.format("2026-10-21 10:%02d:%02d ", i / 60 % 60, i % 60));
+            sb.append(rnd.nextBoolean() ? "ERROR " : "INFO ");
+            sb.append(words[rnd.nextInt(words.length)]).append(' ').append(words[rnd.nextInt(words.length)]);
+            sb.append('\n');
+            int cont = rnd.nextInt(5) == 0 ? 1 + rnd.nextInt(6) : 0;
+            for (int k = 0; k < cont; k++) {
+                sb.append(rnd.nextInt(7) == 0 ? "" : "\tat com.acme." + words[rnd.nextInt(words.length)]);
+                sb.append(rnd.nextInt(10) == 0 ? "\r\n" : "\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    @Test
+    void wholeEntriesAndContextMatchNaive() throws IOException {
+        Random rnd = new Random(21);
+        String text = entryLog(rnd, 1500);
+        byte[] content = text.getBytes(StandardCharsets.UTF_8);
+        Path f = dir.resolve("entries.log");
+        Files.write(f, content);
+        List<String> lines = TestFiles.naiveLines(content);
+        EntryFormat format = EntryFormat.detect(lines.subList(0, 200));
+        assertEquals("date and time (2026-10-21 10:02:13)", format.name());
+        try (LogDocument doc = LogDocument.open(f, 4096);
+             FilterEngine engine = new FilterEngine(doc)) {
+            assertTrue(doc.awaitIdle(10_000));
+            engine.setEntryFormat(format);
+            for (int round = 0; round < 40; round++) {
+                Formula formula = randomFormula(rnd, 3);
+                int ctx = round % 4 == 0 ? 0 : rnd.nextInt(4);
+                engine.configure(SPECS, formula);
+                engine.setContext(ctx);
+                assertTrue(engine.awaitIdle(10_000));
+                FilterResult r = engine.result();
+                List<Long> matched = naiveEntries(lines, format, formula);
+                List<Long> shown = naiveContext(matched, ctx, lines.size());
+                String what = formula + " ctx=" + ctx;
+                check(r, shown, lines.size(), what);
+                for (long line = 0; line < lines.size(); line++) {
+                    assertEquals(matched.contains(line), r.isMatch(line), what + " isMatch " + line);
+                }
+            }
+        }
+    }
+
+    @Test
+    void wholeEntriesFollowGrowingFile() throws IOException {
+        Random rnd = new Random(23);
+        byte[] all = entryLog(rnd, 800).getBytes(StandardCharsets.UTF_8);
+        Path f = dir.resolve("grow-entries.log");
+        Files.write(f, new byte[0]);
+        EntryFormat format = EntryFormat.detect(TestFiles.naiveLines(all).subList(0, 100));
+        Formula formula = Formula.parse("A AND NOT C");
+        try (LogDocument doc = LogDocument.open(f, 500);
+             FilterEngine engine = new FilterEngine(doc)) {
+            engine.configure(SPECS, formula);
+            engine.setEntryFormat(format);
+            engine.setContext(1);
+            int written = 0;
+            while (written < all.length) {
+                int n = Math.min(all.length - written, 1 + rnd.nextInt(2000));
+                LogDocumentTest.append(f, all, written, n);
+                written += n;
+                doc.requestRefresh();
+                assertTrue(engine.awaitIdle(5000));
+                List<String> lines = TestFiles.naiveLines(Arrays.copyOf(all, written));
+                // the last entry may still grow, so compare only complete entries' lines
+                FilterResult r = engine.result();
+                List<Long> shown = naiveContext(naiveEntries(lines, format, formula), 1, lines.size());
+                check(r, shown, lines.size(), "after " + written);
+            }
+        }
+    }
+
+    /** Lines of entries where the formula holds (a filter matches an entry if any line does). */
+    private static List<Long> naiveEntries(List<String> lines, EntryFormat format, Formula f) {
+        Map<Character, Pattern> patterns = new java.util.HashMap<>();
+        SPECS.forEach(s -> patterns.put(s.id(), s.query().toPattern()));
+        List<Long> out = new ArrayList<>();
+        int i = 0;
+        while (i < lines.size()) {
+            int j = i + 1;
+            while (j < lines.size() && !format.startsEntry(lines.get(j))) {
+                j++;
+            }
+            int from = i;
+            int to = j;
+            boolean pass = eval(f, c -> {
+                for (int k = from; k < to; k++) {
+                    if (patterns.get(c).matcher(lines.get(k)).find()) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+            if (pass) {
+                for (int k = from; k < to; k++) {
+                    out.add((long) k);
+                }
+            }
+            i = j;
+        }
+        return out;
+    }
+
+    private static List<Long> naiveContext(List<Long> lines, int n, int lineCount) {
+        java.util.TreeSet<Long> out = new java.util.TreeSet<>();
+        for (long l : lines) {
+            for (long k = Math.max(0, l - n); k <= Math.min(lineCount - 1, l + n); k++) {
+                out.add(k);
+            }
+        }
+        return new ArrayList<>(out);
+    }
+
     @Test
     void rejectsUnknownLetter() throws IOException {
         Path f = dir.resolve("u.log");

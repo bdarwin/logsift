@@ -428,6 +428,7 @@ class VisualTest {
         long t0 = System.nanoTime();
         onEdt(() -> {
             FilterPanel p = tab.filterPanel();
+            p.setKeepEntries(false); // this test checks single lines; entries are tested below
             FilterDef a = p.addFilter("ERROR", FilterDef.Action.SHOW);
             a.matchCase = true;
             p.addFilter("slow query", FilterDef.Action.SHOW);          // ignore case
@@ -769,6 +770,93 @@ class VisualTest {
     /** Height of one display row (as LogView computes it). */
     private static int rowHeightOf(LogView v) {
         return v.getFontMetrics(Theme.monoFont(v.fontSize())).getHeight() + 2;
+    }
+
+    @Test
+    @Order(14)
+    void stackTracesAndContext() throws Exception {
+        onEdt(() -> {
+            frame.openFile(big);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        long t0 = System.nanoTime();
+        onEdt(() -> {
+            FilterPanel p = tab.filterPanel();
+            for (FilterDef d : List.copyOf(p.filters())) {
+                d.enabled = false;
+            }
+            FilterDef npe = p.addFilter("NullPointerException", FilterDef.Action.SHOW);
+            npe.matchCase = true;
+            p.setFormula(null);
+            p.setKeepEntries(true);
+            p.setContextLines(0);
+            tab.filtersChanged();
+            tab.setMatchingOnly(true);
+            return null;
+        });
+        FilterResult r = waitForFilters(tab, t0);
+        long entriesMs = filterMillis;
+        // naive: an entry is a dated line plus the lines under it; keep entries mentioning NPE
+        Pattern start = Pattern.compile("^\\d{4}-\\d\\d-\\d\\d");
+        List<Long> expected = new ArrayList<>();
+        try (var rd = Files.newBufferedReader(big, StandardCharsets.UTF_8)) {
+            List<String> entry = new ArrayList<>();
+            long first = 0;
+            long n = 0;
+            String line;
+            while (true) {
+                line = rd.readLine();
+                if (line == null || (start.matcher(line).find() && !entry.isEmpty())) {
+                    if (entry.stream().anyMatch(s -> s.contains("NullPointerException"))) {
+                        for (int k = 0; k < entry.size(); k++) {
+                            expected.add(first + k);
+                        }
+                    }
+                    entry.clear();
+                    first = n;
+                }
+                if (line == null) {
+                    break;
+                }
+                entry.add(line);
+                n++;
+            }
+        }
+        assertEquals(expected.size(), r.count(), "lines of entries with a NullPointerException");
+        for (int i = 0; i < expected.size(); i += Math.max(1, expected.size() / 300)) {
+            assertEquals(expected.get(i), r.lineAt(i), "row " + i);
+        }
+        summary.put("Filter whole entries (stack traces)", String.format(
+                "%,d lines in %d ms", r.count(), entriesMs));
+        onEdt(() -> {
+            tab.mainView().goToRow(0, false);
+            return null;
+        });
+        settle();
+        shot("17-filter-keeps-stack-traces");
+
+        // two lines of context around each entry, grayed, with separators
+        onEdt(() -> {
+            tab.filterPanel().setContextLines(2);
+            return null;
+        });
+        r = waitForFilters(tab, System.nanoTime());
+        assertEquals(expected.size(), r.matchCount(), "matches unchanged by context");
+        assertTrue(r.count() > r.matchCount(), "context lines added");
+        long firstContext = expected.get(0) - 1;
+        assertTrue(r.contains(firstContext) && !r.isMatch(firstContext), "line before is context");
+        onEdt(() -> {
+            tab.mainView().goToRow(0, false);
+            return null;
+        });
+        settle();
+        shot("18-context-lines");
+        onEdt(() -> {
+            tab.filterPanel().setContextLines(0);
+            tab.setMatchingOnly(false);
+            return null;
+        });
     }
 
     private static long naiveCount(InputStream in) throws IOException {

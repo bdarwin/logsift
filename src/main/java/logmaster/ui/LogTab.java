@@ -67,6 +67,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private Formula appliedFormula;
     private boolean matchingOnly;
     private long pendingLine = -1; // line to show once indexing reaches it
+    private logmaster.core.EntryFormat entryFormat; // detected from the file; null = none
+    private int detectedGeneration = -1;
     private long indexMillis = -1;
     private long searchMillis = -1;
     private String error;
@@ -109,7 +111,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             @Override
             public boolean dimmed(int row) {
                 FilterResult r = filterResult;
-                return r.isFiltering() && !r.contains(row);
+                return r.isFiltering() && !r.isMatch(row);
             }
         };
         matchingLines = new LogView.RowSource() {
@@ -121,6 +123,19 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             @Override
             public long lineNumber(int row) {
                 return filterResult.lineAt(row);
+            }
+
+            @Override
+            public boolean dimmed(int row) {
+                FilterResult r = filterResult;
+                return row < r.count() && !r.isMatch(r.lineAt(row)); // a context line
+            }
+
+            @Override
+            public boolean gapBefore(int row) {
+                FilterResult r = filterResult;
+                return filterPanel.contextLines() > 0 && row < r.count()
+                        && r.lineAt(row) != r.lineAt(row - 1) + 1;
             }
 
             @Override
@@ -216,6 +231,32 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         });
         doc.startFollowing(500);
         updateFilterStatus();
+    }
+
+    /**
+     * Finds how entries start (date, time, level…) from the first lines of the file, once
+     * enough of it is indexed, and again after truncation or rotation.
+     */
+    private void detectEntryFormat() {
+        int gen = doc.generation();
+        long n = doc.lineCount();
+        if (gen == detectedGeneration || (n < 200 && doc.isIndexing())) {
+            return;
+        }
+        if (n == 0) {
+            return; // an empty file that is still growing: decide when lines arrive
+        }
+        detectedGeneration = gen;
+        String[] sample = new String[(int) Math.min(n, 2000)];
+        doc.readLines(0, sample.length, sample);
+        entryFormat = logmaster.core.EntryFormat.detect(java.util.Arrays.asList(sample));
+        filterPanel.setEntryFormatInfo(entryFormat == null ? null : entryFormat.name());
+        applyEntryOptions();
+    }
+
+    private void applyEntryOptions() {
+        engine.setEntryFormat(filterPanel.keepEntries() ? entryFormat : null);
+        engine.setContext(filterPanel.contextLines());
     }
 
     /** Lines containing any of these words (whole word, exact case), kept up to date. */
@@ -363,6 +404,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     private void onDocChanged() {
+        detectEntryFormat();
         main.rowsChanged();
         if (pendingLine >= 0 && (doc.lineCount() > pendingLine || !doc.isIndexing())) {
             long line = pendingLine;
@@ -493,6 +535,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (!filterPanel.isAutoFormula()) {
             filterPanel.setFormulaError(formulaError);
         }
+        applyEntryOptions();
         updateHighlights();
         updateFilterStatus();
     }
@@ -561,7 +604,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (!r.isFiltering()) {
             text = filterPanel.filters().isEmpty() ? "" : "no Show or Hide filter";
         } else {
-            text = String.format("%,d of %,d lines", r.count(), doc.lineCount());
+            text = r.count() != r.matchCount()
+                    ? String.format("%,d matching, %,d shown of %,d lines", r.matchCount(), r.count(),
+                            doc.lineCount())
+                    : String.format("%,d of %,d lines", r.count(), doc.lineCount());
             if (running) {
                 text += String.format("   filtering %d%%", (int) (engine.progress() * 100));
             }

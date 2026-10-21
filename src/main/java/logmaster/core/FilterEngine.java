@@ -9,6 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import logmaster.core.FilterResult.Lines;
 
 /**
  * Runs several filters over one document and combines them with a {@link Formula}.
@@ -35,6 +36,9 @@ public final class FilterEngine implements AutoCloseable {
     private final AtomicBoolean queued = new AtomicBoolean();
     private final LogDocument.Listener docListener;
     private Formula formula;      // guarded by this
+    private SearchSession continuations; // guarded by this; null = every line is an entry
+    private EntryFormat entryFormat;     // guarded by this
+    private int context;                 // guarded by this
     private int version;          // guarded by this
     private volatile FilterResult result;
     private volatile boolean closed;
@@ -120,6 +124,41 @@ public final class FilterEngine implements AutoCloseable {
         schedule();
     }
 
+    /**
+     * Keeps multi-line entries together: with a format, a match anywhere in an entry (for
+     * example in a stack trace) selects the whole entry. Null treats every line separately.
+     */
+    public synchronized void setEntryFormat(EntryFormat format) {
+        if (java.util.Objects.equals(format, entryFormat)) {
+            return;
+        }
+        if (continuations != null) {
+            continuations.close();
+            continuations = null;
+        }
+        entryFormat = format;
+        if (format != null) {
+            continuations = SearchSession.continuationLines(doc, format);
+            continuations.addListener(ss -> schedule());
+            continuations.start();
+        }
+        version++;
+        schedule();
+    }
+
+    public synchronized EntryFormat entryFormat() {
+        return entryFormat;
+    }
+
+    /** Shows {@code n} lines before and after each match (like grep -C). */
+    public synchronized void setContext(int n) {
+        if (n != context) {
+            context = Math.max(0, n);
+            version++;
+            schedule();
+        }
+    }
+
     /** The live search behind filter {@code id}, or null. */
     public synchronized SearchSession session(char id) {
         return sessions.get(id);
@@ -186,9 +225,6 @@ public final class FilterEngine implements AutoCloseable {
         }
     }
 
-    /** A sorted list of lines, or all lines except that list. */
-    private record Lines(long[] a, int n, boolean comp) {}
-
     private void combine() {
         if (closed) {
             return;
@@ -196,10 +232,14 @@ public final class FilterEngine implements AutoCloseable {
         Formula f;
         int ver;
         Map<Character, SearchSession> snap;
+        SearchSession cont;
+        int ctx;
         synchronized (this) {
             f = formula;
             ver = version;
             snap = new HashMap<>(sessions);
+            cont = continuations;
+            ctx = context;
         }
         int gen = doc.generation();
         if (f == null) {
@@ -223,6 +263,16 @@ public final class FilterEngine implements AutoCloseable {
             sizes.put(c, Math.min(n, arr.length));
             complete &= !s.isRunning();
         }
+        long[] contArr = null;
+        int contN = 0;
+        if (cont != null) {
+            contN = cont.hits().size();
+            contArr = cont.hits().array();
+            contN = Math.min(contN, contArr.length);
+            long covered = cont.coveredGeneration() == gen ? cont.coveredLines() : 0;
+            universe = Math.min(universe, covered);
+            complete &= !cont.isRunning();
+        }
         if (universe == Long.MAX_VALUE) {
             universe = 0;
         }
@@ -234,15 +284,113 @@ public final class FilterEngine implements AutoCloseable {
             int n = sizes.get(c);
             int cut = java.util.Arrays.binarySearch(arr, 0, n, universe);
             n = cut >= 0 ? cut : -cut - 1;
-            leaves.put(c, new Lines(arr, n, false));
+            Lines leaf = new Lines(arr, n, false);
+            if (contArr != null) {
+                int cn = java.util.Arrays.binarySearch(contArr, 0, contN, universe);
+                cn = cn >= 0 ? cn : -cn - 1;
+                leaf = wholeEntries(leaf, contArr, cn, universe);
+            }
+            leaves.put(c, leaf);
         }
-        Lines out = eval(f, leaves);
-        long[] list = out.a;
-        if (arrays.containsValue(list)) {
-            list = java.util.Arrays.copyOf(list, out.n); // never hand out a search's live array
+        Lines matched = eval(f, leaves);
+        if (arrays.containsValue(matched.a()) || matched.a() == contArr) {
+            // never hand out a search's live array
+            matched = new Lines(java.util.Arrays.copyOf(matched.a(), matched.n()), matched.n(),
+                    matched.comp());
         }
-        result = new FilterResult(ver, true, universe, list, out.n, out.comp, complete);
+        Lines shown = ctx > 0 ? withContext(matched, ctx, universe) : matched;
+        result = new FilterResult(ver, true, universe, shown, matched, complete);
         fire();
+    }
+
+    /**
+     * Widens matching lines to whole entries: a match anywhere in an entry (a line and the
+     * continuation lines under it, listed sorted in {@code cont}) selects the whole entry.
+     */
+    static Lines wholeEntries(Lines x, long[] cont, int cn, long universe) {
+        LongBuffer out = new LongBuffer(Math.max(16, x.n() + x.n() / 4));
+        long lastEnd = -1;
+        for (int i = 0; i < x.n(); i++) {
+            long m = x.a()[i];
+            if (m <= lastEnd) {
+                continue; // already inside an entry we added
+            }
+            // walk back to the entry's first line
+            long head = m;
+            int k = java.util.Arrays.binarySearch(cont, 0, cn, m);
+            if (k >= 0) {
+                while (k > 0 && cont[k - 1] == cont[k] - 1) {
+                    k--;
+                }
+                head = Math.max(0, cont[k] - 1);
+            }
+            // walk forward over the continuation lines after the head
+            long end = head;
+            int j = java.util.Arrays.binarySearch(cont, 0, cn, head + 1);
+            if (j >= 0) {
+                while (j + 1 < cn && cont[j + 1] == cont[j] + 1) {
+                    j++;
+                }
+                end = cont[j];
+            }
+            end = Math.min(end, universe - 1);
+            for (long l = Math.max(head, lastEnd + 1); l <= end; l++) {
+                out.add(l);
+            }
+            lastEnd = Math.max(lastEnd, end);
+        }
+        return new Lines(out.a, out.n, false);
+    }
+
+    /** Adds {@code n} lines before and after every shown line (like grep -C). */
+    static Lines withContext(Lines x, int n, long universe) {
+        if (!x.comp()) {
+            LongBuffer out = new LongBuffer(Math.max(16, x.n() * 3));
+            long next = 0; // first line not yet added
+            for (int i = 0; i < x.n(); i++) {
+                long from = Math.max(next, x.a()[i] - n);
+                long to = Math.min(universe - 1, x.a()[i] + n);
+                for (long l = from; l <= to; l++) {
+                    out.add(l);
+                }
+                next = Math.max(next, to + 1);
+            }
+            return new Lines(out.a, out.n, false);
+        }
+        // "all except e": runs of excluded lines shrink by n at each end that touches a shown line
+        LongBuffer out = new LongBuffer(Math.max(16, x.n()));
+        int i = 0;
+        while (i < x.n()) {
+            int j = i;
+            while (j + 1 < x.n() && x.a()[j + 1] == x.a()[j] + 1) {
+                j++;
+            }
+            long a = x.a()[i];
+            long b = x.a()[j];
+            long keepFrom = a == 0 ? a : a + n;
+            long keepTo = b >= universe - 1 ? b : b - n;
+            for (long l = keepFrom; l <= keepTo; l++) {
+                out.add(l);
+            }
+            i = j + 1;
+        }
+        return new Lines(out.a, out.n, true);
+    }
+
+    private static final class LongBuffer {
+        long[] a;
+        int n;
+
+        LongBuffer(int capacity) {
+            a = new long[capacity];
+        }
+
+        void add(long v) {
+            if (n == a.length) {
+                a = java.util.Arrays.copyOf(a, Math.max(16, n * 2));
+            }
+            a[n++] = v;
+        }
     }
 
     private void fire() {
@@ -256,7 +404,7 @@ public final class FilterEngine implements AutoCloseable {
             case Formula.Ref r -> leaves.get(r.id());
             case Formula.Not n -> {
                 Lines x = eval(n.a(), leaves);
-                yield new Lines(x.a, x.n, !x.comp);
+                yield new Lines(x.a(), x.n(), !x.comp());
             }
             case Formula.And x -> and(eval(x.a(), leaves), eval(x.b(), leaves));
             case Formula.Or x -> or(eval(x.a(), leaves), eval(x.b(), leaves));
@@ -264,39 +412,39 @@ public final class FilterEngine implements AutoCloseable {
     }
 
     private static Lines and(Lines x, Lines y) {
-        if (!x.comp && !y.comp) {
+        if (!x.comp() && !y.comp()) {
             return intersect(x, y, false);
         }
-        if (!x.comp) {
+        if (!x.comp()) {
             return minus(x, y, false);
         }
-        if (!y.comp) {
+        if (!y.comp()) {
             return minus(y, x, false);
         }
         return union(x, y, true); // NOT a AND NOT b = NOT (a OR b)
     }
 
     private static Lines or(Lines x, Lines y) {
-        if (!x.comp && !y.comp) {
+        if (!x.comp() && !y.comp()) {
             return union(x, y, false);
         }
-        if (!x.comp) {
+        if (!x.comp()) {
             return minus(y, x, true); // a OR NOT b = NOT (b AND NOT a)
         }
-        if (!y.comp) {
+        if (!y.comp()) {
             return minus(x, y, true);
         }
         return intersect(x, y, true); // NOT a OR NOT b = NOT (a AND b)
     }
 
     private static Lines intersect(Lines x, Lines y, boolean comp) {
-        long[] out = new long[Math.min(x.n, y.n)];
+        long[] out = new long[Math.min(x.n(), y.n())];
         int i = 0;
         int j = 0;
         int k = 0;
-        while (i < x.n && j < y.n) {
-            long a = x.a[i];
-            long b = y.a[j];
+        while (i < x.n() && j < y.n()) {
+            long a = x.a()[i];
+            long b = y.a()[j];
             if (a == b) {
                 out[k++] = a;
                 i++;
@@ -311,17 +459,17 @@ public final class FilterEngine implements AutoCloseable {
     }
 
     private static Lines union(Lines x, Lines y, boolean comp) {
-        long[] out = new long[x.n + y.n];
+        long[] out = new long[x.n() + y.n()];
         int i = 0;
         int j = 0;
         int k = 0;
-        while (i < x.n || j < y.n) {
-            if (j >= y.n || (i < x.n && x.a[i] < y.a[j])) {
-                out[k++] = x.a[i++];
-            } else if (i >= x.n || y.a[j] < x.a[i]) {
-                out[k++] = y.a[j++];
+        while (i < x.n() || j < y.n()) {
+            if (j >= y.n() || (i < x.n() && x.a()[i] < y.a()[j])) {
+                out[k++] = x.a()[i++];
+            } else if (i >= x.n() || y.a()[j] < x.a()[i]) {
+                out[k++] = y.a()[j++];
             } else {
-                out[k++] = x.a[i++];
+                out[k++] = x.a()[i++];
                 j++;
             }
         }
@@ -330,15 +478,15 @@ public final class FilterEngine implements AutoCloseable {
 
     /** Lines of x (a plain list) that are not in the list of y. */
     private static Lines minus(Lines x, Lines y, boolean comp) {
-        long[] out = new long[x.n];
+        long[] out = new long[x.n()];
         int j = 0;
         int k = 0;
-        for (int i = 0; i < x.n; i++) {
-            long a = x.a[i];
-            while (j < y.n && y.a[j] < a) {
+        for (int i = 0; i < x.n(); i++) {
+            long a = x.a()[i];
+            while (j < y.n() && y.a()[j] < a) {
                 j++;
             }
-            if (j >= y.n || y.a[j] != a) {
+            if (j >= y.n() || y.a()[j] != a) {
                 out[k++] = a;
             }
         }
@@ -351,6 +499,9 @@ public final class FilterEngine implements AutoCloseable {
         doc.removeListener(docListener);
         sessions.values().forEach(SearchSession::close);
         sessions.clear();
+        if (continuations != null) {
+            continuations.close();
+        }
         combiner.shutdown();
     }
 }

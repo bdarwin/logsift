@@ -73,6 +73,10 @@ final class FilterPanel extends JPanel {
     private final JTextField formulaField = new JTextField(22);
     private final JToggleButton autoFormula = new JToggleButton("Auto", true);
     private final JLabel resultLabel = new JLabel(" ");
+    private final JCheckBox keepEntries = new JCheckBox("Keep stack traces",
+            java.util.prefs.Preferences.userNodeForPackage(FilterPanel.class).getBoolean("entries", true));
+    private final javax.swing.JSpinner context = new javax.swing.JSpinner(
+            new javax.swing.SpinnerNumberModel(0, 0, 50, 1));
     private final Timer formulaTimer;
     private boolean updating;
 
@@ -165,6 +169,17 @@ final class FilterPanel extends JPanel {
             m.show(more, 0, more.getHeight());
         });
 
+        keepEntries.setToolTipText("No multi-line entries found in this file");
+        keepEntries.addActionListener(e -> {
+            java.util.prefs.Preferences.userNodeForPackage(FilterPanel.class)
+                    .putBoolean("entries", keepEntries.isSelected());
+            listener.filtersChanged();
+        });
+        context.setToolTipText("Also show this many lines before and after each match (grayed)");
+        context.setMaximumSize(new Dimension(64, 30));
+        context.addChangeListener(e -> listener.filtersChanged());
+        JLabel contextLabel = new JLabel("Context ±");
+        contextLabel.setToolTipText(context.getToolTipText());
         resultLabel.setFont(resultLabel.getFont().deriveFont(Font.BOLD));
         bar.add(allLines);
         bar.add(matchingOnly);
@@ -175,6 +190,12 @@ final class FilterPanel extends JPanel {
         bar.add(Box.createHorizontalStrut(6));
         bar.add(formulaField);
         bar.add(autoFormula);
+        bar.add(Box.createHorizontalStrut(14));
+        bar.add(keepEntries);
+        bar.add(Box.createHorizontalStrut(10));
+        bar.add(contextLabel);
+        bar.add(Box.createHorizontalStrut(4));
+        bar.add(context);
         bar.add(Box.createHorizontalStrut(16));
         bar.add(resultLabel);
         bar.add(Box.createHorizontalGlue());
@@ -201,6 +222,35 @@ final class FilterPanel extends JPanel {
 
     List<FilterDef> filters() {
         return defs;
+    }
+
+    /** Keep a log line and the lines under it (stack traces) together. */
+    boolean keepEntries() {
+        return keepEntries.isSelected();
+    }
+
+    void setKeepEntries(boolean on) {
+        keepEntries.setSelected(on);
+        listener.filtersChanged();
+    }
+
+    /** Lines of context around each match. */
+    int contextLines() {
+        return (Integer) context.getValue();
+    }
+
+    void setContextLines(int n) {
+        context.setValue(n);
+    }
+
+    /** Says which entry format was found (null: none, every line stands alone). */
+    void setEntryFormatInfo(String name) {
+        keepEntries.setEnabled(name != null);
+        keepEntries.setToolTipText(name == null
+                ? "No multi-line entries found in this file (every line stands alone)"
+                : "<html>Treat a log line and the lines under it (stack traces, wrapped text) as "
+                        + "one entry:<br>if any line of it matches, show all of it.<br>"
+                        + "Entries here start with: <b>" + name + "</b></html>");
     }
 
     boolean isAutoFormula() {

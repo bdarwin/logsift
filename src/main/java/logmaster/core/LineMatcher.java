@@ -155,6 +155,43 @@ abstract sealed class LineMatcher {
         }
     }
 
+    /**
+     * Reports lines that do <em>not</em> start a new entry: continuation lines such as stack
+     * traces. Checks a few bytes at the start of each line, so it runs at newline-scan speed.
+     */
+    static final class Continuations extends LineMatcher {
+        private final EntryFormat format;
+
+        Continuations(EntryFormat format) {
+            this.format = format;
+        }
+
+        @Override
+        void scan(byte[] buf, int len, long firstLine, HitSink sink, BooleanSupplier cancelled) {
+            int pos = 0;
+            long line = firstLine;
+            int checks = 0;
+            while (pos < len) {
+                int nl = ByteScan.indexOf(buf, pos, len, (byte) '\n');
+                int end = nl < 0 ? len : nl;
+                if (end > pos && buf[end - 1] == '\r') {
+                    end--;
+                }
+                if (!format.startsEntry(buf, pos, end) && !sink.hit(line)) {
+                    return;
+                }
+                if (nl < 0) {
+                    return;
+                }
+                pos = nl + 1;
+                line++;
+                if ((++checks & 4095) == 0 && cancelled.getAsBoolean()) {
+                    return;
+                }
+            }
+        }
+    }
+
     /** Regular expression search, one decoded line at a time. */
     static final class Regex extends LineMatcher {
         private final Pattern pattern;
