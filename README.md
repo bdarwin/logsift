@@ -207,12 +207,19 @@ logmaster.core   (no UI code; could later back a VS Code extension or a CLI)
   FilterEngine    one live search per filter; merges their sorted hits by the formula
   FilterResult    the passing lines: a sorted list, or "all lines except a list"
   FolderSearch    parallel search of a folder's files, streaming; .gz and .zip inside
+  EntryFormat     how entries start (date, time, level...), to keep stack traces together
+  TimeFormat      timestamp formats parsed from bytes; TimeIndex: a time every ~64 lines
+  MessageStats    groups lines into message templates; LogCompare compares two logs
+  LogFormat       columns (regex with named groups, or JSON fields); ColumnStats counts values
+  LogMerger       merges logs by time; Encoding / Utf16Mirror; RemoteMirror (SFTP)
+  LineExporter    copies chosen lines' original bytes to a file
 logmaster.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
   LogTab          log view + Filters and Find results panels for one file
   FilterPanel     the filter rows, formula field and All lines / Matching only switch
   OverviewBar     highlight bar beside the scrollbar (errors, warnings, filters, hits)
   FolderSearchTab folder search form and results grouped by file
+  TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
   MainFrame       window, toolbar, menus, status bar, drag & drop
 logmaster.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
@@ -228,19 +235,18 @@ Design choices:
 
 ## Known limits
 
-- **Highlight rules are built in** (ERROR/FATAL, WARN, stack traces, DEBUG/TRACE). There is no editor for them yet.
+- **Highlight rules are built in** (ERROR/FATAL, WARN, stack traces, DEBUG/TRACE). Filters with colors cover most needs; there is no rule editor yet.
 - **Very long lines:**
   - Lines over 64 KB are cut for display. Search still sees the whole line.
   - A single line over 256 MB is only searched in its first 256 MB.
-- **Wide CJK characters:** the highlight boxes can be slightly off on lines that contain them.
-- **Tested only on macOS so far.** The code is cross-platform. On Windows, check that log rotation works while a file is open: Java opens files with delete-sharing, but older Windows versions can still keep a deleted file's name reserved.
+- **Columns view** selects whole lines (not parts of a cell), and wrap is paused while it is on.
+- **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
+- **Time zones** are not converted: times are shown as written in each log.
+- **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows); installers are not code-signed yet.
 
 ## Roadmap
 
-1. ✅ Open, scroll and jump in huge files; Find All with a results panel; tail with live search; highlighting
-1. ✅ Text selection; multiple filters (Show / Hide / Mark) combined with AND / OR / NOT; highlight bar
-2. ✅ Folder search (folder search tools-like): folder + file patterns, parallel over files, `.gz`/`.zip`, results by file
-2. ✅ Text wrap; keep stack traces with their log line when filtering; context lines (±N)
-3. ✅ Timeline, top messages, merge by timestamp, columns (log analyzers-like) with level chips and value counts
-4. Editable highlight rules, saved searches, bookmarks, recent files, filter view ("show only matching")
-5. Native installers with `jpackage` (Windows .msi, macOS .dmg, Linux .deb/.rpm)
+1. ✅ Huge files, Find All, tail with live search, highlighting, text selection
+2. ✅ Filters with AND / OR / NOT, highlight bar, folder search (.gz/.zip), text wrap, stack traces with their line, context lines
+3. ✅ Timeline, top messages, merge by time, columns with level chips and value counts, export, bookmarks, recent files and sessions, alerts, encodings, JSON logs, remote logs over SFTP, compare two logs
+4. Next ideas: editable highlight rules, signed installers (.msi/.dmg), a plugin for custom log formats

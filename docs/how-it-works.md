@@ -18,8 +18,9 @@ Code references point to `src/main/java/logmaster/...`.
 8. [Filters: combining searches with AND / OR / NOT](#8-filters-combining-searches-with-and--or--not)
 9. [The view: drawing only what is visible](#9-the-view-drawing-only-what-is-visible)
 10. [Folder search](#10-folder-search)
-11. [Lessons learned](#11-lessons-learned)
-12. [Numbers](#12-numbers)
+11. [More features, and the idea behind each](#11-more-features-and-the-idea-behind-each)
+12. [Lessons learned](#12-lessons-learned)
+13. [Numbers](#13-numbers)
 
 ---
 
@@ -390,13 +391,50 @@ Searching a folder is different from viewing one file: each file is read once, n
 
 ---
 
-## 11. Lessons learned
+## 11. More features, and the idea behind each
+
+Each later feature reuses the same few building blocks: the line index, the byte-level scanners, and sorted lists of line numbers.
+
+**Text wrap** (`ui/LogView.java`). The view lays out each visible line into *segments* (display rows), breaking at a space near the edge if there is one. The scroll position is a line *plus* a segment within it, and the scrollbar still counts lines. Only on-screen lines are ever laid out, so wrap costs nothing on a 10 GB file.
+
+**Keeping stack traces with their line** (`core/EntryFormat.java`). From a sample of the file, LogMaster finds how an entry starts, for example `2026-10-21`, `[10:02:13`, a syslog date, a level word or `{`. A scanner like Find All then lists every line that does *not* start that way: these are continuation lines. With that sorted list, each filter's matches are widened to whole entries before AND/OR/NOT, so the formula works on entries rather than lines. Walking back from a match to the entry's first line, and forward to its last, is a short binary-search-and-walk in the continuation list.
+
+**Context lines and time ranges** (`core/FilterResult.java`). A result now holds two sets: the lines that *match*, and the lines *shown* (matches plus context). Context in the "all except" form is a nice trick: a run of hidden lines simply shrinks by N at each end that touches a shown line. A time range is a *window* `[start, end)` of lines, because logs are mostly written in time order. The window limits both sets, and "all except" then means "all lines of the window except…".
+
+**Timeline** (`core/TimeFormat.java`, `core/TimeIndex.java`, `ui/TimelineBar.java`). Timestamps are parsed straight from bytes (`daysFromCivil` turns a date into a day number without `java.time`). The time index stores one *(line, time)* pair about every 64 lines, the first line with a timestamp at or after each 64th line, which skips stack traces. That's 2 longs per 64 lines. The bars are counted on a background thread, and "go to 10:05" is a binary search in the samples plus at most a few hundred lines read forward.
+
+**Top messages** (`core/MessageStats.java`). Each entry's first line is tokenized at the byte level. Every token containing a digit (IDs, numbers, hosts, durations, the timestamp) becomes `<*>`, so `ERROR [worker-7] lost after 26579 ms` and `ERROR [worker-2] lost after 812 ms` give the same template. Chunks are counted in parallel, each into its own hash map, and the maps are merged. Then templates that differ in exactly one word (for example a customer name) are merged too. The regex for a template escapes characters one by one rather than using `\Q…\E`, so the search can still find its literal text and use the fast pre-filter.
+
+**Comparing logs** (`core/LogCompare.java`) counts the templates of both logs together. Rates are per entry, so a log twice as long doesn't look twice as bad. Templates are then sorted: new errors first, then big increases, then what disappeared.
+
+**Merging logs by time** (`core/LogMerger.java`). This is a k-way merge with a priority queue keyed by each source's next entry time, holding one entry per file in memory. The result is written to a real file with a `<label> ` prefix on each line. That makes every other feature work on it unchanged. Entry and time detection simply skip such a label.
+
+**Columns** (`core/LogFormat.java`). A layout is a regex with named groups, or a JSON field mapping, picked from presets by sampling. Only visible lines are split, at paint time, so columns cost nothing on huge files. *Count values* splits every entry in parallel chunks.
+
+**Encodings** (`core/Encoding.java`, `core/Utf16Mirror.java`). Windows-1252 and other single-byte encodings keep `\n` as the byte 0x0A, so the byte engine works as is: search text is encoded in the file's encoding, and lines are decoded with it. UTF-16 breaks the byte engine (a newline is two bytes), so LogMaster reads such logs through a UTF-8 copy that follows the original. The decoder keeps half a character, or half a surrogate pair, until the next bytes arrive.
+
+**Remote logs** (`core/RemoteMirror.java`). The same idea again: a local copy fed over SFTP with offset reads (`get(path, monitor, offset)`). It only ever appends whole lines, and the remote offset is "bytes read minus the incomplete last line". If the remote file gets smaller, the copy starts over, and the document's usual truncation handling takes care of the rest.
+
+## 12. Lessons learned
 
 **An interrupted thread closes the file for everyone.** Java's `FileChannel` is an *interruptible channel*: if a thread is interrupted while reading, Java **closes the channel**, for every thread. LogMaster used to cancel searches by interrupting worker threads (`Future.cancel(true)`, `shutdownNow()`). So editing a filter while its search ran (which cancels the old search) could close the open file, and the whole tab stopped working. Nothing reported it, because the error went to a failure callback that nothing listened to. It surfaced as an intermittent visual-test failure. The fixes:
 
 - cancel cooperatively: a `volatile boolean` that the scan loops check, and never interrupt;
 - `FileSource` reopens the channel if it ever finds it closed by an interrupt, after checking that the path still points to the same file;
 - tests that read with the interrupt flag set, and cancel 30 searches mid-flight.
+
+**"Finished before I was listening" bugs.** Three times, something happened before a listener was attached:
+- a small file finished indexing before the tab subscribed to "indexing finished", so detection never ran;
+- the tab's constructor got slower and missed the event on a 200 MB file too;
+- a restored view switched to *Matching only* while the filter result was still empty.
+
+The fixes share a pattern. The document *remembers* state (`lastIndexMillis()`), and anything waiting for a condition (a line to show) is checked again on every relevant event, not just once.
+
+**A position lost during recomputation.** Changing filters makes the engine publish an empty result for a moment. The view clamped its selection to "nothing", so the place in the file was gone. Now the view remembers its line before a redefinition, and returns to it once the new result covers it.
+
+**Overloads that look alike.** `sourceColor(long line)` and `sourceColor(int index)` both took a number. Passing an `int` row picked the wrong one, and the source stripes cycled through colors. Different names fixed it. A test that compared each stripe against the line's actual source would have caught it, so now one does.
+
+**Tests must not touch the user's settings.** For a while the visual tests wrote to the real preferences and `~/.logmaster`. Now all storage goes through one class (`AppState`), and the test tasks point it at the build folder.
 
 **Measure what you think you measure.** A test once reported that changing a filter formula took 1.1 s. In fact it took 2 ms: the timer included a 360 ms UI settle pause and a slow reference computation. Benchmarks in the visual tests now stop the clock the moment the work is done.
 
@@ -406,7 +444,7 @@ Searching a folder is different from viewing one file: each file is read once, n
 
 ---
 
-## 12. Numbers
+## 13. Numbers
 
 Measured by `./gradlew visualTest` on an Apple Silicon Mac (10 cores) with the file already in the OS cache. With a cold cache, disk speed sets the limit.
 
@@ -428,3 +466,10 @@ Measured by `./gradlew visualTest` on an Apple Silicon Mac (10 cores) with the f
 | Folder search | |
 |---|---|
 | 4 files, 48 MB, including `.gz` and `.zip` | ~50 ms (Mac), ~160 ms (Windows CI) |
+
+| On a 200 MB log (1.8M lines, 1.56M entries) | |
+|---|---|
+| Keep stack traces: filter `NullPointerException` (74k lines) | 60 ms |
+| Top messages (94 kinds) | ~0.2 s |
+| Count values of a column (thread) | ~0.3 s |
+| Export 85k filtered lines | ~0.3 s |
