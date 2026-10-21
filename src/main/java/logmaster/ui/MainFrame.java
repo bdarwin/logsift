@@ -60,6 +60,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final JToggleButton wholeWord = toggle("W", "Whole word");
     private final JToggleButton regex = toggle(".*", "Regular expression");
     private final JToggleButton followButton = new JToggleButton("Follow");
+    private final JToggleButton wrapButton = new JToggleButton("Wrap");
+    private boolean wrap = PREFS.getBoolean("wrap", false);
     private final JLabel status = new JLabel(" ");
     private final JLabel statusRight = new JLabel(" ");
     private final JProgressBar progress = new JProgressBar(0, 1000);
@@ -130,6 +132,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             LogTab tab = new LogTab(abs, this);
             tab.mainView().setFontSize(fontSize);
             tab.resultsView().setFontSize(fontSize);
+            tab.mainView().setWrap(wrap);
+            tab.resultsView().setWrap(wrap);
             tabs.addTab(tab.title(), tab);
             int idx = tabs.getTabCount() - 1;
             tabs.setToolTipTextAt(idx, abs.toString());
@@ -289,6 +293,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         followButton.setToolTipText("Follow the end of the file as it grows (tail -f)");
         followButton.addActionListener(e -> setFollow(followButton.isSelected()));
+        wrapButton.setToolTipText("Wrap long lines (" + (isMac() ? "⌥Z" : "Alt+Z") + ")");
+        wrapButton.setSelected(wrap);
+        wrapButton.addActionListener(e -> setWrap(wrapButton.isSelected()));
 
         tb.add(new JLabel(" "));
         tb.add(findField);
@@ -298,6 +305,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tb.add(next);
         tb.addSeparator();
         tb.add(followButton);
+        tb.add(wrapButton);
         tb.add(Box.createHorizontalGlue());
         return tb;
     }
@@ -384,6 +392,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         JMenu view = new JMenu("View");
         view.add(item("Follow (Tail)", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU), e -> setFollow(!followButton.isSelected())));
         view.addSeparator();
+        view.add(item("Word Wrap", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
+                e -> setWrap(!wrap)));
         view.add(item("Show Matching Lines Only / All Lines",
                 KeyStroke.getKeyStroke(KeyEvent.VK_H, MENU | InputEvent.SHIFT_DOWN_MASK), e -> {
                     LogTab t = currentTab();
@@ -520,6 +530,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             if (tabs.getComponentAt(i) instanceof FolderSearchTab f) {
                 f.resultsView().setFontSize(fontSize);
             }
+        }
+    }
+
+    /** Wraps long lines in every log view. */
+    public void setWrap(boolean on) {
+        wrap = on;
+        PREFS.putBoolean("wrap", on);
+        wrapButton.setSelected(on);
+        for (LogTab t : allTabs()) {
+            t.mainView().setWrap(on);
+            t.resultsView().setWrap(on);
         }
     }
 

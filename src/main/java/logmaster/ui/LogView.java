@@ -1,7 +1,9 @@
 package logmaster.ui;
 
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
@@ -11,6 +13,8 @@ import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.InputEvent;
@@ -21,6 +25,7 @@ import java.awt.event.MouseWheelEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.swing.AbstractAction;
@@ -32,12 +37,17 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollBar;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
 /**
- * Virtual list of log lines. Only visible rows are read and painted, and the scrollbar counts
- * rows (not pixels), so files with hundreds of millions of lines scroll smoothly. Swing's own
+ * Virtual list of log lines. Only visible lines are read and laid out, and the scrollbar counts
+ * lines (not pixels), so files with hundreds of millions of lines scroll smoothly. Swing's own
  * JList/JTable measure in pixels and overflow around 100M rows.
+ *
+ * <p>Each visible line is laid out into one or more <em>segments</em>: one without wrap, several
+ * with wrap (continuation segments are indented). Painting, mouse hit-testing and selection all
+ * work on that layout. The scroll position is a line plus a segment within it.
  */
 public final class LogView extends JPanel {
 
@@ -45,21 +55,36 @@ public final class LogView extends JPanel {
     public interface RowSource {
         int rowCount();
 
-        /** 0-based line number in the file, shown in the gutter. */
+        /** 0-based line number in the file, shown in the gutter. Negative shows blank. */
         long lineNumber(int row);
 
         /** Fills {@code out[0..count)} with the text of rows {@code first..}; null if missing. */
         void texts(int first, int count, String[] out);
 
-        /** Largest line number shown (sizes the gutter). Negative line numbers show blank. */
+        /** Largest line number shown (sizes the gutter). */
         default long maxLineNumber() {
             int n = rowCount();
             return n == 0 ? 0 : lineNumber(n - 1);
         }
 
-        /** Rows drawn grayed out (for example, lines the filters remove). */
+        /** Rows drawn grayed out (for example, context lines or lines the filters remove). */
         default boolean dimmed(int row) {
             return false;
+        }
+
+        /** Draw a separator above this row (lines were skipped here). */
+        default boolean gapBefore(int row) {
+            return false;
+        }
+
+        /** A color stripe at the left edge of the row (for example, which file it came from). */
+        default Color tag(int row) {
+            return null;
+        }
+
+        /** A dot in the gutter (for example, a bookmark). */
+        default Color marker(int row) {
+            return null;
         }
     }
 
@@ -76,6 +101,9 @@ public final class LogView extends JPanel {
 
     private static final int MAX_COPY_ROWS = 500_000;
     private static final int TAB = 4;
+    /** Continuation segments of a wrapped line are indented by this many columns. */
+    private static final int WRAP_INDENT = 2;
+    private static final int MAX_SEGMENTS = 2000;
     private static LogView lastFocused;
 
     private final Canvas canvas = new Canvas();
@@ -86,13 +114,18 @@ public final class LogView extends JPanel {
     private RowSource source = emptySource();
 
     private Font font;
+    private FontMetrics metrics;
     private int rowHeight;
     private int charWidth;
     private int ascent;
 
+    // Scroll position: the top line and the first visible segment of it (wrap only).
     private int topRow;
+    private int topSeg;
     private int hOffset;
     private int maxColumns;
+    private boolean wrap;
+
     // Selection runs from (anchor, anchorCol) to (lead, leadCol). Columns are char indexes into
     // the line; Integer.MAX_VALUE means the end of the line. In line mode whole lines are
     // selected. The lead row is also the current line.
@@ -115,7 +148,14 @@ public final class LogView extends JPanel {
     private double wheelRemainder;
     private int dragDirection;
     private final Timer dragTimer = new Timer(40, e -> dragScroll());
-    private java.util.function.BiConsumer<LogView, JPopupMenu> popupExtender;
+    private BiConsumer<LogView, JPopupMenu> popupExtender;
+
+    // The layout of what is on screen: one entry per display row.
+    private Line[] shownLines = new Line[0];
+    private int[] shownLine = new int[0]; // index into shownLines, per display row
+    private int[] shownSeg = new int[0];
+    private int shownCount;
+    private boolean layoutDirty = true;
 
     public LogView() {
         super(new BorderLayout());
@@ -130,14 +170,15 @@ public final class LogView extends JPanel {
         vbar.addAdjustmentListener(e -> {
             if (!adjusting) {
                 topRow = e.getValue();
+                topSeg = 0;
+                changed();
                 updateFollowFromPosition();
-                canvas.repaint();
             }
         });
         hbar.addAdjustmentListener(e -> {
             if (!adjusting) {
                 hOffset = e.getValue();
-                canvas.repaint();
+                changed();
             }
         });
         hbar.setUnitIncrement(24);
@@ -170,6 +211,7 @@ public final class LogView extends JPanel {
     public void setSource(RowSource source) {
         this.source = source;
         topRow = 0;
+        topSeg = 0;
         hOffset = 0;
         maxColumns = 0;
         anchor = lead = -1;
@@ -193,7 +235,7 @@ public final class LogView extends JPanel {
     }
 
     /** Lets the owner add items to the right-click menu. */
-    public void setPopupExtender(java.util.function.BiConsumer<LogView, JPopupMenu> extender) {
+    public void setPopupExtender(BiConsumer<LogView, JPopupMenu> extender) {
         this.popupExtender = extender;
     }
 
@@ -213,16 +255,37 @@ public final class LogView extends JPanel {
 
     public void setFontSize(float size) {
         font = Theme.monoFont(size);
-        FontMetrics fm = getFontMetrics(font);
-        rowHeight = fm.getHeight() + 2;
-        charWidth = Math.max(1, fm.charWidth('m'));
-        ascent = fm.getAscent() + 1;
+        metrics = getFontMetrics(font);
+        rowHeight = metrics.getHeight() + 2;
+        charWidth = Math.max(1, metrics.charWidth('m'));
+        ascent = metrics.getAscent() + 1;
         vbar.setUnitIncrement(1);
         rowsChanged();
     }
 
     public float fontSize() {
         return font.getSize2D();
+    }
+
+    public boolean isWrap() {
+        return wrap;
+    }
+
+    /** Wraps long lines at the window edge instead of scrolling sideways. */
+    public void setWrap(boolean on) {
+        if (wrap == on) {
+            return;
+        }
+        wrap = on;
+        topSeg = 0;
+        hOffset = 0;
+        changed();
+        updateScrollbars();
+        if (follow) {
+            scrollToBottom();
+        } else if (lead >= 0) {
+            ensureVisible(lead);
+        }
     }
 
     public boolean isFollow() {
@@ -248,11 +311,15 @@ public final class LogView extends JPanel {
             anchorCol = leadCol = 0;
             lineMode = false;
         }
+        if (topRow >= n) {
+            topRow = Math.max(0, n - 1);
+            topSeg = 0;
+        }
+        changed();
         if (follow) {
-            topRow = Math.max(0, n - visibleRows());
+            scrollToBottom();
         }
         updateScrollbars();
-        canvas.repaint();
     }
 
     public int selectedRow() {
@@ -263,6 +330,7 @@ public final class LogView extends JPanel {
         return topRow;
     }
 
+    /** Display rows that fit on screen. */
     public int visibleRows() {
         return Math.max(1, canvas.getHeight() / rowHeight);
     }
@@ -278,7 +346,8 @@ public final class LogView extends JPanel {
         anchorCol = leadCol = 0;
         lineMode = false;
         if (center) {
-            setTop(row - visibleRows() / 2);
+            int[] pos = advance(row, 0, -(visibleRows() / 2));
+            setTop(pos[0], pos[1]);
         } else {
             ensureVisible(row);
         }
@@ -302,6 +371,14 @@ public final class LogView extends JPanel {
     /** True if some text (not just a caret) is selected. */
     public boolean hasSelection() {
         return lead >= 0 && (lineMode || anchor != lead || anchorCol != leadCol);
+    }
+
+    /** First and last selected row (or the current row twice); null if none. */
+    public int[] selectedRows() {
+        if (lead < 0) {
+            return null;
+        }
+        return new int[] {Math.min(anchor, lead), Math.max(anchor, lead)};
     }
 
     /**
@@ -376,7 +453,33 @@ public final class LogView extends JPanel {
     }
 
     int yForRowForTest(int row) {
-        return (row - topRow) * rowHeight + rowHeight / 2;
+        ensureLayout();
+        for (int i = 0; i < shownCount; i++) {
+            if (shownLines[shownLine[i]].row == row) {
+                return i * rowHeight + rowHeight / 2;
+            }
+        }
+        return -1;
+    }
+
+    /** Display column where each segment of a row starts. For tests. */
+    int[] segmentStartsForTest(int row) {
+        return lineAt(row).segStart.clone();
+    }
+
+    /** X of a display column on a segment of a row. For tests. */
+    int xForSegmentColumnForTest(int row, int seg, int col) {
+        Line l = lineAt(row);
+        return l.x(seg, col);
+    }
+
+    boolean horizontalScrollbarVisibleForTest() {
+        return hbar.isVisible();
+    }
+
+    /** Number of display rows the given row takes (1 without wrap). For tests. */
+    int segmentsForTest(int row) {
+        return segCount(row);
     }
 
     /** {startRow, startCol, endRow, endCol}, start before end; line mode spans whole lines. */
@@ -402,36 +505,331 @@ public final class LogView extends JPanel {
         return one[0];
     }
 
-    // ---------------------------------------------------------------- scrolling
+    // ---------------------------------------------------------------- layout
 
-    private void scrollToBottom() {
-        setTop(source.rowCount() - visibleRows());
+    /** One line laid out for display. Columns are positions in the tab-expanded text. */
+    private final class Line {
+        final int row;
+        final String raw;
+        final String text;
+        final int[] colOf;   // display column of each raw char (null if no tabs)
+        final boolean wide;
+        final int[] segStart; // display column where each segment starts
+
+        Line(int row, String raw) {
+            this.row = row;
+            this.raw = raw;
+            this.colOf = raw.indexOf('\t') >= 0 ? new int[raw.length() + 1] : null;
+            this.text = expandTabs(raw, colOf);
+            this.wide = hasWideChars(text);
+            this.segStart = wrap ? wrapPoints() : new int[] {0};
+        }
+
+        int segCount() {
+            return segStart.length;
+        }
+
+        int segEnd(int seg) {
+            return seg + 1 < segStart.length ? segStart[seg + 1] : text.length();
+        }
+
+        /** Display column of raw char index {@code c}. */
+        int col(int c) {
+            c = Math.min(c, raw.length());
+            return colOf == null ? c : colOf[c];
+        }
+
+        /** X where segment {@code seg} starts. */
+        int segX(int seg) {
+            int gutter = gutterWidth();
+            if (!wrap) {
+                return gutter - hOffset;
+            }
+            return gutter + (seg > 0 ? WRAP_INDENT * charWidth : 0);
+        }
+
+        /** X of display column {@code col} within segment {@code seg}. */
+        int x(int seg, int col) {
+            int s0 = segStart[seg];
+            col = Math.max(s0, Math.min(col, text.length()));
+            if (wide) {
+                return segX(seg) + metrics.stringWidth(text.substring(s0, col));
+            }
+            return segX(seg) + (col - s0) * charWidth;
+        }
+
+        /** Raw char index nearest to x on segment {@code seg} (a caret position). */
+        int charAt(int seg, int x) {
+            int s0 = segStart[seg];
+            int s1 = segEnd(seg);
+            int rel = x - segX(seg);
+            int dcol;
+            if (wide) {
+                dcol = s1;
+                int prev = 0;
+                for (int i = s0; i < s1; i++) {
+                    int next = metrics.stringWidth(text.substring(s0, i + 1));
+                    if (rel < (prev + next) / 2) {
+                        dcol = i;
+                        break;
+                    }
+                    prev = next;
+                }
+            } else {
+                dcol = s0 + Math.round((float) rel / charWidth);
+            }
+            dcol = Math.max(s0, Math.min(s1, dcol));
+            int idx = dcol;
+            if (colOf != null) {
+                idx = raw.length();
+                for (int i = 0; i <= raw.length(); i++) {
+                    if (colOf[i] >= dcol) {
+                        idx = i > 0 && dcol - colOf[i - 1] < colOf[i] - dcol ? i - 1 : i;
+                        break;
+                    }
+                }
+            }
+            idx = Math.min(idx, raw.length());
+            if (idx > 0 && idx < raw.length() && Character.isLowSurrogate(raw.charAt(idx))) {
+                idx--; // never split a surrogate pair
+            }
+            return idx;
+        }
+
+        /** Where to break the text so each segment fits the width, preferring spaces. */
+        private int[] wrapPoints() {
+            int avail = Math.max(charWidth * 8, canvas.getWidth() - gutterWidth() - charWidth);
+            int n = text.length();
+            List<Integer> starts = new ArrayList<>();
+            starts.add(0);
+            int pos = 0;
+            while (pos < n && starts.size() < MAX_SEGMENTS) {
+                int width = avail - (starts.size() > 1 ? WRAP_INDENT * charWidth : 0);
+                int end = fitEnd(pos, width);
+                if (end >= n) {
+                    break;
+                }
+                // prefer breaking after a space in the last 30% of the segment
+                int minBreak = pos + Math.max(1, (end - pos) * 7 / 10);
+                for (int i = end; i > minBreak; i--) {
+                    if (text.charAt(i - 1) == ' ') {
+                        end = i;
+                        break;
+                    }
+                }
+                if (end < n && Character.isLowSurrogate(text.charAt(end))) {
+                    end--;
+                }
+                if (end <= pos) {
+                    end = pos + 1;
+                }
+                starts.add(end);
+                pos = end;
+            }
+            int[] out = new int[starts.size()];
+            for (int i = 0; i < out.length; i++) {
+                out[i] = starts.get(i);
+            }
+            return out;
+        }
+
+        /** End (exclusive) of the longest run from {@code pos} that fits {@code width} px. */
+        private int fitEnd(int pos, int width) {
+            if (!wide) {
+                return pos + Math.max(1, width / charWidth);
+            }
+            int w = 0;
+            int i = pos;
+            while (i < text.length()) {
+                w += metrics.charWidth(text.charAt(i));
+                if (w > width && i > pos) {
+                    return i;
+                }
+                i++;
+            }
+            return i;
+        }
     }
 
-    private void setTop(int row) {
-        int max = Math.max(0, source.rowCount() - visibleRows());
-        topRow = Math.max(0, Math.min(max, row));
-        updateScrollbars();
+    /** Lays out a single row (reads its text). */
+    private Line lineAt(int row) {
+        String t = textOf(row);
+        return new Line(row, t == null ? "" : t);
+    }
+
+    private int segCount(int row) {
+        if (!wrap) {
+            return 1;
+        }
+        return lineAt(row).segCount();
+    }
+
+    /** Recomputes what is on screen, if anything changed since the last time. */
+    private void ensureLayout() {
+        if (!layoutDirty) {
+            return;
+        }
+        layoutDirty = false;
+        int n = source.rowCount();
+        int vis = visibleRows() + 1;
+        int count = Math.max(0, Math.min(vis, n - topRow));
+        String[] texts = new String[count];
+        if (count > 0) {
+            source.texts(topRow, count, texts);
+        }
+        List<Line> lines = new ArrayList<>(count);
+        int[] li = new int[vis];
+        int[] sg = new int[vis];
+        int shown = 0;
+        for (int i = 0; i < count && shown < vis; i++) {
+            Line l = new Line(topRow + i, texts[i] == null ? "" : texts[i]);
+            int first = 0;
+            if (i == 0) {
+                topSeg = Math.min(topSeg, l.segCount() - 1);
+                first = topSeg;
+            }
+            lines.add(l);
+            for (int s = first; s < l.segCount() && shown < vis; s++) {
+                li[shown] = lines.size() - 1;
+                sg[shown] = s;
+                shown++;
+            }
+        }
+        shownLines = lines.toArray(new Line[0]);
+        shownLine = li;
+        shownSeg = sg;
+        shownCount = shown;
+    }
+
+    /** Marks the layout stale and repaints. */
+    private void changed() {
+        layoutDirty = true;
         canvas.repaint();
+    }
+
+    // ---------------------------------------------------------------- scrolling
+
+    /** Moves (row, seg) by {@code delta} display rows, staying within the file. */
+    private int[] advance(int row, int seg, int delta) {
+        int n = source.rowCount();
+        if (n == 0) {
+            return new int[] {0, 0};
+        }
+        if (!wrap) {
+            return new int[] {Math.max(0, Math.min(n - 1, row + delta)), 0};
+        }
+        while (delta > 0) {
+            int segs = segCount(row);
+            int step = Math.min(delta, segs - 1 - seg);
+            if (step > 0) {
+                seg += step;
+                delta -= step;
+            } else if (row + 1 < n) {
+                row++;
+                seg = 0;
+                delta--;
+            } else {
+                break;
+            }
+        }
+        while (delta < 0) {
+            int step = Math.min(-delta, seg);
+            if (step > 0) {
+                seg -= step;
+                delta += step;
+            } else if (row > 0) {
+                row--;
+                seg = segCount(row) - 1;
+                delta++;
+            } else {
+                break;
+            }
+        }
+        return new int[] {row, seg};
+    }
+
+    /** The scroll position that shows the end of the file at the bottom. */
+    private int[] maxTop() {
+        int n = source.rowCount();
+        int vis = visibleRows();
+        if (!wrap) {
+            return new int[] {Math.max(0, n - vis), 0};
+        }
+        if (n == 0) {
+            return new int[] {0, 0};
+        }
+        int last = n - 1;
+        return advance(last, segCount(last) - 1, -(vis - 1));
+    }
+
+    private static boolean after(int r1, int s1, int r2, int s2) {
+        return r1 > r2 || (r1 == r2 && s1 > s2);
+    }
+
+    private void scrollToBottom() {
+        int[] m = maxTop();
+        setTop(m[0], m[1]);
+    }
+
+    private void setTop(int row, int seg) {
+        int n = source.rowCount();
+        row = Math.max(0, Math.min(Math.max(0, n - 1), row));
+        seg = Math.max(0, seg);
+        // only near the end can the position be past the last screenful
+        if (row >= n - visibleRows() - 1) {
+            int[] m = maxTop();
+            if (after(row, seg, m[0], m[1])) {
+                row = m[0];
+                seg = m[1];
+            }
+        }
+        topRow = row;
+        topSeg = seg;
+        updateScrollbars();
+        changed();
+    }
+
+    private void scrollBy(int displayRows) {
+        int[] p = advance(topRow, topSeg, displayRows);
+        setTop(p[0], p[1]);
     }
 
     private void ensureVisible(int row) {
         int vis = visibleRows();
-        if (row < topRow) {
-            setTop(row);
-        } else if (row >= topRow + vis) {
-            setTop(row - vis + 1);
+        if (row < topRow || (row == topRow && topSeg > 0)) {
+            setTop(row, 0);
+            return;
+        }
+        if (!wrap) {
+            if (row >= topRow + vis) {
+                setTop(row - vis + 1, 0);
+            }
+            return;
+        }
+        if (row - topRow >= vis) {
+            int[] p = advance(row, segCount(row) - 1, -(vis - 1));
+            setTop(p[0], p[1]);
+            return;
+        }
+        // count display rows from the top to the end of this row
+        int used = segCount(topRow) - topSeg;
+        for (int r = topRow + 1; r <= row && used <= vis; r++) {
+            used += segCount(r);
+        }
+        if (used > vis) {
+            int[] p = advance(row, segCount(row) - 1, -(vis - 1));
+            setTop(p[0], p[1]);
         }
     }
 
     private boolean atBottom() {
-        return topRow + visibleRows() >= source.rowCount();
+        int[] m = maxTop();
+        return !after(m[0], m[1], topRow, topSeg);
     }
 
-    /** After a user scroll: being at the bottom turns follow on, scrolling up turns it off. */
+    /** After a user scroll: scrolling up turns follow off. */
     private void updateFollowFromPosition() {
-        boolean bottom = atBottom();
-        if (follow && !bottom) {
+        if (follow && !atBottom()) {
             follow = false;
             listeners.forEach(l -> l.followChanged(this, false));
         }
@@ -442,19 +840,23 @@ public final class LogView extends JPanel {
         try {
             int n = source.rowCount();
             int vis = visibleRows();
-            int max = Math.max(0, n - vis);
-            topRow = Math.max(0, Math.min(max, topRow));
-            vbar.setValues(topRow, Math.min(vis, Math.max(n, 1)), 0, Math.max(n, 1));
+            vbar.setValues(Math.min(topRow, Math.max(0, n - 1)), Math.min(vis, Math.max(n, 1)), 0,
+                    Math.max(n, 1));
             vbar.setBlockIncrement(Math.max(1, vis - 1));
-            vbar.setEnabled(n > vis);
+            vbar.setEnabled(n > vis || topRow > 0 || topSeg > 0);
 
-            int textWidth = canvas.getWidth() - gutterWidth();
-            int contentWidth = (maxColumns + 2) * charWidth;
-            int hmax = Math.max(0, contentWidth - textWidth);
-            hOffset = Math.max(0, Math.min(hmax, hOffset));
-            hbar.setValues(hOffset, Math.max(1, textWidth), 0, Math.max(textWidth, contentWidth));
-            hbar.setBlockIncrement(Math.max(charWidth, textWidth - 4 * charWidth));
-            hbar.setVisible(hmax > 0);
+            if (wrap) {
+                hOffset = 0;
+                hbar.setVisible(false);
+            } else {
+                int textWidth = canvas.getWidth() - gutterWidth();
+                int contentWidth = (maxColumns + 2) * charWidth;
+                int hmax = Math.max(0, contentWidth - textWidth);
+                hOffset = Math.max(0, Math.min(hmax, hOffset));
+                hbar.setValues(hOffset, Math.max(1, textWidth), 0, Math.max(textWidth, contentWidth));
+                hbar.setBlockIncrement(Math.max(charWidth, textWidth - 4 * charWidth));
+                hbar.setVisible(hmax > 0);
+            }
         } finally {
             adjusting = false;
         }
@@ -526,8 +928,15 @@ public final class LogView extends JPanel {
 
     private void dragScroll() {
         if (dragDirection != 0) {
-            int target = dragDirection < 0 ? topRow - 1 : topRow + visibleRows();
-            setTop(topRow + dragDirection);
+            scrollBy(dragDirection);
+            ensureLayout();
+            int target;
+            if (dragDirection < 0) {
+                target = Math.max(0, topRow);
+            } else {
+                target = shownCount == 0 ? topRow
+                        : shownLines[shownLine[shownCount - 1]].row;
+            }
             dragTo(target, dragDirection < 0 ? 0 : Integer.MAX_VALUE);
         }
     }
@@ -564,60 +973,42 @@ public final class LogView extends JPanel {
         return Character.isLetterOrDigit(c) || c == '_';
     }
 
-    /** Character index in {@code row} nearest to canvas x (a caret position). */
-    private int colAt(int row, int x) {
-        String raw = textOf(row);
-        if (raw == null || raw.isEmpty()) {
-            return 0;
-        }
-        int[] colOf = raw.indexOf('\t') >= 0 ? new int[raw.length() + 1] : null;
-        String text = expandTabs(raw, colOf);
-        int rel = x - (gutterWidth() - hOffset);
-        int dcol;
-        if (hasWideChars(text)) {
-            FontMetrics fm = canvas.getFontMetrics(font);
-            dcol = text.length();
-            int prev = 0;
-            for (int i = 0; i < text.length(); i++) {
-                int next = fm.stringWidth(text.substring(0, i + 1));
-                if (rel < (prev + next) / 2) {
-                    dcol = i;
-                    break;
-                }
-                prev = next;
-            }
-        } else {
-            dcol = Math.round((float) rel / charWidth);
-        }
-        dcol = Math.max(0, Math.min(text.length(), dcol));
-        int idx = dcol;
-        if (colOf != null) {
-            idx = raw.length();
-            for (int i = 0; i <= raw.length(); i++) {
-                if (colOf[i] >= dcol) {
-                    // nearer of the boundaries before and at dcol (tabs are several columns wide)
-                    idx = i > 0 && dcol - colOf[i - 1] < colOf[i] - dcol ? i - 1 : i;
-                    break;
-                }
-            }
-        }
-        if (idx > 0 && idx < raw.length() && Character.isLowSurrogate(raw.charAt(idx))) {
-            idx--; // never split a surrogate pair
-        }
-        return idx;
+    /** The display row index at y, or -1 below the last one. */
+    private int shownAt(int y) {
+        ensureLayout();
+        int i = Math.max(0, y) / rowHeight;
+        return i < shownCount ? i : -1;
     }
 
-    private boolean inGutter(int x) {
-        return x < gutterWidth() - 6;
+    /** Row under y, or -1 below the last row. */
+    private int rowAt(int y) {
+        int i = shownAt(y);
+        return i < 0 ? -1 : shownLines[shownLine[i]].row;
     }
 
     /** Row under y, clamped to the existing rows; -1 if there are none. */
     private int rowAtClamped(int y) {
-        int n = source.rowCount();
-        if (n == 0) {
+        if (source.rowCount() == 0) {
             return -1;
         }
-        return Math.min(n - 1, topRow + Math.max(0, y) / rowHeight);
+        int r = rowAt(y);
+        if (r >= 0) {
+            return r;
+        }
+        return shownCount == 0 ? source.rowCount() - 1 : shownLines[shownLine[shownCount - 1]].row;
+    }
+
+    /** Character position under (x, y); end of line below the last row. */
+    private int colAt(int x, int y) {
+        int i = shownAt(y);
+        if (i < 0) {
+            return Integer.MAX_VALUE;
+        }
+        return shownLines[shownLine[i]].charAt(shownSeg[i], x);
+    }
+
+    private boolean inGutter(int x) {
+        return x < gutterWidth() - 6;
     }
 
     // ---------------------------------------------------------------- input
@@ -634,9 +1025,8 @@ public final class LogView extends JPanel {
                 if (e.getButton() != MouseEvent.BUTTON1) {
                     return;
                 }
-                int row = rowAt(e.getY());
-                boolean belowLast = row < 0;
-                row = rowAtClamped(e.getY());
+                boolean belowLast = rowAt(e.getY()) < 0;
+                int row = rowAtClamped(e.getY());
                 if (row < 0) {
                     return;
                 }
@@ -651,7 +1041,7 @@ public final class LogView extends JPanel {
                 } else if (clicks == 2) {
                     dragUnit = BY_WORD;
                     String t = textOf(row);
-                    int[] w = wordAt(t == null ? "" : t, colAt(row, e.getX()));
+                    int[] w = wordAt(t == null ? "" : t, colAt(e.getX(), e.getY()));
                     wordRow = row;
                     wordStart = w[0];
                     wordEnd = w[1];
@@ -662,15 +1052,15 @@ public final class LogView extends JPanel {
                     listeners.forEach(l -> l.rowActivated(LogView.this, r));
                 } else {
                     dragUnit = BY_CHAR;
-                    int col = belowLast ? Integer.MAX_VALUE : colAt(row, e.getX());
+                    int col = belowLast ? Integer.MAX_VALUE : colAt(e.getX(), e.getY());
                     selectTo(row, col, e.isShiftDown());
                 }
             }
 
             @Override
             public void mouseMoved(MouseEvent e) {
-                canvas.setCursor(java.awt.Cursor.getPredefinedCursor(inGutter(e.getX())
-                        ? java.awt.Cursor.DEFAULT_CURSOR : java.awt.Cursor.TEXT_CURSOR));
+                canvas.setCursor(Cursor.getPredefinedCursor(inGutter(e.getX())
+                        ? Cursor.DEFAULT_CURSOR : Cursor.TEXT_CURSOR));
             }
 
             @Override
@@ -696,7 +1086,7 @@ public final class LogView extends JPanel {
                 } else {
                     dragDirection = 0;
                     dragTimer.stop();
-                    if (dragUnit != BY_LINE) {
+                    if (dragUnit != BY_LINE && !wrap) {
                         // scroll sideways when dragging past the left or right edge
                         if (e.getX() > canvas.getWidth() - charWidth) {
                             hbarScroll(charWidth * 2);
@@ -706,9 +1096,9 @@ public final class LogView extends JPanel {
                     }
                     int row = rowAt(e.getY());
                     if (row >= 0) {
-                        dragTo(row, colAt(row, e.getX()));
+                        dragTo(row, colAt(e.getX(), e.getY()));
                     } else if (source.rowCount() > 0) {
-                        dragTo(source.rowCount() - 1, Integer.MAX_VALUE);
+                        dragTo(rowAtClamped(e.getY()), Integer.MAX_VALUE);
                     }
                 }
             }
@@ -717,14 +1107,16 @@ public final class LogView extends JPanel {
             public void mouseWheelMoved(MouseWheelEvent e) {
                 double rot = e.getPreciseWheelRotation();
                 if (e.isShiftDown()) {
-                    hbarScroll((int) Math.round(rot * charWidth * 3));
+                    if (!wrap) {
+                        hbarScroll((int) Math.round(rot * charWidth * 3));
+                    }
                     return;
                 }
                 wheelRemainder += rot * 3;
                 int rows = (int) wheelRemainder;
                 wheelRemainder -= rows;
                 if (rows != 0) {
-                    setTop(topRow + rows);
+                    scrollBy(rows);
                     updateFollowFromPosition();
                 }
             }
@@ -737,7 +1129,7 @@ public final class LogView extends JPanel {
     private void hbarScroll(int dx) {
         hOffset = Math.max(0, hOffset + dx);
         updateScrollbars();
-        canvas.repaint();
+        changed();
     }
 
     private void popup(MouseEvent e) {
@@ -752,11 +1144,6 @@ public final class LogView extends JPanel {
             popupExtender.accept(this, menu);
         }
         menu.show(canvas, e.getX(), e.getY());
-    }
-
-    private int rowAt(int y) {
-        int row = topRow + Math.max(0, y) / rowHeight;
-        return row < source.rowCount() ? row : -1;
     }
 
     private void installKeys() {
@@ -801,10 +1188,22 @@ public final class LogView extends JPanel {
     }
 
     private void page(int dir, boolean extend) {
-        int vis = visibleRows();
-        int offsetInView = (lead >= 0 ? lead : topRow) - topRow;
-        setTop(topRow + dir * (vis - 1));
-        moveLead(topRow + Math.max(0, Math.min(vis - 1, offsetInView)), extend);
+        ensureLayout();
+        int offset = 0;
+        for (int i = 0; i < shownCount; i++) {
+            if (shownLines[shownLine[i]].row == lead) {
+                offset = i;
+                break;
+            }
+        }
+        scrollBy(dir * Math.max(1, visibleRows() - 1));
+        ensureLayout();
+        int target = shownCount == 0 ? topRow
+                : shownLines[shownLine[Math.min(offset, shownCount - 1)]].row;
+        if (dir > 0 && atBottom() && shownCount > 0 && offset >= shownCount - 1) {
+            target = source.rowCount() - 1;
+        }
+        moveLead(target, extend);
     }
 
     private static void bind(InputMap im, ActionMap am, String name, int key, int mods,
@@ -823,7 +1222,7 @@ public final class LogView extends JPanel {
     private int gutterWidth() {
         long maxLine = Math.max(1, source.maxLineNumber() + 1);
         int digits = Math.max(4, Long.toString(maxLine).length());
-        return digits * charWidth + 16;
+        return digits * charWidth + 20;
     }
 
     private static RowSource emptySource() {
@@ -880,23 +1279,15 @@ public final class LogView extends JPanel {
         return false;
     }
 
-    /** X position of the boundary before char {@code c} of a (tab-expanded) line. */
-    private int xOfChar(int c, int[] colOf, String text, boolean wide, FontMetrics fm, int textX) {
-        int col = colOf == null ? c : colOf[c];
-        col = Math.min(col, text.length());
-        return wide ? textX + fm.stringWidth(text.substring(0, col)) : textX + col * charWidth;
-    }
-
     private final class Canvas extends JComponent {
-        private String[] texts = new String[0];
-
         Canvas() {
             setOpaque(true);
-            addComponentListener(new java.awt.event.ComponentAdapter() {
+            addComponentListener(new ComponentAdapter() {
                 @Override
-                public void componentResized(java.awt.event.ComponentEvent e) {
+                public void componentResized(ComponentEvent e) {
+                    layoutDirty = true;
                     if (follow) {
-                        topRow = Math.max(0, source.rowCount() - visibleRows());
+                        scrollToBottom();
                     }
                     updateScrollbars();
                 }
@@ -912,6 +1303,8 @@ public final class LogView extends JPanel {
         protected void paintComponent(Graphics g0) {
             Graphics2D g = (Graphics2D) g0.create();
             try {
+                layoutDirty = true; // the source may have changed without telling us
+                ensureLayout();
                 paintRows(g);
             } finally {
                 g.dispose();
@@ -928,23 +1321,14 @@ public final class LogView extends JPanel {
                         RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             }
             g.setFont(font);
-            FontMetrics fm = g.getFontMetrics();
             int w = getWidth();
             int h = getHeight();
             int gutter = gutterWidth();
-            Color bg = Theme.background();
             Color fg = Theme.foreground();
-            g.setColor(bg);
+            g.setColor(Theme.background());
             g.fillRect(0, 0, w, h);
             g.setColor(Theme.gutterBackground());
             g.fillRect(0, 0, gutter - 6, h);
-
-            int n = source.rowCount();
-            int count = Math.max(0, Math.min(h / rowHeight + 1, n - topRow));
-            if (texts.length < count) {
-                texts = new String[count];
-            }
-            source.texts(topRow, count, texts);
 
             boolean anySel = hasSelection();
             int[] sel = anySel ? selectionBounds() : null;
@@ -959,113 +1343,165 @@ public final class LogView extends JPanel {
                 rm[i] = rules.get(i).pattern().matcher("");
             }
 
-            for (int i = 0; i < count; i++) {
-                int row = topRow + i;
-                int y = i * rowHeight;
-                String raw = texts[i];
-                if (raw == null) {
-                    continue;
-                }
-                // line colors from the first matching rule
-                Color lineFg = fg;
-                Color lineBg = null;
-                boolean dim = source.dimmed(row);
+            // per line: colors and match ranges (in display columns)
+            int lineCount = shownLines.length;
+            Color[] lineFg = new Color[lineCount];
+            Color[] lineBg = new Color[lineCount];
+            int[][] matches = new int[lineCount][];
+            for (int k = 0; k < lineCount; k++) {
+                Line l = shownLines[k];
+                newMaxCols = Math.max(newMaxCols, l.text.length());
+                Color lf = fg;
+                Color lb = null;
+                boolean dim = source.dimmed(l.row);
                 for (int r = 0; r < rm.length && !dim; r++) {
-                    if (rm[r].reset(raw).find()) {
+                    if (rm[r].reset(l.raw).find()) {
                         HighlightRule rule = rules.get(r);
                         if (rule.foreground() != null) {
-                            lineFg = rule.foreground();
+                            lf = rule.foreground();
                         }
-                        lineBg = rule.background();
+                        lb = rule.background();
                         break;
                     }
                 }
                 if (dim) {
-                    lineFg = Theme.dimmedForeground();
+                    lf = Theme.dimmedForeground();
                 }
-                boolean inSel = anySel && row >= sel[0] && row <= sel[2];
+                boolean inSel = anySel && l.row >= sel[0] && l.row <= sel[2];
                 if (inSel && lineMode) {
-                    lineBg = selColor;
-                } else if (lineBg == null && row == lead && !anySel) {
-                    lineBg = Theme.currentLine();
+                    lb = selColor;
+                } else if (lb == null && l.row == lead && !anySel) {
+                    lb = Theme.currentLine();
                 }
-                if (lineBg != null) {
-                    g.setColor(lineBg);
-                    g.fillRect(gutter - 6, y, w, rowHeight);
+                lineFg[k] = lf;
+                lineBg[k] = lb;
+                if (mm != null) {
+                    List<Integer> ranges = new ArrayList<>();
+                    mm.reset(l.raw);
+                    int guard = 0;
+                    while (mm.find() && guard++ < 1000) {
+                        int s = mm.start();
+                        int e = Math.max(mm.end(), s + 1);
+                        ranges.add(l.col(s));
+                        ranges.add(l.col(Math.min(e, l.raw.length())));
+                        if (mm.end() == mm.start() && mm.end() >= l.raw.length()) {
+                            break;
+                        }
+                    }
+                    int[] a = new int[ranges.size()];
+                    for (int i = 0; i < a.length; i++) {
+                        a[i] = ranges.get(i);
+                    }
+                    matches[k] = a;
                 }
-                if (row == lead) {
-                    g.setColor(Theme.marker());
-                    g.fillRect(gutter - 6, y, 3, rowHeight);
-                }
+            }
 
-                int[] colOf = raw.indexOf('\t') >= 0 ? new int[raw.length() + 1] : null;
-                String text = expandTabs(raw, colOf);
-                newMaxCols = Math.max(newMaxCols, text.length());
-                boolean wide = hasWideChars(text);
-                int textX = gutter - hOffset;
-                Graphics2D gt = (Graphics2D) g.create(gutter - 4, 0, w - gutter + 4, h);
-                gt.translate(-(gutter - 4), 0);
-                try {
+            Graphics2D gt = (Graphics2D) g.create(gutter - 4, 0, w - gutter + 4, h);
+            gt.translate(-(gutter - 4), 0);
+            try {
+                for (int i = 0; i < shownCount; i++) {
+                    int k = shownLine[i];
+                    int seg = shownSeg[i];
+                    Line l = shownLines[k];
+                    int y = i * rowHeight;
+                    int s0 = l.segStart[seg];
+                    int s1 = l.segEnd(seg);
+                    if (lineBg[k] != null) {
+                        g.setColor(lineBg[k]);
+                        g.fillRect(gutter - 6, y, w, rowHeight);
+                    }
+                    if (seg == 0 && l.row > 0 && source.gapBefore(l.row)) {
+                        g.setColor(Theme.gutterForeground());
+                        g.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+                                1f, new float[] {3f, 3f}, 0f));
+                        g.drawLine(0, y, w, y);
+                        g.setStroke(new BasicStroke(1f));
+                    }
                     // search matches
-                    if (mm != null) {
-                        mm.reset(raw);
+                    if (matches[k] != null) {
                         gt.setColor(Theme.match());
-                        int guard = 0;
-                        while (mm.find() && guard++ < 1000) {
-                            int s = mm.start();
-                            int e = Math.max(mm.end(), s + 1);
-                            int cs = colOf == null ? s : colOf[s];
-                            int ce = colOf == null ? Math.min(e, raw.length()) : colOf[Math.min(e, raw.length())];
-                            int x0;
-                            int x1;
-                            if (wide) {
-                                x0 = textX + fm.stringWidth(text.substring(0, Math.min(cs, text.length())));
-                                x1 = textX + fm.stringWidth(text.substring(0, Math.min(ce, text.length())));
-                            } else {
-                                x0 = textX + cs * charWidth;
-                                x1 = textX + ce * charWidth;
-                            }
-                            gt.fillRoundRect(x0, y + 1, Math.max(2, x1 - x0), rowHeight - 2, 4, 4);
-                            if (mm.end() == mm.start() && mm.end() >= raw.length()) {
-                                break;
+                        int[] a = matches[k];
+                        for (int m = 0; m + 1 < a.length; m += 2) {
+                            int cs = Math.max(a[m], s0);
+                            int ce = Math.min(a[m + 1], s1);
+                            if (ce > cs || (a[m] == a[m + 1] && a[m] >= s0 && a[m] < s1)) {
+                                int x0 = l.x(seg, cs);
+                                int x1 = l.x(seg, Math.max(ce, cs));
+                                gt.fillRoundRect(x0, y + 1, Math.max(2, x1 - x0), rowHeight - 2, 4, 4);
                             }
                         }
                     }
                     // selected characters
+                    boolean inSel = anySel && l.row >= sel[0] && l.row <= sel[2];
                     if (inSel && !lineMode) {
-                        int c0 = row == sel[0] ? Math.min(sel[1], raw.length()) : 0;
-                        int c1 = row == sel[2] ? Math.min(sel[3], raw.length()) : raw.length();
-                        int x0 = xOfChar(c0, colOf, text, wide, fm, textX);
-                        int x1 = xOfChar(c1, colOf, text, wide, fm, textX);
-                        if (row < sel[2]) {
-                            x1 += charWidth / 2; // the line break is selected too
-                        }
-                        if (x1 > x0) {
-                            gt.setColor(selColor);
-                            gt.fillRect(x0, y, x1 - x0, rowHeight);
+                        int c0 = l.col(l.row == sel[0] ? Math.min(sel[1], l.raw.length()) : 0);
+                        int c1 = l.col(l.row == sel[2] ? Math.min(sel[3], l.raw.length()) : l.raw.length());
+                        int a0 = Math.max(c0, s0);
+                        int a1 = Math.min(c1, s1);
+                        boolean lastSeg = seg == l.segCount() - 1;
+                        if (a1 > a0 || (lastSeg && l.row < sel[2] && c1 >= s0)) {
+                            int x0 = l.x(seg, a0);
+                            int x1 = l.x(seg, Math.max(a0, a1));
+                            if (lastSeg && l.row < sel[2]) {
+                                x1 += charWidth / 2; // the line break is selected too
+                            }
+                            if (x1 > x0) {
+                                gt.setColor(selColor);
+                                gt.fillRect(x0, y, x1 - x0, rowHeight);
+                            }
                         }
                     }
-                    gt.setColor(lineFg);
-                    if (wide) {
-                        gt.drawString(text, textX, y + ascent);
-                    } else if (firstCol < text.length()) {
-                        int end = Math.min(text.length(), firstCol + visibleCols);
-                        gt.drawString(text.substring(firstCol, end), textX + firstCol * charWidth,
-                                y + ascent);
+                    // text
+                    gt.setColor(lineFg[k]);
+                    if (l.wide || wrap) {
+                        if (s1 > s0) {
+                            gt.drawString(l.text.substring(s0, s1), l.segX(seg), y + ascent);
+                        }
+                    } else if (firstCol < l.text.length()) {
+                        int end = Math.min(l.text.length(), firstCol + visibleCols);
+                        gt.drawString(l.text.substring(firstCol, end),
+                                l.segX(seg) + firstCol * charWidth, y + ascent);
                     }
-                } finally {
-                    gt.dispose();
+                    // gutter: line number on the first segment; a hook on continuations
+                    if (seg == 0) {
+                        long lineNo = source.lineNumber(l.row);
+                        String num = lineNo < 0 ? "" : Long.toString(lineNo + 1);
+                        g.setColor(l.row == lead ? fg : Theme.gutterForeground());
+                        g.drawString(num, gutter - 14 - metrics.stringWidth(num), y + ascent);
+                        Color marker = source.marker(l.row);
+                        if (marker != null) {
+                            g.setColor(marker);
+                            int d = Math.max(6, rowHeight - 10);
+                            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                    RenderingHints.VALUE_ANTIALIAS_ON);
+                            g.fillOval(4, y + (rowHeight - d) / 2, d, d);
+                        }
+                    } else {
+                        g.setColor(Theme.gutterForeground());
+                        int cx = gutter - 16;
+                        int cy = y + rowHeight / 2;
+                        g.drawLine(cx, cy - 4, cx, cy);
+                        g.drawLine(cx, cy, cx + 5, cy);
+                        g.drawLine(cx + 3, cy - 2, cx + 5, cy);
+                        g.drawLine(cx + 3, cy + 2, cx + 5, cy);
+                    }
+                    Color tag = source.tag(l.row);
+                    if (tag != null) {
+                        g.setColor(tag);
+                        g.fillRect(0, y, 4, rowHeight);
+                    }
+                    if (l.row == lead && seg == 0) {
+                        g.setColor(Theme.marker());
+                        g.fillRect(gutter - 6, y, 3, rowHeight * Math.max(1,
+                                Math.min(l.segCount(), shownCount - i)));
+                    }
                 }
-
-                // gutter line number
-                long lineNo = source.lineNumber(row);
-                String num = lineNo < 0 ? "" : Long.toString(lineNo + 1);
-                g.setColor(row == lead ? fg : Theme.gutterForeground());
-                g.drawString(num, gutter - 12 - fm.stringWidth(num), y + ascent);
+            } finally {
+                gt.dispose();
             }
-            if (newMaxCols != maxColumns) {
+            if (newMaxCols != maxColumns && !wrap) {
                 maxColumns = newMaxCols;
-                javax.swing.SwingUtilities.invokeLater(LogView.this::updateScrollbars);
+                SwingUtilities.invokeLater(LogView.this::updateScrollbars);
             }
         }
     }

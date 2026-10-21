@@ -679,6 +679,98 @@ class VisualTest {
         shot("15-opened-from-folder-search");
     }
 
+    @Test
+    @Order(13)
+    void wrapLongLines() throws Exception {
+        // a log with long lines (wrapped), tabs and CJK text
+        Path f = dir.resolve("wrap.log");
+        Random rnd = new Random(13);
+        StringBuilder sb = new StringBuilder();
+        String[] words = {"payload", "request", "user=u1234", "status=OK", "latency=12ms",
+            "items=[a,b,c]", "trace=9f2c1e", "retry", "cache", "region=eu-west-1"};
+        for (int i = 0; i < 3000; i++) {
+            sb.append(String.format("2026-10-21 10:%02d:%02d.%03d INFO  [worker-%d] ", i / 60 % 60,
+                    i % 60, i % 1000, i % 8));
+            int n = i % 3 == 0 ? 60 + rnd.nextInt(200) : 3 + rnd.nextInt(6);
+            for (int k = 0; k < n; k++) {
+                sb.append(words[rnd.nextInt(words.length)]).append(' ');
+            }
+            if (i % 50 == 0) {
+                sb.append("\t\ttabbed 田中 太郎 東京 ").append("漢字".repeat(40));
+            }
+            sb.append('\n');
+        }
+        Files.writeString(f, sb);
+        List<String> lines = Files.readAllLines(f);
+        onEdt(() -> {
+            frame.openFile(f);
+            frame.setWrap(true);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> !tab.document().isIndexing(), 30_000, "indexing");
+        LogView v = tab.mainView();
+        int longRow = 3; // i % 3 == 0 lines are long
+        int[] segs = onEdt(() -> {
+            v.goToRow(longRow, false);
+            return v.segmentStartsForTest(longRow);
+        });
+        assertTrue(segs.length >= 3, "a long line wraps into several rows: " + segs.length);
+        assertEquals(1, (int) onEdt(() -> v.segmentsForTest(1)), "a short line stays one row");
+        assertTrue(!onEdt(v::horizontalScrollbarVisibleForTest), "no sideways scrolling in wrap");
+
+        // click on the second row of the wrapped line, shift-click on its third row
+        String l3 = lines.get(longRow);
+        String selected = onEdt(() -> {
+            int y = v.yForRowForTest(longRow);
+            JComponent c = v.canvasForTest();
+            int x1 = v.xForSegmentColumnForTest(longRow, 1, segs[1] + 4);
+            int x2 = v.xForSegmentColumnForTest(longRow, 2, segs[2] + 7);
+            int lineH = rowHeightOf(v);
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                    InputEvent.BUTTON1_DOWN_MASK, x1, y + lineH, 1, false, MouseEvent.BUTTON1));
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(),
+                    0, x1, y + lineH, 1, false, MouseEvent.BUTTON1));
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                    InputEvent.BUTTON1_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK, x2, y + 2 * lineH,
+                    1, false, MouseEvent.BUTTON1));
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(),
+                    InputEvent.SHIFT_DOWN_MASK, x2, y + 2 * lineH, 1, false, MouseEvent.BUTTON1));
+            return v.selectedText();
+        });
+        assertEquals(l3.substring(segs[1] + 4, segs[2] + 7), selected,
+                "selection across wrapped rows");
+
+        // follow shows the very end of the last line
+        boolean lastVisible = onEdt(() -> {
+            frame.setFollow(true);
+            return v.yForRowForTest(lines.size() - 1) >= 0;
+        });
+        assertTrue(lastVisible, "follow shows the last line in wrap mode");
+        onEdt(() -> {
+            frame.setFollow(false);
+            v.goToRow(longRow, false);
+            frame.findAll(new SearchQuery("status=OK", true, false, false));
+            return null;
+        });
+        waitForSearch(tab);
+        onEdt(() -> {
+            v.goToRow(longRow - 1, false);
+            return null;
+        });
+        settle();
+        shot("16-wrap");
+        onEdt(() -> {
+            frame.setWrap(false);
+            return null;
+        });
+    }
+
+    /** Height of one display row (as LogView computes it). */
+    private static int rowHeightOf(LogView v) {
+        return v.getFontMetrics(Theme.monoFont(v.fontSize())).getHeight() + 2;
+    }
+
     private static long naiveCount(InputStream in) throws IOException {
         long n = 0;
         try (var r = new java.io.BufferedReader(new java.io.InputStreamReader(in, StandardCharsets.UTF_8))) {

@@ -40,6 +40,7 @@ Make a test log:
 | Stop a running search | Esc in the Find box |
 | Close results | Shift+Esc |
 | Jump from a result to the line | click it, or move with the arrow keys in the results |
+| Wrap long lines | Alt+Z (⌥Z on macOS), or the Wrap button |
 | Next / previous error | F8 / Shift+F8 |
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Go to line | Ctrl+L |
