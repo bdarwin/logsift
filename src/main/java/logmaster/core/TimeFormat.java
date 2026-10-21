@@ -24,7 +24,8 @@ public final class TimeFormat {
         SYSLOG,     // Oct 21 10:02:13
         APACHE,     // [21/Oct/2026:10:02:13 +0000]
         TIME,       // 10:02:13.123
-        EPOCH       // 1729500000 or 1729500000123
+        EPOCH,      // 1729500000 or 1729500000123
+        JSON_EPOCH  // {"ts":1729500000123, ...} (a JSON field holding epoch seconds or millis)
     }
 
     private final Kind kind;
@@ -54,7 +55,8 @@ public final class TimeFormat {
                 new TimeFormat(Kind.APACHE, "[21/Oct/2026:10:02:13]", true, year),
                 new TimeFormat(Kind.ISO, "2026-10-21T10:02:13 (inside the line)", true, year),
                 new TimeFormat(Kind.TIME, "10:02:13", false, year),
-                new TimeFormat(Kind.EPOCH, "epoch 1729500000", false, year));
+                new TimeFormat(Kind.EPOCH, "epoch 1729500000", false, year),
+                new TimeFormat(Kind.JSON_EPOCH, "JSON epoch {\"ts\":1729500000123}", true, year));
     }
 
     /**
@@ -108,6 +110,9 @@ public final class TimeFormat {
             return parseAt(b, p, end);
         }
         int limit = Math.min(end, start + SEARCH_BYTES);
+        if (kind == Kind.JSON_EPOCH) {
+            return jsonEpoch(b, start, limit, end);
+        }
         for (int p = start; p < limit; p++) {
             byte c = b[p];
             if (kind == Kind.APACHE ? c == '[' : isDigit(c)) {
@@ -130,6 +135,7 @@ public final class TimeFormat {
             case SYSLOG -> syslog(b, p, end);
             case TIME -> time(b, p, end);
             case EPOCH -> epoch(b, p, end);
+            case JSON_EPOCH -> jsonEpoch(b, p, Math.min(end, p + SEARCH_BYTES), end);
         };
     }
 
@@ -209,6 +215,29 @@ public final class TimeFormat {
         }
         if (n == 13) {
             return numLong(b, p, 13);
+        }
+        return NONE;
+    }
+
+    /** The first {@code ":} followed by 10 or 13 digits (optionally quoted): epoch s or ms. */
+    private static long jsonEpoch(byte[] b, int start, int limit, int end) {
+        for (int p = start; p + 1 < limit; p++) {
+            if (b[p] == '"' && b[p + 1] == ':') {
+                int q = p + 2;
+                while (q < end && (b[q] == ' ' || b[q] == '"')) {
+                    q++;
+                }
+                int n = 0;
+                while (q + n < end && isDigit(b[q + n]) && n < 14) {
+                    n++;
+                }
+                if (n == 13) {
+                    return numLong(b, q, 13);
+                }
+                if (n == 10 && (q + 10 >= end || b[q + 10] != '.')) {
+                    return numLong(b, q, 10) * 1000;
+                }
+            }
         }
         return NONE;
     }

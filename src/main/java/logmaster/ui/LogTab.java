@@ -77,6 +77,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final MessagesPanel messages;
     private final Bookmarks bookmarks;
     private final BookmarksPanel bookmarksPanel;
+    private final DetailsPanel details = new DetailsPanel();
     private int bookmarkGeneration;
     /** Per filter with an alert: {line count when switched on, hits already seen, last alert ms, unsent count, first unsent line}. */
     private final java.util.Map<FilterDef, long[]> alerts = new java.util.HashMap<>();
@@ -247,6 +248,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             @Override
             public void selectionChanged(LogView view, int row) {
                 host.tabStatusChanged(LogTab.this);
+                updateDetails();
             }
         });
         main.setPopupExtender(this::extendPopup);
@@ -281,7 +283,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.addTab("Messages", messages);
         bottom.addTab(bookmarks.size() == 0 ? "Bookmarks" : "Bookmarks (" + bookmarks.size() + ")",
                 bookmarksPanel);
+        bottom.addTab("Details", details);
         bottom.addChangeListener(e -> {
+            updateDetails();
             if (bottom.getSelectedComponent() == messages && messages.result() == null
                     && !messages.isRunning()) {
                 messages.start(); // analyze the first time the tab is opened
@@ -984,6 +988,27 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     c.getRGB() & 0xFFFFFF, sourceLabels.get(i)));
         }
         return sb.append("</html>").toString();
+    }
+
+    /** Shows the current line in the Details tab (when that tab is open). */
+    void updateDetails() {
+        if (bottom.getSelectedComponent() != details) {
+            return;
+        }
+        long line = currentLine();
+        details.show(line, line < 0 ? null : doc.line(line), main.fontSize());
+    }
+
+    DetailsPanel detailsPanel() {
+        return details;
+    }
+
+    void showDetailsTab() {
+        if (!bottom.isVisible()) {
+            toggleBottom();
+        }
+        bottom.setSelectedComponent(details);
+        updateDetails();
     }
 
     MessagesPanel messagesPanel() {

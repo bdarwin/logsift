@@ -1546,6 +1546,69 @@ class VisualTest {
         shot("30-utf16-log");
     }
 
+    @Test
+    @Order(24)
+    void jsonLogs() throws Exception {
+        Path f = dir.resolve("app.json.log");
+        Random rnd = new Random(24);
+        String[] levels = {"INFO", "INFO", "INFO", "DEBUG", "WARN", "ERROR"};
+        StringBuilder sb = new StringBuilder();
+        java.util.Map<String, Long> levelCount = new java.util.TreeMap<>();
+        for (int i = 0; i < 3000; i++) {
+            String level = levels[rnd.nextInt(levels.length)];
+            levelCount.merge(level, 1L, Long::sum);
+            sb.append(String.format("{\"@timestamp\":\"2026-10-21T10:%02d:%02d.%03dZ\",\"level\":\"%s\","
+                    + "\"logger\":\"com.acme.%s\",\"thread\":\"worker-%d\",\"message\":\"%s\","
+                    + "\"user\":\"u%d\",\"durationMs\":%d,\"tags\":[\"api\",\"v2\"]}%n",
+                    i / 60 % 60, i % 60, i % 1000, level, rnd.nextBoolean() ? "OrderService" : "PaymentGateway",
+                    rnd.nextInt(4), level.equals("ERROR") ? "Payment failed: card declined" : "request handled",
+                    rnd.nextInt(1000), rnd.nextInt(500)));
+        }
+        Files.writeString(f, sb);
+        onEdt(() -> {
+            frame.openFile(f);
+            frame.setColumns(true);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> tab.logFormat() != null && tab.timeIndex() != null, 30_000, "JSON detected");
+        assertTrue(tab.logFormat().isJson());
+        assertEquals(List.of("time", "level", "thread", "logger", "fields", "message"), tab.logFormat().columns());
+        long errorLine = onEdt(() -> {
+            for (long l = 0; l < 3000; l++) {
+                if (tab.document().line(l).contains("\"ERROR\"")) {
+                    tab.mainView().goToRow((int) l, true);
+                    return l;
+                }
+            }
+            return -1L;
+        });
+        onEdt(() -> {
+            tab.showDetailsTab();
+            return null;
+        });
+        String details = onEdt(() -> tab.detailsPanel().textForTest());
+        assertTrue(details.contains("\"level\": \"ERROR\"") && details.contains("\"tags\": [\n"), details);
+        settle();
+        shot("31-json-columns-and-details");
+
+        onEdt(() -> {
+            tab.countValues("level");
+            return null;
+        });
+        waitFor(() -> ValuesDialog.lastForTest() != null && ValuesDialog.lastForTest().result()[0] != null
+                && ValuesDialog.lastForTest().result()[0].column().equals("level"), 60_000, "levels counted");
+        java.util.Map<String, Long> got = new java.util.TreeMap<>();
+        ValuesDialog.lastForTest().result()[0].values().forEach(v -> got.put(v.value(), v.count()));
+        assertEquals(levelCount, got, "level counts in JSON");
+        onEdt(() -> {
+            ValuesDialog.lastForTest().dialog().dispose();
+            frame.setColumns(false);
+            return null;
+        });
+        assertTrue(errorLine >= 0);
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {

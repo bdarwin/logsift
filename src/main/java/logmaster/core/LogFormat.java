@@ -13,8 +13,9 @@ import java.util.regex.PatternSyntaxException;
  */
 public final class LogFormat {
     private final String name;
-    private final Pattern pattern;
+    private final Pattern pattern;          // null for JSON lines
     private final List<String> columns;
+    private final java.util.Map<String, String> jsonKeys; // column -> JSON key (JSON lines only)
 
     private static final String TS = "\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?";
     private static final String LEVEL = "TRACE|DEBUG|INFO|NOTICE|WARN(?:ING)?|ERROR|SEVERE|FATAL|CRITICAL";
@@ -46,9 +47,65 @@ public final class LogFormat {
         this.name = name;
         this.pattern = Pattern.compile(regex);
         this.columns = groupNames(regex);
+        this.jsonKeys = null;
         if (columns.isEmpty()) {
             throw new IllegalArgumentException("The pattern needs named groups like (?<level>...)");
         }
+    }
+
+    private LogFormat(String name, List<String> columns, java.util.Map<String, String> jsonKeys) {
+        this.name = name;
+        this.pattern = null;
+        this.columns = List.copyOf(columns);
+        this.jsonKeys = jsonKeys;
+    }
+
+    /** Common JSON field names for each column, most usual first. */
+    private static final String[][] JSON_ALIASES = {
+        {"time", "@timestamp", "timestamp", "time", "ts", "datetime", "date", "@t"},
+        {"level", "level", "severity", "lvl", "log.level", "levelname", "loglevel", "@l"},
+        {"thread", "thread", "thread_name", "threadName"},
+        {"logger", "logger", "logger_name", "loggerName", "category", "name"},
+        {"message", "message", "msg", "text", "log", "@m", "@mt"}};
+
+    /** JSON lines: columns from the usual field names, other fields together in "fields". */
+    static LogFormat detectJson(List<String> sample) {
+        int nonBlank = 0;
+        int json = 0;
+        java.util.Map<String, Integer> keyCount = new java.util.HashMap<>();
+        for (String s : sample) {
+            if (s == null || s.isBlank()) {
+                continue;
+            }
+            nonBlank++;
+            java.util.Map<String, Object> m = Json.parseObject(s);
+            if (m != null) {
+                json++;
+                for (String k : m.keySet()) {
+                    keyCount.merge(k, 1, Integer::sum);
+                }
+            }
+        }
+        if (nonBlank < 3 || json < nonBlank * 0.5) {
+            return null;
+        }
+        java.util.Map<String, String> keys = new java.util.LinkedHashMap<>();
+        for (String[] aliases : JSON_ALIASES) {
+            for (int i = 1; i < aliases.length; i++) {
+                if (keyCount.getOrDefault(aliases[i], 0) >= json / 3 && !keys.containsValue(aliases[i])) {
+                    keys.put(aliases[0], aliases[i]);
+                    break;
+                }
+            }
+        }
+        List<String> cols = new ArrayList<>(keys.keySet());
+        cols.add(cols.contains("message") ? cols.indexOf("message") : cols.size(), "fields");
+        return new LogFormat("JSON lines", cols, keys);
+    }
+
+    /** True for JSON lines (columns come from fields, not a regex). */
+    public boolean isJson() {
+        return jsonKeys != null;
     }
 
     public String name() {
@@ -56,7 +113,7 @@ public final class LogFormat {
     }
 
     public String regex() {
-        return pattern.pattern();
+        return pattern == null ? "" : pattern.pattern();
     }
 
     public Pattern pattern() {
@@ -70,6 +127,10 @@ public final class LogFormat {
 
     /** The layout most sample lines follow (at least 30% of entry lines), or null. */
     public static LogFormat detect(List<String> sample) {
+        LogFormat json = detectJson(sample);
+        if (json != null) {
+            return json;
+        }
         LogFormat best = null;
         double bestShare = 0.3;
         int nonBlank = 0;
@@ -104,6 +165,9 @@ public final class LogFormat {
      * start index in the line (or -1).
      */
     public String[] split(String line, int[] starts) {
+        if (jsonKeys != null) {
+            return splitJson(line, starts);
+        }
         Matcher m = pattern.matcher(line);
         if (!m.matches()) {
             return null;
@@ -116,6 +180,35 @@ public final class LogFormat {
                 starts[i] = out[i] == null ? -1 : m.start(c);
             }
         }
+        return out;
+    }
+
+    private String[] splitJson(String line, int[] starts) {
+        java.util.Map<String, Object> m = Json.parseObject(line);
+        if (m == null) {
+            return null;
+        }
+        java.util.Map<String, Object> rest = new java.util.LinkedHashMap<>(m);
+        String[] out = new String[columns.size()];
+        for (int i = 0; i < out.length; i++) {
+            String key = jsonKeys.get(columns.get(i));
+            if (key != null && m.containsKey(key)) {
+                out[i] = Json.display(m.get(key));
+                rest.remove(key);
+            }
+            if (starts != null) {
+                starts[i] = -1;
+            }
+        }
+        int f = columns.indexOf("fields");
+        StringBuilder sb = new StringBuilder();
+        for (var e : rest.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append("  ");
+            }
+            sb.append(e.getKey()).append('=').append(Json.display(e.getValue()));
+        }
+        out[f] = sb.toString();
         return out;
     }
 

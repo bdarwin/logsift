@@ -47,6 +47,7 @@ final class ColumnLayout {
             case "user" -> 12;
             case "size" -> 9;
             case "request" -> 44;
+            case "fields" -> 48;
             default -> 16;
         };
     }

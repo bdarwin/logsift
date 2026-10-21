@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.function.BooleanSupplier;
-import java.util.regex.Matcher;
 
 /**
  * Counts the values of one column (thread, logger, level, host, status...) over a log, most
@@ -111,7 +110,7 @@ public final class ColumnStats {
             throw new UncheckedIOException(e);
         }
         Map<String, long[]> counts = new HashMap<>();
-        Matcher m = format.pattern().matcher("");
+        int col = format.columns().indexOf(column);
         long line = firstLine;
         long lines = 0;
         boolean truncated = false;
@@ -123,8 +122,9 @@ public final class ColumnStats {
                 end--;
             }
             String text = new String(buf, pos, Math.min(end - pos, 4000), doc.charset());
-            if (m.reset(text).matches()) {
-                String v = m.group(column);
+            String[] cells = format.split(text, null);
+            if (cells != null) {
+                String v = cells[col];
                 if (v != null) {
                     long[] c = counts.get(v);
                     if (c != null) {
