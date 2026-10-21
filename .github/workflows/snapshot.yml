@@ -1,0 +1,134 @@
+# Builds and tests on every OS, packages a self-contained app (Java runtime included)
+# for each platform, and publishes them as the rolling "snapshot" pre-release.
+name: snapshot
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: snapshot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+          - { os: windows-latest,   target: windows-x64 }
+          - { os: windows-11-arm,   target: windows-arm64 }
+          - { os: macos-latest,     target: macos-arm64 }
+          - { os: macos-15-intel,   target: macos-x64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon test installDist
+
+      - name: Visual tests (Linux, virtual display, 200 MB log)
+        if: matrix.target == 'linux-x64'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq xvfb fonts-dejavu fonts-noto-cjk
+          xvfb-run -a -s "-screen 0 1600x1000x24" ./gradlew --no-daemon visualTest -PsizeMb=200
+          rm -rf build/visual
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.target }}
+          path: |
+            build/reports/tests
+            build/screenshots
+          if-no-files-found: ignore
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          VERSION=$(./gradlew -q properties | sed -n 's/^version: //p' | tr -d '\r')
+          NAME=LogMaster-snapshot-${{ matrix.target }}
+          COMMON=(--name LogMaster --input build/install/logmaster/lib
+                  --main-jar "logmaster-$VERSION.jar" --main-class logmaster.ui.LogMasterApp
+                  --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
+                  --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility
+                  --vendor bdarwin --description "Viewer for very large log files")
+          mkdir -p dist
+          case "${{ matrix.target }}" in
+            macos-*)
+              # macOS needs an app version whose first number is > 0, so leave the default.
+              jpackage --type dmg --dest dist "${COMMON[@]}"
+              mv dist/LogMaster-*.dmg "dist/$NAME.dmg"
+              ;;
+            windows-*)
+              jpackage --type app-image --dest pkg --app-version "$VERSION" "${COMMON[@]}"
+              pwsh -NoProfile -Command "Compress-Archive -Path pkg/LogMaster -DestinationPath dist/$NAME.zip"
+              ;;
+            linux-*)
+              jpackage --type app-image --dest pkg --app-version "$VERSION" "${COMMON[@]}"
+              tar -C pkg -czf "dist/$NAME.tar.gz" LogMaster
+              if [ "${{ matrix.target }}" = linux-x64 ]; then
+                jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut "${COMMON[@]}"
+                mv dist/*.deb "dist/$NAME.deb"
+                # Plain zip that runs anywhere with Java 21+ installed.
+                cp "build/distributions/logmaster-$VERSION.zip" dist/LogMaster-snapshot-any-java21.zip
+              fi
+              ;;
+          esac
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish snapshot release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          gh release delete snapshot --cleanup-tag --yes || true
+          gh release create snapshot dist/* --prerelease --target "$GITHUB_SHA" \
+            --title "Snapshot build" \
+            --notes "Latest build of main (commit ${GITHUB_SHA::7}, $(date -u '+%Y-%m-%d %H:%M UTC')).
+
+          | File | For |
+          |---|---|
+          | \`LogMaster-snapshot-windows-x64.zip\` / \`-windows-arm64.zip\` | Windows: unzip, run \`LogMaster\\LogMaster.exe\` |
+          | \`LogMaster-snapshot-macos-arm64.dmg\` / \`-macos-x64.dmg\` | macOS Apple Silicon / Intel |
+          | \`LogMaster-snapshot-linux-x64.deb\` | Debian / Ubuntu |
+          | \`LogMaster-snapshot-linux-x64.tar.gz\` / \`-linux-arm64.tar.gz\` | Other Linux: unpack, run \`LogMaster/bin/LogMaster\` |
+          | \`LogMaster-snapshot-any-java21.zip\` | Any OS with Java 21+ installed: run \`bin/logmaster\` |
+
+          The native builds include their own Java runtime. They are not code-signed:
+          - macOS: if it says the app is damaged or can't be opened, run \`xattr -dr com.apple.quarantine /Applications/LogMaster.app\`.
+          - Windows: SmartScreen may warn; choose More info → Run anyway."
