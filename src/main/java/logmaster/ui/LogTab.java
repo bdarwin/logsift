@@ -50,6 +50,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final LogDocument doc;
     private final Path path;
     private final String encodingLabel;
+    private String remoteLabel;          // "user@host:/path" for remote logs
+    private volatile String remoteStatus;
     private final Host host;
     private final LogView main = new LogView();
     private final LogView results = new LogView();
@@ -738,7 +740,31 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return error;
     }
 
+    /** Marks this tab as a remote log (shown by its address, not remembered locally). */
+    void setRemote(String label) {
+        this.remoteLabel = label;
+    }
+
+    String remoteLabel() {
+        return remoteLabel;
+    }
+
+    void setRemoteStatus(String status) {
+        this.remoteStatus = status;
+        host.tabStatusChanged(this);
+    }
+
+    String remoteStatus() {
+        return remoteStatus;
+    }
+
     String title() {
+        if (remoteLabel != null) {
+            int colon = remoteLabel.indexOf(':');
+            String file = remoteLabel.substring(remoteLabel.lastIndexOf('/') + 1);
+            String hostPart = remoteLabel.substring(remoteLabel.indexOf('@') + 1, colon);
+            return file + " @ " + hostPart;
+        }
         return path.getFileName().toString();
     }
 
@@ -1374,7 +1400,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     /** Whether this tab's state should be remembered (not for temporary merged files). */
     boolean remembersState() {
-        return sourceLabels == null;
+        return sourceLabels == null && remoteLabel == null;
     }
 
     /** Shows or hides the Filters / Find results area. */

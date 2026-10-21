@@ -11,11 +11,16 @@ repositories {
 
 dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
+    // SSH/SFTP for remote logs (maintained fork of JSch)
+    implementation("com.github.mwiede:jsch:0.2.20")
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     // A real logging library that rotates files, for the rotation test.
     testImplementation("ch.qos.logback:logback-classic:1.5.18")
+    // an SFTP server inside the tests, for remote logs
+    testImplementation("org.apache.sshd:sshd-core:2.14.0")
+    testImplementation("org.apache.sshd:sshd-sftp:2.14.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -92,4 +97,9 @@ val genIcons by tasks.registering(JavaExec::class) {
     mainClass = "logmaster.tools.IconGenerator"
     args = listOf(layout.projectDirectory.dir("packaging/icons").asFile.absolutePath)
     jvmArgs("-Djava.awt.headless=true")
+}
+
+// Prints the test classpath (used to check the packaged runtime's modules by hand).
+val printTestClasspath by tasks.registering {
+    doLast { println(sourceSets.test.get().runtimeClasspath.asPath) }
 }

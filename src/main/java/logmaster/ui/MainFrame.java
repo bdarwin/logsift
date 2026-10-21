@@ -266,6 +266,68 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         mergeFiles(chosen);
     }
 
+    private void openRemoteDialog() {
+        RemoteDialog.Choice c = RemoteDialog.ask(this);
+        if (c != null) {
+            openRemote(c.target(), c.lastBytes());
+        }
+    }
+
+    /** Opens a log on another machine over SFTP, kept up to date while it grows. */
+    public void openRemote(logmaster.core.RemoteMirror.Target target, long lastBytes) {
+        Path knownHosts = Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        ProgressDialog.run(this, "Connecting to " + target.host() + "…",
+                (progress, cancelled) -> {
+                    Path dir = Files.createTempDirectory("logmaster-remote-");
+                    dir.toFile().deleteOnExit();
+                    String name = target.path().substring(target.path().lastIndexOf('/') + 1);
+                    Path copy = dir.resolve(name.isEmpty() ? "remote.log" : name);
+                    copy.toFile().deleteOnExit();
+                    return logmaster.core.RemoteMirror.open(target, copy, lastBytes,
+                            Boolean.getBoolean("lm.noKnownHosts") ? null : knownHosts,
+                            this::trustHost, progress, cancelled);
+                },
+                mirror -> {
+                    try {
+                        LogTab tab = new LogTab(mirror.copy(), mirror.copy(),
+                                java.nio.charset.StandardCharsets.UTF_8, null, this);
+                        tab.setRemote(target.label());
+                        tab.addCloseHook(() -> {
+                            mirror.close();
+                            try {
+                                Files.deleteIfExists(mirror.copy());
+                            } catch (IOException ex) {
+                                // temp file
+                            }
+                        });
+                        mirror.onStatus(st -> SwingUtilities.invokeLater(() -> tab.setRemoteStatus(st)));
+                        mirror.follow(1000);
+                        addLogTab(tab, mirror.copy());
+                        int i = tabs.indexOfComponent(tab);
+                        tabs.setToolTipTextAt(i, "sftp://" + target.user() + "@" + target.host() + ":"
+                                + target.port() + target.path()
+                                + (mirror.isComplete() ? "" : "  (only the end of the file was loaded)"));
+                    } catch (IOException e) {
+                        mirror.close();
+                        JOptionPane.showMessageDialog(this, "Cannot open the copy: " + e.getMessage());
+                    }
+                });
+    }
+
+    /** Asked (on a background thread) whether to trust a server's host key. */
+    private boolean trustHost(String message) {
+        boolean[] yes = new boolean[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> yes[0] = JOptionPane.showConfirmDialog(this,
+                    "<html><b>First connection to this server.</b><br>" + message.replace("\n", "<br>")
+                            + "<br><br>Trust it and remember its key?</html>", "Host Key",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION);
+        } catch (Exception e) {
+            return false;
+        }
+        return yes[0];
+    }
+
     /** Merges logs by timestamp into a new tab (in the background, with progress). */
     public void mergeFiles(List<Path> files) {
         List<String> labels = logmaster.core.LogMerger.labels(files);
@@ -434,6 +496,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             t.showLineWhenAvailable(line);
             t.mainView().focusView();
         }
+    }
+
+    int currentTabIndexForTest() {
+        return tabs.getSelectedIndex();
     }
 
     /** Closes the tab showing this file, if open. */
@@ -621,6 +687,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
         file.add(recent);
         file.add(item("Reopen Last Session", null, e -> restoreSession()));
+        file.add(item("Open Remote (SFTP)…", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU | InputEvent.SHIFT_DOWN_MASK),
+                e -> openRemoteDialog()));
         file.add(item("Merge Files by Time…", KeyStroke.getKeyStroke(KeyEvent.VK_M, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> mergeDialog()));
         file.add(item("Search in Folder…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU | InputEvent.SHIFT_DOWN_MASK),
@@ -1044,7 +1112,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 // keep the copy's size
             }
         }
-        sb.append(t.path()).append("   ").append(humanBytes(size))
+        sb.append(t.remoteLabel() != null ? "sftp " + t.remoteLabel() : t.path().toString())
+          .append("   ").append(humanBytes(size))
           .append("   ").append(String.format("%,d lines", d.lineCount()));
         if (d.isIndexing()) {
             sb.append("   indexing…");
@@ -1053,6 +1122,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         if (t.error() != null) {
             sb.append("   ⚠ ").append(t.error());
+        }
+        if (t.remoteStatus() != null && !t.remoteStatus().equals("connected")) {
+            sb.append("   ⚡ ").append(t.remoteStatus());
         }
         status.setText(sb.toString());
 

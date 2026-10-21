@@ -72,7 +72,7 @@ jobs:
           COMMON=(--name LogMaster --input build/install/logmaster/lib
                   --main-jar "logmaster-$VERSION.jar" --main-class logmaster.ui.LogMasterApp
                   --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
-                  --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility
+                  --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec
                   --vendor bdarwin --description "Viewer for very large log files")
           mkdir -p dist
           case "${{ matrix.target }}" in

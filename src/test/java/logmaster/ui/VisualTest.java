@@ -1609,6 +1609,64 @@ class VisualTest {
         assertTrue(errorLine >= 0);
     }
 
+    @Test
+    @Order(25)
+    void remoteLogOverSftp() throws Exception {
+        Path remoteRoot = Files.createDirectories(dir.resolve("sftp-root/var/log/app")).getParent().getParent().getParent();
+        Path remoteLog = remoteRoot.resolve("var/log/app/server.log");
+        Files.copy(dir.resolve("incident.log"), remoteLog, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        var server = org.apache.sshd.server.SshServer.setUpDefaultServer();
+        server.setHost("127.0.0.1");
+        server.setPort(0);
+        server.setKeyPairProvider(new org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider(
+                dir.resolve("sftp-hostkey.ser")));
+        server.setPasswordAuthenticator((u, pw, sess) -> u.equals("ops") && pw.equals("secret"));
+        server.setSubsystemFactories(List.of(new org.apache.sshd.sftp.server.SftpSubsystemFactory()));
+        server.setFileSystemFactory(new org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory(remoteRoot));
+        server.start();
+        System.setProperty("lm.noKnownHosts", "true"); // don't touch the real known_hosts
+        try {
+            var target = new logmaster.core.RemoteMirror.Target("127.0.0.1", server.getPort(), "ops",
+                    "/var/log/app/server.log", "secret", null, null);
+            onEdt(() -> {
+                frame.openRemote(target, 0);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null && frame.currentTab().remoteLabel() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "remote log opened");
+            LogTab tab = onEdt(frame::currentTab);
+            long lines;
+            try (var l = Files.lines(remoteLog)) {
+                lines = l.count();
+            }
+            waitFor(() -> tab.document().lineCount() == lines, 30_000, "all remote lines");
+            assertEquals("server.log @ 127.0.0.1", tab.title());
+            // the server's log grows: new lines show up
+            Files.writeString(remoteLog, "2026-10-21 11:00:01.000 ERROR [worker-1] c.a.Service - written on the server\n",
+                    java.nio.file.StandardOpenOption.APPEND);
+            waitFor(() -> tab.document().lineCount() == lines + 1, 30_000, "appended remote line");
+            assertTrue(tab.document().line(lines).endsWith("written on the server"));
+            onEdt(() -> {
+                frame.setFollow(true);
+                return null;
+            });
+            settle();
+            shot("32-remote-log");
+            onEdt(() -> {
+                frame.closeTab(frame.currentTabIndexForTest());
+                return null;
+            });
+        } finally {
+            System.clearProperty("lm.noKnownHosts");
+            server.stop(true);
+        }
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {

@@ -46,6 +46,7 @@ Make a test log:
 | Next / previous bookmark | F2 / Shift+F2 |
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Merge logs by time | Ctrl+Shift+M |
+| Open a remote log (SFTP) | Ctrl+Shift+O |
 | Columns view | Ctrl+Shift+K |
 | Export lines shown by filters | Ctrl+Shift+E |
 | Go to line | Ctrl+L |
@@ -103,6 +104,10 @@ The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as column
 ## JSON logs
 
 Logs with one JSON object per line are recognized. With **Columns** on, the usual fields become columns (`@timestamp`/`ts`/`time` → Time, `level`/`severity` → Level, `thread`, `logger`, `message`/`msg`) and the rest are shown together in a Fields column. The timeline uses ISO times or epoch milliseconds in the JSON. The **Details** tab (next to Filters) shows the current line in full, and JSON lines pretty-printed with colors, which also helps with any very long line.
+
+## Remote logs (SSH / SFTP)
+
+**File → Open Remote (SFTP)…** (Ctrl+Shift+O) opens a log on another machine: host, user, file path, and a password or private key (`~/.ssh/id_ed25519` or `id_rsa` is suggested). Load the whole file or just the last N MB. LogMaster keeps a local copy up to date while the remote log grows (new bytes are fetched every second), starts over when it is truncated or rotated, and reconnects by itself if the connection drops (the status bar says so). Host keys are checked against `~/.ssh/known_hosts`; for a new server you are asked first. Every feature works on remote logs.
 
 ## Merge logs by time
 
