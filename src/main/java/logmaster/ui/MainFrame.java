@@ -214,7 +214,7 @@ public final class MainFrame extends JFrame implements LogTab.Host {
         return tb;
     }
 
-    private static JToggleButton toggle(String text, String tip) {
+    static JToggleButton toggle(String text, String tip) {
         JToggleButton b = new JToggleButton(text);
         b.setToolTipText(tip);
         b.setFocusable(false);
@@ -291,6 +291,20 @@ public final class MainFrame extends JFrame implements LogTab.Host {
 
         JMenu view = new JMenu("View");
         view.add(item("Follow (Tail)", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU), e -> setFollow(!followButton.isSelected())));
+        view.addSeparator();
+        view.add(item("Show Matching Lines Only / All Lines",
+                KeyStroke.getKeyStroke(KeyEvent.VK_H, MENU | InputEvent.SHIFT_DOWN_MASK), e -> {
+                    LogTab t = currentTab();
+                    if (t != null) {
+                        t.setMatchingOnly(!t.isMatchingOnly());
+                    }
+                }));
+        view.add(item("Show / Hide Filters Panel", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU), e -> {
+            LogTab t = currentTab();
+            if (t != null) {
+                t.toggleBottom();
+            }
+        }));
         view.addSeparator();
         view.add(item("Bigger Font", KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, MENU), e -> changeFont(1)));
         view.add(item("Smaller Font", KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, MENU), e -> changeFont(-1)));
@@ -385,7 +399,7 @@ public final class MainFrame extends JFrame implements LogTab.Host {
         }
         try {
             long line = Long.parseLong(s.trim().replace(",", "").replace("_", ""));
-            t.mainView().goToRow((int) Math.min(Integer.MAX_VALUE - 1, Math.max(0, line - 1)), true);
+            t.showLine(Math.min(Integer.MAX_VALUE - 1, Math.max(0, line - 1)));
             t.mainView().focusView();
         } catch (NumberFormatException ex) {
             Toolkit.getDefaultToolkit().beep();
@@ -452,8 +466,11 @@ public final class MainFrame extends JFrame implements LogTab.Host {
         }
         status.setText(sb.toString());
 
-        int sel = t.mainView().selectedRow();
-        String pos = sel >= 0 ? String.format("Ln %,d", sel + 1L) : "";
+        long cur = t.currentLine();
+        String pos = cur >= 0 ? String.format("Ln %,d", cur + 1) : "";
+        if (t.isMatchingOnly()) {
+            pos = "MATCHING ONLY   " + pos;
+        }
         String follow = t.mainView().isFollow() ? "   FOLLOW" : "";
         statusRight.setText(pos + follow + "   UTF-8   " + memory());
 

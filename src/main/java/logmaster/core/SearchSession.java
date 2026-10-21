@@ -53,6 +53,8 @@ public final class SearchSession implements AutoCloseable {
     private volatile long searchedLines;  // complete lines fully searched
     private volatile long progressLine;   // for display only
     private volatile long targetLines;
+    private volatile long coveredLines;   // hits for lines [0, coveredLines) are in the list
+    private volatile int coveredGeneration;
 
     // Coordinator thread only.
     private int generation;
@@ -67,6 +69,7 @@ public final class SearchSession implements AutoCloseable {
         this.matcher = LineMatcher.of(query);
         this.coordinator = Executors.newSingleThreadExecutor(LogDocument.daemon("lm-search"));
         this.generation = doc.generation();
+        this.coveredGeneration = generation;
         this.docListener = new LogDocument.Listener() {
             @Override
             public void linesAdded(LogDocument d) {
@@ -135,6 +138,19 @@ public final class SearchSession implements AutoCloseable {
         return searchedLines;
     }
 
+    /**
+     * Number of lines from the top whose hits are all in {@link #hits()}, for the document
+     * generation {@link #coveredGeneration()}. Unlike {@link #searchedLines()} this grows while
+     * a search is still running and includes an unfinished last line once it was searched.
+     */
+    public long coveredLines() {
+        return coveredLines;
+    }
+
+    public int coveredGeneration() {
+        return coveredGeneration;
+    }
+
     private void schedule() {
         if (!cancelled && queued.compareAndSet(false, true)) {
             coordinator.execute(() -> {
@@ -153,11 +169,13 @@ public final class SearchSession implements AutoCloseable {
             if (doc.generation() != generation) {
                 // File was truncated or rotated: start over.
                 generation = doc.generation();
+                coveredLines = 0;
                 hits.clear();
                 searchedLines = 0;
                 progressLine = 0;
                 tentativeLine = -1;
                 startNanos = System.nanoTime();
+                coveredGeneration = generation;
             }
             LineIndex.Snapshot s = doc.snapshot();
             long complete = s.completeLineCount();
@@ -166,6 +184,7 @@ public final class SearchSession implements AutoCloseable {
             if (complete > searchedLines || (partialLast && !doc.isIndexing())) {
                 // A partial last line searched before may have grown since; search it again.
                 if (tentativeLine >= 0) {
+                    coveredLines = Math.min(coveredLines, tentativeLine);
                     hits.truncateFrom(tentativeLine);
                     tentativeLine = -1;
                 }
@@ -223,7 +242,7 @@ public final class SearchSession implements AutoCloseable {
                     chunk++;
                 }
                 if (stop.getAsBoolean()) {
-                    inFlight.forEach(p -> p.result.cancel(true));
+                    inFlight.forEach(p -> p.result.cancel(false));
                     return;
                 }
                 Pending done = inFlight.removeFirst();
@@ -236,13 +255,16 @@ public final class SearchSession implements AutoCloseable {
                     hits.add(line);
                 }
                 progressLine = done.range.endLine;
+                if (!limitReached) {
+                    coveredLines = done.range.endLine;
+                }
                 notifyUpdated(false);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            inFlight.forEach(p -> p.result.cancel(true));
+            inFlight.forEach(p -> p.result.cancel(false));
         } catch (ExecutionException e) {
-            inFlight.forEach(p -> p.result.cancel(true));
+            inFlight.forEach(p -> p.result.cancel(false));
             Throwable cause = e.getCause();
             if (cause instanceof RuntimeException re) {
                 throw re;
@@ -288,7 +310,7 @@ public final class SearchSession implements AutoCloseable {
     public void close() {
         cancelled = true;
         doc.removeListener(docListener);
-        coordinator.shutdownNow();
+        coordinator.shutdown(); // no interrupts: they would close the shared file channel
     }
 
     private static final class LongBuffer {

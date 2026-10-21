@@ -50,6 +50,11 @@ public final class LogView extends JPanel {
 
         /** Fills {@code out[0..count)} with the text of rows {@code first..}; null if missing. */
         void texts(int first, int count, String[] out);
+
+        /** Rows drawn grayed out (for example, lines the filters remove). */
+        default boolean dimmed(int row) {
+            return false;
+        }
     }
 
     public interface Listener {
@@ -103,6 +108,7 @@ public final class LogView extends JPanel {
     private double wheelRemainder;
     private int dragDirection;
     private final Timer dragTimer = new Timer(40, e -> dragScroll());
+    private java.util.function.BiConsumer<LogView, JPopupMenu> popupExtender;
 
     public LogView() {
         super(new BorderLayout());
@@ -159,6 +165,15 @@ public final class LogView extends JPanel {
         anchorCol = leadCol = 0;
         lineMode = false;
         rowsChanged();
+    }
+
+    /** Lets the owner add items to the right-click menu. */
+    public void setPopupExtender(java.util.function.BiConsumer<LogView, JPopupMenu> extender) {
+        this.popupExtender = extender;
+    }
+
+    public RowSource source() {
+        return source;
     }
 
     public void setMatchPattern(Pattern p) {
@@ -708,6 +723,9 @@ public final class LogView extends JPanel {
         JMenuItem all = new JMenuItem("Select All");
         all.addActionListener(a -> selectAll());
         menu.add(all);
+        if (popupExtender != null) {
+            popupExtender.accept(this, menu);
+        }
         menu.show(canvas, e.getX(), e.getY());
     }
 
@@ -926,7 +944,8 @@ public final class LogView extends JPanel {
                 // line colors from the first matching rule
                 Color lineFg = fg;
                 Color lineBg = null;
-                for (int r = 0; r < rm.length; r++) {
+                boolean dim = source.dimmed(row);
+                for (int r = 0; r < rm.length && !dim; r++) {
                     if (rm[r].reset(raw).find()) {
                         HighlightRule rule = rules.get(r);
                         if (rule.foreground() != null) {
@@ -935,6 +954,9 @@ public final class LogView extends JPanel {
                         lineBg = rule.background();
                         break;
                     }
+                }
+                if (dim) {
+                    lineFg = Theme.dimmedForeground();
                 }
                 boolean inSel = anySel && row >= sel[0] && row <= sel[2];
                 if (inSel && lineMode) {

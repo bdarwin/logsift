@@ -41,12 +41,29 @@ Make a test log:
 | Close results | Shift+Esc |
 | Jump from a result to the line | click it, or move with the arrow keys in the results |
 | Go to line | Ctrl+L |
+| Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
+| Show or hide the Filters panel | Ctrl+J |
 | Follow the end of the file (tail -f) | Ctrl+T, the Follow button, or End |
 | Select text | drag; double-click = word, triple-click or click the line number = whole line; Shift+click extends |
 | Copy | Ctrl+C (with nothing selected, copies the current line) · Select all: Ctrl+A |
 | Search for the selected text | Ctrl+F (fills the Find box, like text editors) |
 | Font size | Ctrl+= / Ctrl+- |
 | Dark mode | View → Toggle Dark Mode |
+
+## Filters
+
+The **Filters** panel below the log holds any number of filters (up to 26). Each one has:
+
+- a letter (A, B, C, …) for use in the formula
+- an action: **Show** keeps matching lines, **Hide** removes them, **Mark** only colors them
+- the text to match, with the same `Aa` / `W` / `.*` options as Find
+- a line color, a live count of matching lines, and ▲ ▼ to step through its matches
+
+**Combine** says how filters work together. In **Auto** mode it is "any Show filter, and no Hide filter", for example `(A OR B) AND NOT C`. Type your own to get anything else: `A AND B`, `(A OR B) AND NOT (C OR D)`, `NOT C`. `AND OR NOT ( )` work, and so do `& | ! -`.
+
+**All lines / Matching only** (Ctrl+Shift+H, ⇧⌘H on macOS) switches between every line, with filtered-out lines grayed, and only the lines that pass. Your place in the file is kept when you switch, so you can filter down, click a line, switch back and see everything around it.
+
+Quick ways to add filters: select text in the log, right-click, then choose **Show / Hide / Mark lines with "…"**. Filter sets can be saved and loaded (the ⋯ menu), and filters keep working while the file grows.
 
 Find All keeps running on a growing file. New matching lines show up in the results as they are written.
 
@@ -63,6 +80,8 @@ These numbers come from `./gradlew visualTest` on an Apple Silicon Mac (10 cores
 | Find All `WARN` (whole word) | 0.15 s | 0.38 s |
 | Find All `müller` (ignore case, non-ASCII) | 0.19 s | 0.45 s |
 | Find All regex `Payment failed .* user=u12\d4 ` | 0.12 s | 0.37 s |
+
+Filters on a 200 MB log (1.8M lines): four filters with formula `(A OR B) AND NOT C` take 0.2 s. Changing only the formula takes about 2 ms, because the filters' results are kept and only merged again.
 
 Heap use stays at a few hundred MB for these sizes. The index costs about 12 MB per 100M lines.
 
@@ -96,9 +115,13 @@ logmaster.core   (no UI code; could later back a VS Code extension or a CLI)
   LineMatcher     literal byte search, regex, or literal pre-filter + regex
   RequiredLiteral finds text every regex match must contain (ripgrep's trick)
   SearchSession   parallel Find All, hits published in line order, follows growth
+  Formula         AND / OR / NOT of filter letters (parser and auto formula)
+  FilterEngine    one live search per filter; merges their sorted hits by the formula
+  FilterResult    the passing lines: a sorted list, or "all lines except a list"
 logmaster.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
-  LogTab          log view + results panel for one file
+  LogTab          log view + Filters and Find results panels for one file
+  FilterPanel     the filter rows, formula field and All lines / Matching only switch
   MainFrame       window, toolbar, menus, status bar, drag & drop
 logmaster.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
@@ -125,6 +148,8 @@ Design choices:
 ## Roadmap
 
 1. ✅ Open, scroll and jump in huge files; Find All with a results panel; tail with live search; highlighting
+1. ✅ Text selection; multiple filters (Show / Hide / Mark) combined with AND / OR / NOT
+1. Next: text wrap; keep stack traces with their log line when filtering; context lines (±N)
 2. Folder search (folder search tools-like): folder + glob, parallel over files, `.gz`/`.zip`, results tree
 3. Log formats (log analyzers-like): pattern → columns (time, level, thread, logger, message), multi-line entries, filter by level and time, merge files by timestamp
 4. Editable highlight rules, saved searches, bookmarks, recent files, filter view ("show only matching")

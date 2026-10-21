@@ -29,6 +29,14 @@ public final class HitList {
         return i >= 0 ? i : -i - 1;
     }
 
+    /**
+     * The backing array; entries {@code [0, size())} read before this call are valid. Read
+     * {@link #size()} first. Callers must not modify it.
+     */
+    long[] array() {
+        return data;
+    }
+
     void add(long line) {
         int n = size;
         long[] d = data;

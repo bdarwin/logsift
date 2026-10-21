@@ -1,23 +1,40 @@
 package logmaster.ui;
 
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Toolkit;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import javax.swing.BorderFactory;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JSplitPane;
+import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
+import logmaster.core.FilterEngine;
+import logmaster.core.FilterResult;
+import logmaster.core.Formula;
 import logmaster.core.HitList;
 import logmaster.core.LogDocument;
 import logmaster.core.SearchQuery;
 import logmaster.core.SearchSession;
 
-/** One open file: the log view on top and the Find All results below. */
-final class LogTab extends JPanel {
+/**
+ * One open file: the log view on top; below it the filters and the Find All results.
+ *
+ * <p>The log view shows either every line (lines the filters remove are grayed) or only the
+ * lines that pass the filters. Switching keeps the current line in place.
+ */
+final class LogTab extends JPanel implements FilterPanel.Listener {
 
     /** Notifies the frame about status changes (for the status bar and toolbar). */
     interface Host {
@@ -30,11 +47,20 @@ final class LogTab extends JPanel {
     private final LogView results = new LogView();
     private final JLabel resultsHeader = new JLabel(" ");
     private final JPanel resultsPanel = new JPanel(new BorderLayout());
+    private final FilterPanel filterPanel = new FilterPanel(this);
+    private final JTabbedPane bottom = new JTabbedPane();
     private final JSplitPane split;
     private final int dividerSize;
+    private final FilterEngine engine;
+    private final LogView.RowSource allLines;
+    private final LogView.RowSource matchingLines;
     private final Runnable docUpdate;
     private final Runnable searchUpdate;
+    private final Runnable filterUpdate;
     private volatile SearchSession search;
+    private FilterResult filterResult;   // EDT only
+    private Formula appliedFormula;
+    private boolean matchingOnly;
     private long indexMillis = -1;
     private long searchMillis = -1;
     private String error;
@@ -43,10 +69,14 @@ final class LogTab extends JPanel {
         super(new BorderLayout());
         this.host = host;
         this.doc = LogDocument.open(path);
+        this.engine = new FilterEngine(doc);
+        this.filterResult = engine.result();
         docUpdate = coalesced(this::onDocChanged);
         searchUpdate = coalesced(this::onSearchChanged);
+        filterUpdate = coalesced(this::onFilterResult);
+        engine.addListener(e -> filterUpdate.run());
 
-        main.setSource(new LogView.RowSource() {
+        allLines = new LogView.RowSource() {
             @Override
             public int rowCount() {
                 return (int) Math.min(doc.lineCount(), Integer.MAX_VALUE - 1);
@@ -61,9 +91,49 @@ final class LogTab extends JPanel {
             public void texts(int first, int count, String[] out) {
                 doc.readLines(first, count, out);
             }
-        });
+
+            @Override
+            public boolean dimmed(int row) {
+                FilterResult r = filterResult;
+                return r.isFiltering() && !r.contains(row);
+            }
+        };
+        matchingLines = new LogView.RowSource() {
+            @Override
+            public int rowCount() {
+                return (int) Math.min(filterResult.count(), Integer.MAX_VALUE - 1);
+            }
+
+            @Override
+            public long lineNumber(int row) {
+                return filterResult.lineAt(row);
+            }
+
+            @Override
+            public void texts(int first, int count, String[] out) {
+                FilterResult r = filterResult;
+                int n = (int) Math.min(count, r.count() - first);
+                // read runs of consecutive lines together
+                int i = 0;
+                while (i < n) {
+                    long start = r.lineAt(first + i);
+                    int run = 1;
+                    while (i + run < n && r.lineAt(first + i + run) == start + run) {
+                        run++;
+                    }
+                    String[] buf = new String[run];
+                    doc.readLines(start, run, buf);
+                    System.arraycopy(buf, 0, out, i, run);
+                    i += run;
+                }
+                for (; i < count; i++) {
+                    out[i] = null;
+                }
+            }
+        };
+        main.setSource(allLines);
         results.setSource(resultsSource());
-        results.setHighlightRules(java.util.List.of());
+        results.setHighlightRules(List.of());
         results.addListener(new LogView.Listener() {
             @Override
             public void rowActivated(LogView view, int row) {
@@ -87,19 +157,24 @@ final class LogTab extends JPanel {
                 host.tabStatusChanged(LogTab.this);
             }
         });
+        main.setPopupExtender(this::extendPopup);
+        results.setPopupExtender(this::extendPopup);
 
         resultsHeader.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
         resultsHeader.setFont(resultsHeader.getFont().deriveFont(Font.BOLD));
         resultsPanel.add(resultsHeader, BorderLayout.NORTH);
         resultsPanel.add(results, BorderLayout.CENTER);
-        split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, main, resultsPanel);
-        split.setResizeWeight(0.65);
+
+        bottom.addTab("Filters", filterPanel);
+        bottom.addTab("Find results", resultsPanel);
+        bottom.setPreferredSize(new Dimension(400, 210));
+        bottom.putClientProperty("JTabbedPane.tabHeight", 26);
+        split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, main, bottom);
+        split.setResizeWeight(1.0); // the log gets the extra space
         split.setContinuousLayout(true);
         split.setBorder(null);
-        add(split, BorderLayout.CENTER);
         dividerSize = split.getDividerSize();
-        resultsPanel.setVisible(false);
-        split.setDividerSize(0); // no divider while there are no results
+        add(split, BorderLayout.CENTER);
 
         doc.addListener(new LogDocument.Listener() {
             @Override
@@ -125,6 +200,7 @@ final class LogTab extends JPanel {
             }
         });
         doc.startFollowing(500);
+        updateFilterStatus();
     }
 
     /** Runs {@code r} on the EDT, at most once per pending request. */
@@ -150,6 +226,14 @@ final class LogTab extends JPanel {
 
     LogView resultsView() {
         return results;
+    }
+
+    FilterPanel filterPanel() {
+        return filterPanel;
+    }
+
+    FilterEngine filterEngine() {
+        return engine;
     }
 
     SearchSession search() {
@@ -182,6 +266,234 @@ final class LogTab extends JPanel {
         results.rowsChanged();
         updateResultsHeader();
         host.tabStatusChanged(this);
+    }
+
+    // ---------------------------------------------------------------- lines and rows
+
+    /** File line number of the current line in the log view, or -1. */
+    long currentLine() {
+        int row = main.selectedRow();
+        if (row < 0 || (matchingOnly && filterResult.count() == 0)) {
+            return -1;
+        }
+        return matchingOnly ? filterResult.lineAt(Math.min(row, filterResult.count() - 1)) : row;
+    }
+
+    /** Shows a file line; if the filters hide it, switches to showing all lines first. */
+    void showLine(long line) {
+        if (matchingOnly && !filterResult.contains(line)) {
+            setMatchingOnly(false);
+        }
+        goNear(line);
+        host.tabStatusChanged(this);
+    }
+
+    /** Goes to the line, or the next one shown if it is filtered out. */
+    private void goNear(long line) {
+        long row = matchingOnly ? filterResult.rowAtOrAfter(line) : line;
+        main.goToRow((int) Math.min(row, Integer.MAX_VALUE - 1), true);
+    }
+
+    boolean isMatchingOnly() {
+        return matchingOnly;
+    }
+
+    /** Shows only lines passing the filters, or all lines. Keeps the current line in view. */
+    void setMatchingOnly(boolean on) {
+        filterPanel.setMatchingOnly(on);
+        if (on == matchingOnly) {
+            return;
+        }
+        long line = currentLine();
+        boolean follow = main.isFollow();
+        matchingOnly = on;
+        main.setSource(on ? matchingLines : allLines);
+        if (follow) {
+            main.setFollow(true);
+        } else if (line >= 0) {
+            goNear(line);
+        }
+        host.tabStatusChanged(this);
+    }
+
+    // ---------------------------------------------------------------- filters
+
+    @Override
+    public void filtersChanged() {
+        List<FilterEngine.Spec> specs = new ArrayList<>();
+        List<Character> shows = new ArrayList<>();
+        List<Character> hides = new ArrayList<>();
+        for (FilterDef d : filterPanel.filters()) {
+            d.error = null;
+            SearchQuery q = d.query();
+            if (q != null) {
+                try {
+                    q.toPattern();
+                } catch (PatternSyntaxException e) {
+                    d.error = "Invalid regular expression: " + e.getDescription();
+                }
+            }
+            filterPanel.refreshRow(d);
+            if (!d.isActive()) {
+                continue;
+            }
+            specs.add(new FilterEngine.Spec(d.id, q));
+            if (d.action == FilterDef.Action.SHOW) {
+                shows.add(d.id);
+            } else if (d.action == FilterDef.Action.HIDE) {
+                hides.add(d.id);
+            }
+        }
+        Formula formula;
+        String formulaError = null;
+        if (filterPanel.isAutoFormula()) {
+            formula = Formula.auto(shows, hides);
+            filterPanel.showAutoFormula(formula == null ? "" : Formula.format(formula));
+        } else {
+            try {
+                formula = Formula.parse(filterPanel.formulaText());
+            } catch (IllegalArgumentException e) {
+                formulaError = e.getMessage();
+                formula = appliedFormula; // keep the last good one while the user types
+            }
+        }
+        try {
+            engine.configure(specs, formula);
+            appliedFormula = formula;
+        } catch (IllegalArgumentException e) {
+            formulaError = formulaError != null ? formulaError : e.getMessage();
+            try {
+                engine.configure(specs, appliedFormula);
+            } catch (IllegalArgumentException e2) {
+                engine.configure(specs, null);
+                appliedFormula = null;
+            }
+        }
+        if (!filterPanel.isAutoFormula()) {
+            filterPanel.setFormulaError(formulaError);
+        }
+        updateHighlights();
+        updateFilterStatus();
+    }
+
+    @Override
+    public void matchingOnlyChanged(boolean on) {
+        setMatchingOnly(on);
+        main.focusView();
+    }
+
+    @Override
+    public void navigate(FilterDef d, boolean forward) {
+        SearchSession s = d.isActive() ? engine.session(d.id) : null;
+        long line = s == null ? -1 : nextHit(s.hits(), forward);
+        if (line < 0) {
+            Toolkit.getDefaultToolkit().beep();
+            return;
+        }
+        showLine(line);
+    }
+
+    /** Adds a filter for exactly this text (from a selection). */
+    void addFilter(String text, FilterDef.Action action) {
+        FilterDef d = filterPanel.addFilter(text, action);
+        if (d != null) {
+            d.matchCase = true;
+            filterPanel.refreshRow(d);
+            filtersChanged();
+            bottom.setSelectedComponent(filterPanel);
+        }
+    }
+
+    /** Line colors: filter colors first (first match wins), then the built-in level colors. */
+    private void updateHighlights() {
+        List<HighlightRule> rules = new ArrayList<>();
+        for (FilterDef d : filterPanel.filters()) {
+            FilterDef.Swatch s = d.color();
+            if (s != null && d.isActive()) {
+                rules.add(new HighlightRule("Filter " + d.id, d.query().toPattern(),
+                        null, s.light(), null, s.dark()));
+            }
+        }
+        results.setHighlightRules(rules);
+        rules.addAll(HighlightRule.defaults());
+        main.setHighlightRules(rules);
+    }
+
+    private void onFilterResult() {
+        FilterResult r = engine.result();
+        boolean redefined = r.version() != filterResult.version();
+        long keep = redefined && matchingOnly && !main.isFollow() ? currentLine() : -1;
+        filterResult = r;
+        main.rowsChanged();
+        if (keep >= 0) {
+            goNear(keep);
+        }
+        updateFilterStatus();
+        host.tabStatusChanged(this);
+    }
+
+    private void updateFilterStatus() {
+        FilterResult r = filterResult;
+        boolean running = engine.isRunning() || doc.isIndexing();
+        String text;
+        if (!r.isFiltering()) {
+            text = filterPanel.filters().isEmpty() ? "" : "no Show or Hide filter";
+        } else {
+            text = String.format("%,d of %,d lines", r.count(), doc.lineCount());
+            if (running) {
+                text += String.format("   filtering %d%%", (int) (engine.progress() * 100));
+            }
+        }
+        filterPanel.setResultText(text);
+        for (FilterDef d : filterPanel.filters()) {
+            SearchSession s = d.isActive() ? engine.session(d.id) : null;
+            String c = "";
+            if (d.error != null) {
+                c = "invalid";
+            } else if (s != null) {
+                c = String.format("%,d", s.hits().size()) + (s.isRunning() ? "…" : "");
+                if (s.isLimitReached()) {
+                    c += "+";
+                }
+            }
+            filterPanel.setCount(d, c);
+        }
+    }
+
+    private void extendPopup(LogView view, JPopupMenu menu) {
+        menu.addSeparator();
+        String sel = view.selectionForFind();
+        if (sel == null) {
+            JMenuItem hint = new JMenuItem("Select text to filter by it");
+            hint.setEnabled(false);
+            menu.add(hint);
+        } else {
+            String shown = sel.length() > 40 ? sel.substring(0, 40) + "…" : sel;
+            for (FilterDef.Action a : FilterDef.Action.values()) {
+                JMenuItem mi = new JMenuItem(a.label + " lines with “" + shown + "”");
+                mi.setToolTipText(a.tip);
+                mi.addActionListener(e -> addFilter(sel, a));
+                menu.add(mi);
+            }
+        }
+        JCheckBoxMenuItem only = new JCheckBoxMenuItem("Show Matching Lines Only", matchingOnly);
+        only.addActionListener(e -> setMatchingOnly(only.isSelected()));
+        menu.add(only);
+    }
+
+    void showFiltersTab() {
+        if (!bottom.isVisible()) {
+            toggleBottom();
+        }
+        bottom.setSelectedComponent(filterPanel);
+    }
+
+    /** Shows or hides the Filters / Find results area. */
+    void toggleBottom() {
+        boolean show = !bottom.isVisible();
+        bottom.setVisible(show);
+        split.setDividerSize(show ? dividerSize : 0);
+        split.resetToPreferredSizes();
     }
 
     // ---------------------------------------------------------------- search
@@ -224,11 +536,10 @@ final class LogTab extends JPanel {
         main.setMatchPattern(highlight);
         results.setMatchPattern(highlight);
         results.setSource(resultsSource());
-        if (!resultsPanel.isVisible()) {
-            resultsPanel.setVisible(true);
-            split.setDividerSize(dividerSize);
-            split.setDividerLocation(0.65);
+        if (!bottom.isVisible()) {
+            toggleBottom();
         }
+        bottom.setSelectedComponent(resultsPanel);
         updateResultsHeader();
         s.start();
     }
@@ -275,40 +586,53 @@ final class LogTab extends JPanel {
         main.setMatchPattern(null);
         results.setMatchPattern(null);
         results.rowsChanged();
-        resultsPanel.setVisible(false);
-        split.setDividerSize(0);
+        updateResultsHeader();
+        bottom.setSelectedComponent(filterPanel);
     }
 
-    /** Jumps to the next (or previous) hit after the selected line. Returns false if none. */
+    /** Jumps to the next (or previous) hit after the current line. Returns false if none. */
     boolean findNext(boolean forward) {
         SearchSession s = search;
         if (s == null || s.hits().size() == 0) {
             return false;
         }
         HitList hits = s.hits();
-        long cur = main.selectedRow() >= 0 ? main.selectedRow() : main.topRow() - 1;
+        long line = nextHit(hits, forward);
+        int idx = hits.firstAtOrAfter(line);
+        results.goToRow(idx, false);
+        showLine(line);
+        return true;
+    }
+
+    /** The hit after (or before) the current line, wrapping around; -1 if there are none. */
+    private long nextHit(HitList hits, boolean forward) {
+        int n = hits.size();
+        if (n == 0) {
+            return -1;
+        }
+        long cur = currentLine();
+        if (cur < 0) {
+            cur = matchingOnly ? -1 : main.topRow() - 1;
+        }
         int idx;
         if (forward) {
             idx = hits.firstAtOrAfter(cur + 1);
-            if (idx >= hits.size()) {
+            if (idx >= n) {
                 idx = 0; // wrap
             }
         } else {
             idx = hits.firstAtOrAfter(cur) - 1;
             if (idx < 0) {
-                idx = hits.size() - 1;
+                idx = n - 1;
             }
         }
-        results.goToRow(idx, false);
-        showHit(idx);
-        return true;
+        return hits.get(idx);
     }
 
     private void showHit(int row) {
         SearchSession s = search;
         if (s != null && row >= 0 && row < s.hits().size()) {
-            main.goToRow((int) s.hits().get(row), true);
-            host.tabStatusChanged(this);
+            showLine(s.hits().get(row));
         }
     }
 
@@ -316,8 +640,10 @@ final class LogTab extends JPanel {
         SearchSession s = search;
         if (s == null) {
             resultsHeader.setText(" ");
+            bottom.setTitleAt(1, "Find results");
             return;
         }
+        bottom.setTitleAt(1, String.format("Find results (%,d)", s.hits().size()));
         SearchQuery q = s.query();
         StringBuilder sb = new StringBuilder("Find All  “").append(q.text()).append('”');
         if (q.regex()) {
@@ -348,6 +674,7 @@ final class LogTab extends JPanel {
         if (s != null) {
             s.close();
         }
+        engine.close();
         doc.close();
     }
 }

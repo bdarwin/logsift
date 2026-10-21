@@ -175,7 +175,7 @@ public final class LineIndex {
                     next = b;
                 }
                 if (cancelled.getAsBoolean()) {
-                    inFlight.forEach(f -> f.cancel(true));
+                    inFlight.forEach(f -> f.cancel(false));
                     return false;
                 }
                 Chunk c = inFlight.removeFirst().get();
@@ -185,10 +185,10 @@ public final class LineIndex {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            inFlight.forEach(f -> f.cancel(true));
+            inFlight.forEach(f -> f.cancel(false));
             return false;
         } catch (ExecutionException e) {
-            inFlight.forEach(f -> f.cancel(true));
+            inFlight.forEach(f -> f.cancel(false));
             Throwable cause = e.getCause();
             if (cause instanceof UncheckedIOException u) {
                 throw u;

@@ -109,6 +109,41 @@ class LogDocumentTest {
     }
 
     @Test
+    void interruptedReaderDoesNotBreakTheFile() throws IOException {
+        Path f = dir.resolve("int.log");
+        Files.writeString(f, "line one\nline two\n");
+        try (FileSource src = new FileSource(f)) {
+            byte[] b = new byte[4];
+            Thread.currentThread().interrupt(); // Java closes a channel read by an interrupted thread
+            assertEquals(4, src.read(0, b, 0, 4));
+            assertTrue(Thread.interrupted(), "interrupt flag kept");
+            assertEquals(4, src.read(9, b, 0, 4));
+            assertEquals("line", new String(b, StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
+    void cancelledSearchesLeaveTheDocumentReadable() throws IOException {
+        Random rnd = new Random(2);
+        byte[] content = TestFiles.randomContent(rnd, 40_000).getBytes(StandardCharsets.UTF_8);
+        Path f = dir.resolve("cancel.log");
+        Files.write(f, content);
+        try (LogDocument doc = LogDocument.open(f, 64 * 1024)) {
+            assertTrue(doc.awaitIdle(10_000));
+            for (int i = 0; i < 30; i++) {
+                SearchSession s = new SearchSession(doc, new SearchQuery("x", false, true, false));
+                s.start();
+                s.close(); // cancel while searching
+            }
+            SearchSession last = new SearchSession(doc, new SearchQuery("error", false, false, false)).start();
+            assertTrue(last.awaitIdle(10_000));
+            assertTrue(last.coveredLines() == doc.lineCount(), "last search completed");
+            last.close();
+            assertMatches(doc, content);
+        }
+    }
+
+    @Test
     void veryLongLineIsCutForDisplay() throws IOException {
         Path f = dir.resolve("long.log");
         String longLine = "y".repeat(LogDocument.MAX_DISPLAY_BYTES * 3);

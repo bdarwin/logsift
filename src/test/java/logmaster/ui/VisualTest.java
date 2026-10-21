@@ -28,6 +28,7 @@ import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
+import logmaster.core.FilterResult;
 import logmaster.core.LogDocument;
 import logmaster.core.SearchQuery;
 import logmaster.core.SearchSession;
@@ -420,7 +421,112 @@ class VisualTest {
         summary.put("text selection", "drag, double/triple-click, shift-click verified");
     }
 
+    @Test
+    @Order(10)
+    void filtersWithFormula() throws Exception {
+        LogTab tab = onEdt(frame::currentTab);
+        long t0 = System.nanoTime();
+        onEdt(() -> {
+            FilterPanel p = tab.filterPanel();
+            FilterDef a = p.addFilter("ERROR", FilterDef.Action.SHOW);
+            a.matchCase = true;
+            p.addFilter("slow query", FilterDef.Action.SHOW);          // ignore case
+            FilterDef c = p.addFilter("user=u1\\d\\d4 ", FilterDef.Action.HIDE);
+            c.regex = true;
+            FilterDef d = p.addFilter("Müller", FilterDef.Action.MARK);
+            d.matchCase = true;
+            tab.filtersChanged();
+            return null;
+        });
+        FilterResult r = waitForFilters(tab, t0);
+        long filterMs = filterMillis;
+        Pattern pa = Pattern.compile("ERROR");
+        Pattern pb = Pattern.compile("slow query", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        Pattern pc = Pattern.compile("user=u1\\d\\d4 ");
+        List<Long> expected = naiveFilter(big, line ->
+                (pa.matcher(line).find() || pb.matcher(line).find()) && !pc.matcher(line).find());
+        assertEquals("(A OR B) AND NOT C", onEdt(() -> tab.filterPanel().formulaText()));
+        assertEquals(expected.size(), r.count(), "filtered line count");
+        Random rnd = new Random(4);
+        for (int i = 0; i < 200; i++) {
+            int row = rnd.nextInt(expected.size());
+            assertEquals(expected.get(row), r.lineAt(row), "row " + row);
+        }
+        summary.put("Filters (A OR B) AND NOT C", String.format("%,d lines in %d ms",
+                r.count(), filterMs));
+
+        // Matching only keeps the current line in place, and back again.
+        long target = expected.get(expected.size() / 2);
+        long[] lines = onEdt(() -> {
+            tab.showFiltersTab();
+            tab.showLine(target);
+            tab.setMatchingOnly(true);
+            long inFiltered = tab.currentLine();
+            int rows = tab.mainView().source().rowCount();
+            return new long[] {inFiltered, rows};
+        });
+        assertEquals(target, lines[0], "same line after switching to matching only");
+        assertEquals(expected.size(), lines[1], "rows in matching-only view");
+        settle();
+        shot("10-filters-matching-only");
+
+        // A custom formula: ERROR lines that are also "slow query" lines, or not hidden.
+        t0 = System.nanoTime();
+        onEdt(() -> {
+            tab.filterPanel().setFormula("A AND NOT C");
+            return null;
+        });
+        r = waitForFilters(tab, t0);
+        long formulaMs = filterMillis;
+        List<Long> expected2 = naiveFilter(big, line ->
+                pa.matcher(line).find() && !pc.matcher(line).find());
+        assertEquals(expected2.size(), r.count(), "custom formula count");
+        summary.put("Filters A AND NOT C (custom)", String.format("%,d lines in %d ms",
+                r.count(), formulaMs));
+        long kept = onEdt(tab::currentLine);
+        assertTrue(kept >= target, "stays near the same place after the formula changed");
+
+        long back = onEdt(() -> {
+            tab.setMatchingOnly(false);
+            return tab.currentLine();
+        });
+        assertEquals(kept, back, "same line after switching back to all lines");
+        settle();
+        shot("11-filters-all-lines-grayed");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private long filterMillis;
+
+    /** Waits for the filters; {@link #filterMillis} gets the time from {@code t0} until done. */
+    private FilterResult waitForFilters(LogTab tab, long t0) throws Exception {
+        assertTrue(tab.filterEngine().awaitIdle(300_000), "filters finished");
+        filterMillis = ms(t0);
+        settle();
+        FilterResult r = tab.filterEngine().result();
+        assertTrue(r.isComplete(), "filter result complete: checked " + r.checkedLines()
+                + " of " + tab.document().lineCount() + ", running " + tab.filterEngine().isRunning()
+                + ", indexing " + tab.document().isIndexing() + " " + tab.filterEngine().describe());
+        return r;
+    }
+
+    /** Lines (0-based) passing {@code keep}, by plain BufferedReader. */
+    private static List<Long> naiveFilter(Path f, java.util.function.Predicate<String> keep)
+            throws IOException {
+        List<Long> out = new ArrayList<>();
+        try (var rd = Files.newBufferedReader(f, StandardCharsets.UTF_8)) {
+            String line;
+            long n = 0;
+            while ((line = rd.readLine()) != null) {
+                if (keep.test(line)) {
+                    out.add(n);
+                }
+                n++;
+            }
+        }
+        return out;
+    }
 
     private static boolean isPlainAscii(String s) {
         return s != null && s.length() > 40 && s.chars().allMatch(c -> c >= 32 && c < 127);

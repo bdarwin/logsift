@@ -54,6 +54,10 @@ final class Theme {
         return pick(new Color(0xD5DEEA), new Color(0x3A3F47));
     }
 
+    static Color dimmedForeground() {
+        return pick(new Color(0xB4B8BE), new Color(0x55595F));
+    }
+
     static Color currentLine() {
         return pick(new Color(0xEEF4FD), new Color(0x262B33));
     }
