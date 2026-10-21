@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "logsift"
-version = "0.1.0"
+version = "1.0.0"
 
 repositories {
     mavenCentral()
@@ -62,7 +62,9 @@ val visualTest by tasks.registering(Test::class) {
     jvmArgs("-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED")
     systemProperty("java.awt.headless", "false")
     systemProperty("logsift.visual.sizeMb", (project.findProperty("sizeMb") ?: "1024").toString())
-    systemProperty("logsift.visual.dir", layout.buildDirectory.dir("visual").get().asFile.absolutePath)
+    // -PvisualDir=/tmp/logs puts the test logs somewhere neutral (for README screenshots)
+    systemProperty("logsift.visual.dir", (project.findProperty("visualDir")
+            ?: layout.buildDirectory.dir("visual").get().asFile.absolutePath).toString())
     systemProperty("logsift.screenshots", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
     // keep tests away from the user's own settings, recent files and ~/.logsift
     systemProperty("logsift.prefs", "/logsift-test/ui")

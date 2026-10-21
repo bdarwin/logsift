@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logsift: fast viewer for very large log files</title>
+<meta name="description" content="Logsift is a free, open-source desktop log viewer for very large log files on Windows, macOS and Linux. Open multi-GB logs instantly, tail live, filter, Find All, timeline, columns, JSON logs, folder search and SSH remote logs.">
+<meta name="keywords" content="log viewer, large log files, log file viewer, tail, log analyzer, log analysis, windows, macos, linux, open source, free, sftp, json logs">
+<link rel="canonical" href="https://bdarwin.github.io/logsift/">
+<meta property="og:title" content="Logsift: fast viewer for very large log files">
+<meta property="og:description" content="Open multi-GB logs instantly, tail live, filter and search. Free and open source for Windows, macOS and Linux.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://bdarwin.github.io/logsift/">
+<meta property="og:image" content="https://bdarwin.github.io/logsift/screenshots/filters.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Logsift",
+ "applicationCategory":"DeveloperApplication","operatingSystem":"Windows, macOS, Linux",
+ "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},
+ "license":"https://opensource.org/licenses/MIT",
+ "downloadUrl":"https://github.com/bdarwin/logsift/releases/latest",
+ "description":"Fast desktop viewer for very large log files: live tail, filters, Find All, timeline, columns, JSON logs, folder search and SSH remote logs."}
+</script>
+<style>
+  :root { --bg:#ffffff; --fg:#1f2328; --muted:#59636e; --accent:#1d4ed8; --card:#f6f8fa; --border:#d1d9e0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --accent:#79a8ff; --card:#151b23; --border:#30363d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:48px 16px 64px; }
+  h1 { font-size:2.6rem; margin:0 0 8px; letter-spacing:-0.02em; }
+  .lead { font-size:1.25rem; color:var(--muted); max-width:760px; margin:0 0 24px; }
+  .buttons { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:32px; }
+  .btn { display:inline-block; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:600; border:1px solid var(--border); color:var(--fg); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  img { max-width:100%; height:auto; border:1px solid var(--border); border-radius:8px; display:block; }
+  h2 { margin:48px 0 16px; font-size:1.6rem; }
+  .features { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; padding:0; list-style:none; }
+  .features li { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; }
+  .features b { display:block; margin-bottom:4px; }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:24px; }
+  figure { margin:0; }
+  figcaption { color:var(--muted); font-size:0.95rem; margin-top:8px; }
+  footer { margin-top:56px; color:var(--muted); font-size:0.9rem; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Logsift</h1>
+  <p class="lead">A fast, free log viewer for very large log files. Open a multi-gigabyte log in under a second, tail it live, and cut it down to what matters. Windows, macOS and Linux.</p>
+  <div class="buttons">
+    <a class="btn primary" href="https://github.com/bdarwin/logsift/releases/latest">Download</a>
+    <a class="btn" href="https://github.com/bdarwin/logsift">Source on GitHub</a>
+  </div>
+  <img src="screenshots/filters.png" alt="Logsift showing a 200 MB log with four combined filters, a timeline and a highlight bar" width="1400" height="828">
+
+  <h2>Features</h2>
+  <ul class="features">
+    <li><b>Huge files, instantly</b>A 1 GB log shows its first lines in 0.12 s and is fully indexed in 0.26 s.</li>
+    <li><b>Live tail</b>Follow growing logs through rotation and truncation, or reload by hand.</li>
+    <li><b>Find All</b>Run several searches at once, each in its own color, and search within the results.</li>
+    <li><b>Filters</b>Show, hide or mark lines, combined with AND, OR and NOT. Filter by level and time range.</li>
+    <li><b>Timeline</b>See error bursts at a glance and select a time range to zoom in.</li>
+    <li><b>Columns and JSON</b>Time, level, thread, logger and message are parsed automatically. JSON logs work too.</li>
+    <li><b>Folder search</b>Search whole folders in parallel, including inside .gz and .zip files.</li>
+    <li><b>Remote logs</b>Browse a server over SSH/SFTP and follow its logs live.</li>
+    <li><b>Analyze</b>See top messages, compare a bad run with a good one, and merge logs by time.</li>
+  </ul>
+
+  <h2>Screenshots</h2>
+  <div class="gallery">
+    <figure><img src="screenshots/find-all.png" alt="Several searches in one results window" loading="lazy" width="1400" height="828"><figcaption>Several searches at once, with a search inside another's results</figcaption></figure>
+    <figure><img src="screenshots/timeline.png" alt="Timeline with a selected time range" loading="lazy" width="1400" height="828"><figcaption>Timeline: select a time range and keep stack traces</figcaption></figure>
+    <figure><img src="screenshots/columns-and-messages.png" alt="Parsed columns and top messages" loading="lazy" width="1400" height="828"><figcaption>Parsed columns and top messages</figcaption></figure>
+    <figure><img src="screenshots/folder-search.png" alt="Folder search" loading="lazy" width="1400" height="828"><figcaption>Folder search, including inside .gz and .zip</figcaption></figure>
+    <figure><img src="screenshots/json.png" alt="JSON log with details panel" loading="lazy" width="1400" height="828"><figcaption>JSON logs with a details panel</figcaption></figure>
+    <figure><img src="screenshots/compare.png" alt="Comparing two logs" loading="lazy" width="1400" height="828"><figcaption>Compare a bad run with a good one</figcaption></figure>
+    <figure><img src="screenshots/dark-mode.png" alt="Dark mode" loading="lazy" width="1400" height="828"><figcaption>Dark mode</figcaption></figure>
+  </div>
+
+  <footer>Logsift is open source under the MIT license. <a href="https://github.com/bdarwin/logsift/issues">Report a bug or suggest a feature</a>.</footer>
+</main>
+</body>
+</html>

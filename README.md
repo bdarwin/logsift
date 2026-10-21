@@ -1,21 +1,55 @@
 # Logsift
 
-A fast, cross-platform desktop viewer for very large log files (Java 21+, Swing + FlatLaf).
+[![Latest release](https://img.shields.io/github/v/release/bdarwin/logsift)](https://github.com/bdarwin/logsift/releases/latest)
+[![Build](https://github.com/bdarwin/logsift/actions/workflows/snapshot.yml/badge.svg)](https://github.com/bdarwin/logsift/actions/workflows/snapshot.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-The goal is one tool for working with logs:
+**A fast, free log viewer for very large log files.** Open a multi-gigabyte log in under a second, tail it live, and cut it down to what matters with filters, Find All, a timeline and parsed columns. Works on Windows, macOS and Linux.
 
-- **follow** a growing log live, with colored lines
-- **Find All** in a file, with a results list
-- **search across folders**, including compressed logs
-- **parsed columns and filters**, to cut a big log down to what matters
+![Logsift with four filters combined as (A OR B) AND NOT C, the timeline on top and the highlight bar on the right](docs/screenshots/filters.png)
 
-**Status (v0.1):** step 1 of the plan is done. You can open huge files, scroll, jump to any line, use Find All with a results panel, follow the file as it grows (handling rotation and truncation), color lines, and switch between light and dark mode. Folder search and column parsing come next (see *Roadmap* below).
+## Features
+
+- **Huge files, instantly.** A 1 GB log shows its first lines in 0.12 s and is fully indexed in 0.26 s. Scrolling and jumping to any line stay smooth at any size.
+- **Live tail.** Follow a growing log, including through rotation and truncation. You choose whether changes load automatically or only when you click Reload.
+- **Find All.** Run several searches at once (text, whole word, regex, any case), each in its own color, and search within the results.
+- **Filters.** Show, hide or mark lines and combine filters with AND, OR and NOT. Filter by log level and time range, keep stack traces with their line, and add context lines.
+- **Timeline and highlight bar.** See error bursts at a glance and drag over a time range to zoom in.
+- **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs work too, with a pretty-printed details view.
+- **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files.
+- **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
+- **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
+- **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
 
 ## Download
 
-Snapshot builds of the latest `main` are on the [snapshot release](https://github.com/bdarwin/logsift/releases/tag/snapshot): Windows (x64, arm64), macOS (Apple Silicon, Intel), Linux (x64 .deb/.tar.gz, arm64 .tar.gz), and a plain zip for any OS with Java 21+. The native builds include their own Java runtime and are not code-signed (see the release notes for the macOS/Windows warnings).
+Get the latest version from the **[Releases page](https://github.com/bdarwin/logsift/releases/latest)**:
 
-## Run it
+| System | File |
+|---|---|
+| Windows (x64, ARM64) | `Logsift-<version>-windows-x64.zip` / `-windows-arm64.zip`: unzip, run `Logsift\Logsift.exe` |
+| macOS (Apple Silicon, Intel) | `Logsift-<version>-macos-arm64.dmg` / `-macos-x64.dmg` |
+| Debian / Ubuntu | `Logsift-<version>-linux-x64.deb` |
+| Other Linux (x64, ARM64) | `Logsift-<version>-linux-x64.tar.gz` / `-linux-arm64.tar.gz`: unpack, run `Logsift/bin/Logsift` |
+| Any OS with Java 21+ | `Logsift-<version>-any-java21.zip`: run `bin/logsift` |
+
+The native downloads include their own Java runtime, so nothing else needs to be installed. They are not code-signed yet:
+- **macOS:** if it says the app is damaged or can't be opened, run `xattr -dr com.apple.quarantine /Applications/Logsift.app`.
+- **Windows:** if SmartScreen warns, choose **More info → Run anyway**.
+
+Builds of the latest code are on the [snapshot release](https://github.com/bdarwin/logsift/releases/tag/snapshot).
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Several Find All searches in one window, one nested inside another](docs/screenshots/find-all.png) **Several searches at once**, with a search inside another's results | ![A selected time range on the timeline, with errors filtered and their stack traces kept](docs/screenshots/timeline.png) **Timeline**: select a time range, keep stack traces |
+| ![Parsed columns with top messages below](docs/screenshots/columns-and-messages.png) **Columns** and **top messages** | ![Folder search across .log, .gz and .zip files](docs/screenshots/folder-search.png) **Folder search**, including inside .gz and .zip |
+| ![JSON log shown as columns, with a pretty-printed details panel](docs/screenshots/json.png) **JSON logs** with a details panel | ![Comparing a bad run with a good one: new, more frequent and missing messages](docs/screenshots/compare.png) **Compare** a bad run with a good one |
+| ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** | |
+
+## Run from source
 
 ```bash
 ./gradlew run --args="/path/to/app.log"     # or open files via File → Open / drag and drop
@@ -246,14 +280,15 @@ Design choices:
 - **Very long lines:**
   - Lines over 64 KB are cut for display. Search still sees the whole line.
   - A single line over 256 MB is only searched in its first 256 MB.
-- **Columns view** selects whole lines (not parts of a cell), and wrap is paused while it is on.
+- **Columns view** selects whole lines (not parts of a cell).
 - **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
 - **Time zones** are not converted: times are shown as written in each log.
-- **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows); installers are not code-signed yet.
+- **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows). The downloads are not code-signed yet.
 
 ## Roadmap
 
-1. ✅ Huge files, Find All, tail with live search, highlighting, text selection
-2. ✅ Filters with AND / OR / NOT, highlight bar, folder search (.gz/.zip), text wrap, stack traces with their line, context lines
-3. ✅ Timeline, top messages, merge by time, columns with level chips and value counts, export, bookmarks, recent files and sessions, alerts, encodings, JSON logs, remote logs over SFTP, compare two logs
-4. Next ideas: editable highlight rules, signed installers (.msi/.dmg), a plugin for custom log formats
+Ideas for next versions: editable highlight rules, signed installers, and plugins for custom log formats. Suggestions and bug reports are welcome in [Issues](https://github.com/bdarwin/logsift/issues).
+
+## License
+
+[MIT](LICENSE) © 2026 bdarwin

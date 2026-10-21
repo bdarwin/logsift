@@ -1,10 +1,12 @@
 # Builds and tests on every OS, packages a self-contained app (Java runtime included)
-# for each platform, and publishes them as the rolling "snapshot" pre-release.
+# for each platform, and publishes them: pushes to main update the rolling "snapshot"
+# pre-release; a version tag (v1.2.3, matching build.gradle.kts) publishes that release.
 name: snapshot
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -68,7 +70,15 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(./gradlew -q properties | sed -n 's/^version: //p' | tr -d '\r')
-          NAME=Logsift-snapshot-${{ matrix.target }}
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match version $VERSION in build.gradle.kts"; exit 1
+            fi
+            LABEL=$VERSION
+          else
+            LABEL=snapshot
+          fi
+          NAME=Logsift-$LABEL-${{ matrix.target }}
           COMMON=(--name Logsift --input build/install/logsift/lib
                   --main-jar "logsift-$VERSION.jar" --main-class logsift.ui.LogsiftApp
                   --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
@@ -77,8 +87,7 @@ jobs:
           mkdir -p dist
           case "${{ matrix.target }}" in
             macos-*)
-              # macOS needs an app version whose first number is > 0, so leave the default.
-              jpackage --type dmg --dest dist --icon packaging/icons/logsift.icns "${COMMON[@]}"
+              jpackage --type dmg --dest dist --app-version "$VERSION" --icon packaging/icons/logsift.icns "${COMMON[@]}"
               mv dist/Logsift-*.dmg "dist/$NAME.dmg"
               ;;
             windows-*)
@@ -92,7 +101,7 @@ jobs:
                 jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut --icon packaging/icons/logsift.png "${COMMON[@]}"
                 mv dist/*.deb "dist/$NAME.deb"
                 # Plain zip that runs anywhere with Java 21+ installed.
-                cp "build/distributions/logsift-$VERSION.zip" dist/Logsift-snapshot-any-java21.zip
+                cp "build/distributions/logsift-$VERSION.zip" "dist/Logsift-$LABEL-any-java21.zip"
               fi
               ;;
           esac
@@ -104,19 +113,35 @@ jobs:
           path: dist/*
 
   release:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v5
         with:
           pattern: dist-*
           path: dist
           merge-multiple: true
 
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          V=${GITHUB_REF_NAME#v}
+          NOTES=docs/releases/$GITHUB_REF_NAME.md
+          [ -f "$NOTES" ] || { echo "Missing $NOTES"; exit 1; }
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
+            --title "Logsift $V" --notes-file "$NOTES"
+
       - name: Publish snapshot release
+        if: github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
