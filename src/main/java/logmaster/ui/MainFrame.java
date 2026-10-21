@@ -148,6 +148,119 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    private void mergeDialog() {
+        List<Path> candidates = new ArrayList<>();
+        for (LogTab t : allTabs()) {
+            if (t.sourceLabels() == null) {
+                candidates.add(t.document().path());
+            }
+        }
+        JPanel list = new JPanel();
+        list.setLayout(new javax.swing.BoxLayout(list, javax.swing.BoxLayout.Y_AXIS));
+        List<javax.swing.JCheckBox> boxes = new ArrayList<>();
+        java.util.function.Consumer<Path> addBox = p -> {
+            javax.swing.JCheckBox b = new javax.swing.JCheckBox(p.getFileName() + "   (" + p.getParent() + ")", true);
+            b.putClientProperty("path", p);
+            boxes.add(b);
+            list.add(b);
+            list.revalidate();
+        };
+        candidates.forEach(addBox);
+        JButton add = new JButton("Add Files…");
+        add.addActionListener(e -> {
+            FileDialog fd = new FileDialog(this, "Add Logs to Merge", FileDialog.LOAD);
+            fd.setMultipleMode(true);
+            fd.setVisible(true);
+            for (File f : fd.getFiles()) {
+                addBox.accept(f.toPath());
+            }
+            SwingUtilities.getWindowAncestor(list).pack();
+        });
+        JPanel panel = new JPanel(new BorderLayout(0, 8));
+        panel.add(new JLabel("<html>Merge these logs into one, in time order.<br>"
+                + "Each line gets a label like &lt;node1&gt; showing where it came from.</html>"),
+                BorderLayout.NORTH);
+        panel.add(new javax.swing.JScrollPane(list), BorderLayout.CENTER);
+        panel.add(add, BorderLayout.SOUTH);
+        panel.setPreferredSize(new Dimension(560, 300));
+        if (JOptionPane.showConfirmDialog(this, panel, "Merge Files by Time",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) {
+            return;
+        }
+        List<Path> chosen = new ArrayList<>();
+        for (javax.swing.JCheckBox b : boxes) {
+            if (b.isSelected()) {
+                chosen.add((Path) b.getClientProperty("path"));
+            }
+        }
+        if (chosen.size() < 2) {
+            JOptionPane.showMessageDialog(this, "Choose at least two logs to merge.");
+            return;
+        }
+        mergeFiles(chosen);
+    }
+
+    /** Merges logs by timestamp into a new tab (in the background, with progress). */
+    public void mergeFiles(List<Path> files) {
+        List<String> labels = logmaster.core.LogMerger.labels(files);
+        List<logmaster.core.LogMerger.Source> sources = new ArrayList<>();
+        for (int i = 0; i < files.size(); i++) {
+            sources.add(new logmaster.core.LogMerger.Source(files.get(i), labels.get(i)));
+        }
+        javax.swing.JDialog dlg = new javax.swing.JDialog(this, "Merging…", false);
+        JProgressBar bar = new JProgressBar(0, 1000);
+        JButton cancel = new JButton("Cancel");
+        java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        cancel.addActionListener(e -> cancelled.set(true));
+        JPanel p = new JPanel(new BorderLayout(8, 8));
+        p.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        p.add(new JLabel("Merging " + files.size() + " logs by time…"), BorderLayout.NORTH);
+        p.add(bar, BorderLayout.CENTER);
+        p.add(cancel, BorderLayout.EAST);
+        dlg.setContentPane(p);
+        dlg.pack();
+        dlg.setLocationRelativeTo(this);
+        dlg.setVisible(true);
+        Thread t = new Thread(() -> {
+            try {
+                Path dir = Files.createTempDirectory("logmaster-merge-");
+                dir.toFile().deleteOnExit();
+                Path out = dir.resolve("merged-" + files.size() + "-logs.log");
+                out.toFile().deleteOnExit();
+                logmaster.core.LogMerger m = logmaster.core.LogMerger.merge(sources, out,
+                        f -> SwingUtilities.invokeLater(() -> bar.setValue((int) (f * 1000))),
+                        cancelled::get);
+                SwingUtilities.invokeLater(() -> {
+                    dlg.dispose();
+                    if (cancelled.get()) {
+                        m.close();
+                        return;
+                    }
+                    openFile(out);
+                    LogTab tab = currentTab();
+                    if (tab != null && tab.document().path().equals(out.toAbsolutePath().normalize())) {
+                        tab.setSourceLabels(labels);
+                        tab.addCloseHook(m::close);
+                        int i = tabs.indexOfComponent(tab);
+                        tabs.setTitleAt(i, "Merged (" + files.size() + " logs)");
+                        tabs.setToolTipTextAt(i, tab.sourceLegend());
+                        m.follow(500);
+                    } else {
+                        m.close();
+                    }
+                });
+            } catch (IOException | RuntimeException e) {
+                SwingUtilities.invokeLater(() -> {
+                    dlg.dispose();
+                    JOptionPane.showMessageDialog(this, "Cannot merge: " + e.getMessage(), "Merge",
+                            JOptionPane.ERROR_MESSAGE);
+                });
+            }
+        }, "lm-merge-start");
+        t.setDaemon(true);
+        t.start();
+    }
+
     /** Opens a new Folder Search tab (folder null = the current file's folder or the last one). */
     public FolderSearchTab openFolderSearch(Path folder) {
         if (folder == null && currentTab() != null) {
@@ -346,6 +459,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         JMenu file = new JMenu("File");
         file.add(item("Open…", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU), e -> openDialog()));
+        file.add(item("Merge Files by Time…", KeyStroke.getKeyStroke(KeyEvent.VK_M, MENU | InputEvent.SHIFT_DOWN_MASK),
+                e -> mergeDialog()));
         file.add(item("Search in Folder…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> openFolderSearch(null)));
         file.add(item("Close Tab", KeyStroke.getKeyStroke(KeyEvent.VK_W, MENU), e -> closeTab(tabs.getSelectedIndex())));

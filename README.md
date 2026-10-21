@@ -43,6 +43,7 @@ Make a test log:
 | Wrap long lines | Alt+Z (⌥Z on macOS), or the Wrap button |
 | Next / previous error | F8 / Shift+F8 |
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
+| Merge logs by time | Ctrl+Shift+M |
 | Go to line | Ctrl+L |
 | Go to time | Ctrl+Shift+L |
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
@@ -71,6 +72,10 @@ When a log has timestamps, a timeline above it shows how much was logged over ti
 - **Drag** across it to show only that time range. The range works with the filters: drag over an incident, add an ERROR filter, and you see just the errors of the incident. Click ✕ on the range to show all times again.
 - The status bar shows the time of the current line.
 - Recognized formats: `2026-10-21 10:02:13`, ISO with `T`, `2026/10/21`, `21-10-2026`, `21.10.2026`, `21-Oct-2026`, syslog `Oct 21 10:02:13`, Apache `[21/Oct/2026:10:02:13 +0000]`, timestamps inside JSON lines, time only, and epoch seconds or milliseconds. Times are shown as written in the log (time zones are not converted).
+
+## Merge logs by time
+
+**File → Merge Files by Time…** (Ctrl+Shift+M) merges several logs (say, the same app on two nodes, or an app log and its server log) into one view in timestamp order. Each line starts with a label like `<node2-app>` and a colored stripe, so you can see where it came from; right-click → **Show Only Lines from <node2-app>** filters to one source. Stack traces stay with their log line. The merged view is an ordinary log, so filters, the timeline, messages and search all work on it, and it keeps updating while the source logs grow.
 
 ## Top messages
 

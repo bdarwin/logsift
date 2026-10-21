@@ -67,6 +67,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final Runnable filterUpdate;
     private volatile SearchSession search;
     private volatile FilterResult filterResult; // written on the EDT
+    private List<String> sourceLabels;          // merged logs: the label of each source
+    private final List<Runnable> closeHooks = new ArrayList<>();
     private final MessagesPanel messages;
     private Formula appliedFormula;
     private boolean matchingOnly;
@@ -125,6 +127,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 FilterResult r = filterResult;
                 return r.isFiltering() && !r.isMatch(row);
             }
+
+            @Override
+            public java.awt.Color tag(int row) {
+                return lineSourceColor(row);
+            }
         };
         matchingLines = new LogView.RowSource() {
             @Override
@@ -141,6 +148,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             public boolean dimmed(int row) {
                 FilterResult r = filterResult;
                 return row < r.count() && !r.isMatch(r.lineAt(row)); // a context line
+            }
+
+            @Override
+            public java.awt.Color tag(int row) {
+                FilterResult r = filterResult;
+                return row < r.count() ? lineSourceColor(r.lineAt(row)) : null;
             }
 
             @Override
@@ -755,6 +768,54 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         showLine(line);
     }
 
+    /** Marks this tab as a merged log: lines start with "<label> " for each source. */
+    void setSourceLabels(List<String> labels) {
+        this.sourceLabels = List.copyOf(labels);
+        main.rowsChanged();
+    }
+
+    List<String> sourceLabels() {
+        return sourceLabels;
+    }
+
+    /** Runs when the tab closes (for example, stops a merge that keeps following). */
+    void addCloseHook(Runnable r) {
+        closeHooks.add(r);
+    }
+
+    /** The source's color of a merged log's line, or null. */
+    private java.awt.Color lineSourceColor(long line) {
+        List<String> labels = sourceLabels;
+        if (labels == null) {
+            return null;
+        }
+        String text = doc.line(line);
+        if (text == null || !text.startsWith("<")) {
+            return null;
+        }
+        int gt = text.indexOf("> ");
+        int i = gt < 0 ? -1 : labels.indexOf(text.substring(1, gt));
+        return i < 0 ? null : sourceColor(i);
+    }
+
+    static java.awt.Color sourceColor(int i) {
+        return FilterDef.SWATCHES.get(i % FilterDef.SWATCHES.size()).mark();
+    }
+
+    /** HTML legend of the sources, for the tab's tooltip. */
+    String sourceLegend() {
+        if (sourceLabels == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("<html><b>Merged by time</b><br>");
+        for (int i = 0; i < sourceLabels.size(); i++) {
+            java.awt.Color c = sourceColor(i);
+            sb.append(String.format("<span style='color:#%06x'>■</span> &lt;%s&gt;<br>",
+                    c.getRGB() & 0xFFFFFF, sourceLabels.get(i)));
+        }
+        return sb.append("</html>").toString();
+    }
+
     MessagesPanel messagesPanel() {
         return messages;
     }
@@ -907,6 +968,17 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 JMenuItem mi = new JMenuItem(a.label + " lines with “" + shown + "”");
                 mi.setToolTipText(a.tip);
                 mi.addActionListener(e -> addFilter(sel, a));
+                menu.add(mi);
+            }
+        }
+        if (sourceLabels != null) {
+            menu.addSeparator();
+            for (String label : sourceLabels) {
+                JMenuItem mi = new JMenuItem("Show Only Lines from <" + label + ">");
+                mi.addActionListener(e -> {
+                    addFilter("<" + label + "> ", FilterDef.Action.SHOW);
+                    setMatchingOnly(true);
+                });
                 menu.add(mi);
             }
         }
@@ -1104,6 +1176,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     void close() {
+        closeHooks.forEach(Runnable::run);
         SearchSession s = search;
         if (s != null) {
             s.close();

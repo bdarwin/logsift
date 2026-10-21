@@ -88,8 +88,29 @@ public final class EntryFormat {
         return startsEntry(b, 0, b.length);
     }
 
+    /**
+     * Skips a source label like {@code <node1> } at the start of a line (lines of merged logs
+     * start with one). Returns the position after it, or {@code start} if there is none.
+     */
+    static int skipSourceTag(byte[] b, int start, int end) {
+        if (start < end && b[start] == '<') {
+            int limit = Math.min(end - 1, start + 48);
+            for (int i = start + 1; i < limit; i++) {
+                byte c = b[i];
+                if (c == '>') {
+                    return i > start + 1 && b[i + 1] == ' ' ? i + 2 : start;
+                }
+                if (c == ' ' || c == '<') {
+                    return start;
+                }
+            }
+        }
+        return start;
+    }
+
     /** Whether the line in {@code buf[start, end)} starts a new entry. */
     boolean startsEntry(byte[] buf, int start, int end) {
+        start = skipSourceTag(buf, start, end);
         if (shape != null) {
             if (end - start < shape.length) {
                 return false;

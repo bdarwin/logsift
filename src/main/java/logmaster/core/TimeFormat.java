@@ -99,6 +99,7 @@ public final class TimeFormat {
 
     /** The time of the line in {@code b[start, end)}, or {@link #NONE}. */
     public long parse(byte[] b, int start, int end) {
+        start = EntryFormat.skipSourceTag(b, start, end); // merged logs: "<node1> 2026-..."
         if (!anywhere) {
             int p = start;
             if (p < end && b[p] == '[') {

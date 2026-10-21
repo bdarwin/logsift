@@ -1093,6 +1093,87 @@ class VisualTest {
         });
     }
 
+    @Test
+    @Order(17)
+    void mergeByTime() throws Exception {
+        Path folder = dir.resolve("folder");
+        List<Path> files = List.of(folder.resolve("app.log"), folder.resolve("node2/app.log"));
+        long total = 0;
+        for (Path f : files) {
+            try (var lines = Files.lines(f)) {
+                total += lines.count();
+            }
+        }
+        onEdt(() -> {
+            frame.mergeFiles(files);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null
+                        && frame.currentTab().sourceLabels() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 120_000, "merged tab opened");
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> !tab.document().isIndexing() && tab.timeIndex() != null, 60_000, "indexed");
+        assertEquals(total, tab.document().lineCount(), "every line of both logs");
+        assertEquals(List.of("folder-app", "node2-app"), tab.sourceLabels());
+        // time order and a source color on every line
+        logmaster.core.TimeFormat tf = tab.timeIndex().format();
+        long last = Long.MIN_VALUE;
+        for (long l = 0; l < 20_000; l++) {
+            String text = tab.document().line(l);
+            long t = tf.parse(text);
+            if (t != logmaster.core.TimeFormat.NONE) {
+                assertTrue(t >= last, "time order at line " + l);
+                last = t;
+            }
+        }
+        for (int row = 0; row < 2000; row += 97) {
+            int r0 = row;
+            String text = tab.document().line(row);
+            int source = text.startsWith("<folder-app>") ? 0 : 1;
+            assertEquals(LogTab.sourceColor(source), onEdt(() -> tab.mainView().source().tag(r0)),
+                    "the color of the line's source, row " + row);
+        }
+        onEdt(() -> {
+            tab.mainView().goToRow(1000, true);
+            return null;
+        });
+        settle();
+        shot("23-merged-by-time");
+        // only the second node's errors
+        onEdt(() -> {
+            tab.addFilter("<node2-app> ", FilterDef.Action.SHOW);
+            FilterDef err = tab.filterPanel().addFilter("ERROR", FilterDef.Action.SHOW);
+            err.matchCase = true;
+            tab.filterPanel().setFormula("A AND B");
+            tab.setMatchingOnly(true);
+            return null;
+        });
+        FilterResult r = waitForFilters(tab, System.nanoTime());
+        long expected;
+        try (var lines = Files.lines(files.get(1))) {
+            // whole entries: ERROR lines plus their stack traces
+            List<String> all = lines.toList();
+            expected = 0;
+            boolean in = false;
+            for (String l : all) {
+                if (l.startsWith("2026-")) {
+                    in = l.contains("ERROR");
+                }
+                if (in) {
+                    expected++;
+                }
+            }
+        }
+        assertEquals(expected, r.count(), "node2 errors with their stack traces");
+        settle();
+        shot("24-merged-one-source-errors");
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {
