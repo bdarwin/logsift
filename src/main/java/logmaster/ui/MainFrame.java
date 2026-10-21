@@ -68,6 +68,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     public MainFrame() {
         super("LogMaster");
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        setIconImages(logmaster.tools.IconGenerator.windowIcons());
         setSize(PREFS.getInt("width", 1280), PREFS.getInt("height", 820));
         setLocationByPlatform(true);
 

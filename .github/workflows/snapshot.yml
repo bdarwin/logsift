@@ -78,18 +78,18 @@ jobs:
           case "${{ matrix.target }}" in
             macos-*)
               # macOS needs an app version whose first number is > 0, so leave the default.
-              jpackage --type dmg --dest dist "${COMMON[@]}"
+              jpackage --type dmg --dest dist --icon packaging/icons/logmaster.icns "${COMMON[@]}"
               mv dist/LogMaster-*.dmg "dist/$NAME.dmg"
               ;;
             windows-*)
-              jpackage --type app-image --dest pkg --app-version "$VERSION" "${COMMON[@]}"
+              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logmaster.ico "${COMMON[@]}"
               pwsh -NoProfile -Command "Compress-Archive -Path pkg/LogMaster -DestinationPath dist/$NAME.zip"
               ;;
             linux-*)
-              jpackage --type app-image --dest pkg --app-version "$VERSION" "${COMMON[@]}"
+              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logmaster.png "${COMMON[@]}"
               tar -C pkg -czf "dist/$NAME.tar.gz" LogMaster
               if [ "${{ matrix.target }}" = linux-x64 ]; then
-                jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut "${COMMON[@]}"
+                jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut --icon packaging/icons/logmaster.png "${COMMON[@]}"
                 mv dist/*.deb "dist/$NAME.deb"
                 # Plain zip that runs anywhere with Java 21+ installed.
                 cp "build/distributions/logmaster-$VERSION.zip" dist/LogMaster-snapshot-any-java21.zip

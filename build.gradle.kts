@@ -77,3 +77,14 @@ val genLog by tasks.registering(JavaExec::class) {
     val follow = project.findProperty("follow")?.toString()
     args = listOfNotNull(out, size, follow?.let { "--follow=$it" })
 }
+
+// Regenerate the installer icons in packaging/icons (macOS .icns needs iconutil):
+//   ./gradlew genIcons && iconutil -c icns packaging/icons/logmaster.iconset -o packaging/icons/logmaster.icns
+val genIcons by tasks.registering(JavaExec::class) {
+    description = "Draws the app icon and writes packaging/icons."
+    group = "build"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "logmaster.tools.IconGenerator"
+    args = listOf(layout.projectDirectory.dir("packaging/icons").asFile.absolutePath)
+    jvmArgs("-Djava.awt.headless=true")
+}
