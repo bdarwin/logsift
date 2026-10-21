@@ -167,6 +167,41 @@ class FilterEngineTest {
         }
     }
 
+    @Test
+    void timeWindowMatchesNaive() throws IOException {
+        Random rnd = new Random(31);
+        byte[] content = TestFiles.randomContent(rnd, 2500).getBytes(StandardCharsets.UTF_8);
+        Path f = dir.resolve("w.log");
+        Files.write(f, content);
+        List<String> lines = TestFiles.naiveLines(content);
+        int n = lines.size();
+        try (LogDocument doc = LogDocument.open(f, 4096);
+             FilterEngine engine = new FilterEngine(doc)) {
+            assertTrue(doc.awaitIdle(10_000));
+            for (int round = 0; round < 40; round++) {
+                Formula formula = round % 5 == 0 ? null : randomFormula(rnd, 2);
+                long w0 = rnd.nextInt(n);
+                long w1 = rnd.nextInt(4) == 0 ? Long.MAX_VALUE : w0 + rnd.nextInt(n);
+                int ctx = rnd.nextInt(3);
+                engine.configure(SPECS, formula);
+                engine.setContext(ctx);
+                engine.setWindow(w0, w1);
+                assertTrue(engine.awaitIdle(10_000));
+                List<Long> shown = new ArrayList<>();
+                for (long l : naiveContext(naive(lines, formula), formula == null ? 0 : ctx, n)) {
+                    if (l >= w0 && l < w1) {
+                        shown.add(l);
+                    }
+                }
+                check(engine.result(), shown, n, formula + " window " + w0 + ".." + w1);
+            }
+            engine.setWindow(0, Long.MAX_VALUE);
+            engine.configure(SPECS, null);
+            assertTrue(engine.awaitIdle(10_000));
+            assertTrue(!engine.result().isFiltering(), "no window, no formula: no filtering");
+        }
+    }
+
     /** Lines of entries where the formula holds (a filter matches an entry if any line does). */
     private static List<Long> naiveEntries(List<String> lines, EntryFormat format, Formula f) {
         Map<Character, Pattern> patterns = new java.util.HashMap<>();

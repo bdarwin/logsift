@@ -134,6 +134,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             tab.resultsView().setFontSize(fontSize);
             tab.mainView().setWrap(wrap);
             tab.resultsView().setWrap(wrap);
+            tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
             tabs.addTab(tab.title(), tab);
             int idx = tabs.getTabCount() - 1;
             tabs.setToolTipTextAt(idx, abs.toString());
@@ -387,11 +388,20 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }));
         edit.addSeparator();
         edit.add(item("Go to Line…", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU), e -> goToLineDialog()));
+        edit.add(item("Go to Time…", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU | InputEvent.SHIFT_DOWN_MASK),
+                e -> goToTimeDialog()));
         bar.add(edit);
 
         JMenu view = new JMenu("View");
         view.add(item("Follow (Tail)", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU), e -> setFollow(!followButton.isSelected())));
         view.addSeparator();
+        view.add(item("Timeline", null, e -> {
+            boolean on = !PREFS.getBoolean("timeline", true);
+            PREFS.putBoolean("timeline", on);
+            for (LogTab t : allTabs()) {
+                t.setTimelineVisible(on);
+            }
+        }));
         view.add(item("Word Wrap", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
                 e -> setWrap(!wrap)));
         view.add(item("Show Matching Lines Only / All Lines",
@@ -519,6 +529,31 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    private void goToTimeDialog() {
+        LogTab t = currentTab();
+        if (t == null || t.timeIndex() == null) {
+            JOptionPane.showMessageDialog(this, "No timestamps found in this file.", "Go to Time",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        long ref = t.currentLineTime();
+        if (ref == logmaster.core.TimeFormat.NONE) {
+            ref = t.timeIndex().samples().minTime();
+        }
+        String s = (String) JOptionPane.showInputDialog(this,
+                "Time (10:05, 10:05:30.250 or 2026-10-21 10:05):", "Go to Time",
+                JOptionPane.QUESTION_MESSAGE, null, null, TimelineBar.formatFull(ref).substring(11, 19));
+        if (s == null) {
+            return;
+        }
+        long time = TimelineBar.parseUserTime(s.trim(), ref);
+        if (time == logmaster.core.TimeFormat.NONE) {
+            Toolkit.getDefaultToolkit().beep();
+            return;
+        }
+        t.goToTime(time);
+    }
+
     private void changeFont(int delta) {
         fontSize = Math.max(8, Math.min(32, fontSize + delta));
         PREFS.putFloat("fontSize", fontSize);
@@ -607,6 +642,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         long cur = t.currentLine();
         String pos = cur >= 0 ? String.format("Ln %,d", cur + 1) : "";
+        long time = t.currentLineTime();
+        if (time != logmaster.core.TimeFormat.NONE) {
+            pos += "   " + TimelineBar.formatFull(time);
+        }
         if (t.isMatchingOnly()) {
             pos = "MATCHING ONLY   " + pos;
         }

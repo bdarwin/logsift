@@ -149,6 +149,7 @@ public final class LogView extends JPanel {
     private int dragDirection;
     private final Timer dragTimer = new Timer(40, e -> dragScroll());
     private BiConsumer<LogView, JPopupMenu> popupExtender;
+    private final List<Runnable> paintListeners = new ArrayList<>();
 
     // The layout of what is on screen: one entry per display row.
     private Line[] shownLines = new Line[0];
@@ -232,6 +233,20 @@ public final class LogView extends JPanel {
 
     OverviewBar overviewForTest() {
         return overview;
+    }
+
+    /** Runs after every repaint (for things that follow the scroll position). */
+    void addPaintListener(Runnable r) {
+        paintListeners.add(r);
+    }
+
+    /** First and last row on screen. */
+    int[] shownRows() {
+        ensureLayout();
+        if (shownCount == 0) {
+            return null;
+        }
+        return new int[] {shownLines[shownLine[0]].row, shownLines[shownLine[shownCount - 1]].row};
     }
 
     /** Lets the owner add items to the right-click menu. */
@@ -1310,6 +1325,7 @@ public final class LogView extends JPanel {
                 g.dispose();
             }
             overview.repaint(); // the view position marker follows scrolling
+            paintListeners.forEach(Runnable::run);
         }
 
         private void paintRows(Graphics2D g) {

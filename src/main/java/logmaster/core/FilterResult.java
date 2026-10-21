@@ -9,6 +9,9 @@ import java.util.Arrays;
  * matches plus any context lines around them). Each is stored either as a sorted list, or (for
  * formulas like {@code NOT C}) as the lines {@code [0, universe)} minus a sorted list, so
  * hiding a few lines never needs a list of all the others.
+ *
+ * <p>An optional window {@code [start, end)} (a time range) limits both sets: lines outside it
+ * are never shown, and "all except" means all lines of the window except the list.
  */
 public final class FilterResult {
 
@@ -20,15 +23,24 @@ public final class FilterResult {
     private final int version;
     private final boolean filtering;
     private final long universe;
+    private final long start;
+    private final long end;
     private final Lines shown;
     private final Lines matched;
     private final boolean complete;
 
     FilterResult(int version, boolean filtering, long universe, Lines shown, Lines matched,
                  boolean complete) {
+        this(version, filtering, universe, 0, Long.MAX_VALUE, shown, matched, complete);
+    }
+
+    FilterResult(int version, boolean filtering, long universe, long start, long end, Lines shown,
+                 Lines matched, boolean complete) {
         this.version = version;
         this.filtering = filtering;
         this.universe = universe;
+        this.start = start;
+        this.end = end;
         this.shown = shown;
         this.matched = matched;
         this.complete = complete;
@@ -70,7 +82,17 @@ public final class FilterResult {
     }
 
     private long count(Lines l) {
-        return l.comp ? universe - l.n : l.n;
+        return l.comp ? Math.max(0, Math.min(universe, end) - start) - l.n : l.n;
+    }
+
+    /** First line of the time window (0 without one). */
+    public long windowStart() {
+        return start;
+    }
+
+    /** End of the time window (exclusive), or Long.MAX_VALUE without one. */
+    public long windowEnd() {
+        return end;
     }
 
     /** Line number of the {@code row}-th shown line. */
@@ -79,29 +101,30 @@ public final class FilterResult {
         if (!l.comp) {
             return l.a[(int) row];
         }
-        // Lines excluded before the answer: the largest k with a[k-1] - (k-1) <= row.
+        // Lines excluded before the answer: the largest k with a[k-1] - start - (k-1) <= row.
         int lo = 0;
         int hi = l.n;
         while (lo < hi) {
             int mid = (lo + hi) >>> 1;
-            if (l.a[mid] - mid <= row) {
+            if (l.a[mid] - start - mid <= row) {
                 lo = mid + 1;
             } else {
                 hi = mid;
             }
         }
-        return row + lo;
+        return start + row + lo;
     }
 
     /** Row of the first shown line at or after {@code line}; {@link #count()} if none. */
     public long rowAtOrAfter(long line) {
-        if (line >= universe) {
+        line = Math.max(line, start);
+        if (line >= universe || line >= end) {
             return count();
         }
         Lines l = shown;
         int i = Arrays.binarySearch(l.a, 0, l.n, line);
         int before = i >= 0 ? i : -i - 1;
-        return l.comp ? line - before : before;
+        return l.comp ? line - start - before : before;
     }
 
     /** Whether {@code line} is shown (lines not yet checked count as shown). */
@@ -115,6 +138,9 @@ public final class FilterResult {
     }
 
     private boolean in(Lines l, long line) {
+        if (line < start || line >= end) {
+            return false;
+        }
         if (line >= universe) {
             return true;
         }

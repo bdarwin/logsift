@@ -39,6 +39,8 @@ public final class FilterEngine implements AutoCloseable {
     private SearchSession continuations; // guarded by this; null = every line is an entry
     private EntryFormat entryFormat;     // guarded by this
     private int context;                 // guarded by this
+    private long windowStart;            // guarded by this; a time range as lines
+    private long windowEnd = Long.MAX_VALUE;
     private int version;          // guarded by this
     private volatile FilterResult result;
     private volatile boolean closed;
@@ -150,6 +152,23 @@ public final class FilterEngine implements AutoCloseable {
         return entryFormat;
     }
 
+    /**
+     * Limits everything to lines {@code [from, to)} (a time range); {@code to} may be
+     * Long.MAX_VALUE for "up to the end, including new lines". (0, MAX) removes the limit.
+     */
+    public synchronized void setWindow(long from, long to) {
+        if (from != windowStart || to != windowEnd) {
+            windowStart = Math.max(0, from);
+            windowEnd = Math.max(windowStart, to);
+            version++;
+            schedule();
+        }
+    }
+
+    public synchronized boolean hasWindow() {
+        return windowStart > 0 || windowEnd != Long.MAX_VALUE;
+    }
+
     /** Shows {@code n} lines before and after each match (like grep -C). */
     public synchronized void setContext(int n) {
         if (n != context) {
@@ -234,16 +253,28 @@ public final class FilterEngine implements AutoCloseable {
         Map<Character, SearchSession> snap;
         SearchSession cont;
         int ctx;
+        long w0;
+        long w1;
         synchronized (this) {
             f = formula;
             ver = version;
             snap = new HashMap<>(sessions);
             cont = continuations;
             ctx = context;
+            w0 = windowStart;
+            w1 = windowEnd;
         }
         int gen = doc.generation();
+        boolean windowed = w0 > 0 || w1 != Long.MAX_VALUE;
         if (f == null) {
-            result = FilterResult.none(ver, doc.lineCount());
+            if (!windowed) {
+                result = FilterResult.none(ver, doc.lineCount());
+            } else {
+                // only a time range: every line of the window
+                long u = doc.lineCount();
+                result = new FilterResult(ver, true, u, w0, w1, FilterResult.Lines.NONE_EXCLUDED,
+                        FilterResult.Lines.NONE_EXCLUDED, !doc.isIndexing());
+            }
             fire();
             return;
         }
@@ -299,7 +330,11 @@ public final class FilterEngine implements AutoCloseable {
                     matched.comp());
         }
         Lines shown = ctx > 0 ? withContext(matched, ctx, universe) : matched;
-        result = new FilterResult(ver, true, universe, shown, matched, complete);
+        if (windowed) {
+            matched = window(matched, w0, w1);
+            shown = window(shown, w0, w1);
+        }
+        result = new FilterResult(ver, true, universe, w0, w1, shown, matched, complete);
         fire();
     }
 
@@ -340,6 +375,16 @@ public final class FilterEngine implements AutoCloseable {
             lastEnd = Math.max(lastEnd, end);
         }
         return new Lines(out.a, out.n, false);
+    }
+
+    /** The part of a set within lines [w0, w1). */
+    static Lines window(Lines x, long w0, long w1) {
+        int a = java.util.Arrays.binarySearch(x.a(), 0, x.n(), w0);
+        a = a >= 0 ? a : -a - 1;
+        int b = java.util.Arrays.binarySearch(x.a(), 0, x.n(), w1);
+        b = b >= 0 ? b : -b - 1;
+        return new Lines(java.util.Arrays.copyOfRange(x.a(), a, Math.max(a, b)), Math.max(0, b - a),
+                x.comp());
     }
 
     /** Adds {@code n} lines before and after every shown line (like grep -C). */

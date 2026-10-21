@@ -44,6 +44,7 @@ Make a test log:
 | Next / previous error | F8 / Shift+F8 |
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Go to line | Ctrl+L |
+| Go to time | Ctrl+Shift+L |
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
 | Show or hide the Filters panel | Ctrl+J |
 | Follow the end of the file (tail -f) | Ctrl+T, the Follow button, or End |
@@ -61,6 +62,15 @@ Make a test log:
 - Rotated logs count as the log they came from: `*.log` also finds `app.log.1`, `app.log.2026-10-21`, `app.log.2.gz`, and `.log` files inside any `.zip`.
 - All files are searched in parallel with the same fast search as Find All. Binary files are skipped. Results are grouped by file and appear while the search runs.
 - Double-click a line to open the file at that line, with Find All already run there. Files from `.gz` or `.zip` are unpacked to a temporary file first. Double-click a file name to fold it.
+
+## Timeline
+
+When a log has timestamps, a timeline above it shows how much was logged over time, with **errors in red and warnings in amber**, so incidents stand out at a glance. The box shows which part of the file you are looking at.
+
+- **Click** the timeline to jump to that time. **Edit → Go to Time…** (Ctrl+Shift+L) takes `10:05`, `10:05:30.250` or `2026-10-21 10:05`.
+- **Drag** across it to show only that time range. The range works with the filters: drag over an incident, add an ERROR filter, and you see just the errors of the incident. Click ✕ on the range to show all times again.
+- The status bar shows the time of the current line.
+- Recognized formats: `2026-10-21 10:02:13`, ISO with `T`, `2026/10/21`, `21-10-2026`, `21.10.2026`, `21-Oct-2026`, syslog `Oct 21 10:02:13`, Apache `[21/Oct/2026:10:02:13 +0000]`, timestamps inside JSON lines, time only, and epoch seconds or milliseconds. Times are shown as written in the log (time zones are not converted).
 
 ## Highlight bar
 

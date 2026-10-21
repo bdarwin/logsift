@@ -68,6 +68,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private boolean matchingOnly;
     private long pendingLine = -1; // line to show once indexing reaches it
     private logmaster.core.EntryFormat entryFormat; // detected from the file; null = none
+    private logmaster.core.TimeFormat timeFormat;   // detected from the file; null = none
+    private logmaster.core.TimeIndex timeIndex;
+    private final TimelineBar timeline;
+    private long[] timeRange;                       // selected {from, to} times, or null
+    private boolean timelineWanted = true;
     private int detectedGeneration = -1;
     private long indexMillis = -1;
     private long searchMillis = -1;
@@ -83,9 +88,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         searchUpdate = coalesced(this::onSearchChanged);
         filterUpdate = coalesced(this::onFilterResult);
         engine.addListener(e -> filterUpdate.run());
+        timeline = new TimelineBar(timelineModel());
+        timeline.setVisible(false);
         marksUpdate = coalesced(() -> {
             main.overviewChanged();
             results.overviewChanged();
+            timeline.refresh();
         });
         errorLines = levelSearch("ERROR", "FATAL", "SEVERE", "CRITICAL");
         warningLines = levelSearch("WARN", "WARNING");
@@ -199,7 +207,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.addTab("Find results", resultsPanel);
         bottom.setPreferredSize(new Dimension(400, 210));
         bottom.putClientProperty("JTabbedPane.tabHeight", 26);
-        split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, main, bottom);
+        JPanel top = new JPanel(new BorderLayout());
+        top.add(timeline, BorderLayout.NORTH);
+        top.add(main, BorderLayout.CENTER);
+        main.addPaintListener(timeline::repaint);
+        split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, top, bottom);
         split.setResizeWeight(1.0); // the log gets the extra space
         split.setContinuousLayout(true);
         split.setBorder(null);
@@ -249,9 +261,179 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         detectedGeneration = gen;
         String[] sample = new String[(int) Math.min(n, 2000)];
         doc.readLines(0, sample.length, sample);
-        entryFormat = logmaster.core.EntryFormat.detect(java.util.Arrays.asList(sample));
+        List<String> lines = java.util.Arrays.asList(sample);
+        entryFormat = logmaster.core.EntryFormat.detect(lines);
         filterPanel.setEntryFormatInfo(entryFormat == null ? null : entryFormat.name());
         applyEntryOptions();
+
+        // timestamps: the timeline, time ranges, Go to Time
+        if (timeIndex != null) {
+            timeIndex.close();
+            timeIndex = null;
+        }
+        int year = java.time.Year.now().getValue();
+        try {
+            year = java.time.Instant.ofEpochMilli(java.nio.file.Files.getLastModifiedTime(doc.path())
+                    .toMillis()).atZone(java.time.ZoneId.systemDefault()).getYear();
+        } catch (IOException e) {
+            // keep this year
+        }
+        timeFormat = logmaster.core.TimeFormat.detect(lines, year);
+        if (timeFormat != null) {
+            timeIndex = new logmaster.core.TimeIndex(doc, timeFormat);
+            timeIndex.addListener(ti -> marksUpdate.run());
+            timeIndex.start();
+        }
+        timeline.setVisible(timeFormat != null && timelineWanted);
+        timeline.refresh();
+        revalidate();
+    }
+
+    // ---------------------------------------------------------------- time
+
+    logmaster.core.TimeIndex timeIndex() {
+        return timeIndex;
+    }
+
+    TimelineBar timeline() {
+        return timeline;
+    }
+
+    void setTimelineVisible(boolean on) {
+        timelineWanted = on;
+        timeline.setVisible(on && timeFormat != null);
+        revalidate();
+    }
+
+    /** First line with a timestamp at or after {@code t} (logs are mostly in time order). */
+    long lineAtTime(long t) {
+        logmaster.core.TimeIndex ti = timeIndex;
+        if (ti == null) {
+            return 0;
+        }
+        logmaster.core.TimeIndex.Samples s = ti.samples();
+        long from = s.lineBefore(t);
+        long n = doc.lineCount();
+        String[] buf = new String[256];
+        for (long first = from; first < n && first < from + 4 * logmaster.core.LineIndex.SAMPLE + 512;
+             first += buf.length) {
+            int k = (int) Math.min(buf.length, n - first);
+            doc.readLines(first, k, buf);
+            for (int i = 0; i < k; i++) {
+                if (buf[i] != null) {
+                    long lt = timeFormat.parse(buf[i]);
+                    if (lt != logmaster.core.TimeFormat.NONE && lt >= t) {
+                        return first + i;
+                    }
+                }
+            }
+        }
+        // past the last timestamp
+        int last = s.sampleAtOrBefore(Long.MAX_VALUE);
+        return last >= 0 && s.times()[last] < t ? n : from;
+    }
+
+    /** Time of the current line (or the nearest line above with a timestamp), or NONE. */
+    long currentLineTime() {
+        long line = currentLine();
+        if (timeFormat == null || line < 0) {
+            return logmaster.core.TimeFormat.NONE;
+        }
+        for (long l = line; l >= 0 && l > line - 200; l--) {
+            String text = doc.line(l);
+            long t = text == null ? logmaster.core.TimeFormat.NONE : timeFormat.parse(text);
+            if (t != logmaster.core.TimeFormat.NONE) {
+                return t;
+            }
+        }
+        return logmaster.core.TimeFormat.NONE;
+    }
+
+    void goToTime(long t) {
+        long line = lineAtTime(t);
+        showLine(Math.min(line, Math.max(0, doc.lineCount() - 1)));
+        main.focusView();
+    }
+
+    /** Shows only lines logged between the two times (inclusive), as a filter. */
+    void selectTimeRange(long from, long to) {
+        logmaster.core.TimeIndex.Samples s = timeIndex == null ? null : timeIndex.samples();
+        if (s == null || s.n() == 0) {
+            return;
+        }
+        long first = lineAtTime(from);
+        long end = to >= s.maxTime() ? Long.MAX_VALUE : lineAtTime(to + 1);
+        timeRange = new long[] {from, to};
+        engine.setWindow(first, end);
+        setMatchingOnly(true);
+        timeline.repaint();
+        updateFilterStatus();
+    }
+
+    void clearTimeRange() {
+        timeRange = null;
+        engine.setWindow(0, Long.MAX_VALUE);
+        timeline.repaint();
+        updateFilterStatus();
+    }
+
+    long[] timeRange() {
+        return timeRange;
+    }
+
+    private TimelineBar.Model timelineModel() {
+        return new TimelineBar.Model() {
+            @Override
+            public logmaster.core.TimeIndex.Samples samples() {
+                logmaster.core.TimeIndex ti = timeIndex;
+                return ti == null ? null : ti.samples();
+            }
+
+            @Override
+            public long lineCount() {
+                return doc.lineCount();
+            }
+
+            @Override
+            public FilterResult errors() {
+                return errorLines.result();
+            }
+
+            @Override
+            public FilterResult warnings() {
+                return warningLines.result();
+            }
+
+            @Override
+            public long[] viewLines() {
+                int[] rows = main.shownRows();
+                if (rows == null) {
+                    return null;
+                }
+                LogView.RowSource src = main.source();
+                return new long[] {src.lineNumber(rows[0]), src.lineNumber(rows[1])};
+            }
+
+            @Override
+            public long[] timeRange() {
+                return timeRange;
+            }
+
+            @Override
+            public void goToTime(long time) {
+                LogTab.this.goToTime(time);
+            }
+
+            @Override
+            public void selectTimeRange(long from, long to) {
+                LogTab.this.selectTimeRange(from, to);
+            }
+
+            @Override
+            public void clearTimeRange() {
+                LogTab.this.clearTimeRange();
+            }
+        };
     }
 
     private void applyEntryOptions() {
@@ -611,6 +793,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             if (running) {
                 text += String.format("   filtering %d%%", (int) (engine.progress() * 100));
             }
+            if (timeRange != null) {
+                text += "   in the selected time range";
+            }
         }
         filterPanel.setResultText(text);
         for (FilterDef d : filterPanel.filters()) {
@@ -843,6 +1028,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             s.close();
         }
         engine.close();
+        if (timeIndex != null) {
+            timeIndex.close();
+        }
         errorLines.close();
         warningLines.close();
         doc.close();

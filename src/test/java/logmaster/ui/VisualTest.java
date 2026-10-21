@@ -859,6 +859,155 @@ class VisualTest {
         });
     }
 
+    @Test
+    @Order(15)
+    void timeline() throws Exception {
+        onEdt(() -> {
+            frame.openFile(big);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> tab.timeIndex() != null, 30_000, "timestamps detected");
+        assertTrue(tab.timeIndex().awaitIdle(300_000));
+        assertTrue(tab.errorLines().awaitIdle(300_000));
+        long lines = Long.parseLong(stats.getProperty("lines"));
+        waitFor(() -> {
+            TimelineBar.Histogram h = tab.timeline().histogramForTest();
+            return h != null && java.util.Arrays.stream(h.volume()).sum()
+                    == lines - tab.timeIndex().samples().lines()[0];
+        }, 30_000, "timeline counts every line");
+        TimelineBar.Histogram h = tab.timeline().histogramForTest();
+        assertEquals(tab.errorLines().result().count(), java.util.Arrays.stream(h.errors()).sum(),
+                "every error line is on the timeline");
+
+        // Go to Time lands on the first line at or after that time
+        logmaster.core.TimeFormat fmt = tab.timeIndex().format();
+        List<Long> times = new ArrayList<>(); // time of each line (or of its entry)
+        try (var rd = Files.newBufferedReader(big, StandardCharsets.UTF_8)) {
+            String line;
+            long last = Long.MIN_VALUE;
+            while ((line = rd.readLine()) != null) {
+                long t = fmt.parse(line);
+                if (t != logmaster.core.TimeFormat.NONE) {
+                    last = t;
+                }
+                times.add(t == logmaster.core.TimeFormat.NONE ? Long.MIN_VALUE : t);
+            }
+        }
+        long target = timeNear(times, times.size() / 2);
+        long firstAt = -1;
+        for (int i = 0; i < times.size() && firstAt < 0; i++) {
+            if (times.get(i) >= target) {
+                firstAt = i;
+            }
+        }
+        long landed = onEdt(() -> {
+            tab.setMatchingOnly(false);
+            tab.goToTime(target);
+            return tab.currentLine();
+        });
+        assertEquals(firstAt, landed, "Go to Time");
+
+        // a time range shows exactly the lines from the first at 'from' to the last at 'to'
+        long from = timeNear(times, times.size() / 3);
+        long to = timeNear(times, times.size() / 3 + 20_000);
+        long t0 = System.nanoTime();
+        onEdt(() -> {
+            for (FilterDef d : tab.filterPanel().filters()) {
+                d.enabled = false; // earlier tests' filters: only the time range here
+            }
+            tab.filtersChanged();
+            tab.selectTimeRange(from, to);
+            return null;
+        });
+        FilterResult r = waitForFilters(tab, t0);
+        long a = -1;
+        long b = times.size();
+        for (int i = 0; i < times.size(); i++) {
+            if (a < 0 && times.get(i) >= from) {
+                a = i;
+            }
+            if (times.get(i) > to && times.get(i) != Long.MIN_VALUE) {
+                b = i;
+                if (a >= 0) {
+                    break;
+                }
+            }
+        }
+        assertEquals(b - a, r.count(), "lines in the time range");
+        assertEquals(a, r.lineAt(0), "first line in the range");
+        assertTrue(onEdt(tab::isMatchingOnly), "a time range shows only its lines");
+        onEdt(() -> {
+            tab.clearTimeRange();
+            tab.setMatchingOnly(false);
+            return null;
+        });
+
+        // a realistic picture: an hour of traffic with an incident at 10:20
+        Path incident = dir.resolve("incident.log");
+        Random rnd = new Random(15);
+        try (var w = Files.newBufferedWriter(incident, StandardCharsets.UTF_8)) {
+            long start = TimelineBar.parseUserTime("2026-10-21 10:00:00", 0);
+            long t = start;
+            int n = 0;
+            while (t < start + 3_600_000L) {
+                long minute = (t - start) / 60_000;
+                boolean burst = minute >= 20 && minute < 25;
+                t += burst ? 5 + rnd.nextInt(20) : 40 + rnd.nextInt(80);
+                String level = burst && rnd.nextInt(6) == 0 ? "ERROR"
+                        : rnd.nextInt(400) == 0 ? "ERROR" : rnd.nextInt(60) == 0 ? "WARN" : "INFO";
+                w.write(TimelineBar.formatFull(t) + " " + level + " [worker-" + rnd.nextInt(8)
+                        + "] c.a.Service - " + (level.equals("ERROR")
+                        ? "Database connection lost after " + rnd.nextInt(30000) + " ms"
+                        : "request handled in " + rnd.nextInt(300) + " ms") + "\n");
+                if (level.equals("ERROR") && rnd.nextBoolean()) {
+                    w.write("java.sql.SQLTransientConnectionException: Connection is not available\n");
+                    w.write("\tat com.acme.db.Pool.get(Pool.java:42)\n");
+                }
+                n++;
+            }
+        }
+        onEdt(() -> {
+            frame.openFile(incident);
+            return null;
+        });
+        LogTab it = onEdt(frame::currentTab);
+        waitFor(() -> it.timeIndex() != null, 30_000, "timestamps detected");
+        assertTrue(it.timeIndex().awaitIdle(60_000));
+        assertTrue(it.errorLines().awaitIdle(60_000));
+        waitFor(() -> it.timeline().histogramForTest() != null, 30_000, "timeline");
+        onEdt(() -> {
+            it.timeline().refresh();
+            it.goToTime(TimelineBar.parseUserTime("2026-10-21 10:21:00", 0));
+            return null;
+        });
+        settle();
+        settle();
+        shot("19-timeline");
+        onEdt(() -> {
+            it.selectTimeRange(TimelineBar.parseUserTime("2026-10-21 10:19:30", 0),
+                    TimelineBar.parseUserTime("2026-10-21 10:25:30", 0));
+            return null;
+        });
+        waitForFilters(it, System.nanoTime());
+        onEdt(() -> {
+            it.filterPanel().addFilter("ERROR", FilterDef.Action.SHOW).matchCase = true;
+            it.filtersChanged();
+            return null;
+        });
+        waitForFilters(it, System.nanoTime());
+        settle();
+        shot("20-time-range-and-filter");
+    }
+
+    /** The time of the first line at or after {@code i} that has a timestamp. */
+    private static long timeNear(List<Long> times, int i) {
+        while (times.get(i) == Long.MIN_VALUE) {
+            i++;
+        }
+        return times.get(i);
+    }
+
     private static long naiveCount(InputStream in) throws IOException {
         long n = 0;
         try (var r = new java.io.BufferedReader(new java.io.InputStreamReader(in, StandardCharsets.UTF_8))) {
