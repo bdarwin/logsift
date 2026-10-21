@@ -62,11 +62,26 @@ public final class MessageStats {
                                  LongPredicate include, BooleanSupplier cancelled,
                                  java.util.function.DoubleConsumer progress) {
         long start = System.nanoTime();
+        Raw raw = countRaw(doc, entries, from, to, include, cancelled, progress);
+        if (raw.cancelled) {
+            return new Result(List.of(), raw.lines, 0, true);
+        }
+        List<Template> templates = mergeSimilar(raw.stats, doc.charset());
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        return new Result(templates, raw.lines, ms, raw.truncated);
+    }
+
+    /** Exact templates (bytes kept as Latin-1 chars) with counts, before merging similar ones. */
+    record Raw(Map<String, Stat> stats, long lines, boolean truncated, boolean cancelled) {}
+
+    static Raw countRaw(LogDocument doc, EntryFormat entries, long from, long to,
+                        LongPredicate include, BooleanSupplier cancelled,
+                        java.util.function.DoubleConsumer progress) {
         LineIndex.Snapshot s = doc.snapshot();
         to = Math.min(to, s.completeLineCount() > 0 ? s.lineCount : 0);
         from = Math.max(0, from);
         if (to <= from) {
-            return new Result(List.of(), 0, 0, false);
+            return new Raw(new HashMap<>(), 0, false, false);
         }
         int maxInFlight = Math.max(4, Runtime.getRuntime().availableProcessors() * 2);
         Map<String, Stat> total = new HashMap<>();
@@ -94,7 +109,7 @@ public final class MessageStats {
                 }
                 if (cancelled.getAsBoolean()) {
                     inFlight.forEach(f -> f.cancel(false));
-                    return new Result(List.of(), counted.get(), 0, true);
+                    return new Raw(total, counted.get(), true, true);
                 }
                 Local l = inFlight.removeFirst().get();
                 counted.addAndGet(l.lines);
@@ -117,7 +132,7 @@ public final class MessageStats {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new Result(List.of(), counted.get(), 0, true);
+            return new Raw(total, counted.get(), true, true);
         } catch (ExecutionException e) {
             Throwable c = e.getCause();
             if (c instanceof RuntimeException re) {
@@ -125,9 +140,7 @@ public final class MessageStats {
             }
             throw new IllegalStateException(c);
         }
-        List<Template> templates = mergeSimilar(total, doc.charset());
-        long ms = (System.nanoTime() - start) / 1_000_000;
-        return new Result(templates, counted.get(), ms, truncated);
+        return new Raw(total, counted.get(), truncated, false);
     }
 
     /** Counts for one template. */
@@ -341,7 +354,7 @@ public final class MessageStats {
     }
 
     /** Same length, one differing token, which is a plain word (and the templates are long enough). */
-    private static boolean differsInOneWord(String[] a, String[] b) {
+    static boolean differsInOneWord(String[] a, String[] b) {
         if (a.length != b.length || a.length < 4) {
             return false;
         }

@@ -47,6 +47,7 @@ Make a test log:
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Merge logs by time | Ctrl+Shift+M |
 | Open a remote log (SFTP) | Ctrl+Shift+O |
+| Compare with another log | Ctrl+Shift+D |
 | Columns view | Ctrl+Shift+K |
 | Export lines shown by filters | Ctrl+Shift+E |
 | Go to line | Ctrl+L |
@@ -122,6 +123,10 @@ The **Messages** tab (next to Filters) groups the log's lines into kinds of mess
 - **Right-click → Hide these lines** to remove noisy messages, or **Show only these lines**. Select several messages to hide them all at once.
 - **Lines shown by filters** counts only the lines your filters and time range show.
 - It is fast: 1.56 million entries are grouped in about 0.25 s.
+
+## Compare two logs
+
+**File → Compare With…** (Ctrl+Shift+D) compares the current log with a baseline, for example the log of a run that went well. Comparing line by line is useless for logs (every timestamp differs), so LogMaster compares **kinds of messages** (as in the Messages tab): what is **new** in this log, what is **gone**, and what happens much **more** or **less** often, with counts scaled to the logs' lengths. New errors come first. Double-click a row to find all its lines in the log that has them.
 
 ## Highlight bar
 

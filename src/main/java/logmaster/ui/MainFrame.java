@@ -26,6 +26,7 @@ import javax.swing.Action;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -49,7 +50,7 @@ import logmaster.core.SearchQuery;
 import logmaster.core.SearchSession;
 
 /** The application window. */
-public final class MainFrame extends JFrame implements LogTab.Host, FolderSearchTab.Host {
+public final class MainFrame extends JFrame implements LogTab.Host, FolderSearchTab.Host, CompareTab.Host {
     private static final Preferences PREFS = AppState.prefs();
     private static final int MENU = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
 
@@ -326,6 +327,48 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             return false;
         }
         return yes[0];
+    }
+
+    private void compareDialog() {
+        LogTab b = currentTab();
+        List<LogTab> others = new ArrayList<>(allTabs());
+        others.remove(b);
+        if (b == null || others.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Open two logs first: the one to look at, and a baseline"
+                    + " (for example a run that went well).", "Compare", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        JComboBox<String> pick = new JComboBox<>(others.stream().map(LogTab::title).toArray(String[]::new));
+        JPanel p = new JPanel(new BorderLayout(0, 8));
+        p.add(new JLabel("<html>Compare <b>" + b.title() + "</b> with which baseline?<br>"
+                + "(for example the log of a run that went well)</html>"), BorderLayout.NORTH);
+        p.add(pick, BorderLayout.CENTER);
+        if (JOptionPane.showConfirmDialog(this, p, "Compare Logs", JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION) {
+            compare(others.get(pick.getSelectedIndex()), b);
+        }
+    }
+
+    /** Opens a tab comparing log {@code b} with the baseline {@code a}. */
+    public CompareTab compare(LogTab a, LogTab b) {
+        CompareTab tab = new CompareTab(a, b, this);
+        tabs.addTab(tab.title(), tab);
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        updateEmptyState();
+        return tab;
+    }
+
+    @Override
+    public void showDiff(CompareTab ct, logmaster.core.LogCompare.Diff d) {
+        boolean inB = d.countB() > 0;
+        LogTab t = inB ? ct.b : ct.a;
+        if (tabs.indexOfComponent(t) < 0) {
+            return; // that log was closed
+        }
+        tabs.setSelectedComponent(t);
+        findAll(new SearchQuery(d.regex(), true, true, false));
+        t.showLine(inB ? d.firstB() : d.firstA());
+        t.mainView().focusView();
     }
 
     /** Merges logs by timestamp into a new tab (in the background, with progress). */
@@ -691,6 +734,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 e -> openRemoteDialog()));
         file.add(item("Merge Files by Time…", KeyStroke.getKeyStroke(KeyEvent.VK_M, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> mergeDialog()));
+        file.add(item("Compare With…", KeyStroke.getKeyStroke(KeyEvent.VK_D, MENU | InputEvent.SHIFT_DOWN_MASK),
+                e -> compareDialog()));
         file.add(item("Search in Folder…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> openFolderSearch(null)));
         file.add(item("Close Tab", KeyStroke.getKeyStroke(KeyEvent.VK_W, MENU), e -> closeTab(tabs.getSelectedIndex())));
@@ -852,6 +897,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             t.close();
         } else if (c instanceof FolderSearchTab f) {
             f.close();
+        } else if (c instanceof CompareTab ct) {
+            ct.close();
         }
         updateEmptyState();
     }
@@ -1086,6 +1133,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     private void refreshStatus() {
         LogTab t = currentTab();
+        if (tabs.getSelectedComponent() instanceof CompareTab ct) {
+            setTitle(ct.title() + " — LogMaster");
+            status.setText(" ");
+            statusRight.setText(memory());
+            progress.setVisible(false);
+            return;
+        }
         if (tabs.getSelectedComponent() instanceof FolderSearchTab f) {
             setTitle(f.title() + " — LogMaster");
             status.setText(f.statusText());

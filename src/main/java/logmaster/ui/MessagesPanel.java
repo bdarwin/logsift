@@ -338,7 +338,7 @@ final class MessagesPanel extends JPanel {
         }
     }
 
-    private static final class LevelRenderer extends DefaultTableCellRenderer {
+    static final class LevelRenderer extends DefaultTableCellRenderer {
         @Override
         public Component getTableCellRendererComponent(JTable t, Object v, boolean sel, boolean focus,
                                                        int row, int col) {

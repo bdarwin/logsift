@@ -1296,6 +1296,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.setSelectedComponent(filterPanel);
     }
 
+    logmaster.core.EntryFormat entryFormat() {
+        return entryFormat;
+    }
+
     logmaster.core.LogFormat logFormat() {
         return logFormat;
     }

@@ -1667,6 +1667,72 @@ class VisualTest {
         }
     }
 
+    @Test
+    @Order(26)
+    void compareTwoLogs() throws Exception {
+        Path good = dir.resolve("run-good.log");
+        Path bad = dir.resolve("run-bad.log");
+        for (int run = 0; run < 2; run++) {
+            boolean isBad = run == 1;
+            Random rnd = new Random(26 + run);
+            StringBuilder sb = new StringBuilder();
+            int n = isBad ? 60_000 : 40_000;
+            for (int i = 0; i < n; i++) {
+                sb.append(String.format("2026-10-21 10:%02d:%02d.%03d ", i / 3600 % 60, i / 60 % 60, i % 1000));
+                int r = rnd.nextInt(100);
+                if (isBad && r < 2) {
+                    sb.append("ERROR [worker-").append(rnd.nextInt(8)).append("] c.a.Db - Connection refused to db-")
+                            .append(rnd.nextInt(3)).append(":5432\n");
+                } else if (r < (isBad ? 12 : 3)) {
+                    sb.append("WARN [worker-").append(rnd.nextInt(8)).append("] c.a.Http - Retrying request (attempt ")
+                            .append(1 + rnd.nextInt(5)).append("/5)\n");
+                } else if (!isBad && r < 5) {
+                    sb.append("INFO [main] c.a.Cache - Cache warmed with ").append(rnd.nextInt(9999)).append(" entries\n");
+                } else {
+                    sb.append("INFO [worker-").append(rnd.nextInt(8)).append("] c.a.Api - request handled in ")
+                            .append(rnd.nextInt(300)).append(" ms\n");
+                }
+            }
+            Files.writeString(isBad ? bad : good, sb);
+        }
+        onEdt(() -> {
+            frame.openFile(good);
+            frame.openFile(bad);
+            return null;
+        });
+        LogTab badTab = onEdt(frame::currentTab);
+        waitFor(() -> !badTab.document().isIndexing(), 30_000, "indexed");
+        CompareTab ct = onEdt(() -> {
+            LogTab goodTab = null;
+            for (int i = 0; i < 200; i++) {
+                frame.openFile(good);
+                goodTab = frame.currentTab();
+                break;
+            }
+            LogTab g = goodTab;
+            return frame.compare(g, badTab);
+        });
+        waitFor(() -> ct.result() != null, 60_000, "compared");
+        settle();
+        List<logmaster.core.LogCompare.Diff> shown = onEdt(ct::shownForTest);
+        assertEquals(logmaster.core.LogCompare.Kind.NEW, shown.get(0).kind());
+        assertTrue(shown.get(0).text().contains("Connection refused to"), shown.get(0).text());
+        assertTrue(shown.stream().anyMatch(d -> d.kind() == logmaster.core.LogCompare.Kind.GONE
+                && d.text().contains("Cache warmed")), "gone message listed");
+        assertTrue(shown.stream().anyMatch(d -> d.kind() == logmaster.core.LogCompare.Kind.MORE
+                && d.text().contains("Retrying request")), "more frequent warning listed");
+        shot("33-compare-logs");
+        // double-click: the bad log, at the first new error, with Find All
+        var first = shown.get(0);
+        onEdt(() -> {
+            frame.showDiff(ct, first);
+            return null;
+        });
+        assertEquals(badTab, onEdt(frame::currentTab));
+        assertEquals(first.firstB(), (long) onEdt(badTab::currentLine));
+        assertEquals(first.countB(), waitForSearch(badTab).hits().size(), "Find All finds all of them");
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {
