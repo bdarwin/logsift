@@ -58,6 +58,18 @@ final class Theme {
         return pick(new Color(0xB4B8BE), new Color(0x55595F));
     }
 
+    static Color errorMark() {
+        return new Color(0xE5484D);
+    }
+
+    static Color warningMark() {
+        return new Color(0xF5A524);
+    }
+
+    static Color findMark() {
+        return pick(new Color(0xC99700), new Color(0xFFD54F));
+    }
+
     static Color currentLine() {
         return pick(new Color(0xEEF4FD), new Color(0x262B33));
     }

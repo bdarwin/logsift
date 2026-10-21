@@ -279,6 +279,8 @@ public final class MainFrame extends JFrame implements LogTab.Host {
             edit.add(item("Find Next (⌘G)", KeyStroke.getKeyStroke(KeyEvent.VK_G, MENU), e -> findNext(true)));
             edit.add(item("Find Previous (⇧⌘G)", KeyStroke.getKeyStroke(KeyEvent.VK_G, MENU | InputEvent.SHIFT_DOWN_MASK), e -> findNext(false)));
         }
+        edit.add(item("Next Error", KeyStroke.getKeyStroke(KeyEvent.VK_F8, 0), e -> nextError(true)));
+        edit.add(item("Previous Error", KeyStroke.getKeyStroke(KeyEvent.VK_F8, InputEvent.SHIFT_DOWN_MASK), e -> nextError(false)));
         edit.add(item("Close Results", KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, InputEvent.SHIFT_DOWN_MASK), e -> {
             LogTab t = currentTab();
             if (t != null) {
@@ -382,6 +384,13 @@ public final class MainFrame extends JFrame implements LogTab.Host {
             findAllFromToolbar();
         }
         if (!t.findNext(forward)) {
+            Toolkit.getDefaultToolkit().beep();
+        }
+    }
+
+    private void nextError(boolean forward) {
+        LogTab t = currentTab();
+        if (t != null && !t.nextError(forward)) {
             Toolkit.getDefaultToolkit().beep();
         }
     }

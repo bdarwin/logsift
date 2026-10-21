@@ -27,21 +27,21 @@ final class FilterDef {
     }
 
     /** Line background colors for light and dark mode. */
-    record Swatch(String name, Color light, Color dark) {
+    record Swatch(String name, Color light, Color dark, Color mark) {
         Color color() {
             return Theme.isDark() ? dark : light;
         }
     }
 
     static final List<Swatch> SWATCHES = List.of(
-            new Swatch("Yellow", new Color(0xFFF1A8), new Color(0x4D4416)),
-            new Swatch("Green", new Color(0xD3F2CF), new Color(0x1F4026)),
-            new Swatch("Blue", new Color(0xD3E5FF), new Color(0x1C3457)),
-            new Swatch("Purple", new Color(0xE8DAFB), new Color(0x3B2A57)),
-            new Swatch("Orange", new Color(0xFFDDBC), new Color(0x52341E)),
-            new Swatch("Pink", new Color(0xFBD9E9), new Color(0x52263B)),
-            new Swatch("Teal", new Color(0xCBF1EC), new Color(0x1A4542)),
-            new Swatch("Red", new Color(0xFAD0D0), new Color(0x552326)));
+            new Swatch("Yellow", new Color(0xFFF1A8), new Color(0x4D4416), new Color(0xD4A800)),
+            new Swatch("Green", new Color(0xD3F2CF), new Color(0x1F4026), new Color(0x2FA84F)),
+            new Swatch("Blue", new Color(0xD3E5FF), new Color(0x1C3457), new Color(0x3B82F6)),
+            new Swatch("Purple", new Color(0xE8DAFB), new Color(0x3B2A57), new Color(0x8B5CF6)),
+            new Swatch("Orange", new Color(0xFFDDBC), new Color(0x52341E), new Color(0xF97316)),
+            new Swatch("Pink", new Color(0xFBD9E9), new Color(0x52263B), new Color(0xEC4899)),
+            new Swatch("Teal", new Color(0xCBF1EC), new Color(0x1A4542), new Color(0x14B8A6)),
+            new Swatch("Red", new Color(0xFAD0D0), new Color(0x552326), new Color(0xDC2626)));
 
     final char id;
     String text = "";

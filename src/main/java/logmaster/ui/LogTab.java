@@ -52,6 +52,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final JSplitPane split;
     private final int dividerSize;
     private final FilterEngine engine;
+    private final FilterEngine errorLines;   // for the highlight bar and F8
+    private final FilterEngine warningLines;
+    private final OverviewBar.Marks errorMarks;
+    private final OverviewBar.Marks warningMarks;
+    private final Runnable marksUpdate;
     private final LogView.RowSource allLines;
     private final LogView.RowSource matchingLines;
     private final Runnable docUpdate;
@@ -75,6 +80,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         searchUpdate = coalesced(this::onSearchChanged);
         filterUpdate = coalesced(this::onFilterResult);
         engine.addListener(e -> filterUpdate.run());
+        marksUpdate = coalesced(() -> {
+            main.overviewChanged();
+            results.overviewChanged();
+        });
+        errorLines = levelSearch("ERROR", "FATAL", "SEVERE", "CRITICAL");
+        warningLines = levelSearch("WARN", "WARNING");
+        errorMarks = OverviewBar.of(errorLines::result);
+        warningMarks = OverviewBar.of(warningLines::result);
 
         allLines = new LogView.RowSource() {
             @Override
@@ -158,6 +171,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
         });
         main.setPopupExtender(this::extendPopup);
+        main.setOverview(overviewModel());
         results.setPopupExtender(this::extendPopup);
 
         resultsHeader.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
@@ -203,6 +217,93 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         updateFilterStatus();
     }
 
+    /** Lines containing any of these words (whole word, exact case), kept up to date. */
+    private FilterEngine levelSearch(String... words) {
+        FilterEngine e = new FilterEngine(doc);
+        List<FilterEngine.Spec> specs = new ArrayList<>();
+        List<Character> ids = new ArrayList<>();
+        for (int i = 0; i < words.length; i++) {
+            char id = (char) ('A' + i);
+            specs.add(new FilterEngine.Spec(id, new SearchQuery(words[i], true, false, true)));
+            ids.add(id);
+        }
+        e.configure(specs, Formula.auto(ids, List.of()));
+        e.addListener(x -> marksUpdate.run());
+        return e;
+    }
+
+    private OverviewBar.Model overviewModel() {
+        return new OverviewBar.Model() {
+            @Override
+            public List<List<OverviewBar.MarkSet>> lanes() {
+                List<OverviewBar.MarkSet> levels = List.of(
+                        new OverviewBar.MarkSet("Error", Theme.errorMark(), errorMarks),
+                        new OverviewBar.MarkSet("Warning", Theme.warningMark(), warningMarks));
+                List<OverviewBar.MarkSet> other = new ArrayList<>();
+                SearchSession s = search;
+                if (s != null) {
+                    other.add(new OverviewBar.MarkSet("Find “" + s.query().text() + "”",
+                            Theme.findMark(), OverviewBar.of(s.hits())));
+                }
+                for (FilterDef d : filterPanel.filters()) {
+                    SearchSession fs = d.isActive() && d.color() != null ? engine.session(d.id) : null;
+                    if (fs != null) {
+                        other.add(new OverviewBar.MarkSet("Filter " + d.id + " “" + d.text + "”",
+                                d.color().mark(), OverviewBar.of(fs.hits())));
+                    }
+                }
+                return List.of(levels, other);
+            }
+
+            @Override
+            public long lineOfRow(long row) {
+                return matchingOnly ? filterResult.lineAt(row) : row;
+            }
+
+            @Override
+            public long lineLimit() {
+                return doc.lineCount();
+            }
+
+            @Override
+            public boolean visible(long line) {
+                return !matchingOnly || filterResult.contains(line);
+            }
+
+            @Override
+            public String lineText(long line) {
+                return doc.line(line);
+            }
+
+            @Override
+            public void goToLine(long line) {
+                showLine(line);
+            }
+        };
+    }
+
+    /** Jumps to the next (or previous) error line, wrapping around. Returns false if none. */
+    boolean nextError(boolean forward) {
+        long cur = currentLine();
+        long line;
+        if (forward) {
+            line = errorMarks.firstAtOrAfter(cur + 1);
+            if (line < 0) {
+                line = errorMarks.firstAtOrAfter(0);
+            }
+        } else {
+            line = errorMarks.lastBefore(cur < 0 ? Long.MAX_VALUE : cur);
+            if (line < 0) {
+                line = errorMarks.lastBefore(Long.MAX_VALUE);
+            }
+        }
+        if (line < 0) {
+            return false;
+        }
+        showLine(line);
+        return true;
+    }
+
     /** Runs {@code r} on the EDT, at most once per pending request. */
     private static Runnable coalesced(Runnable r) {
         AtomicBoolean pending = new AtomicBoolean();
@@ -236,6 +337,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return engine;
     }
 
+    FilterEngine errorLines() {
+        return errorLines;
+    }
+
     SearchSession search() {
         return search;
     }
@@ -264,6 +369,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     private void onSearchChanged() {
         results.rowsChanged();
+        main.overviewChanged();
         updateResultsHeader();
         host.tabStatusChanged(this);
     }
@@ -429,6 +535,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             goNear(keep);
         }
         updateFilterStatus();
+        main.overviewChanged();
         host.tabStatusChanged(this);
     }
 
@@ -675,6 +782,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             s.close();
         }
         engine.close();
+        errorLines.close();
+        warningLines.close();
         doc.close();
     }
 }

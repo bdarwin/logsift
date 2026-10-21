@@ -75,6 +75,7 @@ public final class LogView extends JPanel {
     private final Canvas canvas = new Canvas();
     private final JScrollBar vbar = new JScrollBar(JScrollBar.VERTICAL);
     private final JScrollBar hbar = new JScrollBar(JScrollBar.HORIZONTAL);
+    private final OverviewBar overview = new OverviewBar(this);
     private final List<Listener> listeners = new ArrayList<>();
     private RowSource source = emptySource();
 
@@ -113,7 +114,11 @@ public final class LogView extends JPanel {
     public LogView() {
         super(new BorderLayout());
         add(canvas, BorderLayout.CENTER);
-        add(vbar, BorderLayout.EAST);
+        JPanel east = new JPanel(new BorderLayout());
+        east.add(overview, BorderLayout.WEST);
+        east.add(vbar, BorderLayout.CENTER);
+        add(east, BorderLayout.EAST);
+        overview.setVisible(false);
         add(hbar, BorderLayout.SOUTH);
         setFontSize(13f);
         vbar.addAdjustmentListener(e -> {
@@ -165,6 +170,20 @@ public final class LogView extends JPanel {
         anchorCol = leadCol = 0;
         lineMode = false;
         rowsChanged();
+    }
+
+    /** Shows the highlight bar beside the scrollbar (null hides it). */
+    void setOverview(OverviewBar.Model model) {
+        overview.setModel(model);
+    }
+
+    /** Repaints the highlight bar (after its marks changed). */
+    void overviewChanged() {
+        overview.repaint();
+    }
+
+    OverviewBar overviewForTest() {
+        return overview;
     }
 
     /** Lets the owner add items to the right-click menu. */
@@ -892,6 +911,7 @@ public final class LogView extends JPanel {
             } finally {
                 g.dispose();
             }
+            overview.repaint(); // the view position marker follows scrolling
         }
 
         private void paintRows(Graphics2D g) {

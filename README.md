@@ -40,6 +40,7 @@ Make a test log:
 | Stop a running search | Esc in the Find box |
 | Close results | Shift+Esc |
 | Jump from a result to the line | click it, or move with the arrow keys in the results |
+| Next / previous error | F8 / Shift+F8 |
 | Go to line | Ctrl+L |
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
 | Show or hide the Filters panel | Ctrl+J |
@@ -49,6 +50,10 @@ Make a test log:
 | Search for the selected text | Ctrl+F (fills the Find box, like text editors) |
 | Font size | Ctrl+= / Ctrl+- |
 | Dark mode | View → Toggle Dark Mode |
+
+## Highlight bar
+
+A narrow bar beside the scrollbar shows the whole file at a glance, like log analyzers. It has red marks for errors (ERROR, FATAL, SEVERE, CRITICAL), amber for warnings, a second lane for Find All hits and colored filters, and a box showing where you are. Click a mark to jump to that line; hover to see it. F8 / Shift+F8 jump to the next or previous error. The marks stay up to date while the file grows.
 
 ## Filters
 

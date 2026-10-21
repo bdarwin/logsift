@@ -495,6 +495,84 @@ class VisualTest {
         shot("11-filters-all-lines-grayed");
     }
 
+    @Test
+    @Order(11)
+    void highlightBarAndNextError() throws Exception {
+        LogTab tab = onEdt(frame::currentTab);
+        assertTrue(tab.errorLines().awaitIdle(300_000), "error search finished");
+        Pattern err = Pattern.compile("(?<![\\p{L}\\p{N}_])(ERROR|FATAL|SEVERE|CRITICAL)(?![\\p{L}\\p{N}_])");
+        List<Long> errors = naiveFilter(big, line -> err.matcher(line).find());
+        assertEquals(errors.size(), tab.errorLines().result().count(), "error lines");
+
+        // F8 from the top: first error, then the second; Shift+F8 from the top wraps to the last
+        long[] f8 = onEdt(() -> {
+            tab.setMatchingOnly(false);
+            tab.mainView().goToRow(0, false);
+            tab.nextError(true);
+            long first = tab.currentLine();
+            tab.nextError(true);
+            long second = tab.currentLine();
+            tab.mainView().goToRow(0, false);
+            tab.nextError(false);
+            return new long[] {first, second, tab.currentLine()};
+        });
+        assertEquals(errors.get(0), f8[0], "F8 first error");
+        assertEquals(errors.get(1), f8[1], "F8 second error");
+        assertEquals(errors.get(errors.size() - 1), f8[2], "Shift+F8 wraps to the last error");
+
+        // Clicking the bar at an error's position jumps to an error line near it
+        long target = errors.get(errors.size() * 2 / 3);
+        long clicked = onEdt(() -> {
+            OverviewBar bar = tab.mainView().overviewForTest();
+            int y = bar.yOfRow(target);
+            bar.dispatchEvent(new MouseEvent(bar, MouseEvent.MOUSE_PRESSED,
+                    System.currentTimeMillis(), InputEvent.BUTTON1_DOWN_MASK, 6, y, 1, false,
+                    MouseEvent.BUTTON1));
+            return tab.currentLine();
+        });
+        assertTrue(errors.contains(clicked), "clicking a mark lands on an error line: " + clicked);
+        long lines = Long.parseLong(stats.getProperty("lines"));
+        assertTrue(Math.abs(clicked - target) < lines / 50, "near the clicked position");
+        settle();
+        shot("12-highlight-bar");
+        summary.put("highlight bar", String.format("%,d error marks; F8 / click verified",
+                errors.size()));
+
+        // A more typical log: errors and warnings are rare, so each mark stands out.
+        Path sparse = dir.resolve("sparse.log");
+        Random rnd = new Random(8);
+        try (var rd = Files.newBufferedReader(big, StandardCharsets.UTF_8);
+             var wr = Files.newBufferedWriter(sparse, StandardCharsets.UTF_8)) {
+            String line;
+            int n = 0;
+            while ((line = rd.readLine()) != null && n < 400_000) {
+                boolean error = err.matcher(line).find();
+                boolean warn = line.contains(" WARN ");
+                if ((error && rnd.nextInt(400) != 0) || (warn && rnd.nextInt(60) != 0)) {
+                    continue;
+                }
+                wr.write(line);
+                wr.write('\n');
+                n++;
+            }
+        }
+        onEdt(() -> {
+            frame.openFile(sparse);
+            return null;
+        });
+        LogTab st = onEdt(frame::currentTab);
+        waitFor(() -> !st.document().isIndexing(), 60_000, "indexing");
+        assertTrue(st.errorLines().awaitIdle(60_000));
+        onEdt(() -> {
+            st.mainView().goToRow(0, false);
+            st.nextError(true);
+            st.nextError(true);
+            return null;
+        });
+        settle();
+        shot("13-highlight-bar-sparse-errors");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private long filterMillis;
