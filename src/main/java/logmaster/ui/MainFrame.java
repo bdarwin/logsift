@@ -61,6 +61,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final JToggleButton regex = toggle(".*", "Regular expression");
     private final JToggleButton followButton = new JToggleButton("Follow");
     private final JToggleButton wrapButton = new JToggleButton("Wrap");
+    private final JToggleButton columnsButton = new JToggleButton("Columns");
+    private boolean columns = PREFS.getBoolean("columns", false);
     private boolean wrap = PREFS.getBoolean("wrap", false);
     private final JLabel status = new JLabel(" ");
     private final JLabel statusRight = new JLabel(" ");
@@ -135,6 +137,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             tab.mainView().setWrap(wrap);
             tab.resultsView().setWrap(wrap);
             tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
+            tab.setColumnsVisible(columns);
             tabs.addTab(tab.title(), tab);
             int idx = tabs.getTabCount() - 1;
             tabs.setToolTipTextAt(idx, abs.toString());
@@ -415,6 +418,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         wrapButton.setToolTipText("Wrap long lines (" + (isMac() ? "⌥Z" : "Alt+Z") + ")");
         wrapButton.setSelected(wrap);
         wrapButton.addActionListener(e -> setWrap(wrapButton.isSelected()));
+        columnsButton.setToolTipText("Show lines as columns: time, level, thread, logger, message");
+        columnsButton.setSelected(columns);
+        columnsButton.addActionListener(e -> setColumns(columnsButton.isSelected()));
 
         tb.add(new JLabel(" "));
         tb.add(findField);
@@ -425,6 +431,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tb.addSeparator();
         tb.add(followButton);
         tb.add(wrapButton);
+        tb.add(columnsButton);
         tb.add(Box.createHorizontalGlue());
         return tb;
     }
@@ -522,6 +529,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 t.setTimelineVisible(on);
             }
         }));
+        view.add(item("Columns", KeyStroke.getKeyStroke(KeyEvent.VK_K, MENU | InputEvent.SHIFT_DOWN_MASK),
+                e -> setColumns(!columns)));
         view.add(item("Word Wrap", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
                 e -> setWrap(!wrap)));
         view.add(item("Show Matching Lines Only / All Lines",
@@ -685,6 +694,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             if (tabs.getComponentAt(i) instanceof FolderSearchTab f) {
                 f.resultsView().setFontSize(fontSize);
             }
+        }
+    }
+
+    /** Shows lines as columns (time, level, thread, ...) in every log view. */
+    public void setColumns(boolean on) {
+        columns = on;
+        PREFS.putBoolean("columns", on);
+        columnsButton.setSelected(on);
+        for (LogTab t : allTabs()) {
+            t.setColumnsVisible(on);
         }
     }
 

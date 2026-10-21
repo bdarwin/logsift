@@ -1174,6 +1174,91 @@ class VisualTest {
         shot("24-merged-one-source-errors");
     }
 
+    @Test
+    @Order(18)
+    void columnsLevelsAndValues() throws Exception {
+        onEdt(() -> {
+            frame.openFile(big);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        onEdt(() -> {
+            for (FilterDef d : tab.filterPanel().filters()) {
+                d.enabled = false;
+            }
+            tab.filtersChanged();
+            tab.clearTimeRange();
+            tab.setMatchingOnly(false);
+            frame.setColumns(true);
+            tab.mainView().goToRow(12, true);
+            return null;
+        });
+        logmaster.core.LogFormat f = tab.logFormat();
+        assertTrue(f != null, "column layout detected");
+        assertEquals("logback / log4j (time level [thread] logger - message)", f.name());
+        assertTrue(onEdt(() -> tab.mainView().columns()) != null, "columns shown");
+        settle();
+        shot("25-columns");
+
+        // level chips: only errors and warnings (whole entries)
+        long t0 = System.nanoTime();
+        onEdt(() -> {
+            tab.filterPanel().setLevels("E", "W");
+            tab.setMatchingOnly(true);
+            return null;
+        });
+        FilterResult r = waitForFilters(tab, t0);
+        java.util.regex.Pattern lv = java.util.regex.Pattern.compile(
+                "(?<![\\p{L}\\p{N}_])(ERROR|FATAL|SEVERE|CRITICAL|WARN|WARNING)(?![\\p{L}\\p{N}_])");
+        long expected = 0;
+        java.util.Map<String, Long> threads = new java.util.HashMap<>();
+        try (var rd = Files.newBufferedReader(big, StandardCharsets.UTF_8)) {
+            List<String> entry = new ArrayList<>();
+            String line;
+            while (true) {
+                line = rd.readLine();
+                if (line == null || (line.startsWith("2026-") && !entry.isEmpty())) {
+                    if (entry.stream().anyMatch(x -> lv.matcher(x).find())) {
+                        expected += entry.size();
+                    }
+                    entry.clear();
+                }
+                if (line == null) {
+                    break;
+                }
+                entry.add(line);
+                String[] v = f.split(line, null);
+                if (v != null) {
+                    threads.merge(v[f.columns().indexOf("thread")], 1L, Long::sum);
+                }
+            }
+        }
+        assertEquals(expected, r.count(), "errors and warnings with their stack traces");
+        settle();
+        shot("26-columns-errors-and-warnings");
+
+        // count the values of the thread column
+        onEdt(() -> {
+            tab.countValues("thread");
+            return null;
+        });
+        waitFor(() -> ValuesDialog.lastForTest() != null && ValuesDialog.lastForTest().result()[0] != null,
+                120_000, "thread values counted");
+        logmaster.core.ColumnStats.Result vr = ValuesDialog.lastForTest().result()[0];
+        java.util.Map<String, Long> got = new java.util.HashMap<>();
+        vr.values().forEach(v -> got.put(v.value(), v.count()));
+        assertEquals(threads, got, "thread counts");
+        settle();
+        shotOf(ValuesDialog.lastForTest().dialog().getRootPane(), "27-thread-values");
+        onEdt(() -> {
+            ValuesDialog.lastForTest().dialog().dispose();
+            tab.filterPanel().setLevels("E", "W", "I", "D", "T");
+            tab.setMatchingOnly(false);
+            frame.setColumns(false);
+            return null;
+        });
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {
@@ -1324,8 +1409,13 @@ class VisualTest {
     }
 
     private void shot(String name) throws Exception {
+        shotOf(frame.getRootPane(), name);
+    }
+
+    /** Screenshot of any window's content (dialogs too). */
+    private void shotOf(javax.swing.JComponent root0, String name) throws Exception {
         BufferedImage img = onEdt(() -> {
-            var root = frame.getRootPane();
+            var root = root0;
             BufferedImage im = new BufferedImage(root.getWidth(), root.getHeight(),
                     BufferedImage.TYPE_INT_RGB);
             Graphics2D g = im.createGraphics();

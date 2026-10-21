@@ -151,6 +151,12 @@ public final class LogView extends JPanel {
     private BiConsumer<LogView, JPopupMenu> popupExtender;
     private final List<Runnable> paintListeners = new ArrayList<>();
 
+    // Columns view: lines split by a log format into cells under a header.
+    private ColumnLayout columns;
+    private boolean wrapBeforeColumns;
+    private final ColumnHeader header = new ColumnHeader();
+    private BiConsumer<String, MouseEvent> columnMenu;
+
     // The layout of what is on screen: one entry per display row.
     private Line[] shownLines = new Line[0];
     private int[] shownLine = new int[0]; // index into shownLines, per display row
@@ -160,7 +166,11 @@ public final class LogView extends JPanel {
 
     public LogView() {
         super(new BorderLayout());
-        add(canvas, BorderLayout.CENTER);
+        JPanel center = new JPanel(new BorderLayout());
+        center.add(header, BorderLayout.NORTH);
+        center.add(canvas, BorderLayout.CENTER);
+        header.setVisible(false);
+        add(center, BorderLayout.CENTER);
         JPanel east = new JPanel(new BorderLayout());
         east.add(overview, BorderLayout.WEST);
         east.add(vbar, BorderLayout.CENTER);
@@ -283,11 +293,48 @@ public final class LogView extends JPanel {
     }
 
     public boolean isWrap() {
-        return wrap;
+        return columns == null ? wrap : wrapBeforeColumns;
+    }
+
+    /** Shows lines as columns (null: as plain text). Wrap is paused while columns are shown. */
+    void setColumns(ColumnLayout layout) {
+        if (layout != null && columns == null) {
+            wrapBeforeColumns = wrap;
+            columns = layout;
+            setWrapNow(false);
+        } else if (layout == null && columns != null) {
+            columns = null;
+            setWrapNow(wrapBeforeColumns);
+        } else {
+            columns = layout;
+        }
+        header.setVisible(columns != null);
+        header.repaint();
+        maxColumns = 0;
+        updateScrollbars();
+        changed();
+        revalidate();
+    }
+
+    ColumnLayout columns() {
+        return columns;
+    }
+
+    /** Right-click on a column header (for "Count values" and similar). */
+    void setColumnMenu(BiConsumer<String, MouseEvent> menu) {
+        this.columnMenu = menu;
     }
 
     /** Wraps long lines at the window edge instead of scrolling sideways. */
     public void setWrap(boolean on) {
+        if (columns != null) {
+            wrapBeforeColumns = on; // applies when columns are turned off
+            return;
+        }
+        setWrapNow(on);
+    }
+
+    private void setWrapNow(boolean on) {
         if (wrap == on) {
             return;
         }
@@ -552,6 +599,19 @@ public final class LogView extends JPanel {
         int col(int c) {
             c = Math.min(c, raw.length());
             return colOf == null ? c : colOf[c];
+        }
+
+        /** Raw char index of a display column (inverse of col). */
+        int rawIndexOfCol(int dcol) {
+            if (colOf == null) {
+                return Math.min(dcol, raw.length());
+            }
+            for (int i = 0; i <= raw.length(); i++) {
+                if (colOf[i] >= dcol) {
+                    return i;
+                }
+            }
+            return raw.length();
         }
 
         /** X where segment {@code seg} starts. */
@@ -1046,6 +1106,11 @@ public final class LogView extends JPanel {
                     return;
                 }
                 int clicks = e.getClickCount();
+                if (columns != null && clicks < 2) {
+                    dragUnit = BY_LINE;
+                    moveLead(row, e.isShiftDown());
+                    return;
+                }
                 if (inGutter(e.getX()) || clicks >= 3) {
                     dragUnit = BY_LINE;
                     moveLead(row, e.isShiftDown());
@@ -1145,6 +1210,7 @@ public final class LogView extends JPanel {
         hOffset = Math.max(0, hOffset + dx);
         updateScrollbars();
         changed();
+        header.repaint();
     }
 
     private void popup(MouseEvent e) {
@@ -1433,6 +1499,11 @@ public final class LogView extends JPanel {
                         g.drawLine(0, y, w, y);
                         g.setStroke(new BasicStroke(1f));
                     }
+                    if (columns != null) {
+                        paintColumnsRow(gt, l, y, lineFg[k], matches[k]);
+                        paintGutter(g, l, seg, i, y, gutter, fg);
+                        continue;
+                    }
                     // search matches
                     if (matches[k] != null) {
                         gt.setColor(Theme.match());
@@ -1478,46 +1549,243 @@ public final class LogView extends JPanel {
                         gt.drawString(l.text.substring(firstCol, end),
                                 l.segX(seg) + firstCol * charWidth, y + ascent);
                     }
-                    // gutter: line number on the first segment; a hook on continuations
-                    if (seg == 0) {
-                        long lineNo = source.lineNumber(l.row);
-                        String num = lineNo < 0 ? "" : Long.toString(lineNo + 1);
-                        g.setColor(l.row == lead ? fg : Theme.gutterForeground());
-                        g.drawString(num, gutter - 14 - metrics.stringWidth(num), y + ascent);
-                        Color marker = source.marker(l.row);
-                        if (marker != null) {
-                            g.setColor(marker);
-                            int d = Math.max(6, rowHeight - 10);
-                            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                                    RenderingHints.VALUE_ANTIALIAS_ON);
-                            g.fillOval(4, y + (rowHeight - d) / 2, d, d);
-                        }
-                    } else {
-                        g.setColor(Theme.gutterForeground());
-                        int cx = gutter - 16;
-                        int cy = y + rowHeight / 2;
-                        g.drawLine(cx, cy - 4, cx, cy);
-                        g.drawLine(cx, cy, cx + 5, cy);
-                        g.drawLine(cx + 3, cy - 2, cx + 5, cy);
-                        g.drawLine(cx + 3, cy + 2, cx + 5, cy);
-                    }
-                    Color tag = source.tag(l.row);
-                    if (tag != null) {
-                        g.setColor(tag);
-                        g.fillRect(0, y, 4, rowHeight);
-                    }
-                    if (l.row == lead && seg == 0) {
-                        g.setColor(Theme.marker());
-                        g.fillRect(gutter - 6, y, 3, rowHeight * Math.max(1,
-                                Math.min(l.segCount(), shownCount - i)));
-                    }
+                    paintGutter(g, l, seg, i, y, gutter, fg);
                 }
             } finally {
                 gt.dispose();
             }
+            if (columns != null) {
+                newMaxCols = Math.max(newMaxCols, columns.fixedWidth(charWidth) / charWidth + 200);
+            }
             if (newMaxCols != maxColumns && !wrap) {
                 maxColumns = newMaxCols;
                 SwingUtilities.invokeLater(LogView.this::updateScrollbars);
+            }
+            header.repaint();
+        }
+
+        /** Line number, markers and the current-line bar for one display row. */
+        private void paintGutter(Graphics2D g, Line l, int seg, int i, int y, int gutter, Color fg) {
+            // gutter: line number on the first segment; a hook on continuations
+            if (seg == 0) {
+                long lineNo = source.lineNumber(l.row);
+                String num = lineNo < 0 ? "" : Long.toString(lineNo + 1);
+                g.setColor(l.row == lead ? fg : Theme.gutterForeground());
+                g.drawString(num, gutter - 14 - metrics.stringWidth(num), y + ascent);
+                Color marker = source.marker(l.row);
+                if (marker != null) {
+                    g.setColor(marker);
+                    int d = Math.max(6, rowHeight - 10);
+                    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                            RenderingHints.VALUE_ANTIALIAS_ON);
+                    g.fillOval(4, y + (rowHeight - d) / 2, d, d);
+                }
+            } else {
+                g.setColor(Theme.gutterForeground());
+                int cx = gutter - 16;
+                int cy = y + rowHeight / 2;
+                g.drawLine(cx, cy - 4, cx, cy);
+                g.drawLine(cx, cy, cx + 5, cy);
+                g.drawLine(cx + 3, cy - 2, cx + 5, cy);
+                g.drawLine(cx + 3, cy + 2, cx + 5, cy);
+            }
+            Color tag = source.tag(l.row);
+            if (tag != null) {
+                g.setColor(tag);
+                g.fillRect(0, y, 4, rowHeight);
+            }
+            if (l.row == lead && seg == 0) {
+                g.setColor(Theme.marker());
+                g.fillRect(gutter - 6, y, 3, rowHeight * Math.max(1,
+                        Math.min(l.segCount(), shownCount - i)));
+            }
+        }
+
+        /** One line as cells under the column header; other lines start at the message column. */
+        private void paintColumnsRow(Graphics2D gt, Line l, int y, Color lineFg, int[] matchCols) {
+            ColumnLayout cl = columns;
+            int x0 = gutterWidth() - hOffset;
+            int[] starts = new int[cl.format().columns().size()];
+            String[] cells = cl.format().split(l.raw, starts);
+            if (cells == null) {
+                // a continuation line (stack trace): under the message
+                int x = x0 + cl.messageX(charWidth);
+                gt.setColor(lineFg);
+                gt.drawString(l.text, x, y + ascent);
+                return;
+            }
+            int x = x0;
+            int[] visible = cl.visible();
+            for (int c = 0; c < visible.length; c++) {
+                int col = visible[c];
+                boolean last = c == visible.length - 1;
+                int w = last ? Integer.MAX_VALUE / 4 : cl.width(c, charWidth);
+                String v = cells[col] == null ? "" : cells[col].replace('\t', ' ');
+                Graphics2D cg = (Graphics2D) gt.create();
+                try {
+                    if (!last) {
+                        cg.clipRect(x, y, Math.max(0, w - charWidth), rowHeight);
+                    }
+                    if (matchCols != null && starts[col] >= 0) {
+                        cg.setColor(Theme.match());
+                        int s0 = starts[col];
+                        int s1 = s0 + v.length();
+                        for (int m = 0; m + 1 < matchCols.length; m += 2) {
+                            int a = Math.max(l.rawIndexOfCol(matchCols[m]), s0);
+                            int b = Math.min(l.rawIndexOfCol(matchCols[m + 1]), s1);
+                            if (b > a) {
+                                int xa = x + metrics.stringWidth(v.substring(0, a - s0));
+                                int xb = x + metrics.stringWidth(v.substring(0, b - s0));
+                                cg.fillRoundRect(xa, y + 1, Math.max(2, xb - xa), rowHeight - 2, 4, 4);
+                            }
+                        }
+                    }
+                    cg.setColor(cl.isLevel(col) ? levelColor(v, lineFg) : lineFg);
+                    cg.drawString(v, x, y + ascent);
+                } finally {
+                    cg.dispose();
+                }
+                if (!last) {
+                    gt.setColor(Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY));
+                    gt.drawLine(x + w - charWidth / 2, y, x + w - charWidth / 2, y + rowHeight);
+                }
+                x += w;
+            }
+        }
+
+        private Color levelColor(String level, Color fallback) {
+            return switch (level.trim()) {
+                case "ERROR", "FATAL", "SEVERE", "CRITICAL" -> Theme.errorMark();
+                case "WARN", "WARNING" -> new Color(0xC27C00);
+                case "DEBUG", "TRACE" -> Theme.gutterForeground();
+                default -> fallback;
+            };
+        }
+    }
+
+    /** The column titles above the rows; drag an edge to resize, right-click for more. */
+    private final class ColumnHeader extends JComponent {
+        private int dragging = -1;
+        private int dragX;
+        private int dragWidth;
+
+        ColumnHeader() {
+            setOpaque(true);
+            MouseAdapter m = new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    if (columns == null) {
+                        return;
+                    }
+                    if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) {
+                        if (columnMenu != null) {
+                            String col = columnAt(e.getX());
+                            if (col != null) {
+                                columnMenu.accept(col, e);
+                            }
+                        }
+                        return;
+                    }
+                    dragging = edgeAt(e.getX());
+                    if (dragging >= 0) {
+                        dragX = e.getX();
+                        dragWidth = columns.width(dragging, charWidth);
+                    }
+                }
+
+                @Override
+                public void mouseDragged(MouseEvent e) {
+                    if (dragging >= 0 && columns != null) {
+                        columns.setWidth(dragging, Math.max(charWidth * 3, dragWidth + e.getX() - dragX), charWidth);
+                        repaint();
+                        changed();
+                    }
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    dragging = -1;
+                }
+
+                @Override
+                public void mouseMoved(MouseEvent e) {
+                    setCursor(Cursor.getPredefinedCursor(edgeAt(e.getX()) >= 0
+                            ? Cursor.E_RESIZE_CURSOR : Cursor.DEFAULT_CURSOR));
+                }
+            };
+            addMouseListener(m);
+            addMouseMotionListener(m);
+            setToolTipText("Drag an edge to resize a column · right-click a column to count its values");
+        }
+
+        /** Index of the column whose right edge is near x, or -1. */
+        private int edgeAt(int x) {
+            if (columns == null) {
+                return -1;
+            }
+            int cx = gutterWidth() - hOffset;
+            int[] visible = columns.visible();
+            for (int c = 0; c < visible.length - 1; c++) {
+                cx += columns.width(c, charWidth);
+                if (Math.abs(x - (cx - charWidth / 2)) <= 4) {
+                    return c;
+                }
+            }
+            return -1;
+        }
+
+        private String columnAt(int x) {
+            int cx = gutterWidth() - hOffset;
+            int[] visible = columns.visible();
+            for (int c = 0; c < visible.length; c++) {
+                int w = c == visible.length - 1 ? Integer.MAX_VALUE / 4 : columns.width(c, charWidth);
+                if (x >= cx && x < cx + w) {
+                    return columns.format().columns().get(visible[c]);
+                }
+                cx += w;
+            }
+            return null;
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            return new Dimension(100, rowHeight + 6);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g0) {
+            Graphics2D g = (Graphics2D) g0.create();
+            try {
+                Object hints = Toolkit.getDefaultToolkit().getDesktopProperty("awt.font.desktophints");
+                if (hints instanceof Map<?, ?> mm) {
+                    g.addRenderingHints(mm);
+                }
+                g.setColor(Theme.gutterBackground());
+                g.fillRect(0, 0, getWidth(), getHeight());
+                g.setColor(Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY));
+                g.drawLine(0, getHeight() - 1, getWidth(), getHeight() - 1);
+                if (columns == null) {
+                    return;
+                }
+                g.setFont(getFont().deriveFont(Font.BOLD));
+                int gutter = gutterWidth();
+                g.clipRect(gutter - 4, 0, getWidth(), getHeight());
+                int x = gutter - hOffset;
+                int[] visible = columns.visible();
+                java.awt.FontMetrics fm = g.getFontMetrics();
+                for (int c = 0; c < visible.length; c++) {
+                    String name = columns.title(visible[c]);
+                    g.setColor(Theme.foreground());
+                    g.drawString(name, x, (getHeight() + fm.getAscent()) / 2 - 2);
+                    if (c < visible.length - 1) {
+                        int w = columns.width(c, charWidth);
+                        g.setColor(Theme.gutterForeground());
+                        g.drawLine(x + w - charWidth / 2, 4, x + w - charWidth / 2, getHeight() - 4);
+                        x += w;
+                    }
+                }
+            } finally {
+                g.dispose();
             }
         }
     }

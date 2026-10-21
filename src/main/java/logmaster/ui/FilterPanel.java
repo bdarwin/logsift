@@ -75,6 +75,11 @@ final class FilterPanel extends JPanel {
     private final JLabel resultLabel = new JLabel(" ");
     private final JCheckBox keepEntries = new JCheckBox("Keep stack traces",
             java.util.prefs.Preferences.userNodeForPackage(FilterPanel.class).getBoolean("entries", true));
+    /** Level chips: E W I D T, all on = no level filtering. */
+    static final String[] LEVEL_CHIPS = {"E", "W", "I", "D", "T"};
+    static final String[][] LEVEL_WORDS = {{"ERROR", "FATAL", "SEVERE", "CRITICAL"},
+        {"WARN", "WARNING"}, {"INFO", "NOTICE"}, {"DEBUG"}, {"TRACE"}};
+    private final JToggleButton[] levelChips = new JToggleButton[LEVEL_CHIPS.length];
     private final javax.swing.JSpinner context = new javax.swing.JSpinner(
             new javax.swing.SpinnerNumberModel(0, 0, 50, 1));
     private final Timer formulaTimer;
@@ -178,6 +183,16 @@ final class FilterPanel extends JPanel {
         context.setToolTipText("Also show this many lines before and after each match (grayed)");
         context.setMaximumSize(new Dimension(64, 30));
         context.addChangeListener(e -> listener.filtersChanged());
+        String[] names = {"errors", "warnings", "info", "debug", "trace"};
+        for (int i = 0; i < LEVEL_CHIPS.length; i++) {
+            JToggleButton b = new JToggleButton(LEVEL_CHIPS[i], true);
+            b.setToolTipText("Show " + names[i] + " (" + String.join(", ", LEVEL_WORDS[i]) + ")");
+            b.putClientProperty("JButton.buttonType", "toolBarButton");
+            b.setFocusable(false);
+            b.setFont(b.getFont().deriveFont(Font.BOLD));
+            b.addActionListener(e -> listener.filtersChanged());
+            levelChips[i] = b;
+        }
         JLabel contextLabel = new JLabel("Context ±");
         contextLabel.setToolTipText(context.getToolTipText());
         resultLabel.setFont(resultLabel.getFont().deriveFont(Font.BOLD));
@@ -191,6 +206,11 @@ final class FilterPanel extends JPanel {
         bar.add(formulaField);
         bar.add(autoFormula);
         bar.add(Box.createHorizontalStrut(14));
+        bar.add(new JLabel("Levels "));
+        for (JToggleButton b : levelChips) {
+            bar.add(b);
+        }
+        bar.add(Box.createHorizontalStrut(10));
         bar.add(keepEntries);
         bar.add(Box.createHorizontalStrut(10));
         bar.add(contextLabel);
@@ -222,6 +242,29 @@ final class FilterPanel extends JPanel {
 
     List<FilterDef> filters() {
         return defs;
+    }
+
+    /** Level words of the chips that are on, or null when all are on (no level filter). */
+    java.util.List<String> levelWords() {
+        java.util.List<String> out = new ArrayList<>();
+        boolean all = true;
+        for (int i = 0; i < levelChips.length; i++) {
+            if (levelChips[i].isSelected()) {
+                out.addAll(java.util.List.of(LEVEL_WORDS[i]));
+            } else {
+                all = false;
+            }
+        }
+        return all ? null : out;
+    }
+
+    /** Turns level chips on or off (by letter, for example "E", "W"). For tests and the API. */
+    void setLevels(String... chips) {
+        java.util.List<String> on = java.util.List.of(chips);
+        for (int i = 0; i < levelChips.length; i++) {
+            levelChips[i].setSelected(on.contains(LEVEL_CHIPS[i]));
+        }
+        listener.filtersChanged();
     }
 
     /** Keep a log line and the lines under it (stack traces) together. */

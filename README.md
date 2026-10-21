@@ -44,6 +44,7 @@ Make a test log:
 | Next / previous error | F8 / Shift+F8 |
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Merge logs by time | Ctrl+Shift+M |
+| Columns view | Ctrl+Shift+K |
 | Go to line | Ctrl+L |
 | Go to time | Ctrl+Shift+L |
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
@@ -72,6 +73,13 @@ When a log has timestamps, a timeline above it shows how much was logged over ti
 - **Drag** across it to show only that time range. The range works with the filters: drag over an incident, add an ERROR filter, and you see just the errors of the incident. Click ✕ on the range to show all times again.
 - The status bar shows the time of the current line.
 - Recognized formats: `2026-10-21 10:02:13`, ISO with `T`, `2026/10/21`, `21-10-2026`, `21.10.2026`, `21-Oct-2026`, syslog `Oct 21 10:02:13`, Apache `[21/Oct/2026:10:02:13 +0000]`, timestamps inside JSON lines, time only, and epoch seconds or milliseconds. Times are shown as written in the log (time zones are not converted).
+
+## Columns and levels
+
+The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns, like log analyzers: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. LogMaster recognizes common layouts by itself: logback and log4j patterns, Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
+
+- **Count values:** right-click a column header (Thread, Logger, Host, Status…) → *Count Values* lists every value with its number of lines. Double-click one to show only its lines, or *Hide* it.
+- **Level chips** in the Filters bar (**E W I D T**) show only some levels, together with your other filters: turn off I, D and T to see just errors and warnings, stack traces included.
 
 ## Merge logs by time
 
@@ -199,6 +207,6 @@ Design choices:
 1. ✅ Text selection; multiple filters (Show / Hide / Mark) combined with AND / OR / NOT; highlight bar
 2. ✅ Folder search (folder search tools-like): folder + file patterns, parallel over files, `.gz`/`.zip`, results by file
 2. ✅ Text wrap; keep stack traces with their log line when filtering; context lines (±N)
-3. Log formats (log analyzers-like): pattern → columns (time, level, thread, logger, message), multi-line entries, filter by level and time, merge files by timestamp
+3. ✅ Timeline, top messages, merge by timestamp, columns (log analyzers-like) with level chips and value counts
 4. Editable highlight rules, saved searches, bookmarks, recent files, filter view ("show only matching")
 5. Native installers with `jpackage` (Windows .msi, macOS .dmg, Linux .deb/.rpm)

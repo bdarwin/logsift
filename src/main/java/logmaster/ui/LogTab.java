@@ -76,6 +76,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private volatile logmaster.core.EntryFormat entryFormat; // detected; null = none
     private volatile logmaster.core.TimeFormat timeFormat;   // detected; null = none
     private volatile logmaster.core.TimeIndex timeIndex;
+    private volatile logmaster.core.LogFormat logFormat; // columns; null = none found
+    private boolean columnsWanted;
     private final TimelineBar timeline;
     private long[] timeRange;                       // selected {from, to} times, or null
     private boolean timelineWanted = true;
@@ -212,6 +214,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
         });
         main.setPopupExtender(this::extendPopup);
+        main.setColumnMenu((col, e) -> {
+            JPopupMenu m = new JPopupMenu();
+            JMenuItem count = new JMenuItem("Count Values in " + col.substring(0, 1).toUpperCase()
+                    + col.substring(1) + "…");
+            count.addActionListener(a -> countValues(col));
+            m.add(count);
+            m.show(e.getComponent(), e.getX(), e.getY());
+        });
         main.setOverview(overviewModel());
         results.setPopupExtender(this::extendPopup);
 
@@ -291,6 +301,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         doc.readLines(0, sample.length, sample);
         List<String> lines = java.util.Arrays.asList(sample);
         entryFormat = logmaster.core.EntryFormat.detect(lines);
+        logFormat = logmaster.core.LogFormat.detect(lines);
+        applyColumns();
         filterPanel.setEntryFormatInfo(entryFormat == null ? null : entryFormat.name());
         applyEntryOptions();
 
@@ -731,6 +743,23 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 formula = appliedFormula; // keep the last good one while the user types
             }
         }
+        // level chips: AND (any of the chosen level words), using ids that aren't letters
+        List<String> levelWords = filterPanel.levelWords();
+        if (levelWords != null) {
+            List<Character> ids = new ArrayList<>();
+            for (int i = 0; i < levelWords.size(); i++) {
+                char id = (char) ('0' + i);
+                specs.add(new FilterEngine.Spec(id, new SearchQuery(levelWords.get(i), true, false, true)));
+                ids.add(id);
+            }
+            Formula levels = ids.isEmpty() ? null : Formula.auto(ids, List.of());
+            if (levels == null) {
+                // no level chosen: show nothing
+                specs.add(new FilterEngine.Spec('0', new SearchQuery("\\A\\z.", false, true, false)));
+                levels = new Formula.Ref('0');
+            }
+            formula = formula == null ? levels : new Formula.And(formula, levels);
+        }
         try {
             engine.configure(specs, formula);
             appliedFormula = formula;
@@ -938,6 +967,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             if (timeRange != null) {
                 text += "   in the selected time range";
             }
+            if (filterPanel.levelWords() != null) {
+                text += "   · some levels hidden";
+            }
         }
         filterPanel.setResultText(text);
         for (FilterDef d : filterPanel.filters()) {
@@ -992,6 +1024,40 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             toggleBottom();
         }
         bottom.setSelectedComponent(filterPanel);
+    }
+
+    logmaster.core.LogFormat logFormat() {
+        return logFormat;
+    }
+
+    /** Shows lines as columns when the log has a known layout. */
+    void setColumnsVisible(boolean on) {
+        columnsWanted = on;
+        applyColumns();
+    }
+
+    private void applyColumns() {
+        logmaster.core.LogFormat f = logFormat;
+        ColumnLayout layout = columnsWanted && f != null ? new ColumnLayout(f, sourceLabels != null) : null;
+        main.setColumns(layout);
+        results.setColumns(layout == null ? null : new ColumnLayout(f, sourceLabels != null));
+    }
+
+    /** Counts the values of a column in the background and shows them. */
+    void countValues(String column) {
+        logmaster.core.LogFormat f = logFormat;
+        if (f == null) {
+            return;
+        }
+        ValuesDialog.show(this, f, column);
+    }
+
+    /** Shows only (or hides) lines whose column has this exact value. */
+    void filterByValue(String value, FilterDef.Action action) {
+        addFilter(value, action);
+        if (action != FilterDef.Action.MARK) {
+            setMatchingOnly(true);
+        }
     }
 
     /** Shows or hides the Filters / Find results area. */
