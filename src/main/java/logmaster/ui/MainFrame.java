@@ -129,9 +129,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Opens a file in a new tab (or selects it if already open). */
     public void openFile(Path path) {
+        openFile(path, null);
+    }
+
+    /** Opens a file with a given text encoding (null: detect it). */
+    public void openFile(Path path, java.nio.charset.Charset forced) {
         Path abs = path.toAbsolutePath().normalize();
         for (int i = 0; i < tabs.getTabCount(); i++) {
-            if (tabs.getComponentAt(i) instanceof LogTab lt && lt.document().path().equals(abs)) {
+            if (tabs.getComponentAt(i) instanceof LogTab lt && lt.path().equals(abs)) {
                 tabs.setSelectedIndex(i);
                 AppState.addRecent(abs);
                 return;
@@ -142,30 +147,71 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     JOptionPane.ERROR_MESSAGE);
             return;
         }
+        java.nio.charset.Charset cs = forced;
         try {
-            LogTab tab = new LogTab(abs, this);
-            tab.mainView().setFontSize(fontSize);
-            tab.resultsView().setFontSize(fontSize);
-            tab.mainView().setWrap(wrap);
-            tab.resultsView().setWrap(wrap);
-            tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
-            tab.setColumnsVisible(columns);
-            tabs.addTab(tab.title(), tab);
-            int idx = tabs.getTabCount() - 1;
-            tabs.setToolTipTextAt(idx, abs.toString());
-            tabs.setSelectedIndex(idx);
-            PREFS.put("lastDir", abs.getParent().toString());
-            AppState.addRecent(abs);
-            java.util.Properties state = AppState.loadFileState(abs);
-            if (state != null) {
-                tab.restoreState(state);
+            if (cs == null) {
+                cs = logmaster.core.Encoding.detect(abs);
             }
-            updateEmptyState();
-            SwingUtilities.invokeLater(() -> tab.mainView().focusView());
+        } catch (IOException e) {
+            cs = java.nio.charset.StandardCharsets.UTF_8;
+        }
+        if (logmaster.core.Encoding.isUtf16(cs)) {
+            openUtf16(abs, cs);
+            return;
+        }
+        try {
+            addLogTab(new LogTab(abs, abs, cs, null, this), abs);
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this, "Cannot open " + abs + ":\n" + e.getMessage(),
                     "Open", JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    /** UTF-16 logs are read through a UTF-8 copy that follows the original. */
+    private void openUtf16(Path abs, java.nio.charset.Charset cs) {
+        ProgressDialog.run(this, "Converting " + abs.getFileName() + " from " + cs.name() + "…",
+                (progress, cancelled) -> {
+                    Path dir = Files.createTempDirectory("logmaster-utf16-");
+                    dir.toFile().deleteOnExit();
+                    Path copy = dir.resolve(abs.getFileName().toString());
+                    copy.toFile().deleteOnExit();
+                    return logmaster.core.Utf16Mirror.create(abs, copy, cs, progress, cancelled);
+                },
+                mirror -> {
+                    try {
+                        LogTab tab = new LogTab(mirror.copy(), abs, java.nio.charset.StandardCharsets.UTF_8,
+                                cs.name(), this);
+                        tab.addCloseHook(mirror::close);
+                        mirror.follow(500);
+                        addLogTab(tab, abs);
+                    } catch (IOException e) {
+                        mirror.close();
+                        JOptionPane.showMessageDialog(this, "Cannot open " + abs + ":\n" + e.getMessage(),
+                                "Open", JOptionPane.ERROR_MESSAGE);
+                    }
+                });
+    }
+
+    /** Shows a new log tab with the current view settings and the file's remembered state. */
+    private void addLogTab(LogTab tab, Path abs) {
+        tab.mainView().setFontSize(fontSize);
+        tab.resultsView().setFontSize(fontSize);
+        tab.mainView().setWrap(wrap);
+        tab.resultsView().setWrap(wrap);
+        tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
+        tab.setColumnsVisible(columns);
+        tabs.addTab(tab.title(), tab);
+        int idx = tabs.getTabCount() - 1;
+        tabs.setToolTipTextAt(idx, abs.toString());
+        tabs.setSelectedIndex(idx);
+        PREFS.put("lastDir", abs.getParent().toString());
+        AppState.addRecent(abs);
+        java.util.Properties state = AppState.loadFileState(abs);
+        if (state != null) {
+            tab.restoreState(state);
+        }
+        updateEmptyState();
+        SwingUtilities.invokeLater(() -> tab.mainView().focusView());
     }
 
     private void mergeDialog() {
@@ -258,7 +304,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     }
                     openFile(out);
                     LogTab tab = currentTab();
-                    if (tab != null && tab.document().path().equals(out.toAbsolutePath().normalize())) {
+                    if (tab != null && tab.path().equals(out.toAbsolutePath().normalize())) {
                         tab.setSourceLabels(labels);
                         tab.addCloseHook(m::close);
                         int i = tabs.indexOfComponent(tab);
@@ -284,7 +330,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** Opens a new Folder Search tab (folder null = the current file's folder or the last one). */
     public FolderSearchTab openFolderSearch(Path folder) {
         if (folder == null && currentTab() != null) {
-            folder = currentTab().document().path().getParent();
+            folder = currentTab().path().getParent();
         }
         String text = findField.getText().isEmpty() ? null : findField.getText();
         FolderSearchTab tab = new FolderSearchTab(this, folder, text);
@@ -383,7 +429,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void openAt(Path file, long line, SearchQuery q) {
         openFile(file);
         LogTab t = currentTab();
-        if (t != null && t.document().path().equals(file.toAbsolutePath().normalize())) {
+        if (t != null && t.path().equals(file.toAbsolutePath().normalize())) {
             findAll(q);
             t.showLineWhenAvailable(line);
             t.mainView().focusView();
@@ -394,7 +440,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     void closeFile(Path path) {
         Path abs = path.toAbsolutePath().normalize();
         for (int i = 0; i < tabs.getTabCount(); i++) {
-            if (tabs.getComponentAt(i) instanceof LogTab lt && lt.document().path().equals(abs)) {
+            if (tabs.getComponentAt(i) instanceof LogTab lt && lt.path().equals(abs)) {
                 closeTab(i);
                 return;
             }
@@ -407,11 +453,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         int selected = 0;
         for (int i = 0; i < tabs.getTabCount(); i++) {
             if (tabs.getComponentAt(i) instanceof LogTab t && t.remembersState()) {
-                AppState.saveFileState(t.document().path(), t.saveState());
+                AppState.saveFileState(t.path(), t.saveState());
                 if (i == tabs.getSelectedIndex()) {
                     selected = files.size();
                 }
-                files.add(t.document().path());
+                files.add(t.path());
             }
         }
         AppState.saveSession(files, selected);
@@ -649,6 +695,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         JMenu view = new JMenu("View");
         view.add(item("Follow (Tail)", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU), e -> setFollow(!followButton.isSelected())));
         view.addSeparator();
+        JMenu encoding = new JMenu("Encoding");
+        encoding.add(item("Detect Automatically", null, e -> reopenWithEncoding(null)));
+        encoding.addSeparator();
+        for (String cs : new String[] {"UTF-8", "windows-1252", "ISO-8859-1", "ISO-8859-15", "UTF-16LE",
+            "UTF-16BE", "windows-1251", "Shift_JIS", "GB18030"}) {
+            if (java.nio.charset.Charset.isSupported(cs)) {
+                java.nio.charset.Charset c = java.nio.charset.Charset.forName(cs);
+                encoding.add(item(logmaster.core.Encoding.label(c), null, e -> reopenWithEncoding(c)));
+            }
+        }
+        view.add(encoding);
         view.add(item("Timeline", null, e -> {
             boolean on = !PREFS.getBoolean("timeline", true);
             PREFS.putBoolean("timeline", on);
@@ -720,7 +777,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         java.awt.Component c = tabs.getComponentAt(index);
         if (c instanceof LogTab t && t.remembersState()) {
-            AppState.saveFileState(t.document().path(), t.saveState());
+            AppState.saveFileState(t.path(), t.saveState());
         }
         tabs.removeTabAt(index);
         if (c instanceof LogTab t) {
@@ -810,18 +867,19 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 suffix = "-view";
             }
         }
-        String name = t.document().path().getFileName().toString();
+        String name = t.path().getFileName().toString();
         int dot = name.lastIndexOf('.');
         String base = dot > 0 ? name.substring(0, dot) : name;
         FileDialog fd = new FileDialog(this, "Export Lines", FileDialog.SAVE);
-        fd.setDirectory(t.document().path().getParent().toString());
+        fd.setDirectory(t.path().getParent().toString());
         fd.setFile(base + suffix + ".log");
         fd.setVisible(true);
         if (fd.getFile() == null) {
             return;
         }
         Path out = Path.of(fd.getDirectory(), fd.getFile());
-        if (out.toAbsolutePath().normalize().equals(t.document().path())) {
+        if (out.toAbsolutePath().normalize().equals(t.path())
+                || out.toAbsolutePath().normalize().equals(t.document().path())) {
             JOptionPane.showMessageDialog(this, "Choose a different file than the log itself.");
             return;
         }
@@ -896,6 +954,18 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    /** Reopens the current log in another text encoding (null: detect it again). */
+    void reopenWithEncoding(java.nio.charset.Charset cs) {
+        LogTab t = currentTab();
+        if (t == null || t.sourceLabels() != null) {
+            return;
+        }
+        Path p = t.path();
+        int i = tabs.indexOfComponent(t);
+        closeTab(i);
+        openFile(p, cs);
+    }
+
     /** Shows lines as columns (time, level, thread, ...) in every log view. */
     public void setColumns(boolean on) {
         columns = on;
@@ -966,7 +1036,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         LogDocument d = t.document();
         setTitle(d.path().getFileName() + " — LogMaster");
         StringBuilder sb = new StringBuilder();
-        sb.append(d.path()).append("   ").append(humanBytes(d.fileSize()))
+        long size = d.fileSize();
+        if (!t.path().equals(d.path())) {
+            try {
+                size = Files.size(t.path()); // the original, not the converted copy
+            } catch (IOException e) {
+                // keep the copy's size
+            }
+        }
+        sb.append(t.path()).append("   ").append(humanBytes(size))
           .append("   ").append(String.format("%,d lines", d.lineCount()));
         if (d.isIndexing()) {
             sb.append("   indexing…");
@@ -988,7 +1066,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             pos = "MATCHING ONLY   " + pos;
         }
         String follow = t.mainView().isFollow() ? "   FOLLOW" : "";
-        statusRight.setText(pos + follow + "   UTF-8   " + memory());
+        statusRight.setText(pos + follow + "   " + t.encodingLabel() + "   " + memory());
 
         SearchSession s = t.search();
         if (d.isIndexing() && d.fileSize() > 0) {

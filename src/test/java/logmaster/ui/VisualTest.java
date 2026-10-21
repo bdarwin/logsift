@@ -1492,6 +1492,60 @@ class VisualTest {
         Notifier.dismiss();
     }
 
+    @Test
+    @Order(23)
+    void encodings() throws Exception {
+        String text = "2026-10-21 10:00:00 INFO Bestellung für Müller angelegt\n"
+                + "2026-10-21 10:00:01 ERROR Zahlung fehlgeschlagen: Straße unbekannt\n"
+                + "2026-10-21 10:00:02 WARN 東京 キャッシュ 😀\n";
+        Path utf16 = dir.resolve("windows-utf16.log");
+        Files.write(utf16, ("\uFEFF" + text).getBytes(StandardCharsets.UTF_16LE));
+        Path cp1252 = dir.resolve("windows-1252.log");
+        Files.write(cp1252, text.replace("東京 キャッシュ 😀", "Grüße").getBytes(logmaster.core.Encoding.WINDOWS_1252));
+
+        onEdt(() -> {
+            frame.openFile(cp1252);
+            return null;
+        });
+        LogTab w = onEdt(frame::currentTab);
+        waitFor(() -> !w.document().isIndexing(), 10_000, "indexed");
+        assertEquals("Windows-1252", w.encodingLabel());
+        assertEquals("2026-10-21 10:00:01 ERROR Zahlung fehlgeschlagen: Straße unbekannt", w.document().line(1));
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("straße", false, false, false));
+            return null;
+        });
+        assertEquals(1, waitForSearch(w).hits().size(), "ignore-case search with non-ASCII");
+
+        onEdt(() -> {
+            frame.openFile(utf16);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(utf16.toAbsolutePath().normalize()));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "UTF-16 log opened");
+        LogTab u = onEdt(frame::currentTab);
+        waitFor(() -> !u.document().isIndexing() && u.document().lineCount() == 3, 10_000, "indexed");
+        assertEquals("UTF-16LE", u.encodingLabel());
+        assertEquals("2026-10-21 10:00:02 WARN 東京 キャッシュ 😀", u.document().line(2));
+        // the UTF-16 log grows: the new line shows up
+        Files.write(utf16, "2026-10-21 10:00:03 ERROR neu hinzugefügt\n".getBytes(StandardCharsets.UTF_16LE),
+                java.nio.file.StandardOpenOption.APPEND);
+        waitFor(() -> u.document().lineCount() == 4, 10_000, "appended line visible");
+        assertEquals("2026-10-21 10:00:03 ERROR neu hinzugefügt", u.document().line(3));
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("Müller", true, false, false));
+            return null;
+        });
+        assertEquals(1, waitForSearch(u).hits().size());
+        settle();
+        shot("30-utf16-log");
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {

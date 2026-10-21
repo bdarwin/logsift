@@ -125,7 +125,7 @@ public final class MessageStats {
             }
             throw new IllegalStateException(c);
         }
-        List<Template> templates = mergeSimilar(total);
+        List<Template> templates = mergeSimilar(total, doc.charset());
         long ms = (System.nanoTime() - start) / 1_000_000;
         return new Result(templates, counted.get(), ms, truncated);
     }
@@ -288,12 +288,11 @@ public final class MessageStats {
     }
 
     /** Merges templates that differ in at most one word, and sorts by count. */
-    static List<Template> mergeSimilar(Map<String, Stat> raw) {
+    static List<Template> mergeSimilar(Map<String, Stat> raw, java.nio.charset.Charset cs) {
         // decode once and group by (level, number of tokens)
         Map<String, List<Object[]>> groups = new LinkedHashMap<>();
         for (var e : raw.entrySet()) {
-            String text = new String(e.getKey().getBytes(StandardCharsets.ISO_8859_1),
-                    StandardCharsets.UTF_8);
+            String text = new String(e.getKey().getBytes(StandardCharsets.ISO_8859_1), cs);
             String[] tokens = text.split(" ", -1);
             String key = levelOf(text) + "/" + tokens.length;
             groups.computeIfAbsent(key, k -> new ArrayList<>()).add(new Object[] {tokens, e.getValue()});

@@ -64,7 +64,7 @@ public final class SearchSession implements AutoCloseable {
 
     /** @throws java.util.regex.PatternSyntaxException for an invalid regex */
     public SearchSession(LogDocument doc, SearchQuery query) {
-        this(doc, query, LineMatcher.of(query));
+        this(doc, query, LineMatcher.of(query, doc.charset()));
     }
 
     /**

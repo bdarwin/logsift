@@ -85,9 +85,26 @@ public final class LogDocument implements Closeable {
     }
 
     public static LogDocument open(Path path, int chunkSize) throws IOException {
+        return open(path, chunkSize, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Opens a file whose text is in {@code charset}. It must keep newlines as the byte 0x0A
+     * (UTF-8, Windows-1252, ISO-8859-x...); UTF-16 files are converted first.
+     */
+    public static LogDocument open(Path path, int chunkSize, java.nio.charset.Charset charset)
+            throws IOException {
         LogDocument doc = new LogDocument(path, chunkSize);
+        doc.charset = charset;
         doc.serial.execute(doc::initialIndex);
         return doc;
+    }
+
+    private volatile java.nio.charset.Charset charset = java.nio.charset.StandardCharsets.UTF_8;
+
+    /** The text encoding used to decode lines and encode search text. */
+    public java.nio.charset.Charset charset() {
+        return charset;
     }
 
     public void addListener(Listener l) {
@@ -251,7 +268,11 @@ public final class LogDocument implements Closeable {
             if (n > 0 && buf[n - 1] == '\r') {
                 n--;
             }
-            out[i] = new String(buf, 0, n, StandardCharsets.UTF_8);
+            String text = new String(buf, 0, n, charset);
+            if (line == 0 && i == 0 && !text.isEmpty() && text.charAt(0) == '\uFEFF') {
+                text = text.substring(1); // byte order mark
+            }
+            out[i] = text;
             // If the line was cut, find the next start through the index.
             pos = nl >= 0 ? nl + 1 : -1;
         }

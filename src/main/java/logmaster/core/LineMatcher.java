@@ -17,16 +17,21 @@ abstract sealed class LineMatcher {
     }
 
     static LineMatcher of(SearchQuery q) {
+        return of(q, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** A matcher for text in {@code cs} (an encoding that keeps ASCII as single bytes). */
+    static LineMatcher of(SearchQuery q, java.nio.charset.Charset cs) {
         if (q.isPlainBytes()) {
-            return new Literal(q.text(), q.matchCase());
+            return new Literal(q.text(), q.matchCase(), cs);
         }
         Pattern p = q.toPattern();
         String required = RequiredLiteral.of(q);
         if (required != null) {
             // Find candidate lines by fast byte search, confirm each with the regex.
-            return new Prefiltered(new Literal(required, q.matchCase()), p);
+            return new Prefiltered(new Literal(required, q.matchCase(), cs), p, cs);
         }
-        return new Regex(p);
+        return new Regex(p, cs);
     }
 
     abstract void scan(byte[] buf, int len, long firstLine, HitSink sink, BooleanSupplier cancelled);
@@ -40,8 +45,12 @@ abstract sealed class LineMatcher {
         private final boolean ignoreCase;
 
         Literal(String text, boolean matchCase) {
+            this(text, matchCase, StandardCharsets.UTF_8);
+        }
+
+        Literal(String text, boolean matchCase, java.nio.charset.Charset cs) {
             this.ignoreCase = !matchCase;
-            byte[] b = text.getBytes(StandardCharsets.UTF_8);
+            byte[] b = text.getBytes(cs);
             if (ignoreCase) {
                 for (int i = 0; i < b.length; i++) {
                     b[i] = lower(b[i]);
@@ -143,15 +152,17 @@ abstract sealed class LineMatcher {
     static final class Prefiltered extends LineMatcher {
         private final Literal literal;
         private final Pattern pattern;
+        private final java.nio.charset.Charset cs;
 
-        Prefiltered(Literal literal, Pattern pattern) {
+        Prefiltered(Literal literal, Pattern pattern, java.nio.charset.Charset cs) {
             this.literal = literal;
             this.pattern = pattern;
+            this.cs = cs;
         }
 
         @Override
         void scan(byte[] buf, int len, long firstLine, HitSink sink, BooleanSupplier cancelled) {
-            literal.scanCandidates(buf, len, firstLine, new Regex(pattern), sink, cancelled);
+            literal.scanCandidates(buf, len, firstLine, new Regex(pattern, cs), sink, cancelled);
         }
     }
 
@@ -195,10 +206,12 @@ abstract sealed class LineMatcher {
     /** Regular expression search, one decoded line at a time. */
     static final class Regex extends LineMatcher {
         private final Pattern pattern;
+        private final java.nio.charset.Charset cs;
         private Matcher matcher; // per scan; a Regex instance is used by one thread
 
-        Regex(Pattern pattern) {
+        Regex(Pattern pattern, java.nio.charset.Charset cs) {
             this.pattern = pattern;
+            this.cs = cs;
         }
 
         /** Whether the line {@code buf[start, end)} (end excludes the newline) matches. */
@@ -206,7 +219,7 @@ abstract sealed class LineMatcher {
             if (end > start && buf[end - 1] == '\r') {
                 end--;
             }
-            String s = new String(buf, start, end - start, StandardCharsets.UTF_8);
+            String s = new String(buf, start, end - start, cs);
             if (matcher == null) {
                 matcher = pattern.matcher(s);
             } else {
@@ -224,7 +237,7 @@ abstract sealed class LineMatcher {
                 int nl = ByteScan.indexOf(buf, pos, len, (byte) '\n');
                 int end = nl < 0 ? len : nl;
                 int textEnd = end > pos && buf[end - 1] == '\r' ? end - 1 : end;
-                String s = new String(buf, pos, textEnd - pos, StandardCharsets.UTF_8);
+                String s = new String(buf, pos, textEnd - pos, cs);
                 if (m.reset(s).find() && !sink.hit(line)) {
                     return;
                 }

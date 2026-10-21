@@ -54,6 +54,7 @@ public final class FolderSearch implements AutoCloseable {
         private final List<Hit> hits = new ArrayList<>();
         private volatile long hitCount;
         private long lastLine = -1; // worker thread only
+        private java.nio.charset.Charset charset = StandardCharsets.UTF_8;
 
         FileResult(Path file, String entry) {
             this.file = file;
@@ -374,8 +375,20 @@ public final class FolderSearch implements AutoCloseable {
     }
 
     /** Streams the content in blocks of whole lines through the matcher. */
-    private void searchStream(FileResult result, InputStream in) throws IOException {
-        LineMatcher matcher = LineMatcher.of(options.query());
+    private void searchStream(FileResult result, InputStream raw) throws IOException {
+        // detect the encoding from the start; UTF-16 is read as UTF-8
+        InputStream buffered = new BufferedInputStream(raw, 1 << 16);
+        buffered.mark(1 << 16);
+        byte[] head = buffered.readNBytes(1 << 16);
+        buffered.reset();
+        java.nio.charset.Charset cs = Encoding.detect(head, head.length);
+        InputStream in = buffered;
+        if (Encoding.isUtf16(cs)) {
+            in = new Utf8Stream(buffered, cs);
+            cs = java.nio.charset.StandardCharsets.UTF_8;
+        }
+        result.charset = cs;
+        LineMatcher matcher = LineMatcher.of(options.query(), cs);
         byte[] buf = new byte[blockSize];
         int len = 0;
         long line = 0;
@@ -458,8 +471,7 @@ public final class FolderSearch implements AutoCloseable {
                     && keptHits.get() < MAX_KEPT_TOTAL;
             String text = null;
             if (keep) {
-                text = new String(buf, pos, Math.min(lineEnd - pos, MAX_TEXT * 4),
-                        StandardCharsets.UTF_8);
+                text = new String(buf, pos, Math.min(lineEnd - pos, MAX_TEXT * 4), r.charset);
                 if (text.length() > MAX_TEXT) {
                     text = text.substring(0, MAX_TEXT);
                 }

@@ -2,7 +2,6 @@ package logmaster.core;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -123,7 +122,7 @@ public final class ColumnStats {
             if (end > pos && buf[end - 1] == '\r') {
                 end--;
             }
-            String text = new String(buf, pos, Math.min(end - pos, 4000), StandardCharsets.UTF_8);
+            String text = new String(buf, pos, Math.min(end - pos, 4000), doc.charset());
             if (m.reset(text).matches()) {
                 String v = m.group(column);
                 if (v != null) {

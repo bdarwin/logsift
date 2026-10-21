@@ -48,6 +48,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     private final LogDocument doc;
+    private final Path path;
+    private final String encodingLabel;
     private final Host host;
     private final LogView main = new LogView();
     private final LogView results = new LogView();
@@ -97,9 +99,22 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private String error;
 
     LogTab(Path path, Host host) throws IOException {
+        this(path, path, java.nio.charset.StandardCharsets.UTF_8, null, host);
+    }
+
+    /**
+     * @param readPath the file to read (a UTF-8 copy for UTF-16 logs)
+     * @param path the file the user opened (title, recent files, bookmarks, memory)
+     * @param charset the text encoding of {@code readPath}
+     * @param encodingLabel what to show as the encoding (null: the charset's name)
+     */
+    LogTab(Path readPath, Path path, java.nio.charset.Charset charset, String encodingLabel, Host host)
+            throws IOException {
         super(new BorderLayout());
         this.host = host;
-        this.doc = LogDocument.open(path);
+        this.path = path.toAbsolutePath().normalize();
+        this.encodingLabel = encodingLabel != null ? encodingLabel : logmaster.core.Encoding.label(charset);
+        this.doc = LogDocument.open(readPath, logmaster.core.LineIndex.DEFAULT_CHUNK_SIZE, charset);
         this.engine = new FilterEngine(doc);
         this.filterResult = engine.result();
         docUpdate = coalesced(this::onDocChanged);
@@ -252,7 +267,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         resultsPanel.add(results, BorderLayout.CENTER);
 
         messages = new MessagesPanel(messagesHost());
-        bookmarks = new Bookmarks(doc.path());
+        bookmarks = new Bookmarks(path);
         bookmarkGeneration = doc.generation();
         bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
         bookmarks.addListener(() -> {
@@ -673,6 +688,15 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return doc;
     }
 
+    /** The file the user opened (for a UTF-16 log, not the UTF-8 copy that is read). */
+    Path path() {
+        return path;
+    }
+
+    String encodingLabel() {
+        return encodingLabel;
+    }
+
     LogView mainView() {
         return main;
     }
@@ -711,7 +735,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     String title() {
-        return doc.path().getFileName().toString();
+        return path.getFileName().toString();
     }
 
     private void onDocChanged() {

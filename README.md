@@ -81,6 +81,10 @@ When a log has timestamps, a timeline above it shows how much was logged over ti
 
 **Ctrl+F2** (⌘F2 on macOS) bookmarks the current line (or right-click → *Bookmark This Line*); **F2 / Shift+F2** jump to the next / previous bookmark. Bookmarks show as blue dots by the line number and on the highlight bar. The **Bookmarks** tab lists them with their time and text; type a note in the Note column, double-click to go there, Delete to remove. Bookmarks are remembered per file, and dropped if the file was truncated (the lines would have moved).
 
+## Text encodings
+
+LogMaster detects how a log's text is encoded: UTF-8 (with or without a byte order mark), **UTF-16** (as written by some Windows tools; with or without a byte order mark), and **Windows-1252** (Western European, used by older Windows programs). The status bar shows the encoding; **View → Encoding** reopens the log in another one (Latin-1, Cyrillic, Shift_JIS, GB18030 and more). UTF-16 logs are read through a UTF-8 copy that is kept up to date, so following a growing UTF-16 log works too. Folder search detects the encoding of each file.
+
 ## Recent files and sessions
 
 **File → Open Recent** lists the last 15 files. When LogMaster starts without a file to open, it reopens the logs that were open last time (**File → Reopen Last Session** does it any time). Every file remembers its filters, formula, level chips, *Matching only* and position, so reopening a log puts you back where you were; if the file got smaller in the meantime (truncated or rotated), it starts fresh.
@@ -210,7 +214,6 @@ Design choices:
 
 ## Known limits
 
-- **Only UTF-8 (and ASCII) files are decoded correctly.** UTF-16 and other encodings are not detected yet.
 - **Highlight rules are built in** (ERROR/FATAL, WARN, stack traces, DEBUG/TRACE). There is no editor for them yet.
 - **Very long lines:**
   - Lines over 64 KB are cut for display. Search still sees the whole line.
