@@ -79,6 +79,15 @@ final class Theme {
         return pick(new Color(0xEEF4FD), new Color(0x262B33));
     }
 
+    /** Header rows of foldable groups (folder search files, Find results searches). */
+    static Color groupHeaderForeground() {
+        return isDark() ? new Color(0x93C5FD) : new Color(0x1D4ED8);
+    }
+
+    static Color groupHeaderBackground() {
+        return isDark() ? new Color(0x2A2E35) : new Color(0xEEF2F7);
+    }
+
     static Color matchLight() {
         return new Color(0xFFD54F);
     }

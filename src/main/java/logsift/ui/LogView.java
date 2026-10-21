@@ -83,6 +83,14 @@ public final class LogView extends JPanel {
         }
 
         /** A dot in the gutter (for example, a bookmark). */
+        /**
+         * For a group's header row (a file in folder search, a search in Find results): true
+         * if the group is folded, false if open; null for ordinary rows.
+         */
+        default Boolean folded(int row) {
+            return null;
+        }
+
         default Color marker(int row) {
             return null;
         }
@@ -100,6 +108,9 @@ public final class LogView extends JPanel {
 
         /** A row was clicked with the mouse (not moved to with the keyboard). */
         default void rowClicked(LogView view, int row, int clicks) {}
+
+        /** A group header was clicked (or Enter, Left or Right pressed on it): fold or open it. */
+        default void foldToggled(LogView view, int row) {}
     }
 
     private static final int MAX_COPY_ROWS = 500_000;
@@ -1145,6 +1156,14 @@ public final class LogView extends JPanel {
                 int clicks = e.getClickCount();
                 int clickedRow = row;
                 listeners.forEach(l -> l.rowClicked(LogView.this, clickedRow, clicks));
+                if (!belowLast && source.folded(row) != null && !e.isShiftDown()) {
+                    // a group header: one click anywhere on it folds or opens the group
+                    moveLead(row, false);
+                    if (clicks == 1) {
+                        listeners.forEach(l -> l.foldToggled(LogView.this, clickedRow));
+                    }
+                    return;
+                }
                 if (columns != null) {
                     dragUnit = BY_LINE;
                     moveLead(row, e.isShiftDown());
@@ -1291,11 +1310,30 @@ public final class LogView extends JPanel {
         bind(im, am, "s-pgdn", KeyEvent.VK_PAGE_DOWN, sh, () -> page(1, true));
         bind(im, am, "s-home", KeyEvent.VK_HOME, sh, () -> moveLead(0, true));
         bind(im, am, "s-end", KeyEvent.VK_END, sh, () -> moveLead(source.rowCount() - 1, true));
-        bind(im, am, "left", KeyEvent.VK_LEFT, 0, () -> hbarScroll(-charWidth * 4));
-        bind(im, am, "right", KeyEvent.VK_RIGHT, 0, () -> hbarScroll(charWidth * 4));
+        bind(im, am, "left", KeyEvent.VK_LEFT, 0, () -> {
+            if (lead >= 0 && Boolean.FALSE.equals(source.folded(lead))) {
+                int r = lead;
+                listeners.forEach(l -> l.foldToggled(this, r)); // fold an open group
+            } else {
+                hbarScroll(-charWidth * 4);
+            }
+        });
+        bind(im, am, "right", KeyEvent.VK_RIGHT, 0, () -> {
+            if (lead >= 0 && Boolean.TRUE.equals(source.folded(lead))) {
+                int r = lead;
+                listeners.forEach(l -> l.foldToggled(this, r)); // open a folded group
+            } else {
+                hbarScroll(charWidth * 4);
+            }
+        });
         bind(im, am, "enter", KeyEvent.VK_ENTER, 0, () -> {
             if (lead >= 0) {
-                listeners.forEach(l -> l.rowActivated(this, lead));
+                int r = lead;
+                if (source.folded(r) != null) {
+                    listeners.forEach(l -> l.foldToggled(this, r));
+                } else {
+                    listeners.forEach(l -> l.rowActivated(this, r));
+                }
             }
         });
         bind(im, am, "copy", KeyEvent.VK_C, menu, this::copySelection);
@@ -1496,6 +1534,10 @@ public final class LogView extends JPanel {
                 if (dim) {
                     lf = Theme.dimmedForeground();
                 }
+                if (source.folded(l.row) != null) {
+                    lf = Theme.groupHeaderForeground();
+                    lb = Theme.groupHeaderBackground();
+                }
                 boolean inSel = anySel && l.row >= sel[0] && l.row <= sel[2];
                 if (inSel && lineMode) {
                     lb = selColor;
@@ -1617,11 +1659,47 @@ public final class LogView extends JPanel {
             header.repaint();
         }
 
+        /** A large ▸ / ▾ chevron at the right of the gutter for a group header. */
+        private void paintChevron(Graphics2D g0, boolean folded, int gutter, int y) {
+            Graphics2D g = (Graphics2D) g0.create();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+                g.setColor(Theme.groupHeaderBackground());
+                g.fillRect(gutter - 30, y, 30, rowHeight);
+                double size = Math.max(9, rowHeight * 0.62); // the chevron's box
+                double cx = gutter - 15;
+                double cy = y + rowHeight / 2.0;
+                double h = size / 2;
+                java.awt.geom.Path2D p = new java.awt.geom.Path2D.Double();
+                if (folded) { // ▸ pointing right
+                    p.moveTo(cx - h / 2, cy - h);
+                    p.lineTo(cx + h / 2, cy);
+                    p.lineTo(cx - h / 2, cy + h);
+                } else { // ▾ pointing down
+                    p.moveTo(cx - h, cy - h / 2);
+                    p.lineTo(cx, cy + h / 2);
+                    p.lineTo(cx + h, cy - h / 2);
+                }
+                g.setColor(Theme.groupHeaderForeground());
+                g.setStroke(new BasicStroke(Math.max(2f, rowHeight / 9f), BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND));
+                g.draw(p);
+            } finally {
+                g.dispose();
+            }
+        }
+
         /** Line number, markers and the current-line bar for one display row. */
         private void paintGutter(Graphics2D g, Line l, int seg, int i, int y, int gutter, Color fg) {
             // gutter: line number on the first segment; a hook on continuations
             if (seg == 0) {
                 long lineNo = source.lineNumber(l.row);
+                Boolean folded = source.folded(l.row);
+                if (folded != null) {
+                    paintChevron(g, folded, gutter, y);
+                    lineNo = -1;
+                }
                 String num = lineNo < 0 ? "" : Long.toString(lineNo + 1);
                 g.setColor(l.row == lead ? fg : Theme.gutterForeground());
                 g.drawString(num, gutter - 14 - metrics.stringWidth(num), y + ascent);

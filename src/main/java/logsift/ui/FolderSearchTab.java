@@ -93,11 +93,14 @@ final class FolderSearchTab extends JPanel {
 
         results.setSource(new Rows());
         results.setHighlightRules(List.of(
-                new HighlightRule("File", Pattern.compile("^[▾▸] "),
-                        new Color(0x1D4ED8), new Color(0xEEF2F7), new Color(0x93C5FD), new Color(0x2A2E35)),
                 new HighlightRule("More", Pattern.compile("^ {3}… "),
                         new Color(0x8A8F98), null, new Color(0x7C828A), null)));
         results.addListener(new LogView.Listener() {
+            @Override
+            public void foldToggled(LogView view, int row) {
+                activate(row); // on a file's header: folds or opens it
+            }
+
             @Override
             public void rowActivated(LogView view, int row) {
                 activate(row);
@@ -423,6 +426,15 @@ final class FolderSearchTab extends JPanel {
             }
         }
 
+        @Override
+        public Boolean folded(int row) {
+            if (row >= rowCount) {
+                return null;
+            }
+            int fi = fileOf(row);
+            return row == firstRow[fi] ? collapsed.contains(files.get(fi)) : null;
+        }
+
         private String text(int row) {
             if (row >= rowCount) {
                 return null;
@@ -431,7 +443,7 @@ final class FolderSearchTab extends JPanel {
             FolderSearch.FileResult f = files.get(fi);
             int k = row - firstRow[fi] - 1;
             if (k < 0) {
-                return (collapsed.contains(f) ? "▸ " : "▾ ") + label(f)
+                return label(f)
                         + String.format("   (%,d %s)", f.hitCount(), f.hitCount() == 1 ? "line" : "lines");
             }
             if (k < f.keptHits()) {

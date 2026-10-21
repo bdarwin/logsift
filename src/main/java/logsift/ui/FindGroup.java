@@ -129,7 +129,7 @@ final class FindGroup {
     /** The header line in the results window. */
     String header() {
         StringBuilder sb = new StringBuilder("   ".repeat(depth()));
-        sb.append(expanded ? "▾ " : "▸ ").append('“').append(title()).append('”');
+        sb.append('“').append(title()).append('”');
         List<String> opts = new ArrayList<>();
         if (query.regex()) {
             opts.add("regex");

@@ -6,7 +6,6 @@ import java.awt.Dimension;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -97,9 +96,10 @@ final class ResultsPanel extends JPanel {
         view.setSource(new Rows());
         view.addListener(new LogView.Listener() {
             @Override
-            public void rowClicked(LogView v, int row, int clicks) {
-                if (headerOf(row) != null && clicks == 1) {
-                    toggle(headerOf(row)); // a click on a search's header folds or opens it
+            public void foldToggled(LogView v, int row) {
+                FindGroup g = headerOf(row);
+                if (g != null) {
+                    toggle(g);
                 }
             }
 
@@ -121,7 +121,6 @@ final class ResultsPanel extends JPanel {
         });
         view.setPopupExtender((v, menu) -> extendPopup(menu));
         add(view, BorderLayout.CENTER);
-        setHeaderStyle();
         updateTarget();
     }
 
@@ -132,13 +131,6 @@ final class ResultsPanel extends JPanel {
         b.setFocusable(false);
         b.addActionListener(e -> r.run());
         return b;
-    }
-
-    /** Header rows in the accent color, on the gutter background. */
-    private void setHeaderStyle() {
-        view.setHighlightRules(List.of(new HighlightRule("Search",
-                Pattern.compile("^\\s*[▾▸] “"), new Color(0x1D4ED8), new Color(0xEEF2F7),
-                new Color(0x93C5FD), new Color(0x2A2E35))));
     }
 
     LogView view() {
@@ -443,6 +435,12 @@ final class ResultsPanel extends JPanel {
         public Color marker(int row) {
             FindGroup g = headerOf(row);
             return g == null ? null : g.colors()[2];
+        }
+
+        @Override
+        public Boolean folded(int row) {
+            FindGroup g = headerOf(row);
+            return g == null ? null : !g.expanded;
         }
 
         @Override
