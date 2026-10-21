@@ -142,6 +142,7 @@ public final class LogView extends JPanel {
     private int wordStart;
     private int wordEnd;
     private boolean follow;
+    private boolean stripes = true;
     private boolean adjusting;
     private Pattern matchPattern;
     private List<HighlightRule> rules = HighlightRule.defaults();
@@ -153,7 +154,6 @@ public final class LogView extends JPanel {
 
     // Columns view: lines split by a log format into cells under a header.
     private ColumnLayout columns;
-    private boolean wrapBeforeColumns;
     private final ColumnHeader header = new ColumnHeader();
     private BiConsumer<String, MouseEvent> columnMenu;
 
@@ -293,21 +293,16 @@ public final class LogView extends JPanel {
     }
 
     public boolean isWrap() {
-        return columns == null ? wrap : wrapBeforeColumns;
+        return wrap;
     }
 
-    /** Shows lines as columns (null: as plain text). Wrap is paused while columns are shown. */
+    /**
+     * Shows lines as columns (null: as plain text). With wrap on, the Message column wraps
+     * within its column.
+     */
     void setColumns(ColumnLayout layout) {
-        if (layout != null && columns == null) {
-            wrapBeforeColumns = wrap;
-            columns = layout;
-            setWrapNow(false);
-        } else if (layout == null && columns != null) {
-            columns = null;
-            setWrapNow(wrapBeforeColumns);
-        } else {
-            columns = layout;
-        }
+        columns = layout;
+        topSeg = 0;
         header.setVisible(columns != null);
         header.repaint();
         maxColumns = 0;
@@ -327,10 +322,6 @@ public final class LogView extends JPanel {
 
     /** Wraps long lines at the window edge instead of scrolling sideways. */
     public void setWrap(boolean on) {
-        if (columns != null) {
-            wrapBeforeColumns = on; // applies when columns are turned off
-            return;
-        }
         setWrapNow(on);
     }
 
@@ -348,6 +339,12 @@ public final class LogView extends JPanel {
         } else if (lead >= 0) {
             ensureVisible(lead);
         }
+    }
+
+    /** Alternate lines get a faint background, so lines (and wrapped lines) are easy to tell apart. */
+    public void setStripes(boolean on) {
+        stripes = on;
+        canvas.repaint();
     }
 
     public boolean isFollow() {
@@ -577,12 +574,30 @@ public final class LogView extends JPanel {
         final int[] colOf;   // display column of each raw char (null if no tabs)
         final boolean wide;
         final int[] segStart; // display column where each segment starts
+        // Columns view: the cells (null for a line without the layout, such as a stack trace);
+        // then "text" is the Message cell, or the whole line, which is what wraps.
+        final String[] cells;
+        final int[] cellStarts;
 
         Line(int row, String raw) {
             this.row = row;
             this.raw = raw;
-            this.colOf = raw.indexOf('\t') >= 0 ? new int[raw.length() + 1] : null;
-            this.text = expandTabs(raw, colOf);
+            ColumnLayout cl = columns;
+            if (cl != null) {
+                int[] starts = new int[cl.format().columns().size()];
+                String[] split = cl.format().split(raw, starts);
+                this.cells = split;
+                this.cellStarts = starts;
+                this.colOf = null;
+                int msg = cl.messageColumn();
+                this.text = split == null ? expandTabs(raw, null)
+                        : (msg < 0 || split[msg] == null ? "" : split[msg].replace('\t', ' '));
+            } else {
+                this.cells = null;
+                this.cellStarts = null;
+                this.colOf = raw.indexOf('\t') >= 0 ? new int[raw.length() + 1] : null;
+                this.text = expandTabs(raw, colOf);
+            }
             this.wide = hasWideChars(text);
             this.segStart = wrap ? wrapPoints() : new int[] {0};
         }
@@ -617,10 +632,11 @@ public final class LogView extends JPanel {
         /** X where segment {@code seg} starts. */
         int segX(int seg) {
             int gutter = gutterWidth();
+            int base = columns != null ? gutter - hOffset + columns.messageX(charWidth) : gutter - hOffset;
             if (!wrap) {
-                return gutter - hOffset;
+                return base;
             }
-            return gutter + (seg > 0 ? WRAP_INDENT * charWidth : 0);
+            return base + hOffset + (seg > 0 ? WRAP_INDENT * charWidth : 0);
         }
 
         /** X of display column {@code col} within segment {@code seg}. */
@@ -673,7 +689,8 @@ public final class LogView extends JPanel {
 
         /** Where to break the text so each segment fits the width, preferring spaces. */
         private int[] wrapPoints() {
-            int avail = Math.max(charWidth * 8, canvas.getWidth() - gutterWidth() - charWidth);
+            int used = gutterWidth() + (columns != null ? columns.messageX(charWidth) : 0);
+            int avail = Math.max(charWidth * 8, canvas.getWidth() - used - charWidth);
             int n = text.length();
             List<Integer> starts = new ArrayList<>();
             starts.add(0);
@@ -1106,9 +1123,13 @@ public final class LogView extends JPanel {
                     return;
                 }
                 int clicks = e.getClickCount();
-                if (columns != null && clicks < 2) {
+                if (columns != null) {
                     dragUnit = BY_LINE;
                     moveLead(row, e.isShiftDown());
+                    if (clicks == 2) {
+                        int r = row;
+                        listeners.forEach(l -> l.rowActivated(LogView.this, r));
+                    }
                     return;
                 }
                 if (inGutter(e.getX()) || clicks >= 3) {
@@ -1455,6 +1476,9 @@ public final class LogView extends JPanel {
                 } else if (lb == null && l.row == lead && !anySel) {
                     lb = Theme.currentLine();
                 }
+                if (lb == null && stripes && (l.row & 1) == 1) {
+                    lb = Theme.stripe();
+                }
                 lineFg[k] = lf;
                 lineBg[k] = lb;
                 if (mm != null) {
@@ -1500,7 +1524,7 @@ public final class LogView extends JPanel {
                         g.setStroke(new BasicStroke(1f));
                     }
                     if (columns != null) {
-                        paintColumnsRow(gt, l, y, lineFg[k], matches[k]);
+                        paintColumnsRow(gt, l, seg, y, lineFg[k]);
                         paintGutter(g, l, seg, i, y, gutter, fg);
                         continue;
                     }
@@ -1601,55 +1625,67 @@ public final class LogView extends JPanel {
             }
         }
 
-        /** One line as cells under the column header; other lines start at the message column. */
-        private void paintColumnsRow(Graphics2D gt, Line l, int y, Color lineFg, int[] matchCols) {
+        /**
+         * One display row of the columns view. The first row of a line has every cell; the
+         * Message cell (or a whole line without the layout, such as a stack trace) wraps onto
+         * further rows under the Message column.
+         */
+        private void paintColumnsRow(Graphics2D gt, Line l, int seg, int y, Color lineFg) {
             ColumnLayout cl = columns;
             int x0 = gutterWidth() - hOffset;
-            int[] starts = new int[cl.format().columns().size()];
-            String[] cells = cl.format().split(l.raw, starts);
-            if (cells == null) {
-                // a continuation line (stack trace): under the message
-                int x = x0 + cl.messageX(charWidth);
-                gt.setColor(lineFg);
-                gt.drawString(l.text, x, y + ascent);
-                return;
-            }
-            int x = x0;
-            int[] visible = cl.visible();
-            for (int c = 0; c < visible.length; c++) {
-                int col = visible[c];
-                boolean last = c == visible.length - 1;
-                int w = last ? Integer.MAX_VALUE / 4 : cl.width(c, charWidth);
-                String v = cells[col] == null ? "" : cells[col].replace('\t', ' ');
-                Graphics2D cg = (Graphics2D) gt.create();
-                try {
-                    if (!last) {
+            if (l.cells != null && seg == 0) {
+                int x = x0;
+                int[] visible = cl.visible();
+                for (int c = 0; c < visible.length - 1; c++) {
+                    int col = visible[c];
+                    int w = cl.width(c, charWidth);
+                    String v = l.cells[col] == null ? "" : l.cells[col].replace('\t', ' ');
+                    Graphics2D cg = (Graphics2D) gt.create();
+                    try {
                         cg.clipRect(x, y, Math.max(0, w - charWidth), rowHeight);
+                        paintMatches(cg, v, x, y);
+                        cg.setColor(cl.isLevel(col) ? levelColor(v, lineFg) : lineFg);
+                        cg.drawString(v, x, y + ascent);
+                    } finally {
+                        cg.dispose();
                     }
-                    if (matchCols != null && starts[col] >= 0) {
-                        cg.setColor(Theme.match());
-                        int s0 = starts[col];
-                        int s1 = s0 + v.length();
-                        for (int m = 0; m + 1 < matchCols.length; m += 2) {
-                            int a = Math.max(l.rawIndexOfCol(matchCols[m]), s0);
-                            int b = Math.min(l.rawIndexOfCol(matchCols[m + 1]), s1);
-                            if (b > a) {
-                                int xa = x + metrics.stringWidth(v.substring(0, a - s0));
-                                int xb = x + metrics.stringWidth(v.substring(0, b - s0));
-                                cg.fillRoundRect(xa, y + 1, Math.max(2, xb - xa), rowHeight - 2, 4, 4);
-                            }
-                        }
-                    }
-                    cg.setColor(cl.isLevel(col) ? levelColor(v, lineFg) : lineFg);
-                    cg.drawString(v, x, y + ascent);
-                } finally {
-                    cg.dispose();
-                }
-                if (!last) {
                     gt.setColor(Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY));
                     gt.drawLine(x + w - charWidth / 2, y, x + w - charWidth / 2, y + rowHeight);
+                    x += w;
                 }
-                x += w;
+            } else if (l.cells != null) {
+                // continuation rows keep the column separators, so the message stays in its column
+                int x = x0;
+                int[] visible = cl.visible();
+                gt.setColor(Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY));
+                for (int c = 0; c < visible.length - 1; c++) {
+                    x += cl.width(c, charWidth);
+                    gt.drawLine(x - charWidth / 2, y, x - charWidth / 2, y + rowHeight);
+                }
+            }
+            // the message (or the whole line) for this row
+            String part = l.text.substring(l.segStart[seg], l.segEnd(seg));
+            int mx = l.segX(seg);
+            paintMatches(gt, part, mx, y);
+            gt.setColor(lineFg);
+            gt.drawString(part, mx, y + ascent);
+        }
+
+        /** Highlights Find All matches inside one cell's text drawn at x. */
+        private void paintMatches(Graphics2D g, String text, int x, int y) {
+            if (matchPattern == null || text.isEmpty()) {
+                return;
+            }
+            Matcher m = matchPattern.matcher(text);
+            g.setColor(Theme.match());
+            int guard = 0;
+            while (m.find() && guard++ < 200) {
+                if (m.end() == m.start()) {
+                    continue;
+                }
+                int xa = x + metrics.stringWidth(text.substring(0, m.start()));
+                int xb = x + metrics.stringWidth(text.substring(0, m.end()));
+                g.fillRoundRect(xa, y + 1, Math.max(2, xb - xa), rowHeight - 2, 4, 4);
             }
         }
 

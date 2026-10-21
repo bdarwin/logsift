@@ -28,6 +28,7 @@ import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import javax.swing.JComponent;
+import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 import logsift.core.FilterResult;
 import logsift.core.LogDocument;
@@ -1732,6 +1733,117 @@ class VisualTest {
         assertEquals(badTab, onEdt(frame::currentTab));
         assertEquals(first.firstB(), (long) onEdt(badTab::currentLine));
         assertEquals(first.countB(), waitForSearch(badTab).hits().size(), "Find All finds all of them");
+    }
+
+    @Test
+    @Order(27)
+    void wrapInColumnsClearAllFoldAndSlowOpen() throws Exception {
+        // 1. wrap works in the columns view: long messages wrap under the Message column
+        Path f = dir.resolve("wrap-columns.log");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 400; i++) {
+            sb.append(String.format("2026-10-21 10:00:%02d.%03d INFO  [worker-%d] c.a.Svc - ", i % 60, i, i % 4));
+            sb.append(i % 3 == 0 ? "a long message with many words ".repeat(12) : "short").append('\n');
+        }
+        Files.writeString(f, sb);
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> tab.logFormat() != null, 30_000, "layout detected");
+        int segs = onEdt(() -> {
+            frame.setColumns(true);
+            frame.setWrap(true);
+            tab.mainView().goToRow(0, false);
+            return tab.mainView().segmentsForTest(3);
+        });
+        assertTrue(segs > 1, "a long message wraps in the columns view: " + segs);
+        assertEquals(1, (int) onEdt(() -> tab.mainView().segmentsForTest(1)), "a short one doesn't");
+        settle();
+        shot("34-wrap-in-columns-and-stripes");
+        onEdt(() -> {
+            frame.setWrap(false);
+            frame.setColumns(false);
+            return null;
+        });
+
+        // 2. Clear all: filters, level chips and the time range go; all lines are shown
+        onEdt(() -> {
+            tab.filterPanel().addFilter("long", FilterDef.Action.SHOW);
+            tab.filterPanel().setLevels("E", "W");
+            tab.setMatchingOnly(true);
+            return null;
+        });
+        waitForFilters(tab, System.nanoTime());
+        onEdt(() -> {
+            tab.filterPanel().clearAll();
+            return null;
+        });
+        waitFor(() -> !tab.filterEngine().result().isFiltering(), 10_000, "no filtering after Clear all");
+        assertTrue(onEdt(() -> tab.filterPanel().filters().isEmpty() && tab.filterPanel().levelWords() == null
+                && !tab.isMatchingOnly() && tab.timeRange() == null), "everything cleared");
+
+        // 3. Clear on the Find results
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("worker-2", true, false, false));
+            return null;
+        });
+        waitForSearch(tab);
+        onEdt(() -> {
+            tab.closeResults();
+            return null;
+        });
+        assertEquals(null, onEdt(tab::search), "results cleared");
+
+        // 4. the bottom panel folds to its tab strip and comes back
+        int open = onEdt(tab::bottomHeightForTest);
+        int folded = onEdt(() -> {
+            tab.setBottomCollapsed(true);
+            return tab.bottomHeightForTest();
+        });
+        assertTrue(folded < 45 && folded < open, "folded to the tabs: " + folded + " (was " + open + ")");
+        settle();
+        shot("35-bottom-panel-folded");
+        int reopened = onEdt(() -> {
+            JTabbedPane b = tab.bottomTabsForTest();
+            java.awt.Rectangle r = b.getBoundsAt(1);
+            b.dispatchEvent(new MouseEvent(b, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                    InputEvent.BUTTON1_DOWN_MASK, r.x + 5, r.y + 5, 1, false, MouseEvent.BUTTON1));
+            return 0;
+        });
+        settle();
+        int afterClick = onEdt(tab::bottomHeightForTest);
+        assertTrue(afterClick > 100 && reopened == 0, "clicking a tab opens it again: " + afterClick);
+
+        // 6. a file on a slow drive: the window stays responsive, "Opening…" shows, then the tab
+        Path slow = dir.resolve("slow-drive.log");
+        Files.writeString(slow, "2026-10-21 10:00:00 INFO from a slow drive\n");
+        System.setProperty("logsift.openWaitMs", "100");
+        System.setProperty("logsift.testOpenDelayMs", "1500");
+        try {
+            long t0 = System.nanoTime();
+            onEdt(() -> {
+                frame.openFile(slow);
+                return null;
+            });
+            long blocked = ms(t0);
+            assertTrue(blocked < 800, "the window was blocked for " + blocked + " ms");
+            assertTrue(onEdt(() -> frame.isOpeningForTest(slow)), "opening in the background");
+            settle();
+            shot("36-opening-from-slow-drive");
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null
+                            && frame.currentTab().path().equals(slow.toAbsolutePath().normalize()));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 15_000, "slow file opened");
+        } finally {
+            System.setProperty("logsift.openWaitMs", "10000");
+            System.clearProperty("logsift.testOpenDelayMs");
+        }
     }
 
     /** The time of the first line at or after {@code i} that has a timestamp. */

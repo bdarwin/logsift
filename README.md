@@ -40,7 +40,7 @@ Make a test log:
 | Stop a running search | Esc in the Find box |
 | Close results | Shift+Esc |
 | Jump from a result to the line | click it, or move with the arrow keys in the results |
-| Wrap long lines | Alt+Z (⌥Z on macOS), or the Wrap button |
+| Wrap long lines | Alt+Z (⌥Z on macOS), or the Wrap button (works in the Columns view too) |
 | Next / previous error | F8 / Shift+F8 |
 | Bookmark the current line | Ctrl+F2 (⌘F2 on macOS) |
 | Next / previous bookmark | F2 / Shift+F2 |
@@ -53,7 +53,7 @@ Make a test log:
 | Go to line | Ctrl+L |
 | Go to time | Ctrl+Shift+L |
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
-| Show or hide the Filters panel | Ctrl+J |
+| Fold / open the bottom panel | Ctrl+J, the ▾ button, or double-click a tab |
 | Follow the end of the file (tail -f) | Ctrl+T, the Follow button, or End |
 | Select text | drag; double-click = word, triple-click or click the line number = whole line; Shift+click extends |
 | Copy | Ctrl+C (with nothing selected, copies the current line) · Select all: Ctrl+A |
@@ -148,6 +148,8 @@ The **Filters** panel below the log holds any number of filters (up to 26). Each
 **Keep stack traces** (on by default) treats a log line and the lines under it (stack traces, wrapped messages) as one entry: if any line of the entry matches, the whole entry is shown, and Hide filters hide whole entries. Logsift detects how entries start from the first lines of the file (a date, a time, a syslog date, a level word, or `{` for JSON lines); the checkbox tooltip shows what it found. **Context ±N** adds N grayed lines before and after each match, with a dashed line where lines were skipped, like `grep -C`.
 
 **Alerts:** click the bell on a filter to be told when new lines matching it are written (while the file grows). Logsift shows a desktop notification and a popup you can click to jump to the line, beeps, and puts a count on the tab. Bursts are combined (at most one alert per filter every 3 seconds). Lines that were already in the file don't alert.
+
+**Clear all** (next to + Add filter) removes every filter, turns all levels back on and clears the time range. The Find results have a **Clear** button too, and the ✕ in the Find box clears them as well.
 
 Quick ways to add filters: select text in the log, right-click, then choose **Show / Hide / Mark lines with "…"**. Filter sets can be saved and loaded (the ⋯ menu), and filters keep working while the file grows.
 

@@ -83,6 +83,11 @@ final class ColumnLayout {
         return messageX(charWidth);
     }
 
+    /** Index (in the format's columns) of the last shown column, normally the message. */
+    int messageColumn() {
+        return visible.length == 0 ? -1 : visible[visible.length - 1];
+    }
+
     boolean isLevel(int col) {
         return format.columns().get(col).equals("level");
     }

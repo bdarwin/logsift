@@ -130,46 +130,159 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Opens a file in a new tab (or selects it if already open). */
     public void openFile(Path path) {
-        openFile(path, null);
+        openFile(path, null, null);
     }
 
     /** Opens a file with a given text encoding (null: detect it). */
     public void openFile(Path path, java.nio.charset.Charset forced) {
+        openFile(path, forced, null);
+    }
+
+    /** Files being opened right now (opening can take a while on network or cloud drives). */
+    private final java.util.Set<Path> opening = new java.util.HashSet<>();
+    private static final java.util.concurrent.ExecutorService OPENER =
+            java.util.concurrent.Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "logsift-open");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private record Opened(java.nio.charset.Charset charset, LogDocument doc) {}
+
+    /**
+     * Opens (or selects) a file. The slow parts (checking the file, reading its start to detect
+     * the encoding, opening it) run in the background, so a file on a slow network or cloud drive
+     * never freezes the window: after a moment an "Opening…" window with Cancel appears.
+     *
+     * @param then gets the file's tab once it is open (not called if it fails or is cancelled)
+     */
+    public void openFile(Path path, java.nio.charset.Charset forced, java.util.function.Consumer<LogTab> then) {
         Path abs = path.toAbsolutePath().normalize();
         for (int i = 0; i < tabs.getTabCount(); i++) {
             if (tabs.getComponentAt(i) instanceof LogTab lt && lt.path().equals(abs)) {
                 tabs.setSelectedIndex(i);
                 AppState.addRecent(abs);
+                if (then != null) {
+                    then.accept(lt);
+                }
                 return;
             }
         }
-        if (!Files.isRegularFile(abs)) {
-            JOptionPane.showMessageDialog(this, "Not a file: " + abs, "Open",
-                    JOptionPane.ERROR_MESSAGE);
-            return;
+        if (!opening.add(abs)) {
+            return; // already on its way
         }
-        java.nio.charset.Charset cs = forced;
-        try {
-            if (cs == null) {
-                cs = logsift.core.Encoding.detect(abs);
+        java.util.concurrent.CompletableFuture<Opened> f = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                long testDelay = Long.getLong("logsift.testOpenDelayMs", 0); // tests: a slow drive
+                if (testDelay > 0) {
+                    Thread.sleep(testDelay);
+                }
+                if (!Files.isRegularFile(abs)) {
+                    throw new IOException("Not a file (or not reachable): " + abs);
+                }
+                java.nio.charset.Charset cs = forced;
+                if (cs == null) {
+                    try {
+                        cs = logsift.core.Encoding.detect(abs);
+                    } catch (IOException e) {
+                        cs = java.nio.charset.StandardCharsets.UTF_8;
+                    }
+                }
+                if (logsift.core.Encoding.isUtf16(cs)) {
+                    return new Opened(cs, null);
+                }
+                return new Opened(cs, LogDocument.open(abs, logsift.core.LineIndex.DEFAULT_CHUNK_SIZE, cs));
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
             }
-        } catch (IOException e) {
-            cs = java.nio.charset.StandardCharsets.UTF_8;
-        }
-        if (logsift.core.Encoding.isUtf16(cs)) {
-            openUtf16(abs, cs);
-            return;
-        }
+        }, OPENER);
         try {
-            addLogTab(new LogTab(abs, abs, cs, null, this), abs);
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this, "Cannot open " + abs + ":\n" + e.getMessage(),
-                    "Open", JOptionPane.ERROR_MESSAGE);
+            // usually done in milliseconds: then open right away, without any window
+            Opened r = f.get(Long.getLong("logsift.openWaitMs", 300), java.util.concurrent.TimeUnit.MILLISECONDS);
+            finishOpen(abs, r, then);
+        } catch (java.util.concurrent.TimeoutException e) {
+            openSlowly(abs, f, then);
+        } catch (java.util.concurrent.ExecutionException e) {
+            opening.remove(abs);
+            showOpenError(abs, e.getCause());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            opening.remove(abs);
         }
     }
 
+    /** Shows "Opening…" with Cancel while a slow file opens; the window stays usable. */
+    private void openSlowly(Path abs, java.util.concurrent.CompletableFuture<Opened> f,
+                            java.util.function.Consumer<LogTab> then) {
+        javax.swing.JDialog dlg = new javax.swing.JDialog(this, "Opening " + abs.getFileName(), false);
+        JProgressBar bar = new JProgressBar();
+        bar.setIndeterminate(true);
+        JButton cancel = new JButton("Cancel");
+        java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        JPanel p = new JPanel(new BorderLayout(8, 8));
+        p.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        p.add(new JLabel("<html>Opening <b>" + abs.getFileName() + "</b>…<br>"
+                + "<span style='color:gray'>Waiting for the file. It may be on a network or cloud drive"
+                + " that has to fetch it first.</span></html>"), BorderLayout.NORTH);
+        p.add(bar, BorderLayout.CENTER);
+        p.add(cancel, BorderLayout.EAST);
+        dlg.setContentPane(p);
+        dlg.pack();
+        dlg.setLocationRelativeTo(this);
+        cancel.addActionListener(e -> {
+            cancelled.set(true);
+            opening.remove(abs);
+            dlg.dispose();
+        });
+        dlg.setVisible(true);
+        status.setText("Opening " + abs + "…");
+        f.whenComplete((r, ex) -> SwingUtilities.invokeLater(() -> {
+            dlg.dispose();
+            if (cancelled.get()) {
+                if (r != null && r.doc() != null) {
+                    r.doc().close();
+                }
+                return;
+            }
+            if (ex != null) {
+                opening.remove(abs);
+                showOpenError(abs, ex instanceof java.util.concurrent.CompletionException c ? c.getCause() : ex);
+            } else {
+                finishOpen(abs, r, then);
+            }
+        }));
+    }
+
+    private void finishOpen(Path abs, Opened r, java.util.function.Consumer<LogTab> then) {
+        opening.remove(abs);
+        if (r.doc() == null) {
+            openUtf16(abs, r.charset(), then);
+            return;
+        }
+        LogTab tab = new LogTab(r.doc(), abs, null, this);
+        addLogTab(tab, abs);
+        if (then != null) {
+            then.accept(tab);
+        }
+    }
+
+    /** Files from the last session: if they are gone now, say nothing. */
+    private final java.util.Set<Path> quietOpen = new java.util.HashSet<>();
+
+    private void showOpenError(Path abs, Throwable e) {
+        if (quietOpen.remove(abs)) {
+            status.setText("Not reopened (missing): " + abs);
+            return;
+        }
+        Throwable cause = e instanceof java.io.UncheckedIOException u ? u.getCause() : e;
+        JOptionPane.showMessageDialog(this, "Cannot open " + abs + ":\n"
+                + (cause == null ? "unknown error" : cause.getMessage()), "Open", JOptionPane.ERROR_MESSAGE);
+    }
+
     /** UTF-16 logs are read through a UTF-8 copy that follows the original. */
-    private void openUtf16(Path abs, java.nio.charset.Charset cs) {
+    private void openUtf16(Path abs, java.nio.charset.Charset cs, java.util.function.Consumer<LogTab> then) {
         ProgressDialog.run(this, "Converting " + abs.getFileName() + " from " + cs.name() + "…",
                 (progress, cancelled) -> {
                     Path dir = Files.createTempDirectory("logsift-utf16-");
@@ -185,6 +298,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         tab.addCloseHook(mirror::close);
                         mirror.follow(500);
                         addLogTab(tab, abs);
+                        if (then != null) {
+                            then.accept(tab);
+                        }
                     } catch (IOException e) {
                         mirror.close();
                         JOptionPane.showMessageDialog(this, "Cannot open " + abs + ":\n" + e.getMessage(),
@@ -199,6 +315,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tab.resultsView().setFontSize(fontSize);
         tab.mainView().setWrap(wrap);
         tab.resultsView().setWrap(wrap);
+        tab.mainView().setStripes(PREFS.getBoolean("stripes", true));
+        tab.resultsView().setStripes(PREFS.getBoolean("stripes", true));
         tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
         tab.setColumnsVisible(columns);
         tabs.addTab(tab.title(), tab);
@@ -407,18 +525,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         m.close();
                         return;
                     }
-                    openFile(out);
-                    LogTab tab = currentTab();
-                    if (tab != null && tab.path().equals(out.toAbsolutePath().normalize())) {
+                    openFile(out, java.nio.charset.StandardCharsets.UTF_8, tab -> {
                         tab.setSourceLabels(labels);
                         tab.addCloseHook(m::close);
                         int i = tabs.indexOfComponent(tab);
                         tabs.setTitleAt(i, "Merged (" + files.size() + " logs)");
                         tabs.setToolTipTextAt(i, tab.sourceLegend());
                         m.follow(500);
-                    } else {
-                        m.close();
-                    }
+                    });
                 });
             } catch (IOException | RuntimeException e) {
                 SwingUtilities.invokeLater(() -> {
@@ -532,13 +646,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Opens a file at a line and runs Find All for the query there. */
     private void openAt(Path file, long line, SearchQuery q) {
-        openFile(file);
-        LogTab t = currentTab();
-        if (t != null && t.path().equals(file.toAbsolutePath().normalize())) {
+        openFile(file, null, t -> {
+            tabs.setSelectedComponent(t);
             findAll(q);
             t.showLineWhenAvailable(line);
             t.mainView().focusView();
-        }
+        });
+    }
+
+    boolean isOpeningForTest(Path p) {
+        return opening.contains(p.toAbsolutePath().normalize());
     }
 
     int currentTabIndexForTest() {
@@ -575,18 +692,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** Opens the files that were open last time (each with its filters and position). */
     public void restoreSession() {
         AppState.Session s = AppState.lastSession();
-        LogTab select = null;
-        for (int i = 0; i < s.files().size(); i++) {
-            Path p = s.files().get(i);
-            if (Files.isRegularFile(p)) {
-                openFile(p);
-                if (i == s.selected()) {
-                    select = currentTab();
-                }
+        java.util.function.Consumer<LogTab> select = t -> SwingUtilities.invokeLater(() -> {
+            if (tabs.indexOfComponent(t) >= 0) {
+                tabs.setSelectedComponent(t);
             }
-        }
-        if (select != null) {
-            tabs.setSelectedComponent(select);
+        });
+        for (int i = 0; i < s.files().size(); i++) {
+            // no existence check here: on an unreachable share it could hang; opening handles it
+            Path p = s.files().get(i).toAbsolutePath().normalize();
+            quietOpen.add(p);
+            openFile(p, null, i == s.selected() ? select.andThen(t -> quietOpen.remove(p))
+                    : t -> quietOpen.remove(p));
         }
     }
 
@@ -620,6 +736,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         findField.putClientProperty("JTextField.placeholderText", "Find  (Enter = Find All)");
         findField.putClientProperty("JTextField.showClearButton", true);
+        // the ✕ in the Find box also clears the results
+        findField.putClientProperty("JTextField.clearCallback", (Runnable) () -> {
+            findField.setText("");
+            LogTab t = currentTab();
+            if (t != null) {
+                t.closeResults();
+            }
+        });
         JToolBar inField = new JToolBar();
         inField.setFloatable(false);
         inField.setOpaque(false);
@@ -714,7 +838,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 }
                 for (Path p : files) {
                     JMenuItem mi = new JMenuItem(p.getFileName() + "   —   " + p.getParent());
-                    mi.setEnabled(Files.isRegularFile(p));
                     mi.addActionListener(a -> openFile(p));
                     recent.add(mi);
                 }
@@ -828,6 +951,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }));
         view.add(item("Columns", KeyStroke.getKeyStroke(KeyEvent.VK_K, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> setColumns(!columns)));
+        view.add(item("Line Stripes", null, e -> {
+            boolean on = !PREFS.getBoolean("stripes", true);
+            PREFS.putBoolean("stripes", on);
+            for (LogTab t : allTabs()) {
+                t.mainView().setStripes(on);
+                t.resultsView().setStripes(on);
+            }
+        }));
         view.add(item("Word Wrap", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
                 e -> setWrap(!wrap)));
         view.add(item("Show Matching Lines Only / All Lines",
@@ -837,7 +968,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         t.setMatchingOnly(!t.isMatchingOnly());
                     }
                 }));
-        view.add(item("Show / Hide Filters Panel", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU), e -> {
+        view.add(item("Fold / Open Bottom Panel", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU), e -> {
             LogTab t = currentTab();
             if (t != null) {
                 t.toggleBottom();

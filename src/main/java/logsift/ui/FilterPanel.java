@@ -61,6 +61,9 @@ final class FilterPanel extends JPanel {
 
         /** A filter's alert was switched on or off. */
         default void alertChanged(FilterDef f) {}
+
+        /** "Clear all" was pressed: filters are gone; also clear what the owner keeps (time range). */
+        default void clearAllFilters() {}
     }
 
     static final int MAX_FILTERS = 26;
@@ -136,6 +139,10 @@ final class FilterPanel extends JPanel {
             }
         });
 
+        JButton clearAll = new JButton("Clear all");
+        clearAll.setToolTipText("Remove all filters, show all levels and times: back to the whole log");
+        clearAll.addActionListener(e -> clearAll());
+
         JLabel combine = new JLabel("Combine:");
         combine.setToolTipText("How filters combine, using their letters: AND, OR, NOT, ( )");
         formulaField.putClientProperty("JTextField.placeholderText", "no filtering");
@@ -203,6 +210,8 @@ final class FilterPanel extends JPanel {
         bar.add(matchingOnly);
         bar.add(Box.createHorizontalStrut(12));
         bar.add(add);
+        bar.add(Box.createHorizontalStrut(4));
+        bar.add(clearAll);
         bar.add(Box.createHorizontalStrut(16));
         bar.add(combine);
         bar.add(Box.createHorizontalStrut(6));
@@ -416,6 +425,21 @@ final class FilterPanel extends JPanel {
         defs.remove(d);
         rebuildRows();
         listener.filtersChanged();
+    }
+
+    /** Back to the whole log: no filters, all levels, no context, automatic formula. */
+    void clearAll() {
+        defs.clear();
+        autoFormula.setSelected(true);
+        for (JToggleButton b : levelChips) {
+            b.setSelected(true);
+        }
+        updating = true;
+        context.setValue(0);
+        updating = false;
+        rebuildRows();
+        listener.filtersChanged();
+        listener.clearAllFilters();
     }
 
     private void removeAllFilters() {

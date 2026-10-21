@@ -67,6 +67,8 @@ val visualTest by tasks.registering(Test::class) {
     // keep tests away from the user's own settings, recent files and ~/.logsift
     systemProperty("logsift.prefs", "/logsift-test/ui")
     systemProperty("logsift.home", layout.buildDirectory.dir("visual/home").get().asFile.absolutePath)
+    // tests expect a file's tab right after opening it; allow slow CI machines time for that
+    systemProperty("logsift.openWaitMs", "10000")
     testLogging {
         events("passed", "failed", "skipped")
         showStandardStreams = true

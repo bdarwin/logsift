@@ -70,6 +70,11 @@ final class Theme {
         return pick(new Color(0xC99700), new Color(0xFFD54F));
     }
 
+    /** Background of every other line: barely visible, just enough to separate lines. */
+    static Color stripe() {
+        return pick(new Color(0xF5F7FA), new Color(0x232529));
+    }
+
     static Color currentLine() {
         return pick(new Color(0xEEF4FD), new Color(0x262B33));
     }

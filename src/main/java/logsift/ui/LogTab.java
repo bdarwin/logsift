@@ -113,11 +113,18 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
      */
     LogTab(Path readPath, Path path, java.nio.charset.Charset charset, String encodingLabel, Host host)
             throws IOException {
+        this(LogDocument.open(readPath, logsift.core.LineIndex.DEFAULT_CHUNK_SIZE, charset), path,
+                encodingLabel, host);
+    }
+
+    /** A tab for a document opened already (opening can be slow on network drives). */
+    LogTab(LogDocument doc, Path path, String encodingLabel, Host host) {
         super(new BorderLayout());
         this.host = host;
         this.path = path.toAbsolutePath().normalize();
-        this.encodingLabel = encodingLabel != null ? encodingLabel : logsift.core.Encoding.label(charset);
-        this.doc = LogDocument.open(readPath, logsift.core.LineIndex.DEFAULT_CHUNK_SIZE, charset);
+        this.encodingLabel = encodingLabel != null ? encodingLabel
+                : logsift.core.Encoding.label(doc.charset());
+        this.doc = doc;
         this.engine = new FilterEngine(doc);
         this.filterResult = engine.result();
         docUpdate = coalesced(this::onDocChanged);
@@ -267,7 +274,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         resultsHeader.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
         resultsHeader.setFont(resultsHeader.getFont().deriveFont(Font.BOLD));
-        resultsPanel.add(resultsHeader, BorderLayout.NORTH);
+        JPanel resultsTop = new JPanel(new BorderLayout());
+        resultsTop.add(resultsHeader, BorderLayout.CENTER);
+        javax.swing.JButton clearResults = new javax.swing.JButton("Clear");
+        clearResults.putClientProperty("JButton.buttonType", "toolBarButton");
+        clearResults.setToolTipText("Clear the Find All results and highlights (Shift+Esc)");
+        clearResults.addActionListener(e -> closeResults());
+        resultsTop.add(clearResults, BorderLayout.EAST);
+        resultsPanel.add(resultsTop, BorderLayout.NORTH);
         resultsPanel.add(results, BorderLayout.CENTER);
 
         messages = new MessagesPanel(messagesHost());
@@ -304,6 +318,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         split.setContinuousLayout(true);
         split.setBorder(null);
         dividerSize = split.getDividerSize();
+        setUpCollapsing();
         add(split, BorderLayout.CENTER);
 
         doc.addListener(new LogDocument.Listener() {
@@ -343,18 +358,51 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private void detectEntryFormat() {
         int gen = doc.generation();
         long n = doc.lineCount();
-        if (gen == detectedGeneration || (n < 200 && doc.isIndexing())) {
+        if (gen == detectedGeneration || gen == detectingGeneration
+                || (n < 200 && doc.isIndexing())) {
             return;
         }
         if (n == 0) {
             return; // an empty file that is still growing: decide when lines arrive
         }
+        // reading the sample can be slow on a network drive: do it off the UI thread
+        detectingGeneration = gen;
+        DETECT.execute(() -> {
+            String[] sample = new String[(int) Math.min(n, 2000)];
+            doc.readLines(0, sample.length, sample);
+            List<String> lines = java.util.Arrays.asList(sample);
+            logsift.core.EntryFormat ef = logsift.core.EntryFormat.detect(lines);
+            logsift.core.LogFormat lf = logsift.core.LogFormat.detect(lines);
+            int year = java.time.Year.now().getValue();
+            try {
+                year = java.time.Instant.ofEpochMilli(java.nio.file.Files.getLastModifiedTime(doc.path())
+                        .toMillis()).atZone(java.time.ZoneId.systemDefault()).getYear();
+            } catch (IOException e) {
+                // keep this year
+            }
+            logsift.core.TimeFormat tf = logsift.core.TimeFormat.detect(lines, year);
+            SwingUtilities.invokeLater(() -> applyDetected(gen, ef, lf, tf));
+        });
+    }
+
+    /** Daemon thread for format detection (shared by all tabs). */
+    private static final java.util.concurrent.ExecutorService DETECT =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "logsift-detect");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private int detectingGeneration = -1;
+
+    private void applyDetected(int gen, logsift.core.EntryFormat ef, logsift.core.LogFormat lf,
+                               logsift.core.TimeFormat tf) {
+        if (gen != doc.generation() || closed) {
+            return; // the file changed meanwhile: detect again
+        }
         detectedGeneration = gen;
-        String[] sample = new String[(int) Math.min(n, 2000)];
-        doc.readLines(0, sample.length, sample);
-        List<String> lines = java.util.Arrays.asList(sample);
-        entryFormat = logsift.core.EntryFormat.detect(lines);
-        logFormat = logsift.core.LogFormat.detect(lines);
+        entryFormat = ef;
+        logFormat = lf;
         applyColumns();
         filterPanel.setEntryFormatInfo(entryFormat == null ? null : entryFormat.name());
         applyEntryOptions();
@@ -364,14 +412,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             timeIndex.close();
             timeIndex = null;
         }
-        int year = java.time.Year.now().getValue();
-        try {
-            year = java.time.Instant.ofEpochMilli(java.nio.file.Files.getLastModifiedTime(doc.path())
-                    .toMillis()).atZone(java.time.ZoneId.systemDefault()).getYear();
-        } catch (IOException e) {
-            // keep this year
-        }
-        timeFormat = logsift.core.TimeFormat.detect(lines, year);
+        timeFormat = tf;
         if (timeFormat != null) {
             timeIndex = new logsift.core.TimeIndex(doc, timeFormat);
             timeIndex.addListener(ti -> marksUpdate.run());
@@ -380,6 +421,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         timeline.setVisible(timeFormat != null && timelineWanted);
         timeline.refresh();
         revalidate();
+        tryPendingLine();
+        updateFilterStatus();
     }
 
     // ---------------------------------------------------------------- time
@@ -625,9 +668,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     void showBookmarksTab() {
-        if (!bottom.isVisible()) {
-            toggleBottom();
-        }
+        setBottomCollapsed(false);
         bottom.setSelectedComponent(bookmarksPanel);
     }
 
@@ -952,6 +993,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     @Override
+    public void clearAllFilters() {
+        clearTimeRange();
+        setMatchingOnly(false);
+    }
+
+    @Override
     public void matchingOnlyChanged(boolean on) {
         setMatchingOnly(on);
         main.focusView();
@@ -1030,9 +1077,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     void showDetailsTab() {
-        if (!bottom.isVisible()) {
-            toggleBottom();
-        }
+        setBottomCollapsed(false);
         bottom.setSelectedComponent(details);
         updateDetails();
     }
@@ -1042,9 +1087,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     void showMessagesTab() {
-        if (!bottom.isVisible()) {
-            toggleBottom();
-        }
+        setBottomCollapsed(false);
         bottom.setSelectedComponent(messages);
     }
 
@@ -1290,9 +1333,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     void showFiltersTab() {
-        if (!bottom.isVisible()) {
-            toggleBottom();
-        }
+        setBottomCollapsed(false);
         bottom.setSelectedComponent(filterPanel);
     }
 
@@ -1409,10 +1450,86 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     /** Shows or hides the Filters / Find results area. */
     void toggleBottom() {
-        boolean show = !bottom.isVisible();
-        bottom.setVisible(show);
-        split.setDividerSize(show ? dividerSize : 0);
-        split.resetToPreferredSizes();
+        setBottomCollapsed(!bottomCollapsed);
+    }
+
+    private boolean bottomCollapsed;
+    private int bottomHeight = 230; // its height when open, to come back to
+    private final javax.swing.JButton collapseButton = new javax.swing.JButton();
+
+    JTabbedPane bottomTabsForTest() {
+        return bottom;
+    }
+
+    int bottomHeightForTest() {
+        return split.getHeight() - split.getDividerLocation() - split.getDividerSize();
+    }
+
+    boolean isBottomCollapsed() {
+        return bottomCollapsed;
+    }
+
+    /** Folds the bottom panel down to its tab strip, or opens it again. */
+    void setBottomCollapsed(boolean collapse) {
+        int total = split.getHeight();
+        if (collapse == bottomCollapsed || total <= 0) {
+            bottomCollapsed = total > 0 ? bottomCollapsed : collapse;
+            updateCollapseButton();
+            return;
+        }
+        if (collapse) {
+            bottomHeight = Math.max(120, total - split.getDividerLocation() - split.getDividerSize());
+            split.setDividerLocation(total - split.getDividerSize() - tabStripHeight());
+        } else {
+            split.setDividerLocation(Math.max(80, total - split.getDividerSize() - bottomHeight));
+        }
+        bottomCollapsed = collapse;
+        updateCollapseButton();
+    }
+
+    private int tabStripHeight() {
+        java.awt.Rectangle r = bottom.getTabCount() > 0 ? bottom.getBoundsAt(0) : null;
+        return r == null ? 30 : r.y + r.height + 1;
+    }
+
+    private void updateCollapseButton() {
+        collapseButton.setText(bottomCollapsed ? "▴" : "▾");
+        collapseButton.setToolTipText(bottomCollapsed ? "Open this panel (Ctrl+J)" : "Fold this panel away (Ctrl+J)");
+    }
+
+    private void setUpCollapsing() {
+        collapseButton.putClientProperty("JButton.buttonType", "toolBarButton");
+        collapseButton.setFocusable(false);
+        collapseButton.addActionListener(e -> toggleBottom());
+        updateCollapseButton();
+        JPanel trailing = new JPanel(new BorderLayout()); // takes the free space: button at the far right
+        trailing.setOpaque(false);
+        trailing.add(collapseButton, BorderLayout.EAST);
+        bottom.putClientProperty("JTabbedPane.trailingComponent", trailing);
+        bottom.setMinimumSize(new Dimension(0, 0));
+        // clicking a tab opens a folded panel; double-clicking a tab folds it
+        bottom.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                if (bottom.indexAtLocation(e.getX(), e.getY()) < 0) {
+                    return;
+                }
+                if (bottomCollapsed) {
+                    SwingUtilities.invokeLater(() -> setBottomCollapsed(false));
+                } else if (e.getClickCount() == 2) {
+                    setBottomCollapsed(true);
+                }
+            }
+        });
+        // dragging the divider all the way down counts as folding
+        split.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY, e -> {
+            int h = split.getHeight() - split.getDividerLocation() - split.getDividerSize();
+            boolean folded = split.getHeight() > 0 && h <= tabStripHeight() + 6;
+            if (folded != bottomCollapsed) {
+                bottomCollapsed = folded;
+                updateCollapseButton();
+            }
+        });
     }
 
     // ---------------------------------------------------------------- search
@@ -1455,9 +1572,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         main.setMatchPattern(highlight);
         results.setMatchPattern(highlight);
         results.setSource(resultsSource());
-        if (!bottom.isVisible()) {
-            toggleBottom();
-        }
+        setBottomCollapsed(false);
         bottom.setSelectedComponent(resultsPanel);
         updateResultsHeader();
         s.start();
@@ -1597,7 +1712,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return false;
     }
 
+    private volatile boolean closed;
+
     void close() {
+        closed = true;
         if (alertTimer != null) {
             alertTimer.stop();
         }
