@@ -48,6 +48,12 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" ./gradlew --no-daemon visualTest -PsizeMb=200
           rm -rf build/visual
 
+      - name: Visual tests (Windows desktop, 200 MB log)
+        if: matrix.target == 'windows-x64'
+        run: |
+          ./gradlew --no-daemon visualTest -PsizeMb=200
+          rm -rf build/visual
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v5

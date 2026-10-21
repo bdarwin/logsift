@@ -14,6 +14,8 @@ dependencies {
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    // A real logging library that rotates files, for the rotation test.
+    testImplementation("ch.qos.logback:logback-classic:1.5.18")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
