@@ -1587,7 +1587,8 @@ class VisualTest {
             tab.showDetailsTab();
             return null;
         });
-        String details = onEdt(() -> tab.detailsPanel().textForTest());
+        // text components give Windows line endings on Windows
+        String details = onEdt(() -> tab.detailsPanel().textForTest()).replace("\r\n", "\n");
         assertTrue(details.contains("\"level\": \"ERROR\"") && details.contains("\"tags\": [\n"), details);
         settle();
         shot("31-json-columns-and-details");
