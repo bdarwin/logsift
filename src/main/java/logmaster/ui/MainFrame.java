@@ -356,6 +356,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    /** Closes the tab showing this file, if open. */
+    void closeFile(Path path) {
+        Path abs = path.toAbsolutePath().normalize();
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof LogTab lt && lt.document().path().equals(abs)) {
+                closeTab(i);
+                return;
+            }
+        }
+    }
+
     public LogTab currentTab() {
         return tabs.getSelectedComponent() instanceof LogTab t ? t : null;
     }
@@ -522,6 +533,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
         }));
         edit.addSeparator();
+        edit.add(item("Toggle Bookmark", KeyStroke.getKeyStroke(KeyEvent.VK_F2, MENU), e -> {
+            LogTab t = currentTab();
+            if (t != null) {
+                t.toggleBookmark();
+            }
+        }));
+        edit.add(item("Next Bookmark", KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), e -> nextBookmark(true)));
+        edit.add(item("Previous Bookmark", KeyStroke.getKeyStroke(KeyEvent.VK_F2, InputEvent.SHIFT_DOWN_MASK),
+                e -> nextBookmark(false)));
+        edit.addSeparator();
         edit.add(item("Go to Line…", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU), e -> goToLineDialog()));
         edit.add(item("Go to Time…", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> goToTimeDialog()));
@@ -595,7 +616,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    private void closeTab(int index) {
+    void closeTab(int index) {
         if (index < 0 || index >= tabs.getTabCount()) {
             return;
         }
@@ -635,6 +656,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             findAllFromToolbar();
         }
         if (!t.findNext(forward)) {
+            Toolkit.getDefaultToolkit().beep();
+        }
+    }
+
+    private void nextBookmark(boolean forward) {
+        LogTab t = currentTab();
+        if (t != null && !t.nextBookmark(forward)) {
             Toolkit.getDefaultToolkit().beep();
         }
     }

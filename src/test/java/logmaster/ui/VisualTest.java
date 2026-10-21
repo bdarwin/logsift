@@ -1,5 +1,6 @@
 package logmaster.ui;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1300,6 +1301,74 @@ class VisualTest {
                 d.enabled = false;
             }
             tab.filtersChanged();
+            return null;
+        });
+    }
+
+    @Test
+    @Order(20)
+    void bookmarks() throws Exception {
+        Path f = dir.resolve("bookmarks.log");
+        Files.copy(dir.resolve("incident.log"), f, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> !tab.document().isIndexing(), 30_000, "indexed");
+        onEdt(() -> {
+            tab.bookmarks().clear();
+            for (long line : new long[] {30_000, 100, 5_000}) {
+                tab.mainView().goToRow((int) line, true);
+                tab.toggleBookmark();
+            }
+            tab.bookmarks().set(5_000, "first DB error of the incident?");
+            tab.showBookmarksTab();
+            return null;
+        });
+        // F2 goes through them in line order and wraps around; Shift+F2 goes back
+        long[] visits = onEdt(() -> {
+            tab.mainView().goToRow(0, false);
+            long[] v = new long[5];
+            for (int i = 0; i < 4; i++) {
+                tab.nextBookmark(true);
+                v[i] = tab.currentLine();
+            }
+            tab.nextBookmark(false);
+            v[4] = tab.currentLine();
+            return v;
+        });
+        assertArrayEquals(new long[] {100, 5_000, 30_000, 100, 30_000}, visits);
+        onEdt(() -> {
+            tab.mainView().goToRow(4_990, true);
+            return null;
+        });
+        settle();
+        shot("28-bookmarks");
+
+        // remembered when the file is opened again
+        onEdt(() -> {
+            frame.closeFile(f);
+            frame.openFile(f);
+            return null;
+        });
+        LogTab again = onEdt(frame::currentTab);
+        assertEquals(java.util.Map.of(100L, "", 5_000L, "first DB error of the incident?", 30_000L, ""),
+                new java.util.HashMap<>(again.bookmarks().all()), "bookmarks restored");
+
+        // a truncated file forgets them (the lines moved)
+        onEdt(() -> {
+            frame.closeFile(f);
+            return null;
+        });
+        Files.writeString(f, "short\n");
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        assertEquals(0, onEdt(() -> frame.currentTab().bookmarks().size()), "dropped after truncation");
+        onEdt(() -> {
+            frame.closeFile(f);
             return null;
         });
     }

@@ -70,6 +70,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private List<String> sourceLabels;          // merged logs: the label of each source
     private final List<Runnable> closeHooks = new ArrayList<>();
     private final MessagesPanel messages;
+    private final Bookmarks bookmarks;
+    private final BookmarksPanel bookmarksPanel;
+    private int bookmarkGeneration;
     private Formula appliedFormula;
     private boolean matchingOnly;
     private long pendingLine = -1; // line to show once indexing reaches it
@@ -134,6 +137,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             public java.awt.Color tag(int row) {
                 return lineSourceColor(row);
             }
+
+            @Override
+            public java.awt.Color marker(int row) {
+                return bookmarks.contains(row) ? Theme.marker() : null;
+            }
         };
         matchingLines = new LogView.RowSource() {
             @Override
@@ -156,6 +164,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             public java.awt.Color tag(int row) {
                 FilterResult r = filterResult;
                 return row < r.count() ? lineSourceColor(r.lineAt(row)) : null;
+            }
+
+            @Override
+            public java.awt.Color marker(int row) {
+                FilterResult r = filterResult;
+                return row < r.count() && bookmarks.contains(r.lineAt(row)) ? Theme.marker() : null;
             }
 
             @Override
@@ -231,9 +245,20 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         resultsPanel.add(results, BorderLayout.CENTER);
 
         messages = new MessagesPanel(messagesHost());
+        bookmarks = new Bookmarks(doc.path());
+        bookmarkGeneration = doc.generation();
+        bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
+        bookmarks.addListener(() -> {
+            main.rowsChanged();
+            main.overviewChanged();
+            bottom.setTitleAt(bottom.indexOfComponent(bookmarksPanel),
+                    bookmarks.size() == 0 ? "Bookmarks" : "Bookmarks (" + bookmarks.size() + ")");
+        });
         bottom.addTab("Filters", filterPanel);
         bottom.addTab("Find results", resultsPanel);
         bottom.addTab("Messages", messages);
+        bottom.addTab(bookmarks.size() == 0 ? "Bookmarks" : "Bookmarks (" + bookmarks.size() + ")",
+                bookmarksPanel);
         bottom.addChangeListener(e -> {
             if (bottom.getSelectedComponent() == messages && messages.result() == null
                     && !messages.isRunning()) {
@@ -504,6 +529,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                         new OverviewBar.MarkSet("Error", Theme.errorMark(), errorMarks),
                         new OverviewBar.MarkSet("Warning", Theme.warningMark(), warningMarks));
                 List<OverviewBar.MarkSet> other = new ArrayList<>();
+                if (bookmarks.size() > 0) {
+                    other.add(new OverviewBar.MarkSet("Bookmark", Theme.marker(), bookmarkMarks()));
+                }
                 SearchSession s = search;
                 if (s != null) {
                     other.add(new OverviewBar.MarkSet("Find “" + s.query().text() + "”",
@@ -544,6 +572,59 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 showLine(line);
             }
         };
+    }
+
+    Bookmarks bookmarks() {
+        return bookmarks;
+    }
+
+    /** Bookmarks or un-bookmarks the current line. */
+    void toggleBookmark() {
+        long line = currentLine();
+        if (line >= 0) {
+            bookmarks.toggle(line);
+        }
+    }
+
+    /** Goes to the next (or previous) bookmark, wrapping. Returns false if there are none. */
+    boolean nextBookmark(boolean forward) {
+        long line = bookmarks.next(Math.max(-1, currentLine()), forward);
+        if (line < 0) {
+            return false;
+        }
+        showLine(line);
+        return true;
+    }
+
+    void showBookmarksTab() {
+        if (!bottom.isVisible()) {
+            toggleBottom();
+        }
+        bottom.setSelectedComponent(bookmarksPanel);
+    }
+
+    private OverviewBar.Marks bookmarkMarks() {
+        return new OverviewBar.Marks() {
+            @Override
+            public long firstAtOrAfter(long line) {
+                Long l = bookmarks.all().ceilingKey(line);
+                return l == null ? -1 : l;
+            }
+
+            @Override
+            public long lastBefore(long line) {
+                Long l = bookmarks.all().lowerKey(line);
+                return l == null ? -1 : l;
+            }
+        };
+    }
+
+    /** "2026-10-21 10:02:13.123" of a line, or "" without timestamps. */
+    private String timeText(long line) {
+        logmaster.core.TimeFormat tf = timeFormat;
+        String text = tf == null ? null : doc.line(line);
+        long t = text == null ? logmaster.core.TimeFormat.NONE : tf.parse(text);
+        return t == logmaster.core.TimeFormat.NONE ? "" : TimelineBar.formatFull(t);
     }
 
     /** Jumps to the next (or previous) error line, wrapping around. Returns false if none. */
@@ -627,6 +708,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     private void onDocChanged() {
+        if (doc.generation() != bookmarkGeneration) {
+            bookmarkGeneration = doc.generation();
+            bookmarks.clear(); // truncated or rotated: the bookmarked lines are gone
+        }
         detectEntryFormat();
         main.rowsChanged();
         if (pendingLine >= 0 && (doc.lineCount() > pendingLine || !doc.isIndexing())) {
@@ -989,6 +1074,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     private void extendPopup(LogView view, JPopupMenu menu) {
         menu.addSeparator();
+        if (view == main) {
+            long cur = currentLine();
+            JMenuItem bm = new JMenuItem(cur >= 0 && bookmarks.contains(cur) ? "Remove Bookmark"
+                    : "Bookmark This Line");
+            bm.addActionListener(e -> toggleBookmark());
+            menu.add(bm);
+            menu.addSeparator();
+        }
         String sel = view.selectionForFind();
         if (sel == null) {
             JMenuItem hint = new JMenuItem("Select text to filter by it");

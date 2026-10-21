@@ -42,6 +42,8 @@ Make a test log:
 | Jump from a result to the line | click it, or move with the arrow keys in the results |
 | Wrap long lines | Alt+Z (⌥Z on macOS), or the Wrap button |
 | Next / previous error | F8 / Shift+F8 |
+| Bookmark the current line | Ctrl+F2 (⌘F2 on macOS) |
+| Next / previous bookmark | F2 / Shift+F2 |
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Merge logs by time | Ctrl+Shift+M |
 | Columns view | Ctrl+Shift+K |
@@ -74,6 +76,10 @@ When a log has timestamps, a timeline above it shows how much was logged over ti
 - **Drag** across it to show only that time range. The range works with the filters: drag over an incident, add an ERROR filter, and you see just the errors of the incident. Click ✕ on the range to show all times again.
 - The status bar shows the time of the current line.
 - Recognized formats: `2026-10-21 10:02:13`, ISO with `T`, `2026/10/21`, `21-10-2026`, `21.10.2026`, `21-Oct-2026`, syslog `Oct 21 10:02:13`, Apache `[21/Oct/2026:10:02:13 +0000]`, timestamps inside JSON lines, time only, and epoch seconds or milliseconds. Times are shown as written in the log (time zones are not converted).
+
+## Bookmarks
+
+**Ctrl+F2** (⌘F2 on macOS) bookmarks the current line (or right-click → *Bookmark This Line*); **F2 / Shift+F2** jump to the next / previous bookmark. Bookmarks show as blue dots by the line number and on the highlight bar. The **Bookmarks** tab lists them with their time and text; type a note in the Note column, double-click to go there, Delete to remove. Bookmarks are remembered per file, and dropped if the file was truncated (the lines would have moved).
 
 ## Export
 
