@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.stream.IntStream;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
@@ -189,7 +190,7 @@ class VisualTest {
         summary.put("Find All \"ERROR\" (literal)", String.format("%,d lines in %d ms (%s)",
                 s.hits().size(), took, mbPerSec(Files.size(big), took)));
         onEdt(() -> {
-            tab.resultsView().goToRow(0, false);
+            tab.results().selectResult(tab.currentFind(), 0);
             tab.mainView().goToRow((int) s.hits().get(0), true);
             return null;
         });
@@ -228,7 +229,7 @@ class VisualTest {
         summary.put("Find All regex", String.format("%,d lines in %d ms (%s)",
                 s2.hits().size(), took2, mbPerSec(Files.size(big), took2)));
         onEdt(() -> {
-            tab.resultsView().goToRow(Math.min(5, s2.hits().size() - 1), false);
+            tab.results().selectResult(tab.currentFind(), Math.min(5, s2.hits().size() - 1));
             tab.mainView().goToRow((int) s2.hits().get(Math.min(5, s2.hits().size() - 1)), true);
             return null;
         });
@@ -346,7 +347,7 @@ class VisualTest {
                 s.hits().size(), ms(t0)));
         assertEquals(Long.parseLong(stats.getProperty("count.WARN")), s.hits().size());
         onEdt(() -> {
-            tab.resultsView().goToRow(3, false);
+            tab.results().selectResult(tab.currentFind(), 3);
             tab.mainView().goToRow((int) tab.search().hits().get(3), true);
             return null;
         });
@@ -1949,6 +1950,84 @@ class VisualTest {
             frame.setAutoReload(true);
             return null;
         });
+    }
+
+    @Test
+    @Order(29)
+    void severalSearchesFoldAndSearchWithin() throws Exception {
+        Path f = dir.resolve("several-searches.log");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 3000; i++) {
+            String level = i % 7 == 0 ? "ERROR" : i % 5 == 0 ? "WARN" : "INFO";
+            sb.append(String.format("2026-10-21 10:%02d:%02d %s [worker-%d] request %d %s%n",
+                    i / 60 % 60, i % 60, level, i % 4, i, i % 3 == 0 ? "timeout after 30s" : "done"));
+        }
+        Files.writeString(f, sb);
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> !tab.document().isIndexing() && tab.document().lineCount() == 3000, 10_000, "loaded");
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("ERROR", true, false, false));
+            return null;
+        });
+        FindGroup errors = onEdt(tab::currentFind);
+        assertTrue(errors.awaitIdle(10_000));
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("WARN", true, false, false));
+            return null;
+        });
+        FindGroup warns = onEdt(tab::currentFind);
+        assertTrue(warns.awaitIdle(10_000));
+        // both are kept: the new one on top and open, the old one folded below
+        assertEquals(List.of(warns, errors), onEdt(() -> tab.results().groups()));
+        assertTrue(warns.expanded && !errors.expanded);
+        long nErrors = IntStream.range(0, 3000).filter(i -> i % 7 == 0).count();
+        assertEquals(nErrors, errors.count());
+        assertEquals(warns.count() + 2, onEdt(() -> tab.resultsView().source().rowCount()),
+                "two headers plus the open search's lines");
+
+        // open the errors again and search within them
+        onEdt(() -> {
+            tab.results().toggle(errors);
+            return null;
+        });
+        FindGroup within = onEdt(() -> tab.findWithin(errors, new SearchQuery("timeout", true, false, false)));
+        assertTrue(within.awaitIdle(10_000));
+        waitFor(() -> within.count() == IntStream.range(0, 3000).filter(i -> i % 7 == 0 && i % 3 == 0).count(),
+                10_000, "errors that timed out: " + within.count());
+        for (int i = 0; i < within.count(); i++) {
+            String line = tab.document().line(within.lineAt(i));
+            assertTrue(line.contains("ERROR") && line.contains("timeout"), line);
+        }
+        assertEquals("ERROR › timeout", within.title());
+        assertEquals(List.of(warns, errors, within), onEdt(() -> tab.results().groups()));
+        onEdt(() -> {
+            tab.results().toggle(warns);
+            tab.results().selectResult(within, 2);
+            return null;
+        });
+        settle();
+        shot("39-several-searches");
+
+        // the same search again goes back to the top; closing one keeps the others
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("ERROR", true, false, false));
+            return null;
+        });
+        assertEquals(List.of(errors, within, warns), onEdt(() -> tab.results().groups()));
+        onEdt(() -> {
+            tab.results().close(errors);
+            return null;
+        });
+        assertEquals(List.of(warns), onEdt(() -> tab.results().groups()), "closing a search closes the searches in it");
+        onEdt(() -> {
+            tab.results().closeAll();
+            return null;
+        });
+        assertEquals(null, onEdt(tab::currentFind));
     }
 
     /** The time of the first line at or after {@code i} that has a timestamp. */

@@ -79,6 +79,27 @@ final class Theme {
         return pick(new Color(0xEEF4FD), new Color(0x262B33));
     }
 
+    static Color matchLight() {
+        return new Color(0xFFD54F);
+    }
+
+    static Color matchDark() {
+        return new Color(0x8A6A00);
+    }
+
+    /**
+     * Colors for several searches at once: {highlight light, highlight dark, mark}. The first
+     * is the usual yellow.
+     */
+    static final Color[][] SEARCH_COLORS = {
+        {new Color(0xFFD54F), new Color(0x8A6A00), new Color(0xD4A800)},
+        {new Color(0xA5E6A9), new Color(0x2F6E3B), new Color(0x2FA84F)},
+        {new Color(0xA9CDFF), new Color(0x2E5A94), new Color(0x3B82F6)},
+        {new Color(0xFFB8D4), new Color(0x7D3558), new Color(0xEC4899)},
+        {new Color(0xFFCC99), new Color(0x80501F), new Color(0xF97316)},
+        {new Color(0xD5BEFF), new Color(0x5E4396), new Color(0x8B5CF6)},
+        {new Color(0x9FE8E0), new Color(0x1F6B66), new Color(0x14B8A6)}};
+
     static Color match() {
         return pick(new Color(0xFFD54F), new Color(0x8A6A00));
     }

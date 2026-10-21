@@ -772,7 +772,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         findField.putClientProperty("JTextField.placeholderText", "Find  (Enter = Find All)");
         findField.putClientProperty("JTextField.showClearButton", true);
-        // the ✕ in the Find box also clears the results
+        // the ✕ in the Find box also closes the selected search's results
         findField.putClientProperty("JTextField.clearCallback", (Runnable) () -> {
             findField.setText("");
             LogTab t = currentTab();
@@ -1158,11 +1158,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 suffix = "-filtered";
             }
             case "find" -> {
-                if (t.search() == null) {
+                FindGroup g = t.currentFind();
+                if (g == null) {
                     JOptionPane.showMessageDialog(this, "Run Find All first.");
                     return;
                 }
-                runs = logsift.core.LineExporter.of(t.search().hits());
+                runs = g.runs();
                 suffix = "-found";
             }
             case "selection" -> {

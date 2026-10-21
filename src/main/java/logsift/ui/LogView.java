@@ -97,6 +97,9 @@ public final class LogView extends JPanel {
 
         /** Follow mode was switched on or off by scrolling. */
         default void followChanged(LogView view, boolean follow) {}
+
+        /** A row was clicked with the mouse (not moved to with the keyboard). */
+        default void rowClicked(LogView view, int row, int clicks) {}
     }
 
     private static final int MAX_COPY_ROWS = 500_000;
@@ -144,7 +147,14 @@ public final class LogView extends JPanel {
     private boolean follow;
     private boolean stripes = true;
     private boolean adjusting;
-    private Pattern matchPattern;
+    /** A search to highlight, in its own color. */
+    record Highlight(Pattern pattern, Color light, Color dark) {
+        Color color() {
+            return Theme.isDark() ? dark : light;
+        }
+    }
+
+    private List<Highlight> highlights = List.of();
     private List<HighlightRule> rules = HighlightRule.defaults();
     private double wheelRemainder;
     private int dragDirection;
@@ -268,8 +278,14 @@ public final class LogView extends JPanel {
         return source;
     }
 
+    /** Highlights matches of one search (null: none), in the usual yellow. */
     public void setMatchPattern(Pattern p) {
-        this.matchPattern = p;
+        setHighlights(p == null ? List.of() : List.of(new Highlight(p, Theme.matchLight(), Theme.matchDark())));
+    }
+
+    /** Highlights matches of several searches, each in its color (later ones on top). */
+    void setHighlights(List<Highlight> list) {
+        this.highlights = List.copyOf(list);
         canvas.repaint();
     }
 
@@ -342,6 +358,10 @@ public final class LogView extends JPanel {
     }
 
     /** Alternate lines get a faint background, so lines (and wrapped lines) are easy to tell apart. */
+    public boolean isStripes() {
+        return stripes;
+    }
+
     public void setStripes(boolean on) {
         stripes = on;
         canvas.repaint();
@@ -1123,6 +1143,8 @@ public final class LogView extends JPanel {
                     return;
                 }
                 int clicks = e.getClickCount();
+                int clickedRow = row;
+                listeners.forEach(l -> l.rowClicked(LogView.this, clickedRow, clicks));
                 if (columns != null) {
                     dragUnit = BY_LINE;
                     moveLead(row, e.isShiftDown());
@@ -1440,7 +1462,11 @@ public final class LogView extends JPanel {
             int firstCol = hOffset / charWidth;
             int visibleCols = (w - gutter) / charWidth + 2;
             int newMaxCols = maxColumns;
-            Matcher mm = matchPattern == null ? null : matchPattern.matcher("");
+            List<Highlight> hl = highlights;
+            Matcher[] hm = new Matcher[hl.size()];
+            for (int i = 0; i < hm.length; i++) {
+                hm[i] = hl.get(i).pattern().matcher("");
+            }
             Matcher[] rm = new Matcher[rules.size()];
             for (int i = 0; i < rm.length; i++) {
                 rm[i] = rules.get(i).pattern().matcher("");
@@ -1450,7 +1476,7 @@ public final class LogView extends JPanel {
             int lineCount = shownLines.length;
             Color[] lineFg = new Color[lineCount];
             Color[] lineBg = new Color[lineCount];
-            int[][] matches = new int[lineCount][];
+            int[][] matches = new int[lineCount][]; // per line: {start, end, highlight index}...
             for (int k = 0; k < lineCount; k++) {
                 Line l = shownLines[k];
                 newMaxCols = Math.max(newMaxCols, l.text.length());
@@ -1481,17 +1507,20 @@ public final class LogView extends JPanel {
                 }
                 lineFg[k] = lf;
                 lineBg[k] = lb;
-                if (mm != null) {
+                if (hm.length > 0) {
                     List<Integer> ranges = new ArrayList<>();
-                    mm.reset(l.raw);
-                    int guard = 0;
-                    while (mm.find() && guard++ < 1000) {
-                        int s = mm.start();
-                        int e = Math.max(mm.end(), s + 1);
-                        ranges.add(l.col(s));
-                        ranges.add(l.col(Math.min(e, l.raw.length())));
-                        if (mm.end() == mm.start() && mm.end() >= l.raw.length()) {
-                            break;
+                    for (int hi = 0; hi < hm.length; hi++) {
+                        Matcher mm = hm[hi].reset(l.raw);
+                        int guard = 0;
+                        while (mm.find() && guard++ < 1000) {
+                            int s = mm.start();
+                            int e = Math.max(mm.end(), s + 1);
+                            ranges.add(l.col(s));
+                            ranges.add(l.col(Math.min(e, l.raw.length())));
+                            ranges.add(hi);
+                            if (mm.end() == mm.start() && mm.end() >= l.raw.length()) {
+                                break;
+                            }
                         }
                     }
                     int[] a = new int[ranges.size()];
@@ -1530,9 +1559,9 @@ public final class LogView extends JPanel {
                     }
                     // search matches
                     if (matches[k] != null) {
-                        gt.setColor(Theme.match());
                         int[] a = matches[k];
-                        for (int m = 0; m + 1 < a.length; m += 2) {
+                        for (int m = 0; m + 2 < a.length; m += 3) {
+                            gt.setColor(hl.get(a[m + 2]).color());
                             int cs = Math.max(a[m], s0);
                             int ce = Math.min(a[m + 1], s1);
                             if (ce > cs || (a[m] == a[m + 1] && a[m] >= s0 && a[m] < s1)) {
@@ -1673,19 +1702,21 @@ public final class LogView extends JPanel {
 
         /** Highlights Find All matches inside one cell's text drawn at x. */
         private void paintMatches(Graphics2D g, String text, int x, int y) {
-            if (matchPattern == null || text.isEmpty()) {
+            if (highlights.isEmpty() || text.isEmpty()) {
                 return;
             }
-            Matcher m = matchPattern.matcher(text);
-            g.setColor(Theme.match());
-            int guard = 0;
-            while (m.find() && guard++ < 200) {
-                if (m.end() == m.start()) {
-                    continue;
+            for (Highlight h : highlights) {
+                Matcher m = h.pattern().matcher(text);
+                g.setColor(h.color());
+                int guard = 0;
+                while (m.find() && guard++ < 200) {
+                    if (m.end() == m.start()) {
+                        continue;
+                    }
+                    int xa = x + metrics.stringWidth(text.substring(0, m.start()));
+                    int xb = x + metrics.stringWidth(text.substring(0, m.end()));
+                    g.fillRoundRect(xa, y + 1, Math.max(2, xb - xa), rowHeight - 2, 4, 4);
                 }
-                int xa = x + metrics.stringWidth(text.substring(0, m.start()));
-                int xb = x + metrics.stringWidth(text.substring(0, m.end()));
-                g.fillRoundRect(xa, y + 1, Math.max(2, xb - xa), rowHeight - 2, 4, 4);
             }
         }
 

@@ -150,11 +150,15 @@ The **Filters** panel below the log holds any number of filters (up to 26). Each
 
 **Alerts:** click the bell on a filter to be told when new lines matching it are written (while the file grows). Logsift shows a desktop notification and a popup you can click to jump to the line, beeps, and puts a count on the tab. Bursts are combined (at most one alert per filter every 3 seconds). Lines that were already in the file don't alert.
 
-**Clear all** (next to + Add filter) removes every filter, turns all levels back on and clears the time range. The Find results have a **Clear** button too, and the ✕ in the Find box clears them as well.
+**Clear all** (next to + Add filter) removes every filter, turns all levels back on and clears the time range. In Find results, **Close** removes the selected search, **Close all** removes every one, and the ✕ in the Find box closes the selected search.
 
 Quick ways to add filters: select text in the log, right-click, then choose **Show / Hide / Mark lines with "…"**. Filter sets can be saved and loaded (the ⋯ menu), and filters keep working while the file grows.
 
-Find All keeps running on a growing file. New matching lines show up in the results as they are written.
+**Several searches at once:** each Find All is added to the top of the Find results window and opens there, while earlier searches fold to a header line (“ERROR” — 1,234 lines) and stay available. Click a header to fold or open it, or use **Fold all** / **Unfold all**. Every search has its own color in the log and on the highlight bar. Running a search you already have moves it back to the top. F3 / Shift+F3 step through the selected search's hits.
+
+**Search within results:** select a search (or any of its lines), type in **Search in these results** and press Enter. A nested search like “ERROR › timeout” appears under it, showing only the lines that match both. You can keep narrowing it further, and closing a search also closes the searches nested in it.
+
+Find All keeps running on a growing file. New matching lines show up in the results as they are written, including nested searches.
 
 ## Measured speed
 
