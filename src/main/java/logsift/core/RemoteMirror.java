@@ -211,6 +211,16 @@ public final class RemoteMirror implements AutoCloseable {
     }
 
     private void connect() throws JSchException, IOException {
+        Session sess = openSession(target, knownHosts, trustNewHost);
+        ChannelSftp c = (ChannelSftp) sess.openChannel("sftp");
+        c.connect(15_000);
+        session = sess;
+        sftp = c;
+    }
+
+    /** An SSH session to the target's host (known_hosts checked, new hosts asked about). */
+    static Session openSession(Target target, Path knownHosts, Predicate<String> trustNewHost)
+            throws JSchException, IOException {
         JSch jsch = new JSch();
         if (knownHosts != null) {
             if (!Files.exists(knownHosts)) {
@@ -260,10 +270,7 @@ public final class RemoteMirror implements AutoCloseable {
         });
         s.setServerAliveInterval(15_000);
         s.connect(15_000);
-        ChannelSftp c = (ChannelSftp) s.openChannel("sftp");
-        c.connect(15_000);
-        session = s;
-        sftp = c;
+        return s;
     }
 
     private void disconnect() {
@@ -277,7 +284,7 @@ public final class RemoteMirror implements AutoCloseable {
         session = null;
     }
 
-    private static String describe(Exception e) {
+    static String describe(Exception e) {
         String m = e.getMessage();
         if (e instanceof SftpException se && se.id == ChannelSftp.SSH_FX_NO_SUCH_FILE) {
             return "no such file";

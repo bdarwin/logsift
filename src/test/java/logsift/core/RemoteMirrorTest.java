@@ -93,6 +93,28 @@ class RemoteMirrorTest {
     }
 
     @Test
+    void browsesFolders() throws Exception {
+        Files.createDirectories(remoteRoot.resolve("var/log/app"));
+        Files.createDirectories(remoteRoot.resolve("var/log/Zeta"));
+        Files.writeString(remoteRoot.resolve("var/log/syslog"), "x\n".repeat(10));
+        Files.writeString(remoteRoot.resolve("var/log/auth.log"), "y\n");
+        try (RemoteBrowser b = RemoteBrowser.connect(target("secret"), null, h -> true)) {
+            assertEquals("/", b.home(), "the virtual file system's root is the home here");
+            assertEquals("/var/log", b.resolve("/var/log/app/.."));
+            assertEquals("/var/log", b.resolve("var/log"), "relative to home");
+            assertTrue(b.isDirectory("/var/log/app"));
+            List<RemoteBrowser.Entry> e = b.list("/var/log");
+            assertEquals(List.of("app", "Zeta", "auth.log", "syslog"), e.stream().map(RemoteBrowser.Entry::name).toList(),
+                    "folders first, then files, by name");
+            assertTrue(e.get(0).dir() && !e.get(2).dir());
+            assertEquals(20, e.get(3).size());
+            assertEquals("/var", RemoteBrowser.parent("/var/log"));
+            assertEquals("/", RemoteBrowser.parent("/var"));
+            assertThrows(IOException.class, () -> b.list("/nope"));
+        }
+    }
+
+    @Test
     void wrongPasswordIsAClearError() throws Exception {
         Files.createDirectories(remoteRoot.resolve("var"));
         Files.writeString(remoteRoot.resolve("var/app.log"), "x\n");

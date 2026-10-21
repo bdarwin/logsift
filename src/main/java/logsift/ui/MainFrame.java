@@ -405,11 +405,23 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         mergeFiles(chosen);
     }
 
+    private RemoteDialog remoteDialog;
+
     private void openRemoteDialog() {
-        RemoteDialog.Choice c = RemoteDialog.ask(this);
-        if (c != null) {
-            openRemote(c.target(), c.lastBytes());
+        if (remoteDialog != null && remoteDialog.isDisplayable()) {
+            remoteDialog.toFront();
+            return;
         }
+        Path knownHosts = Boolean.getBoolean("logsift.noKnownHosts") ? null
+                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        remoteDialog = new RemoteDialog(this, knownHosts, this::trustHost,
+                c -> openRemote(c.target(), c.lastBytes()));
+        remoteDialog.setVisible(true);
+    }
+
+    RemoteDialog openRemoteDialogForTest() {
+        openRemoteDialog();
+        return remoteDialog;
     }
 
     /** Opens a log on another machine over SFTP, kept up to date while it grows. */

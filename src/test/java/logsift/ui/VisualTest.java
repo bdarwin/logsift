@@ -1629,10 +1629,67 @@ class VisualTest {
         server.start();
         System.setProperty("logsift.noKnownHosts", "true"); // don't touch the real known_hosts
         try {
-            var target = new logsift.core.RemoteMirror.Target("127.0.0.1", server.getPort(), "ops",
-                    "/var/log/app/server.log", "secret", null, null);
+            Files.writeString(remoteLog.resolveSibling("access.log"), "x\n");
+            Files.createDirectories(remoteLog.getParent().resolve("archive"));
+            // the dialog: connect, type a folder in the address bar, open a folder, pick the file
+            RemoteDialog dlg = onEdt(() -> {
+                RemoteDialog d = frame.openRemoteDialogForTest();
+                d.setConnection("127.0.0.1", server.getPort(), "ops", "secret");
+                d.connect();
+                return d;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> dlg.folderForTest() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "connected and listed the start folder");
             onEdt(() -> {
-                frame.openRemote(target, 0);
+                dlg.go("/var/log");
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> "/var/log".equals(dlg.folderForTest()));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 10_000, "typed folder listed");
+            assertEquals(List.of("..", "app"), onEdt(dlg::namesForTest));
+            onEdt(() -> {
+                dlg.go("app");
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> dlg.namesForTest().contains("server.log"));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 10_000, "app folder listed");
+            assertEquals(List.of("..", "archive", "access.log", "server.log"), onEdt(dlg::namesForTest),
+                    "folders first, then files");
+            int before = onEdt(dlg::listingsForTest);
+            onEdt(() -> {
+                dlg.go("/var/log/app");
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> dlg.listingsForTest() > before && "/var/log/app".equals(dlg.folderForTest()));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 10_000, "app folder by its full path");
+            onEdt(() -> {
+                dlg.select("server.log");
+                return null;
+            });
+            settle();
+            shotOf(dlg.getRootPane(), "38-remote-file-browser");
+            onEdt(() -> {
+                dlg.openSelected();
                 return null;
             });
             waitFor(() -> {

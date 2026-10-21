@@ -109,7 +109,7 @@ Logs with one JSON object per line are recognized. With **Columns** on, the usua
 
 ## Remote logs (SSH / SFTP)
 
-**File → Open Remote (SFTP)…** (Ctrl+Shift+O) opens a log on another machine: host, user, file path, and a password or private key (`~/.ssh/id_ed25519` or `id_rsa` is suggested). Load the whole file or just the last N MB. Logsift keeps a local copy up to date while the remote log grows (new bytes are fetched every second), starts over when it is truncated or rotated, and reconnects by itself if the connection drops (the status bar says so). Host keys are checked against `~/.ssh/known_hosts`; for a new server you are asked first. Every feature works on remote logs.
+**File → Open Remote (SFTP)…** (Ctrl+Shift+O, or the server button in the toolbar): enter the host, user, and a password or private key (`~/.ssh/id_ed25519` or `id_rsa` is suggested), then **Connect**. Pick the log in the file browser: type a folder in the address bar (`/var/log`, `~/logs`, or a name relative to the folder shown) and press Enter, or double-click folders (`..` goes up, Backspace too); double-click a file or press **Open**. Load the whole file or just the last N MB. LogSift keeps a local copy up to date while the remote log grows (new bytes are fetched every second), starts over when it is truncated or rotated, and reconnects by itself if the connection drops (the status bar says so). Host keys are checked against `~/.ssh/known_hosts`; for a new server you are asked first. It remembers the server, user, key and last folder per server, never passwords. Every feature works on remote logs.
 
 ## Merge logs by time
 

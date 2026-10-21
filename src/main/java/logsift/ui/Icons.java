@@ -37,6 +37,22 @@ final class Icons {
         });
     }
 
+    /** A page with a folded corner. */
+    static Icon file() {
+        return of(g -> {
+            Path2D p = new Path2D.Double();
+            p.moveTo(3.5, 1.5);
+            p.lineTo(9.5, 1.5);
+            p.lineTo(12.5, 4.5);
+            p.lineTo(12.5, 14.5);
+            p.lineTo(3.5, 14.5);
+            p.closePath();
+            g.draw(p);
+            g.draw(new Line2D.Double(9.5, 1.5, 9.5, 4.5));
+            g.draw(new Line2D.Double(9.5, 4.5, 12.5, 4.5));
+        });
+    }
+
     static Icon remote() {
         return of(g -> {
             g.draw(new RoundRectangle2D.Double(2, 2, 12, 5, 2, 2));
