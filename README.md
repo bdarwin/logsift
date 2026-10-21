@@ -2,12 +2,12 @@
 
 A fast, cross-platform desktop viewer for very large log files (Java 21+, Swing + FlatLaf).
 
-The goal is one tool that combines:
+The goal is one tool for working with logs:
 
-- **live tail viewers**: live follow and line coloring
-- **text editors**: Find All in the current document
-- **folder search tools**: search across folders
-- **log analyzers**: parsed columns and filters
+- **follow** a growing log live, with colored lines
+- **Find All** in a file, with a results list
+- **search across folders**, including compressed logs
+- **parsed columns and filters**, to cut a big log down to what matters
 
 **Status (v0.1):** step 1 of the plan is done. You can open huge files, scroll, jump to any line, use Find All with a results panel, follow the file as it grows (handling rotation and truncation), color lines, and switch between light and dark mode. Folder search and column parsing come next (see *Roadmap* below).
 
@@ -57,13 +57,13 @@ Make a test log:
 | Follow the end of the file (tail -f) | Ctrl+T, the Follow button, or End |
 | Select text | drag; double-click = word, triple-click or click the line number = whole line; Shift+click extends |
 | Copy | Ctrl+C (with nothing selected, copies the current line) · Select all: Ctrl+A |
-| Search for the selected text | Ctrl+F (fills the Find box, like text editors) |
+| Search for the selected text | Ctrl+F (fills the Find box with the selected text) |
 | Font size | Ctrl+= / Ctrl+- |
 | Dark mode | View → Toggle Dark Mode |
 
 ## Folder search
 
-**File → Search in Folder…** (Ctrl+Shift+F, ⇧⌘F on macOS), or drop a folder on the window, opens a search tab like folder search tools:
+**File → Search in Folder…** (Ctrl+Shift+F, ⇧⌘F on macOS), or drop a folder on the window, opens a search tab:
 
 - Pick a folder, file name patterns (`*.log;*.txt`), and whether to include subfolders and archives.
 - Rotated logs count as the log they came from: `*.log` also finds `app.log.1`, `app.log.2026-10-21`, `app.log.2.gz`, and `.log` files inside any `.zip`.
@@ -97,7 +97,7 @@ LogMaster detects how a log's text is encoded: UTF-8 (with or without a byte ord
 
 ## Columns and levels
 
-The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns, like log analyzers: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. LogMaster recognizes common layouts by itself: logback and log4j patterns, Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
+The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. LogMaster recognizes common layouts by itself: logback and log4j patterns, Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
 
 - **Count values:** right-click a column header (Thread, Logger, Host, Status…) → *Count Values* lists every value with its number of lines. Double-click one to show only its lines, or *Hide* it.
 - **Level chips** in the Filters bar (**E W I D T**) show only some levels, together with your other filters: turn off I, D and T to see just errors and warnings, stack traces included.
@@ -130,7 +130,7 @@ The **Messages** tab (next to Filters) groups the log's lines into kinds of mess
 
 ## Highlight bar
 
-A narrow bar beside the scrollbar shows the whole file at a glance, like log analyzers. It has red marks for errors (ERROR, FATAL, SEVERE, CRITICAL), amber for warnings, a second lane for Find All hits and colored filters, and a box showing where you are. Click a mark to jump to that line; hover to see it. F8 / Shift+F8 jump to the next or previous error. The marks stay up to date while the file grows.
+A narrow bar beside the scrollbar shows the whole file at a glance. It has red marks for errors (ERROR, FATAL, SEVERE, CRITICAL), amber for warnings, a second lane for Find All hits and colored filters, and a box showing where you are. Click a mark to jump to that line; hover to see it. F8 / Shift+F8 jump to the next or previous error. The marks stay up to date while the file grows.
 
 ## Filters
 

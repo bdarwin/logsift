@@ -766,7 +766,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }));
         edit.addSeparator();
         edit.add(item("Find…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU), e -> {
-            // like text editors: text selected in the log becomes the search text
+            // text selected in the log becomes the search text
             LogView v = LogView.lastFocused();
             String s = v != null && v.isViewFocused() ? v.selectionForFind() : null;
             if (s != null) {

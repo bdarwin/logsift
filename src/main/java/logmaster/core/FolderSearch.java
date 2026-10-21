@@ -27,7 +27,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Searches every matching file under a folder (folder search tools style), in parallel, including files
+ * Searches every matching file under a folder, in parallel, including files
  * inside {@code .gz} and {@code .zip} archives. Files are streamed in large blocks through the
  * same fast line matcher as Find All, so nothing is indexed or kept in memory except the hits.
  */

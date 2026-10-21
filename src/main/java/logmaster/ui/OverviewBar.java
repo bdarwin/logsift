@@ -11,7 +11,7 @@ import javax.swing.JComponent;
 import javax.swing.ToolTipManager;
 
 /**
- * The highlight bar beside the scrollbar (like log analyzers): the whole file squeezed into the bar's
+ * The highlight bar beside the scrollbar: the whole file squeezed into the bar's
  * height, with a colored mark wherever errors, warnings, filter matches or Find All hits are.
  * Clicking a mark jumps to that line.
  *

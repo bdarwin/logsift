@@ -37,7 +37,7 @@ import logmaster.core.FolderSearch;
 import logmaster.core.SearchQuery;
 
 /**
- * Search in all files of a folder (folder search tools style). Results are grouped by file; double-click a
+ * Search in all files of a folder. Results are grouped by file; double-click a
  * line to open the file there, double-click a file to fold it.
  */
 final class FolderSearchTab extends JPanel {

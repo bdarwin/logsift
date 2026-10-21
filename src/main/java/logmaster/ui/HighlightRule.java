@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Colors a whole line when it matches (live tail viewers style). The first matching rule wins.
+ * Colors a whole line when it matches. The first matching rule wins.
  * Colors may be null to keep the default.
  */
 record HighlightRule(String name, Pattern pattern,
