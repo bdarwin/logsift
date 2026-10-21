@@ -1000,6 +1000,99 @@ class VisualTest {
         shot("20-time-range-and-filter");
     }
 
+    @Test
+    @Order(16)
+    void topMessages() throws Exception {
+        Path incident = dir.resolve("incident.log");
+        onEdt(() -> {
+            frame.openFile(incident);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        onEdt(() -> {
+            for (FilterDef d : tab.filterPanel().filters()) {
+                d.enabled = false;
+            }
+            tab.filtersChanged();
+            tab.clearTimeRange();
+            tab.setMatchingOnly(false);
+            tab.showMessagesTab();
+            return null;
+        });
+        waitFor(() -> tab.messagesPanel().result() != null, 60_000, "messages analyzed");
+        logmaster.core.MessageStats.Result r = tab.messagesPanel().result();
+        List<String> lines = Files.readAllLines(incident);
+        long heads = lines.stream().filter(l -> l.startsWith("2026-")).count();
+        assertEquals(heads, r.lines(), "every entry counted");
+        assertEquals(heads, r.templates().stream().mapToLong(logmaster.core.MessageStats.Template::count).sum());
+        long dbLost = lines.stream().filter(l -> l.contains("Database connection lost")).count();
+        var db = r.templates().stream().filter(t -> t.text().contains("Database connection lost"))
+                .findFirst().orElseThrow();
+        assertEquals(dbLost, db.count(), "errors grouped into one message");
+        assertEquals("ERROR", db.level());
+        var top = r.templates().get(0);
+        assertTrue(top.text().contains("request handled in <*> ms"), "top message: " + top.text());
+        settle();
+        shot("21-messages");
+
+        // hide the most frequent message: what remains is everything else
+        onEdt(() -> {
+            tab.messagesPanel().tableForTest().setRowSelectionInterval(0, 0);
+            return null;
+        });
+        long t0 = System.nanoTime();
+        onEdt(() -> {
+            MessagesPanel mp = tab.messagesPanel();
+            // same as right-click → Hide These Lines
+            FilterDef d = tab.filterPanel().addFilter(top.regex(), FilterDef.Action.HIDE);
+            d.regex = true;
+            d.matchCase = true;
+            tab.filtersChanged();
+            tab.setMatchingOnly(true);
+            return mp;
+        });
+        FilterResult fr = waitForFilters(tab, t0);
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(top.regex());
+        // whole entries are hidden: lines of entries whose first line matches
+        long hidden = 0;
+        boolean inHidden = false;
+        for (String l : lines) {
+            if (l.startsWith("2026-")) {
+                inHidden = p.matcher(l).find();
+            }
+            if (inHidden) {
+                hidden++;
+            }
+        }
+        assertEquals(lines.size() - hidden, fr.count(), "lines left after hiding the top message");
+
+        // speed on the big log
+        onEdt(() -> {
+            frame.openFile(big);
+            return null;
+        });
+        LogTab bt = onEdt(frame::currentTab);
+        long t1 = System.nanoTime();
+        onEdt(() -> {
+            bt.showMessagesTab();
+            if (bt.messagesPanel().result() != null) {
+                bt.messagesPanel().start();
+            }
+            return null;
+        });
+        waitFor(() -> bt.messagesPanel().result() != null && !bt.messagesPanel().isRunning(),
+                300_000, "big log analyzed");
+        logmaster.core.MessageStats.Result br = bt.messagesPanel().result();
+        settle();
+        shot("22-messages-big-log");
+        summary.put("Top messages (whole file)", String.format("%,d kinds in %,d entries in %d ms",
+                br.templates().size(), br.lines(), ms(t1)));
+        onEdt(() -> {
+            tab.setMatchingOnly(false);
+            return null;
+        });
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {

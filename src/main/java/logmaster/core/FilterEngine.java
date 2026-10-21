@@ -206,7 +206,7 @@ public final class FilterEngine implements AutoCloseable {
                 return true;
             }
         }
-        return false;
+        return continuations != null && continuations.isRunning();
     }
 
     /** Lowest search progress over all filters, 0..1. */
@@ -224,6 +224,9 @@ public final class FilterEngine implements AutoCloseable {
         List<SearchSession> all;
         synchronized (this) {
             all = new ArrayList<>(sessions.values());
+            if (continuations != null) {
+                all.add(continuations); // stack-trace lines must be known too
+            }
         }
         for (SearchSession s : all) {
             if (!s.awaitIdle(Math.max(1, deadline - System.currentTimeMillis()))) {

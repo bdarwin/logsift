@@ -39,6 +39,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     /** Notifies the frame about status changes (for the status bar and toolbar). */
     interface Host {
         void tabStatusChanged(LogTab tab);
+
+        /** Runs Find All in this tab through the toolbar (so the Find box shows the query). */
+        default void runFindAll(SearchQuery q) {}
     }
 
     private final LogDocument doc;
@@ -63,13 +66,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final Runnable searchUpdate;
     private final Runnable filterUpdate;
     private volatile SearchSession search;
-    private FilterResult filterResult;   // EDT only
+    private volatile FilterResult filterResult; // written on the EDT
+    private final MessagesPanel messages;
     private Formula appliedFormula;
     private boolean matchingOnly;
     private long pendingLine = -1; // line to show once indexing reaches it
-    private logmaster.core.EntryFormat entryFormat; // detected from the file; null = none
-    private logmaster.core.TimeFormat timeFormat;   // detected from the file; null = none
-    private logmaster.core.TimeIndex timeIndex;
+    private volatile logmaster.core.EntryFormat entryFormat; // detected; null = none
+    private volatile logmaster.core.TimeFormat timeFormat;   // detected; null = none
+    private volatile logmaster.core.TimeIndex timeIndex;
     private final TimelineBar timeline;
     private long[] timeRange;                       // selected {from, to} times, or null
     private boolean timelineWanted = true;
@@ -203,8 +207,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         resultsPanel.add(resultsHeader, BorderLayout.NORTH);
         resultsPanel.add(results, BorderLayout.CENTER);
 
+        messages = new MessagesPanel(messagesHost());
         bottom.addTab("Filters", filterPanel);
         bottom.addTab("Find results", resultsPanel);
+        bottom.addTab("Messages", messages);
+        bottom.addChangeListener(e -> {
+            if (bottom.getSelectedComponent() == messages && messages.result() == null
+                    && !messages.isRunning()) {
+                messages.start(); // analyze the first time the tab is opened
+            }
+        });
         bottom.setPreferredSize(new Dimension(400, 210));
         bottom.putClientProperty("JTabbedPane.tabHeight", 26);
         JPanel top = new JPanel(new BorderLayout());
@@ -243,6 +255,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         });
         doc.startFollowing(500);
         updateFilterStatus();
+        // A small file may be fully indexed before the listener above was added, so look at it
+        // once now too (detects entries and timestamps).
+        docUpdate.run();
     }
 
     /**
@@ -570,7 +585,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     long indexMillis() {
-        return indexMillis;
+        // the document remembers it, in case indexing finished before we were listening
+        return indexMillis >= 0 ? indexMillis : doc.lastIndexMillis();
     }
 
     long searchMillis() {
@@ -737,6 +753,71 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             return;
         }
         showLine(line);
+    }
+
+    MessagesPanel messagesPanel() {
+        return messages;
+    }
+
+    void showMessagesTab() {
+        if (!bottom.isVisible()) {
+            toggleBottom();
+        }
+        bottom.setSelectedComponent(messages);
+    }
+
+    private MessagesPanel.Host messagesHost() {
+        return new MessagesPanel.Host() {
+            @Override
+            public logmaster.core.MessageStats.Result analyze(boolean onlyFiltered,
+                    AtomicBoolean cancel, java.util.function.DoubleConsumer progress) {
+                FilterResult r = filterResult;
+                boolean filtered = onlyFiltered && r.isFiltering();
+                long from = filtered ? r.windowStart() : 0;
+                long to = filtered ? r.windowEnd() : Long.MAX_VALUE;
+                return logmaster.core.MessageStats.analyze(doc, entryFormat, from, to,
+                        filtered ? r::contains : null, cancel::get, progress);
+            }
+
+            @Override
+            public String describeLine(long line) {
+                if (timeFormat != null) {
+                    String text = doc.line(line);
+                    long t = text == null ? logmaster.core.TimeFormat.NONE : timeFormat.parse(text);
+                    if (t != logmaster.core.TimeFormat.NONE) {
+                        return TimelineBar.formatFull(t).substring(5, 19);
+                    }
+                }
+                return String.format("line %,d", line + 1);
+            }
+
+            @Override
+            public void findAll(logmaster.core.MessageStats.Template t) {
+                host.runFindAll(new SearchQuery(t.regex(), true, true, false));
+                showLine(t.firstLine());
+            }
+
+            @Override
+            public void filter(List<logmaster.core.MessageStats.Template> ts, FilterDef.Action action) {
+                StringBuilder re = new StringBuilder();
+                for (logmaster.core.MessageStats.Template t : ts) {
+                    if (re.length() > 0) {
+                        re.append('|');
+                    }
+                    re.append(ts.size() == 1 ? t.regex() : "(?:" + t.regex() + ")");
+                }
+                FilterDef d = filterPanel.addFilter(re.toString(), action);
+                if (d != null) {
+                    d.regex = true;
+                    d.matchCase = true;
+                    filterPanel.refreshRow(d);
+                    filtersChanged();
+                    if (action != FilterDef.Action.MARK) {
+                        setMatchingOnly(true);
+                    }
+                }
+            }
+        };
     }
 
     /** Adds a filter for exactly this text (from a selection). */
@@ -1027,6 +1108,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (s != null) {
             s.close();
         }
+        messages.cancel();
         engine.close();
         if (timeIndex != null) {
             timeIndex.close();

@@ -119,6 +119,13 @@ public final class LogDocument implements Closeable {
         return index.snapshot().lineCount;
     }
 
+    private volatile long lastIndexMillis = -1;
+
+    /** How long the last full (re)index took, or -1 while the first one runs. */
+    public long lastIndexMillis() {
+        return lastIndexMillis;
+    }
+
     /** Changes every time the document is reset (truncation or rotation). */
     public int generation() {
         return generation.get();
@@ -276,6 +283,7 @@ public final class LogDocument implements Closeable {
             indexing = false;
         }
         long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+        lastIndexMillis = ms;
         notifyLines(true);
         for (Listener l : listeners) {
             l.indexingFinished(this, ms);

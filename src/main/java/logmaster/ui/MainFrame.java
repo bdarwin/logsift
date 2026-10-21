@@ -164,6 +164,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     @Override
+    public void runFindAll(SearchQuery q) {
+        findAll(q);
+    }
+
+    @Override
     public void folderTabChanged(FolderSearchTab tab) {
         int i = tabs.indexOfComponent(tab);
         if (i >= 0) {

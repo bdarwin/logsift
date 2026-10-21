@@ -72,6 +72,16 @@ When a log has timestamps, a timeline above it shows how much was logged over ti
 - The status bar shows the time of the current line.
 - Recognized formats: `2026-10-21 10:02:13`, ISO with `T`, `2026/10/21`, `21-10-2026`, `21.10.2026`, `21-Oct-2026`, syslog `Oct 21 10:02:13`, Apache `[21/Oct/2026:10:02:13 +0000]`, timestamps inside JSON lines, time only, and epoch seconds or milliseconds. Times are shown as written in the log (time zones are not converted).
 
+## Top messages
+
+The **Messages** tab (next to Filters) groups the log's lines into kinds of messages and counts them, most frequent first. Variable parts (numbers, IDs, hosts, durations, user names) are shown as ∗, so `ERROR [worker-7] Database connection lost after 26579 ms` and `ERROR [worker-2] Database connection lost after 812 ms` count as one message. Stack traces count with their log line.
+
+- Use it to answer "what is actually going wrong?" in seconds: pick **Errors** in the level list.
+- **Double-click** a message to find all its lines (and jump to the first one).
+- **Right-click → Hide these lines** to remove noisy messages, or **Show only these lines**. Select several messages to hide them all at once.
+- **Lines shown by filters** counts only the lines your filters and time range show.
+- It is fast: 1.56 million entries are grouped in about 0.25 s.
+
 ## Highlight bar
 
 A narrow bar beside the scrollbar shows the whole file at a glance, like log analyzers. It has red marks for errors (ERROR, FATAL, SEVERE, CRITICAL), amber for warnings, a second lane for Find All hits and colored filters, and a box showing where you are. Click a mark to jump to that line; hover to see it. F8 / Shift+F8 jump to the next or previous error. The marks stay up to date while the file grows.
