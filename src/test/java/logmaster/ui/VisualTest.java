@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Graphics2D;
+import java.awt.event.InputEvent;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -24,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
+import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
 import logmaster.core.LogDocument;
 import logmaster.core.SearchQuery;
@@ -341,7 +344,96 @@ class VisualTest {
         });
     }
 
+    @Test
+    @Order(9)
+    void selectText() throws Exception {
+        LogTab tab = onEdt(frame::currentTab);
+        LogView v = tab.mainView();
+        // a few consecutive plain ASCII lines, so columns map straight to pixels
+        int row = onEdt(() -> {
+            for (int r = 1000; ; r++) {
+                if (isPlainAscii(tab.document().line(r)) && isPlainAscii(tab.document().line(r + 2))) {
+                    v.goToRow(r, true);
+                    return r;
+                }
+            }
+        });
+        String l0 = onEdt(() -> tab.document().line(row));
+        String l1 = onEdt(() -> tab.document().line(row + 1));
+        String l2 = onEdt(() -> tab.document().line(row + 2));
+        String nl = System.lineSeparator();
+
+        // drag from column 5 to 25
+        String dragged = onEdt(() -> {
+            mouse(v, MouseEvent.MOUSE_PRESSED, row, 5, 1, 0);
+            mouse(v, MouseEvent.MOUSE_DRAGGED, row, 25, 1, 0);
+            mouse(v, MouseEvent.MOUSE_RELEASED, row, 25, 1, 0);
+            return v.selectedText();
+        });
+        assertEquals(l0.substring(5, 25), dragged, "drag selects characters");
+
+        // double-click the log level word (third field: "date time LEVEL ...")
+        String level = l0.split(" ")[2];
+        int levelCol = l0.indexOf(" " + level + " ") + 1;
+        String word = onEdt(() -> {
+            mouse(v, MouseEvent.MOUSE_PRESSED, row, levelCol + 1, 1, 0);
+            mouse(v, MouseEvent.MOUSE_RELEASED, row, levelCol + 1, 1, 0);
+            mouse(v, MouseEvent.MOUSE_PRESSED, row, levelCol + 1, 2, 0);
+            mouse(v, MouseEvent.MOUSE_RELEASED, row, levelCol + 1, 2, 0);
+            return v.selectedText();
+        });
+        assertEquals(level, word, "double-click selects a word");
+        assertEquals(level, onEdt(v::selectionForFind), "selection pre-fills Find");
+
+        // triple-click selects the whole line
+        String line = onEdt(() -> {
+            mouse(v, MouseEvent.MOUSE_PRESSED, row, 3, 3, 0);
+            mouse(v, MouseEvent.MOUSE_RELEASED, row, 3, 3, 0);
+            return v.selectedText();
+        });
+        assertEquals(l0, line, "triple-click selects the line");
+
+        // click, then shift-click two lines down: a selection across lines
+        String multi = onEdt(() -> {
+            mouse(v, MouseEvent.MOUSE_PRESSED, row, 12, 1, 0);
+            mouse(v, MouseEvent.MOUSE_RELEASED, row, 12, 1, 0);
+            mouse(v, MouseEvent.MOUSE_PRESSED, row + 2, 19, 1, InputEvent.SHIFT_DOWN_MASK);
+            mouse(v, MouseEvent.MOUSE_RELEASED, row + 2, 19, 1, InputEvent.SHIFT_DOWN_MASK);
+            return v.selectedText();
+        });
+        assertEquals(l0.substring(12) + nl + l1 + nl + l2.substring(0, 19), multi,
+                "shift-click extends across lines");
+        onEdt(() -> {
+            v.focusView();
+            return null;
+        });
+        settle();
+        shot("09-text-selection");
+
+        // with nothing selected, copy takes the current line
+        String current = onEdt(() -> {
+            mouse(v, MouseEvent.MOUSE_PRESSED, row + 1, 4, 1, 0);
+            mouse(v, MouseEvent.MOUSE_RELEASED, row + 1, 4, 1, 0);
+            return v.hasSelection() ? "selection!" : v.selectedText();
+        });
+        assertEquals(l1, current, "copy without selection takes the line");
+        summary.put("text selection", "drag, double/triple-click, shift-click verified");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private static boolean isPlainAscii(String s) {
+        return s != null && s.length() > 40 && s.chars().allMatch(c -> c >= 32 && c < 127);
+    }
+
+    /** Sends a left-button mouse event at a column of a row, as a real click would. */
+    private static void mouse(LogView v, int id, int row, int col, int clicks, int mods) {
+        JComponent c = v.canvasForTest();
+        int m = mods | (id == MouseEvent.MOUSE_RELEASED ? 0 : InputEvent.BUTTON1_DOWN_MASK);
+        c.dispatchEvent(new MouseEvent(c, id, System.currentTimeMillis(), m,
+                v.xForColumnForTest(col), v.yForRowForTest(row), clicks, false,
+                MouseEvent.BUTTON1));
+    }
 
     private SearchSession waitForSearch(LogTab tab) throws Exception {
         SearchSession s = onEdt(tab::search);

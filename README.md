@@ -42,7 +42,9 @@ Make a test log:
 | Jump from a result to the line | click it, or move with the arrow keys in the results |
 | Go to line | Ctrl+L |
 | Follow the end of the file (tail -f) | Ctrl+T, the Follow button, or End |
-| Copy selected lines | Ctrl+C (Shift+click or drag to select several) |
+| Select text | drag; double-click = word, triple-click or click the line number = whole line; Shift+click extends |
+| Copy | Ctrl+C (with nothing selected, copies the current line) · Select all: Ctrl+A |
+| Search for the selected text | Ctrl+F (fills the Find box, like text editors) |
 | Font size | Ctrl+= / Ctrl+- |
 | Dark mode | View → Toggle Dark Mode |
 
@@ -113,7 +115,6 @@ Design choices:
 ## Known limits
 
 - **Only UTF-8 (and ASCII) files are decoded correctly.** UTF-16 and other encodings are not detected yet.
-- **Selection works on whole lines.** You can't select part of a line yet.
 - **Highlight rules are built in** (ERROR/FATAL, WARN, stack traces, DEBUG/TRACE). There is no editor for them yet.
 - **Very long lines:**
   - Lines over 64 KB are cut for display. Search still sees the whole line.

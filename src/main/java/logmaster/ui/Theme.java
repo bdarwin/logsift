@@ -51,7 +51,11 @@ final class Theme {
     }
 
     static Color selectionInactive() {
-        return pick(new Color(0xE2E8F0), new Color(0x33373D));
+        return pick(new Color(0xD5DEEA), new Color(0x3A3F47));
+    }
+
+    static Color currentLine() {
+        return pick(new Color(0xEEF4FD), new Color(0x262B33));
     }
 
     static Color match() {

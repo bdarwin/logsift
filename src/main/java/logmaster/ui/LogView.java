@@ -81,8 +81,21 @@ public final class LogView extends JPanel {
     private int topRow;
     private int hOffset;
     private int maxColumns;
+    // Selection runs from (anchor, anchorCol) to (lead, leadCol). Columns are char indexes into
+    // the line; Integer.MAX_VALUE means the end of the line. In line mode whole lines are
+    // selected. The lead row is also the current line.
     private int anchor = -1;
     private int lead = -1;
+    private int anchorCol;
+    private int leadCol;
+    private boolean lineMode;
+    private static final int BY_CHAR = 0;
+    private static final int BY_WORD = 1;
+    private static final int BY_LINE = 2;
+    private int dragUnit = BY_CHAR;
+    private int wordRow;
+    private int wordStart;
+    private int wordEnd;
     private boolean follow;
     private boolean adjusting;
     private Pattern matchPattern;
@@ -143,6 +156,8 @@ public final class LogView extends JPanel {
         hOffset = 0;
         maxColumns = 0;
         anchor = lead = -1;
+        anchorCol = leadCol = 0;
+        lineMode = false;
         rowsChanged();
     }
 
@@ -188,8 +203,10 @@ public final class LogView extends JPanel {
     /** Call after the row source changed size or content. */
     public void rowsChanged() {
         int n = source.rowCount();
-        if (lead >= n) {
+        if (lead >= n || anchor >= n) {
             anchor = lead = n - 1;
+            anchorCol = leadCol = 0;
+            lineMode = false;
         }
         if (follow) {
             topRow = Math.max(0, n - visibleRows());
@@ -218,6 +235,8 @@ public final class LogView extends JPanel {
         }
         row = Math.max(0, Math.min(n - 1, row));
         anchor = lead = row;
+        anchorCol = leadCol = 0;
+        lineMode = false;
         if (center) {
             setTop(row - visibleRows() / 2);
         } else {
@@ -231,27 +250,116 @@ public final class LogView extends JPanel {
         canvas.requestFocusInWindow();
     }
 
-    /** Copies the selected rows to the clipboard. */
+    /** Copies the selected text to the clipboard; with nothing selected, the current line. */
     public void copySelection() {
         if (lead < 0) {
             return;
         }
-        int from = Math.min(anchor, lead);
-        int to = Math.max(anchor, lead);
-        int count = Math.min(to - from + 1, MAX_COPY_ROWS);
+        Toolkit.getDefaultToolkit().getSystemClipboard()
+                .setContents(new StringSelection(selectedText()), null);
+    }
+
+    /** True if some text (not just a caret) is selected. */
+    public boolean hasSelection() {
+        return lead >= 0 && (lineMode || anchor != lead || anchorCol != leadCol);
+    }
+
+    /**
+     * The selected text, lines joined with the platform line separator. With nothing selected
+     * it is the current line. At most {@value #MAX_COPY_ROWS} lines.
+     */
+    public String selectedText() {
+        if (lead < 0) {
+            return "";
+        }
+        if (!hasSelection()) {
+            String t = textOf(lead);
+            return t == null ? "" : t;
+        }
+        int[] s = selectionBounds();
+        int from = s[0];
+        int to = Math.min(s[2], from + MAX_COPY_ROWS - 1);
+        String nl = System.lineSeparator();
         StringBuilder sb = new StringBuilder();
-        String[] buf = new String[Math.min(count, 4096)];
-        for (int done = 0; done < count; done += buf.length) {
-            int k = Math.min(buf.length, count - done);
-            source.texts(from + done, k, buf);
+        String[] buf = new String[Math.min(to - from + 1, 4096)];
+        for (int first = from; first <= to; first += buf.length) {
+            int k = Math.min(buf.length, to - first + 1);
+            source.texts(first, k, buf);
             for (int i = 0; i < k; i++) {
-                if (buf[i] != null) {
-                    sb.append(buf[i]).append('\n');
+                int row = first + i;
+                String t = buf[i] == null ? "" : buf[i];
+                int c0 = row == s[0] ? Math.min(s[1], t.length()) : 0;
+                int c1 = row == s[2] ? Math.min(s[3], t.length()) : t.length();
+                if (row > from) {
+                    sb.append(nl);
+                }
+                if (c1 > c0) {
+                    sb.append(t, c0, c1);
                 }
             }
         }
-        Toolkit.getDefaultToolkit().getSystemClipboard()
-                .setContents(new StringSelection(sb.toString()), null);
+        return sb.toString();
+    }
+
+    /** Selected text within one line, for pre-filling Find; null if none or multi-line. */
+    public String selectionForFind() {
+        if (!hasSelection() || lineMode || anchor != lead) {
+            return null;
+        }
+        String t = selectedText();
+        return t.isEmpty() || t.length() > 1000 ? null : t;
+    }
+
+    public void selectAll() {
+        int n = source.rowCount();
+        if (n == 0) {
+            return;
+        }
+        anchor = 0;
+        lead = n - 1;
+        lineMode = true;
+        canvas.repaint();
+    }
+
+    /** Whether this view's text area has keyboard focus. */
+    public boolean isViewFocused() {
+        return canvas.isFocusOwner();
+    }
+
+    // For tests: where to click to reach a column of a plain ASCII line without tabs.
+    JComponent canvasForTest() {
+        return canvas;
+    }
+
+    int xForColumnForTest(int col) {
+        return gutterWidth() - hOffset + col * charWidth;
+    }
+
+    int yForRowForTest(int row) {
+        return (row - topRow) * rowHeight + rowHeight / 2;
+    }
+
+    /** {startRow, startCol, endRow, endCol}, start before end; line mode spans whole lines. */
+    private int[] selectionBounds() {
+        boolean forward = anchor < lead || (anchor == lead && anchorCol <= leadCol);
+        int sr = forward ? anchor : lead;
+        int sc = forward ? anchorCol : leadCol;
+        int er = forward ? lead : anchor;
+        int ec = forward ? leadCol : anchorCol;
+        if (lineMode) {
+            sc = 0;
+            ec = Integer.MAX_VALUE;
+        }
+        return new int[] {sr, sc, er, ec};
+    }
+
+    private String textOf(int row) {
+        if (row < 0 || row >= source.rowCount()) {
+            return null;
+        }
+        String[] one = new String[1];
+        source.texts(row, 1, one);
+        return one[0];
     }
 
     // ---------------------------------------------------------------- scrolling
@@ -321,6 +429,10 @@ public final class LogView extends JPanel {
         lead = row;
         if (!extend || anchor < 0) {
             anchor = row;
+            anchorCol = leadCol = 0;
+            lineMode = false;
+        } else {
+            lineMode = true; // keyboard and gutter selection work on whole lines
         }
         ensureVisible(row);
         updateFollowFromPosition();
@@ -329,12 +441,143 @@ public final class LogView extends JPanel {
         listeners.forEach(l -> l.selectionChanged(this, r));
     }
 
+    /** Moves the lead (caret) to a character position; extends the selection if asked. */
+    private void selectTo(int row, int col, boolean extend) {
+        int n = source.rowCount();
+        if (n == 0) {
+            return;
+        }
+        row = Math.max(0, Math.min(n - 1, row));
+        boolean rowChanged = row != lead;
+        lead = row;
+        leadCol = col;
+        if (!extend || anchor < 0) {
+            anchor = row;
+            anchorCol = col;
+        }
+        lineMode = false;
+        ensureVisible(row);
+        updateFollowFromPosition();
+        canvas.repaint();
+        if (rowChanged || !extend) {
+            int r = row;
+            listeners.forEach(l -> l.selectionChanged(this, r));
+        }
+    }
+
+    /** Extends a selection made by double-click, word by word. */
+    private void extendByWord(int row, int col) {
+        String t = textOf(row);
+        int[] w = wordAt(t == null ? "" : t, col);
+        boolean after = row > wordRow || (row == wordRow && col >= wordStart);
+        anchor = wordRow;
+        anchorCol = after ? wordStart : wordEnd;
+        lineMode = false;
+        selectTo(row, after ? Math.max(w[1], col) : Math.min(w[0], col), true);
+    }
+
+    private void dragTo(int row, int col) {
+        switch (dragUnit) {
+            case BY_LINE -> moveLead(row, true);
+            case BY_WORD -> extendByWord(row, col);
+            default -> selectTo(row, col, true);
+        }
+    }
+
     private void dragScroll() {
         if (dragDirection != 0) {
             int target = dragDirection < 0 ? topRow - 1 : topRow + visibleRows();
             setTop(topRow + dragDirection);
-            moveLead(target, true);
+            dragTo(target, dragDirection < 0 ? 0 : Integer.MAX_VALUE);
         }
+    }
+
+    /** Start and end of the word (letters, digits, _) at {@code col}; one char otherwise. */
+    static int[] wordAt(String s, int col) {
+        int n = s.length();
+        if (n == 0) {
+            return new int[] {0, 0};
+        }
+        int c = Math.max(0, Math.min(col, n - 1));
+        if (!isWordChar(s.charAt(c)) && c > 0 && col >= n) {
+            c--;
+        }
+        if (!isWordChar(s.charAt(c))) {
+            int end = c + 1;
+            if (Character.isHighSurrogate(s.charAt(c)) && end < n) {
+                end++;
+            }
+            return new int[] {c, end};
+        }
+        int a = c;
+        while (a > 0 && isWordChar(s.charAt(a - 1))) {
+            a--;
+        }
+        int b = c;
+        while (b < n && isWordChar(s.charAt(b))) {
+            b++;
+        }
+        return new int[] {a, b};
+    }
+
+    private static boolean isWordChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
+    }
+
+    /** Character index in {@code row} nearest to canvas x (a caret position). */
+    private int colAt(int row, int x) {
+        String raw = textOf(row);
+        if (raw == null || raw.isEmpty()) {
+            return 0;
+        }
+        int[] colOf = raw.indexOf('\t') >= 0 ? new int[raw.length() + 1] : null;
+        String text = expandTabs(raw, colOf);
+        int rel = x - (gutterWidth() - hOffset);
+        int dcol;
+        if (hasWideChars(text)) {
+            FontMetrics fm = canvas.getFontMetrics(font);
+            dcol = text.length();
+            int prev = 0;
+            for (int i = 0; i < text.length(); i++) {
+                int next = fm.stringWidth(text.substring(0, i + 1));
+                if (rel < (prev + next) / 2) {
+                    dcol = i;
+                    break;
+                }
+                prev = next;
+            }
+        } else {
+            dcol = Math.round((float) rel / charWidth);
+        }
+        dcol = Math.max(0, Math.min(text.length(), dcol));
+        int idx = dcol;
+        if (colOf != null) {
+            idx = raw.length();
+            for (int i = 0; i <= raw.length(); i++) {
+                if (colOf[i] >= dcol) {
+                    // nearer of the boundaries before and at dcol (tabs are several columns wide)
+                    idx = i > 0 && dcol - colOf[i - 1] < colOf[i] - dcol ? i - 1 : i;
+                    break;
+                }
+            }
+        }
+        if (idx > 0 && idx < raw.length() && Character.isLowSurrogate(raw.charAt(idx))) {
+            idx--; // never split a surrogate pair
+        }
+        return idx;
+    }
+
+    private boolean inGutter(int x) {
+        return x < gutterWidth() - 6;
+    }
+
+    /** Row under y, clamped to the existing rows; -1 if there are none. */
+    private int rowAtClamped(int y) {
+        int n = source.rowCount();
+        if (n == 0) {
+            return -1;
+        }
+        return Math.min(n - 1, topRow + Math.max(0, y) / rowHeight);
     }
 
     // ---------------------------------------------------------------- input
@@ -344,20 +587,50 @@ public final class LogView extends JPanel {
             @Override
             public void mousePressed(MouseEvent e) {
                 canvas.requestFocusInWindow();
-                int row = rowAt(e.getY());
-                if (row < 0) {
-                    return;
-                }
                 if (e.isPopupTrigger()) {
                     popup(e);
                     return;
                 }
-                if (e.getButton() == MouseEvent.BUTTON1) {
-                    moveLead(row, e.isShiftDown());
-                    if (e.getClickCount() == 2) {
-                        listeners.forEach(l -> l.rowActivated(LogView.this, row));
-                    }
+                if (e.getButton() != MouseEvent.BUTTON1) {
+                    return;
                 }
+                int row = rowAt(e.getY());
+                boolean belowLast = row < 0;
+                row = rowAtClamped(e.getY());
+                if (row < 0) {
+                    return;
+                }
+                int clicks = e.getClickCount();
+                if (inGutter(e.getX()) || clicks >= 3) {
+                    dragUnit = BY_LINE;
+                    moveLead(row, e.isShiftDown());
+                    if (!e.isShiftDown()) {
+                        lineMode = true; // select this whole line
+                        canvas.repaint();
+                    }
+                } else if (clicks == 2) {
+                    dragUnit = BY_WORD;
+                    String t = textOf(row);
+                    int[] w = wordAt(t == null ? "" : t, colAt(row, e.getX()));
+                    wordRow = row;
+                    wordStart = w[0];
+                    wordEnd = w[1];
+                    anchor = row;
+                    anchorCol = w[0];
+                    selectTo(row, w[1], true);
+                    int r = row;
+                    listeners.forEach(l -> l.rowActivated(LogView.this, r));
+                } else {
+                    dragUnit = BY_CHAR;
+                    int col = belowLast ? Integer.MAX_VALUE : colAt(row, e.getX());
+                    selectTo(row, col, e.isShiftDown());
+                }
+            }
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                canvas.setCursor(java.awt.Cursor.getPredefinedCursor(inGutter(e.getX())
+                        ? java.awt.Cursor.DEFAULT_CURSOR : java.awt.Cursor.TEXT_CURSOR));
             }
 
             @Override
@@ -383,9 +656,19 @@ public final class LogView extends JPanel {
                 } else {
                     dragDirection = 0;
                     dragTimer.stop();
+                    if (dragUnit != BY_LINE) {
+                        // scroll sideways when dragging past the left or right edge
+                        if (e.getX() > canvas.getWidth() - charWidth) {
+                            hbarScroll(charWidth * 2);
+                        } else if (e.getX() < gutterWidth() && hOffset > 0) {
+                            hbarScroll(-charWidth * 2);
+                        }
+                    }
                     int row = rowAt(e.getY());
                     if (row >= 0) {
-                        moveLead(row, true);
+                        dragTo(row, colAt(row, e.getX()));
+                    } else if (source.rowCount() > 0) {
+                        dragTo(source.rowCount() - 1, Integer.MAX_VALUE);
                     }
                 }
             }
@@ -419,9 +702,12 @@ public final class LogView extends JPanel {
 
     private void popup(MouseEvent e) {
         JPopupMenu menu = new JPopupMenu();
-        JMenuItem copy = new JMenuItem("Copy");
+        JMenuItem copy = new JMenuItem(hasSelection() ? "Copy" : "Copy Line");
         copy.addActionListener(a -> copySelection());
         menu.add(copy);
+        JMenuItem all = new JMenuItem("Select All");
+        all.addActionListener(a -> selectAll());
+        menu.add(all);
         menu.show(canvas, e.getX(), e.getY());
     }
 
@@ -459,6 +745,7 @@ public final class LogView extends JPanel {
             }
         });
         bind(im, am, "copy", KeyEvent.VK_C, menu, this::copySelection);
+        bind(im, am, "selectAll", KeyEvent.VK_A, menu, this::selectAll);
     }
 
     private void endKey() {
@@ -551,6 +838,13 @@ public final class LogView extends JPanel {
         return false;
     }
 
+    /** X position of the boundary before char {@code c} of a (tab-expanded) line. */
+    private int xOfChar(int c, int[] colOf, String text, boolean wide, FontMetrics fm, int textX) {
+        int col = colOf == null ? c : colOf[c];
+        col = Math.min(col, text.length());
+        return wide ? textX + fm.stringWidth(text.substring(0, col)) : textX + col * charWidth;
+    }
+
     private final class Canvas extends JComponent {
         private String[] texts = new String[0];
 
@@ -609,9 +903,10 @@ public final class LogView extends JPanel {
             }
             source.texts(topRow, count, texts);
 
-            int selFrom = lead < 0 ? -1 : Math.min(anchor, lead);
-            int selTo = lead < 0 ? -1 : Math.max(anchor, lead);
+            boolean anySel = hasSelection();
+            int[] sel = anySel ? selectionBounds() : null;
             boolean focused = isFocusOwner();
+            Color selColor = focused ? Theme.selection() : Theme.selectionInactive();
             int firstCol = hOffset / charWidth;
             int visibleCols = (w - gutter) / charWidth + 2;
             int newMaxCols = maxColumns;
@@ -641,9 +936,11 @@ public final class LogView extends JPanel {
                         break;
                     }
                 }
-                boolean selected = row >= selFrom && row <= selTo;
-                if (selected) {
-                    lineBg = focused ? Theme.selection() : Theme.selectionInactive();
+                boolean inSel = anySel && row >= sel[0] && row <= sel[2];
+                if (inSel && lineMode) {
+                    lineBg = selColor;
+                } else if (lineBg == null && row == lead && !anySel) {
+                    lineBg = Theme.currentLine();
                 }
                 if (lineBg != null) {
                     g.setColor(lineBg);
@@ -685,6 +982,20 @@ public final class LogView extends JPanel {
                             if (mm.end() == mm.start() && mm.end() >= raw.length()) {
                                 break;
                             }
+                        }
+                    }
+                    // selected characters
+                    if (inSel && !lineMode) {
+                        int c0 = row == sel[0] ? Math.min(sel[1], raw.length()) : 0;
+                        int c1 = row == sel[2] ? Math.min(sel[3], raw.length()) : raw.length();
+                        int x0 = xOfChar(c0, colOf, text, wide, fm, textX);
+                        int x1 = xOfChar(c1, colOf, text, wide, fm, textX);
+                        if (row < sel[2]) {
+                            x1 += charWidth / 2; // the line break is selected too
+                        }
+                        if (x1 > x0) {
+                            gt.setColor(selColor);
+                            gt.fillRect(x0, y, x1 - x0, rowHeight);
                         }
                     }
                     gt.setColor(lineFg);

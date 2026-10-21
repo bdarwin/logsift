@@ -250,14 +250,26 @@ public final class MainFrame extends JFrame implements LogTab.Host {
         bar.add(file);
 
         JMenu edit = new JMenu("Edit");
-        edit.add(item("Copy Lines", KeyStroke.getKeyStroke(KeyEvent.VK_C, MENU), e -> {
+        edit.add(item("Copy", KeyStroke.getKeyStroke(KeyEvent.VK_C, MENU), e -> {
             LogView v = LogView.lastFocused();
             if (v != null) {
                 v.copySelection();
             }
         }));
+        edit.add(item("Select All", KeyStroke.getKeyStroke(KeyEvent.VK_A, MENU), e -> {
+            LogView v = LogView.lastFocused();
+            if (v != null) {
+                v.selectAll();
+            }
+        }));
         edit.addSeparator();
         edit.add(item("Find…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU), e -> {
+            // like text editors: text selected in the log becomes the search text
+            LogView v = LogView.lastFocused();
+            String s = v != null && v.isViewFocused() ? v.selectionForFind() : null;
+            if (s != null) {
+                findField.setText(s);
+            }
             findField.requestFocusInWindow();
             findField.selectAll();
         }));
