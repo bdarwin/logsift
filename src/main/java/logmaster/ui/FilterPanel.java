@@ -74,7 +74,7 @@ final class FilterPanel extends JPanel {
     private final JToggleButton autoFormula = new JToggleButton("Auto", true);
     private final JLabel resultLabel = new JLabel(" ");
     private final JCheckBox keepEntries = new JCheckBox("Keep stack traces",
-            java.util.prefs.Preferences.userNodeForPackage(FilterPanel.class).getBoolean("entries", true));
+            AppState.prefs().getBoolean("entries", true));
     /** Level chips: E W I D T, all on = no level filtering. */
     static final String[] LEVEL_CHIPS = {"E", "W", "I", "D", "T"};
     static final String[][] LEVEL_WORDS = {{"ERROR", "FATAL", "SEVERE", "CRITICAL"},
@@ -176,7 +176,7 @@ final class FilterPanel extends JPanel {
 
         keepEntries.setToolTipText("No multi-line entries found in this file");
         keepEntries.addActionListener(e -> {
-            java.util.prefs.Preferences.userNodeForPackage(FilterPanel.class)
+            AppState.prefs()
                     .putBoolean("entries", keepEntries.isSelected());
             listener.filtersChanged();
         });
@@ -242,6 +242,19 @@ final class FilterPanel extends JPanel {
 
     List<FilterDef> filters() {
         return defs;
+    }
+
+    /** Whether any filter, level chip or option would filter lines. */
+    boolean hasActiveFilters() {
+        if (levelWords() != null) {
+            return true;
+        }
+        for (FilterDef d : defs) {
+            if (d.isActive() && d.action != FilterDef.Action.MARK) {
+                return true;
+            }
+        }
+        return !isAutoFormula() && !formulaText().isBlank();
     }
 
     /** Level words of the chips that are on, or null when all are on (no level filter). */
@@ -673,7 +686,24 @@ final class FilterPanel extends JPanel {
     // ---------------------------------------------------------------- save / load
 
     void save(Path file) throws IOException {
+        Properties p = toProperties();
+        try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+            p.store(w, "LogMaster filters");
+        }
+    }
+
+    /** The filters, formula and options as properties (for saving). */
+    Properties toProperties() {
         Properties p = new Properties();
+        p.setProperty("context", Integer.toString(contextLines()));
+        p.setProperty("entries", Boolean.toString(keepEntries()));
+        StringBuilder lv = new StringBuilder();
+        for (int i = 0; i < levelChips.length; i++) {
+            if (levelChips[i].isSelected()) {
+                lv.append(LEVEL_CHIPS[i]);
+            }
+        }
+        p.setProperty("levels", lv.toString());
         p.setProperty("count", Integer.toString(defs.size()));
         p.setProperty("formula.auto", Boolean.toString(isAutoFormula()));
         p.setProperty("formula", formulaText());
@@ -689,9 +719,7 @@ final class FilterPanel extends JPanel {
             p.setProperty(k + "wholeWord", Boolean.toString(d.wholeWord));
             p.setProperty(k + "enabled", Boolean.toString(d.enabled));
         }
-        try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            p.store(w, "LogMaster filters");
-        }
+        return p;
     }
 
     void load(Path file) throws IOException {
@@ -699,6 +727,11 @@ final class FilterPanel extends JPanel {
         try (Reader r = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             p.load(r);
         }
+        fromProperties(p);
+    }
+
+    /** Replaces the filters, formula and options with saved ones. */
+    void fromProperties(Properties p) throws IOException {
         List<FilterDef> loaded = new ArrayList<>();
         int n = Math.min(MAX_FILTERS, Integer.parseInt(p.getProperty("count", "0")));
         for (int i = 0; i < n; i++) {
@@ -729,6 +762,20 @@ final class FilterPanel extends JPanel {
         formulaField.setText(p.getProperty("formula", ""));
         updating = false;
         autoFormula.setSelected(auto);
+        if (p.getProperty("levels") != null) {
+            String lv = p.getProperty("levels");
+            for (int i = 0; i < levelChips.length; i++) {
+                levelChips[i].setSelected(lv.contains(LEVEL_CHIPS[i]));
+            }
+        }
+        if (p.getProperty("context") != null) {
+            updating = true;
+            context.setValue(Integer.parseInt(p.getProperty("context")));
+            updating = false;
+        }
+        if (p.getProperty("entries") != null) {
+            keepEntries.setSelected(Boolean.parseBoolean(p.getProperty("entries")));
+        }
         rebuildRows();
         listener.filtersChanged();
     }

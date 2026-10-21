@@ -49,7 +49,7 @@ final class FolderSearchTab extends JPanel {
         void folderTabChanged(FolderSearchTab tab);
     }
 
-    private static final Preferences PREFS = Preferences.userNodeForPackage(FolderSearchTab.class);
+    private static final Preferences PREFS = AppState.prefs();
 
     private final Host host;
     private final JTextField folder = new JTextField(36);

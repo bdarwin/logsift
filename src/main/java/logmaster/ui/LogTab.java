@@ -75,7 +75,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private int bookmarkGeneration;
     private Formula appliedFormula;
     private boolean matchingOnly;
-    private long pendingLine = -1; // line to show once indexing reaches it
+    private long pendingLine = -1; // line to show once indexing (and filters) reach it
+    private boolean pendingExact;  // true: show exactly that line (may leave "Matching only")
     private volatile logmaster.core.EntryFormat entryFormat; // detected; null = none
     private volatile logmaster.core.TimeFormat timeFormat;   // detected; null = none
     private volatile logmaster.core.TimeIndex timeIndex;
@@ -714,11 +715,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         detectEntryFormat();
         main.rowsChanged();
-        if (pendingLine >= 0 && (doc.lineCount() > pendingLine || !doc.isIndexing())) {
-            long line = pendingLine;
-            pendingLine = -1;
-            showLine(line);
-        }
+        tryPendingLine();
         results.rowsChanged();
         host.tabStatusChanged(this);
     }
@@ -750,12 +747,41 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         host.tabStatusChanged(this);
     }
 
-    /** Shows a line now, or as soon as indexing has reached it (for a file just opened). */
+    /**
+     * Shows a line now, or as soon as indexing (and, in "Matching only", the filters) have
+     * reached it, for a file just opened.
+     */
     void showLineWhenAvailable(long line) {
-        if (doc.lineCount() > line || !doc.isIndexing()) {
-            showLine(line);
+        pendingLine = line;
+        pendingExact = true;
+        tryPendingLine();
+    }
+
+    private void tryPendingLine() {
+        long line = pendingLine;
+        if (line < 0) {
+            return;
+        }
+        boolean indexed = doc.lineCount() > line || !doc.isIndexing();
+        FilterResult r = filterResult;
+        boolean filtered;
+        if (!matchingOnly || !filterPanel.hasActiveFilters()) {
+            filtered = true;
+        } else if (pendingExact) {
+            // wait until filtering has settled (entries detected, every filter done), or a
+            // line inside a stack trace may look hidden for a moment
+            filtered = r.isFiltering() && r.isComplete() && !engine.isRunning()
+                    && detectedGeneration == doc.generation() && r.version() == engine.result().version();
         } else {
-            pendingLine = line;
+            filtered = r.isFiltering() && (r.checkedLines() > line || r.isComplete());
+        }
+        if (indexed && filtered) {
+            pendingLine = -1;
+            if (pendingExact) {
+                showLine(line);
+            } else {
+                goNear(line); // keep the place: this line, or the next one shown
+            }
         }
     }
 
@@ -1024,12 +1050,17 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private void onFilterResult() {
         FilterResult r = engine.result();
         boolean redefined = r.version() != filterResult.version();
-        long keep = redefined && matchingOnly && !main.isFollow() ? currentLine() : -1;
+        if (redefined && matchingOnly && !main.isFollow() && pendingLine < 0) {
+            // keep the place while the new result is computed (it may be empty for a moment)
+            long keep = currentLine();
+            if (keep >= 0) {
+                pendingLine = keep;
+                pendingExact = false;
+            }
+        }
         filterResult = r;
         main.rowsChanged();
-        if (keep >= 0) {
-            goNear(keep);
-        }
+        tryPendingLine();
         updateFilterStatus();
         main.overviewChanged();
         host.tabStatusChanged(this);
@@ -1195,6 +1226,35 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 c.run(runStart, prev + 1);
             }
         };
+    }
+
+    /** Filters, view mode and position, to remember for the next time the file is opened. */
+    java.util.Properties saveState() {
+        java.util.Properties p = filterPanel.toProperties();
+        p.setProperty("state.size", Long.toString(doc.fileSize()));
+        p.setProperty("state.line", Long.toString(Math.max(0, currentLine())));
+        p.setProperty("state.matchingOnly", Boolean.toString(matchingOnly));
+        return p;
+    }
+
+    /** Applies remembered state, unless the file got smaller since (then lines moved). */
+    void restoreState(java.util.Properties p) {
+        try {
+            long size = Long.parseLong(p.getProperty("state.size", "0"));
+            if (doc.fileSize() < size) {
+                return;
+            }
+            filterPanel.fromProperties(p);
+            setMatchingOnly(Boolean.parseBoolean(p.getProperty("state.matchingOnly", "false")));
+            showLineWhenAvailable(Long.parseLong(p.getProperty("state.line", "0")));
+        } catch (IOException | RuntimeException e) {
+            // unreadable state: start fresh
+        }
+    }
+
+    /** Whether this tab's state should be remembered (not for temporary merged files). */
+    boolean remembersState() {
+        return sourceLabels == null;
     }
 
     /** Shows or hides the Filters / Find results area. */

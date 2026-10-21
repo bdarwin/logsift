@@ -19,10 +19,13 @@ public final class LogMasterApp {
             java.awt.Taskbar.getTaskbar().setIconImage(logmaster.tools.IconGenerator.render(512));
         }
         SwingUtilities.invokeLater(() -> {
-            boolean dark = Preferences.userNodeForPackage(MainFrame.class).getBoolean("dark", false);
+            boolean dark = AppState.prefs().getBoolean("dark", false);
             Theme.apply(dark);
             MainFrame f = new MainFrame();
             f.setVisible(true);
+            if (args.length == 0) {
+                f.restoreSession(); // reopen what was open last time
+            }
             for (String a : args) {
                 f.openFile(Path.of(a));
             }

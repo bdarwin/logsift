@@ -71,6 +71,16 @@ class VisualTest {
                 Files.delete(p);
             }
         }
+        // start from clean settings and memory (tests use their own, see build.gradle.kts)
+        Path home = AppState.home();
+        if (Files.exists(home)) {
+            try (var walk = Files.walk(home)) {
+                for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.delete(p);
+                }
+            }
+        }
+        AppState.prefs().removeNode();
         big = dir.resolve("big-" + sizeMb + "mb.log");
         stats = generateIfNeeded(big, sizeMb);
         onEdt(() -> {
@@ -1371,6 +1381,65 @@ class VisualTest {
             frame.closeFile(f);
             return null;
         });
+    }
+
+    @Test
+    @Order(21)
+    void sessionAndRecentFiles() throws Exception {
+        Path incident = dir.resolve("incident.log");
+        Path sparse = dir.resolve("sparse.log");
+        onEdt(() -> {
+            frame.openFile(sparse);
+            frame.openFile(incident);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        onEdt(() -> {
+            for (FilterDef d : List.copyOf(tab.filterPanel().filters())) {
+                d.enabled = false;
+            }
+            FilterDef d = tab.filterPanel().addFilter("Database connection lost", FilterDef.Action.SHOW);
+            d.matchCase = true;
+            tab.filtersChanged();
+            tab.setMatchingOnly(true);
+            return null;
+        });
+        FilterResult r = waitForFilters(tab, System.nanoTime());
+        long line = r.lineAt(r.count() / 2);
+        onEdt(() -> {
+            tab.showLine(line);
+            frame.saveSession();
+            return null;
+        });
+        assertTrue(AppState.recentFiles().contains(incident.toAbsolutePath().normalize()), "recent files");
+        assertEquals(incident.toAbsolutePath().normalize(), AppState.recentFiles().get(0), "most recent first");
+
+        // a new window restores the session: files, filters, view mode and position
+        MainFrame second = onEdt(() -> {
+            MainFrame m = new MainFrame();
+            m.setSize(1200, 700);
+            m.setVisible(true);
+            m.restoreSession();
+            return m;
+        });
+        try {
+            LogTab restored = onEdt(second::currentTab);
+            assertEquals(incident.toAbsolutePath().normalize(), restored.document().path(), "selected tab");
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> restored.isMatchingOnly() && restored.currentLine() == line);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "filters, view and position restored (expected line " + line + ")");
+            assertTrue(onEdt(() -> restored.filterPanel().filters().stream()
+                    .anyMatch(f -> f.text.equals("Database connection lost") && f.enabled)), "filter restored");
+        } finally {
+            onEdt(() -> {
+                second.dispose();
+                return null;
+            });
+        }
     }
 
     /** The time of the first line at or after {@code i} that has a timestamp. */

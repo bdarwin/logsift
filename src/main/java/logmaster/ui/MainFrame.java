@@ -50,7 +50,7 @@ import logmaster.core.SearchSession;
 
 /** The application window. */
 public final class MainFrame extends JFrame implements LogTab.Host, FolderSearchTab.Host {
-    private static final Preferences PREFS = Preferences.userNodeForPackage(MainFrame.class);
+    private static final Preferences PREFS = AppState.prefs();
     private static final int MENU = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
 
     private final JTabbedPane tabs = new JTabbedPane();
@@ -107,6 +107,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             public void windowClosed(WindowEvent e) {
                 PREFS.putInt("width", getWidth());
                 PREFS.putInt("height", getHeight());
+                saveSession();
                 for (LogTab t : allTabs()) {
                     t.close();
                 }
@@ -122,6 +123,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         for (int i = 0; i < tabs.getTabCount(); i++) {
             if (tabs.getComponentAt(i) instanceof LogTab lt && lt.document().path().equals(abs)) {
                 tabs.setSelectedIndex(i);
+                AppState.addRecent(abs);
                 return;
             }
         }
@@ -143,6 +145,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             tabs.setToolTipTextAt(idx, abs.toString());
             tabs.setSelectedIndex(idx);
             PREFS.put("lastDir", abs.getParent().toString());
+            AppState.addRecent(abs);
+            java.util.Properties state = AppState.loadFileState(abs);
+            if (state != null) {
+                tab.restoreState(state);
+            }
             updateEmptyState();
             SwingUtilities.invokeLater(() -> tab.mainView().focusView());
         } catch (IOException e) {
@@ -367,6 +374,40 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    /** Remembers open files (and each file's filters and position) for next time. */
+    void saveSession() {
+        List<Path> files = new ArrayList<>();
+        int selected = 0;
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof LogTab t && t.remembersState()) {
+                AppState.saveFileState(t.document().path(), t.saveState());
+                if (i == tabs.getSelectedIndex()) {
+                    selected = files.size();
+                }
+                files.add(t.document().path());
+            }
+        }
+        AppState.saveSession(files, selected);
+    }
+
+    /** Opens the files that were open last time (each with its filters and position). */
+    public void restoreSession() {
+        AppState.Session s = AppState.lastSession();
+        LogTab select = null;
+        for (int i = 0; i < s.files().size(); i++) {
+            Path p = s.files().get(i);
+            if (Files.isRegularFile(p)) {
+                openFile(p);
+                if (i == s.selected()) {
+                    select = currentTab();
+                }
+            }
+        }
+        if (select != null) {
+            tabs.setSelectedComponent(select);
+        }
+    }
+
     public LogTab currentTab() {
         return tabs.getSelectedComponent() instanceof LogTab t ? t : null;
     }
@@ -477,6 +518,36 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         JMenu file = new JMenu("File");
         file.add(item("Open…", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU), e -> openDialog()));
+        JMenu recent = new JMenu("Open Recent");
+        recent.addMenuListener(new javax.swing.event.MenuListener() {
+            @Override
+            public void menuSelected(javax.swing.event.MenuEvent e) {
+                recent.removeAll();
+                List<Path> files = AppState.recentFiles();
+                if (files.isEmpty()) {
+                    JMenuItem none = new JMenuItem("No recent files");
+                    none.setEnabled(false);
+                    recent.add(none);
+                    return;
+                }
+                for (Path p : files) {
+                    JMenuItem mi = new JMenuItem(p.getFileName() + "   —   " + p.getParent());
+                    mi.setEnabled(Files.isRegularFile(p));
+                    mi.addActionListener(a -> openFile(p));
+                    recent.add(mi);
+                }
+                recent.addSeparator();
+                recent.add(item("Clear Recent Files", null, a -> AppState.clearRecent()));
+            }
+
+            @Override
+            public void menuDeselected(javax.swing.event.MenuEvent e) {}
+
+            @Override
+            public void menuCanceled(javax.swing.event.MenuEvent e) {}
+        });
+        file.add(recent);
+        file.add(item("Reopen Last Session", null, e -> restoreSession()));
         file.add(item("Merge Files by Time…", KeyStroke.getKeyStroke(KeyEvent.VK_M, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> mergeDialog()));
         file.add(item("Search in Folder…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU | InputEvent.SHIFT_DOWN_MASK),
@@ -621,6 +692,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             return;
         }
         java.awt.Component c = tabs.getComponentAt(index);
+        if (c instanceof LogTab t && t.remembersState()) {
+            AppState.saveFileState(t.document().path(), t.saveState());
+        }
         tabs.removeTabAt(index);
         if (c instanceof LogTab t) {
             t.close();

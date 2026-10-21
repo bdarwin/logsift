@@ -6,10 +6,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -99,14 +96,7 @@ final class Bookmarks {
     // ---------------------------------------------------------------- storage
 
     private Path store() {
-        try {
-            byte[] h = MessageDigest.getInstance("SHA-1").digest(
-                    file.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
-            return Path.of(System.getProperty("user.home"), ".logmaster", "bookmarks",
-                    HexFormat.of().formatHex(h, 0, 10) + ".properties");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        return AppState.home().resolve("bookmarks").resolve(AppState.key(file) + ".properties");
     }
 
     private void load() {

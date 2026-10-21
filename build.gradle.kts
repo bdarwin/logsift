@@ -37,6 +37,8 @@ tasks.test {
         excludeTags("visual")
     }
     maxHeapSize = "1g"
+    systemProperty("lm.prefs", "/logmaster-test/ui")
+    systemProperty("lm.home", layout.buildDirectory.dir("test-home").get().asFile.absolutePath)
 }
 
 // Visual tests: generate large log files, open them in the real UI,
@@ -57,6 +59,9 @@ val visualTest by tasks.registering(Test::class) {
     systemProperty("lm.visual.sizeMb", (project.findProperty("sizeMb") ?: "1024").toString())
     systemProperty("lm.visual.dir", layout.buildDirectory.dir("visual").get().asFile.absolutePath)
     systemProperty("lm.screenshots", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
+    // keep tests away from the user's own settings, recent files and ~/.logmaster
+    systemProperty("lm.prefs", "/logmaster-test/ui")
+    systemProperty("lm.home", layout.buildDirectory.dir("visual/home").get().asFile.absolutePath)
     testLogging {
         events("passed", "failed", "skipped")
         showStandardStreams = true
