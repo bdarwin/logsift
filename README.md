@@ -121,6 +121,8 @@ It saves screenshots and a timing summary to `build/screenshots/`. Delete `build
 
 ## How it works
 
+For the full, educational explanation (sparse index, SWAR byte search, the regex pre-filter, filter merging, tail and rotation, and lessons learned), see **[docs/how-it-works.md](docs/how-it-works.md)**. Short version:
+
 ```
 logmaster.core   (no UI code; could later back a VS Code extension or a CLI)
   FileSource      positional reads (pread), safe from many threads
