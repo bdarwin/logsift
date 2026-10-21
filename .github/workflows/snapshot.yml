@@ -66,6 +66,12 @@ jobs:
             build/screenshots
           if-no-files-found: ignore
 
+      - name: Install WiX 3 (for the Windows installer)
+        if: startsWith(matrix.target, 'windows-')
+        run: |
+          choco install wixtoolset -y --no-progress
+          echo "C:/Program Files (x86)/WiX Toolset v3.14/bin" >> "$GITHUB_PATH"
+
       - name: Package
         run: |
           set -euo pipefail
@@ -85,20 +91,28 @@ jobs:
                   --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets
                   --vendor bdarwin --description "Viewer for very large log files")
           mkdir -p dist
+          ASSOC=(--file-associations packaging/file-associations/log.properties)
           case "${{ matrix.target }}" in
             macos-*)
-              jpackage --type dmg --dest dist --app-version "$VERSION" --icon packaging/icons/logsift.icns "${COMMON[@]}"
+              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.icns "${ASSOC[@]}" "${COMMON[@]}"
+              packaging/macos-file-types.sh pkg/Logsift.app
+              jpackage --type dmg --dest dist --app-image pkg/Logsift.app --name Logsift --app-version "$VERSION"
               mv dist/Logsift-*.dmg "dist/$NAME.dmg"
               ;;
             windows-*)
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.ico "${COMMON[@]}"
               pwsh -NoProfile -Command "Compress-Archive -Path pkg/Logsift -DestinationPath dist/$NAME.zip"
+              # Installer: per user (no admin rights needed), Start menu entry, opens .log files
+              jpackage --type msi --dest dist --app-version "$VERSION" --icon packaging/icons/logsift.ico \
+                --win-per-user-install --win-menu --win-menu-group Logsift --win-shortcut-prompt \
+                --win-upgrade-uuid 2cf55e2a-4bbe-4a4c-8397-7b68517646a0 "${ASSOC[@]}" "${COMMON[@]}"
+              mv dist/Logsift-*.msi "dist/$NAME.msi"
               ;;
             linux-*)
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.png "${COMMON[@]}"
               tar -C pkg -czf "dist/$NAME.tar.gz" Logsift
               if [ "${{ matrix.target }}" = linux-x64 ]; then
-                jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut --icon packaging/icons/logsift.png "${COMMON[@]}"
+                jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut --icon packaging/icons/logsift.png "${ASSOC[@]}" "${COMMON[@]}"
                 mv dist/*.deb "dist/$NAME.deb"
                 # Plain zip that runs anywhere with Java 21+ installed.
                 cp "build/distributions/logsift-$VERSION.zip" "dist/Logsift-$LABEL-any-java21.zip"
@@ -106,6 +120,25 @@ jobs:
               ;;
           esac
           ls -l dist
+
+      - name: Try the Windows installer (install, check, uninstall)
+        if: matrix.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem dist/*.msi | Select-Object -First 1
+          $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 40; throw "install failed: $($p.ExitCode)" }
+          $exe = Get-ChildItem "$env:LOCALAPPDATA" -Recurse -Filter Logsift.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "Logsift.exe not installed under LOCALAPPDATA" }
+          Write-Host "Installed: $($exe.FullName)"
+          $out = & $exe.FullName --version | Out-String
+          Write-Host "Reports: $out"
+          $assoc = Get-ChildItem "HKCU:\Software\Classes" -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq '.log' }
+          if (-not $assoc) { throw ".log is not associated" }
+          Write-Host ".log association: $((Get-ItemProperty $assoc.PSPath).'(default)')"
+          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
+          if (Test-Path $exe.FullName) { throw "still there after uninstall" }
 
       - uses: actions/upload-artifact@v5
         with:
@@ -154,7 +187,8 @@ jobs:
 
           | File | For |
           |---|---|
-          | \`Logsift-snapshot-windows-x64.zip\` / \`-windows-arm64.zip\` | Windows: unzip, run \`Logsift\\Logsift.exe\` |
+          | \`Logsift-snapshot-windows-x64.msi\` / \`-windows-arm64.msi\` | Windows installer (no admin rights needed) |
+          | \`Logsift-snapshot-windows-x64.zip\` / \`-windows-arm64.zip\` | Windows without installing: unzip, run \`Logsift\\Logsift.exe\` |
           | \`Logsift-snapshot-macos-arm64.dmg\` / \`-macos-x64.dmg\` | macOS Apple Silicon / Intel |
           | \`Logsift-snapshot-linux-x64.deb\` | Debian / Ubuntu |
           | \`Logsift-snapshot-linux-x64.tar.gz\` / \`-linux-arm64.tar.gz\` | Other Linux: unpack, run \`Logsift/bin/Logsift\` |

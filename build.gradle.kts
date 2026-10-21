@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "logsift"
-version = "1.0.0"
+version = "1.1.0"
 
 repositories {
     mavenCentral()
@@ -43,6 +43,7 @@ tasks.test {
     }
     maxHeapSize = "1g"
     systemProperty("logsift.prefs", "/logsift-test/ui")
+    systemProperty("logsift.updateUrl", "none")
     systemProperty("logsift.home", layout.buildDirectory.dir("test-home").get().asFile.absolutePath)
 }
 
@@ -68,6 +69,7 @@ val visualTest by tasks.registering(Test::class) {
     systemProperty("logsift.screenshots", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
     // keep tests away from the user's own settings, recent files and ~/.logsift
     systemProperty("logsift.prefs", "/logsift-test/ui")
+    systemProperty("logsift.updateUrl", "none")
     systemProperty("logsift.home", layout.buildDirectory.dir("visual/home").get().asFile.absolutePath)
     // tests expect a file's tab right after opening it; allow slow CI machines time for that
     systemProperty("logsift.openWaitMs", "10000")
@@ -106,4 +108,10 @@ val genIcons by tasks.registering(JavaExec::class) {
 // Prints the test classpath (used to check the packaged runtime's modules by hand).
 val printTestClasspath by tasks.registering {
     doLast { println(sourceSets.test.get().runtimeClasspath.asPath) }
+}
+
+tasks.jar {
+    manifest {
+        attributes("Implementation-Title" to "Logsift", "Implementation-Version" to project.version)
+    }
 }

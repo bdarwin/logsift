@@ -2030,6 +2030,71 @@ class VisualTest {
         assertEquals(null, onEdt(tab::currentFind));
     }
 
+    @Test
+    @Order(30)
+    void helpUpdatesAndErrors() throws Exception {
+        // every menu shortcut is listed, read from the menus themselves
+        List<String[]> rows = onEdt(() -> HelpSupport.shortcuts(frame.getJMenuBar()));
+        assertTrue(rows.stream().anyMatch(r -> r[1].equals("Find Next") && r[2].equals("F3")), "F3 listed");
+        assertTrue(rows.stream().anyMatch(r -> r[1].equals("Keyboard Shortcuts")), "the dialog lists itself");
+        javax.swing.JDialog keys = onEdt(() -> {
+            javax.swing.JDialog d = HelpSupport.shortcutsDialog(frame, frame.getJMenuBar());
+            d.setVisible(true);
+            return d;
+        });
+        settle();
+        shotOf(keys.getRootPane(), "40-keyboard-shortcuts");
+        onEdt(() -> {
+            keys.dispose();
+            return null;
+        });
+        assertTrue(HelpSupport.bugReportUrl("t", "x").contains("version="), "bug form is filled in");
+
+        // a newer release on the (local, fake) update server shows a button in the toolbar
+        com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/latest", ex -> {
+            byte[] b = "{\"tag_name\":\"v9.9.0\",\"html_url\":\"https://example.invalid/r\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(200, b.length);
+            ex.getResponseBody().write(b);
+            ex.close();
+        });
+        server.start();
+        System.setProperty("logsift.updateUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/latest");
+        System.setProperty("logsift.version", "1.1.0");
+        try {
+            onEdt(() -> {
+                frame.checkForUpdates(false);
+                return null;
+            });
+            waitFor(() -> "Logsift 9.9.0 is available".equals(frame.updateButtonTextForTest()), 10_000,
+                    "update button");
+            settle();
+            shot("41-update-available");
+        } finally {
+            server.stop(0);
+            System.setProperty("logsift.updateUrl", "none");
+            System.clearProperty("logsift.version");
+        }
+
+        // an unexpected error: a window with the details, Logsift keeps running
+        onEdt(() -> {
+            ErrorReporter.report(new IllegalStateException("Something unexpected (test)"));
+            return null;
+        });
+        waitFor(() -> ErrorReporter.openForTest() != null, 10_000, "error window");
+        settle();
+        javax.swing.JDialog err = onEdt(ErrorReporter::openForTest);
+        shotOf(err.getRootPane(), "42-error-window");
+        assertTrue(Files.readString(Path.of(System.getProperty("logsift.home"), "errors.log"))
+                .contains("Something unexpected (test)"), "logged to errors.log");
+        onEdt(() -> {
+            err.dispose();
+            return null;
+        });
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {

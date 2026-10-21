@@ -86,6 +86,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private boolean wrap = PREFS.getBoolean("wrap", false);
     private final JLabel status = new JLabel(" ");
     private final JLabel statusRight = new JLabel(" ");
+    private final JButton updateButton = new JButton();
+    private String updateUrl = HelpSupport.REPO + "/releases/latest";
     private final JProgressBar progress = new JProgressBar(0, 1000);
     private float fontSize = PREFS.getFloat("fontSize", 13f);
 
@@ -132,6 +134,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         updateEmptyState();
 
         new Timer(250, e -> refreshStatus()).start();
+        Timer updates = new Timer(4000, e -> autoCheckForUpdates());
+        updates.setRepeats(false);
+        updates.start();
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosed(WindowEvent e) {
@@ -146,6 +151,126 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     // ---------------------------------------------------------------- public API
+
+    /** Opens files handed over by the system or a second launch, and comes to the front. */
+    public void openFiles(List<Path> files) {
+        for (Path p : files) {
+            openFile(p);
+        }
+        if (getExtendedState() == ICONIFIED) {
+            setExtendedState(NORMAL);
+        }
+        toFront();
+        requestFocus();
+        if (java.awt.Desktop.isDesktopSupported()
+                && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.APP_REQUEST_FOREGROUND)) {
+            java.awt.Desktop.getDesktop().requestForeground(true);
+        }
+    }
+
+    /** Opens the file that piped input is copied into, following it as it grows. */
+    public void openPiped(Path capture) {
+        openFile(capture, null, t -> setFollow(true));
+    }
+
+    // ---------------------------------------------------------------- updates
+
+    private void autoCheckForUpdates() {
+        if (!PREFS.getBoolean("updates.auto", true) || logsift.core.UpdateChecker.url() == null) {
+            return;
+        }
+        String known = PREFS.get("updates.latest", null);
+        if (known != null && logsift.core.Version.isNewer(known, logsift.core.Version.current())) {
+            showUpdate(known, PREFS.get("updates.url", updateUrl)); // known from an earlier check
+        }
+        long last = PREFS.getLong("updates.lastCheck", 0);
+        if (System.currentTimeMillis() - last > 24L * 3600 * 1000) {
+            checkForUpdates(false);
+        }
+    }
+
+    /**
+     * Asks GitHub for the latest release (in the background). A newer one shows a button in the
+     * toolbar; when {@code manual}, the answer is also shown in a dialog.
+     */
+    void checkForUpdates(boolean manual) {
+        String url = logsift.core.UpdateChecker.url();
+        if (url == null) {
+            if (manual) {
+                JOptionPane.showMessageDialog(this, "Update checks are turned off.");
+            }
+            return;
+        }
+        Thread t = new Thread(() -> {
+            java.util.Optional<logsift.core.UpdateChecker.Release> r;
+            String error = null;
+            try {
+                r = logsift.core.UpdateChecker.latest(url);
+            } catch (java.io.IOException e) {
+                r = java.util.Optional.empty();
+                error = e.getMessage();
+            }
+            java.util.Optional<logsift.core.UpdateChecker.Release> result = r;
+            String err = error;
+            SwingUtilities.invokeLater(() -> updateChecked(result, err, manual));
+        }, "logsift-update-check");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void updateChecked(java.util.Optional<logsift.core.UpdateChecker.Release> r, String error, boolean manual) {
+        String current = logsift.core.Version.current();
+        if (r.isPresent()) {
+            PREFS.putLong("updates.lastCheck", System.currentTimeMillis());
+            PREFS.put("updates.latest", r.get().version());
+            PREFS.put("updates.url", r.get().url());
+        }
+        boolean newer = r.isPresent() && logsift.core.Version.isNewer(r.get().version(), current);
+        if (newer) {
+            showUpdate(r.get().version(), r.get().url());
+        } else {
+            updateButton.setVisible(false);
+        }
+        if (!manual) {
+            return;
+        }
+        if (newer) {
+            int answer = JOptionPane.showOptionDialog(this,
+                    "Logsift " + r.get().version() + " is available. You have " + current + ".",
+                    "Update Available", JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null,
+                    new Object[] {"Download", "Later"}, "Download");
+            if (answer == 0) {
+                HelpSupport.browse(this, r.get().url());
+            }
+        } else if (r.isPresent()) {
+            JOptionPane.showMessageDialog(this, "You have the latest version (" + current + ").",
+                    "No Update", JOptionPane.INFORMATION_MESSAGE);
+        } else {
+            JOptionPane.showMessageDialog(this, "Couldn't check for updates"
+                    + (error == null ? "." : ": " + error) + "\nYou can look at " + HelpSupport.REPO + "/releases",
+                    "Check for Updates", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    private void showUpdate(String version, String url) {
+        updateUrl = url;
+        updateButton.setText("Logsift " + version + " is available");
+        updateButton.setToolTipText("Open the download page for version " + version);
+        updateButton.setVisible(true);
+    }
+
+    String updateButtonTextForTest() {
+        return updateButton.isVisible() ? updateButton.getText() : null;
+    }
+
+    private void openErrorLog() {
+        Path f = AppState.home().resolve("errors.log");
+        if (java.nio.file.Files.exists(f)) {
+            openFile(f);
+        } else {
+            JOptionPane.showMessageDialog(this, "No errors have been logged.");
+        }
+    }
 
     /** Opens a file in a new tab (or selects it if already open). */
     public void openFile(Path path) {
@@ -849,6 +974,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tb.add(reloadButton);
         tb.add(autoReloadButton);
         tb.add(Box.createHorizontalGlue());
+        updateButton.putClientProperty("JButton.buttonType", "toolBarButton");
+        updateButton.setFont(updateButton.getFont().deriveFont(Font.BOLD));
+        updateButton.setForeground(new Color(0x2563EB));
+        updateButton.setFocusable(false);
+        updateButton.setVisible(false);
+        updateButton.addActionListener(e -> HelpSupport.browse(this, updateUrl));
+        tb.add(updateButton);
         return tb;
     }
 
@@ -1041,6 +1173,26 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         view.addSeparator();
         view.add(item("Toggle Dark Mode", null, e -> toggleDark()));
         bar.add(view);
+
+        JMenu help = new JMenu("Help");
+        help.add(item("Keyboard Shortcuts", KeyStroke.getKeyStroke(KeyEvent.VK_SLASH, MENU),
+                e -> HelpSupport.shortcutsDialog(this, getJMenuBar()).setVisible(true)));
+        help.add(item("Documentation", null, e -> HelpSupport.browse(this, HelpSupport.DOCS)));
+        help.addSeparator();
+        help.add(item("Report a Bug or Suggest a Feature…", null,
+                e -> HelpSupport.browse(this, HelpSupport.bugReportUrl(null, null))));
+        help.add(item("Open Error Log", null, e -> openErrorLog()));
+        help.addSeparator();
+        help.add(item("Check for Updates…", null, e -> checkForUpdates(true)));
+        javax.swing.JCheckBoxMenuItem auto = new javax.swing.JCheckBoxMenuItem("Check for Updates Automatically",
+                PREFS.getBoolean("updates.auto", true));
+        auto.addActionListener(e -> PREFS.putBoolean("updates.auto", auto.isSelected()));
+        help.add(auto);
+        if (!isMac()) { // on macOS, About is in the application menu
+            help.addSeparator();
+            help.add(item("About Logsift", null, e -> HelpSupport.showAbout(this)));
+        }
+        bar.add(help);
         return bar;
     }
 

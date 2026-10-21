@@ -28,7 +28,7 @@ Get the latest version from the **[Releases page](https://github.com/bdarwin/log
 
 | System | File |
 |---|---|
-| Windows (x64, ARM64) | `Logsift-<version>-windows-x64.zip` / `-windows-arm64.zip`: unzip, run `Logsift\Logsift.exe` |
+| Windows (x64, ARM64) | `Logsift-<version>-windows-x64.msi` / `-windows-arm64.msi`: installer, no admin rights needed. Or the `.zip`: unzip, run `Logsift\Logsift.exe` |
 | macOS (Apple Silicon, Intel) | `Logsift-<version>-macos-arm64.dmg` / `-macos-x64.dmg` |
 | Debian / Ubuntu | `Logsift-<version>-linux-x64.deb` |
 | Other Linux (x64, ARM64) | `Logsift-<version>-linux-x64.tar.gz` / `-linux-arm64.tar.gz`: unpack, run `Logsift/bin/Logsift` |
@@ -38,7 +38,28 @@ The native downloads include their own Java runtime, so nothing else needs to be
 - **macOS:** if it says the app is damaged or can't be opened, run `xattr -dr com.apple.quarantine /Applications/Logsift.app`.
 - **Windows:** if SmartScreen warns, choose **More info → Run anyway**.
 
-Builds of the latest code are on the [snapshot release](https://github.com/bdarwin/logsift/releases/tag/snapshot).
+Builds of the latest code are on the [snapshot release](https://github.com/bdarwin/logsift/releases/tag/snapshot). What changed in each version is in the [CHANGELOG](CHANGELOG.md).
+
+## Opening logs
+
+- **Files:** File → Open, drag files onto the window, or double-click a `.log` file (the installers register Logsift for `.log`). On macOS you can also use Open With or drop files on the Dock icon. If Logsift is already running, files open in the same window.
+- **Command line:** `logsift app.log other.log`. `logsift --version` prints the version.
+- **Another program's output, live:** pipe it in with `-`:
+
+  ```bash
+  kubectl logs -f my-pod | logsift -
+  docker logs -f my-app 2>&1 | logsift -
+  journalctl -f | logsift -
+  ```
+
+  The output is saved to `~/.logsift/stdin/` as it arrives and followed like a growing log. Captures older than a week are removed. On macOS the command is `/Applications/Logsift.app/Contents/MacOS/Logsift`, and on Linux `/opt/logsift/bin/Logsift` (`.deb`) or `Logsift/bin/Logsift` (`.tar.gz`); add an alias for convenience.
+
+## Help, updates and privacy
+
+- **Help → Keyboard Shortcuts** (Ctrl+/ or ⌘/) lists every shortcut. **Help → Report a Bug** opens a GitHub issue with your version and system filled in.
+- **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the toolbar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
+- **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub**. Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).
+- Logsift never sends your logs anywhere. Its only other network connections are to SFTP servers you choose.
 
 ## Screenshots
 
@@ -288,6 +309,10 @@ Design choices:
 ## Roadmap
 
 Ideas for next versions: editable highlight rules, signed installers, and plugins for custom log formats. Suggestions and bug reports are welcome in [Issues](https://github.com/bdarwin/logsift/issues).
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
