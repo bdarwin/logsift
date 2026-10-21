@@ -55,6 +55,7 @@ Make a test log:
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
 | Fold / open the bottom panel | Ctrl+J, the ▾ button, or double-click a tab |
 | Follow the end of the file (tail -f) | Ctrl+T, the Follow button, or End |
+| Load changes to the file | F5 or Reload (it lights up when the file changed); **Auto reload** loads them as they happen |
 | Select text | drag; double-click = word, triple-click or click the line number = whole line; Shift+click extends |
 | Copy | Ctrl+C (with nothing selected, copies the current line) · Select all: Ctrl+A |
 | Search for the selected text | Ctrl+F (fills the Find box with the selected text) |

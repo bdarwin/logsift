@@ -40,7 +40,13 @@ public final class LogDocument implements Closeable {
         default void indexingFinished(LogDocument doc, long millis) {}
 
         default void failed(LogDocument doc, Exception e) {}
+
+        /** The file on disk changed and is not loaded yet (auto reload off), or was just loaded. */
+        default void staleChanged(LogDocument doc) {}
     }
+
+    /** How the file on disk differs from what is loaded. */
+    public enum Change { NONE, GREW, REPLACED }
 
     /** Lines longer than this are cut for display (searching still sees the full line). */
     public static final int MAX_DISPLAY_BYTES = 64 * 1024;
@@ -155,8 +161,100 @@ public final class LogDocument implements Closeable {
     /** Checks the file for growth, truncation or rotation every {@code millis} ms. */
     public void startFollowing(long millis) {
         stopFollowing();
-        poller = TIMER.scheduleWithFixedDelay(this::requestRefresh, millis, millis,
-                TimeUnit.MILLISECONDS);
+        poller = TIMER.scheduleWithFixedDelay(this::poll, millis, millis, TimeUnit.MILLISECONDS);
+    }
+
+    private volatile boolean autoReload = true;
+    private volatile Change pending = Change.NONE;
+    private volatile long pendingBytes;
+    private final AtomicBoolean checkQueued = new AtomicBoolean();
+
+    /**
+     * With auto reload (the default) changes on disk are loaded as they happen. Without it they
+     * are only noticed ({@link #pendingChange()}) until {@link #reload()} is called.
+     */
+    public void setAutoReload(boolean on) {
+        autoReload = on;
+        if (on && pending != Change.NONE) {
+            requestRefresh();
+        }
+    }
+
+    public boolean isAutoReload() {
+        return autoReload;
+    }
+
+    /** What changed on disk and is not loaded yet. */
+    public Change pendingChange() {
+        return pending;
+    }
+
+    /** For a file that grew: how many bytes are not loaded yet. */
+    public long pendingBytes() {
+        return pendingBytes;
+    }
+
+    /** Loads what changed on disk now. */
+    public void reload() {
+        requestRefresh();
+    }
+
+    private void poll() {
+        if (autoReload) {
+            requestRefresh();
+        } else if (!closed && checkQueued.compareAndSet(false, true)) {
+            serial.execute(() -> {
+                checkQueued.set(false);
+                checkForChange();
+            });
+        }
+    }
+
+    /** Notices a change on disk without loading it. */
+    private void checkForChange() {
+        if (closed) {
+            return;
+        }
+        Change c = Change.NONE;
+        long bytes = 0;
+        try {
+            Object key;
+            try {
+                key = fileKey(path);
+            } catch (NoSuchFileException e) {
+                return;
+            }
+            long size = source.size();
+            LineIndex.Snapshot s = index.snapshot();
+            if ((key != null && !key.equals(fileKey)) || (key == null && Files.size(path) < size)
+                    || size < s.indexedBytes || !fingerprintStillMatches()) {
+                c = Change.REPLACED;
+            } else if (size > s.indexedBytes) {
+                c = Change.GREW;
+                bytes = size - s.indexedBytes;
+            }
+        } catch (IOException | UncheckedIOException | FileChangedException e) {
+            return; // try again next time
+        }
+        setPending(c, bytes);
+    }
+
+    private void setPending(Change c, long bytes) {
+        boolean changed = c != pending || bytes != pendingBytes;
+        pending = c;
+        pendingBytes = bytes;
+        if (changed) {
+            for (Listener l : listeners) {
+                l.staleChanged(this);
+            }
+        }
+    }
+
+    /** Like fingerprintMatches, but without remembering anything. */
+    private boolean fingerprintStillMatches() throws IOException {
+        byte[] now = readFingerprint(source);
+        return now.length >= fingerprint.length
+                && Arrays.equals(fingerprint, 0, fingerprint.length, now, 0, fingerprint.length);
     }
 
     public void stopFollowing() {
@@ -325,6 +423,14 @@ public final class LogDocument implements Closeable {
         if (closed) {
             return;
         }
+        try {
+            refreshNow();
+        } finally {
+            setPending(Change.NONE, 0); // whatever was on disk is loaded now
+        }
+    }
+
+    private void refreshNow() {
         try {
             Object key;
             try {

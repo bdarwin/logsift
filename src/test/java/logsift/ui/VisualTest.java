@@ -87,6 +87,7 @@ class VisualTest {
         onEdt(() -> {
             Theme.apply(false);
             frame = new MainFrame();
+            frame.setAutoReload(true); // most tests follow growing files; manual mode is tested below
             frame.setSize(1400, 860);
             frame.setLocation(40, 40);
             frame.setVisible(true);
@@ -1844,6 +1845,53 @@ class VisualTest {
             System.setProperty("logsift.openWaitMs", "10000");
             System.clearProperty("logsift.testOpenDelayMs");
         }
+    }
+
+    @Test
+    @Order(28)
+    void manualReload() throws Exception {
+        Path f = dir.resolve("manual-reload.log");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            sb.append("2026-10-21 10:00:00 INFO line ").append(i).append('\n');
+        }
+        Files.writeString(f, sb);
+        onEdt(() -> {
+            frame.setAutoReload(false);
+            frame.openFile(f);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> !tab.document().isIndexing() && tab.document().lineCount() == 100, 10_000, "loaded");
+        String extra = "2026-10-21 10:00:01 ERROR written after opening\n".repeat(50);
+        Files.writeString(f, extra, java.nio.file.StandardOpenOption.APPEND);
+        waitFor(() -> tab.document().pendingChange() == logsift.core.LogDocument.Change.GREW, 10_000,
+                "the change on disk is noticed");
+        Thread.sleep(700);
+        assertEquals(100, tab.document().lineCount(), "not loaded by itself");
+        settle();
+        assertTrue(onEdt(frame::reloadButtonTextForTest).startsWith("Reload (+"),
+                "the Reload button shows there is more: " + onEdt(frame::reloadButtonTextForTest));
+        shot("37-reload-waiting");
+        onEdt(() -> {
+            frame.reload();
+            return null;
+        });
+        waitFor(() -> tab.document().lineCount() == 150, 10_000, "loaded after Reload");
+        settle();
+        assertEquals("Reload", onEdt(frame::reloadButtonTextForTest));
+        // Follow loads changes by itself, even with auto reload off
+        onEdt(() -> {
+            frame.setFollow(true);
+            return null;
+        });
+        Files.writeString(f, "2026-10-21 10:00:02 INFO while following\n", java.nio.file.StandardOpenOption.APPEND);
+        waitFor(() -> tab.document().lineCount() == 151, 10_000, "followed");
+        onEdt(() -> {
+            frame.setFollow(false);
+            frame.setAutoReload(true);
+            return null;
+        });
     }
 
     /** The time of the first line at or after {@code i} that has a timestamp. */

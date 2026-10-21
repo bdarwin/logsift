@@ -251,6 +251,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         main.addListener(new LogView.Listener() {
             @Override
             public void followChanged(LogView view, boolean follow) {
+                applyAutoReload(); // following the end means loading changes as they come
                 host.tabStatusChanged(LogTab.this);
             }
 
@@ -342,6 +343,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             public void failed(LogDocument d, Exception e) {
                 error = e.getMessage();
                 docUpdate.run();
+            }
+
+            @Override
+            public void staleChanged(LogDocument d) {
+                SwingUtilities.invokeLater(() -> host.tabStatusChanged(LogTab.this));
             }
         });
         doc.startFollowing(500);
@@ -1013,6 +1019,23 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             return;
         }
         showLine(line);
+    }
+
+    private boolean autoReload = true;
+
+    /** Loads changes on disk as they happen; off: they wait for {@link #reload()}. */
+    void setAutoReload(boolean on) {
+        autoReload = on;
+        applyAutoReload();
+    }
+
+    private void applyAutoReload() {
+        doc.setAutoReload(autoReload || main.isFollow());
+    }
+
+    /** Loads what changed in the file on disk. */
+    void reload() {
+        doc.reload();
     }
 
     /** Marks this tab as a merged log: lines start with "<label> " for each source. */

@@ -45,6 +45,7 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.TransferHandler;
+import javax.swing.UIManager;
 import logsift.core.LogDocument;
 import logsift.core.SearchQuery;
 import logsift.core.SearchSession;
@@ -63,6 +64,24 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final JToggleButton followButton = new JToggleButton("Follow");
     private final JToggleButton wrapButton = new JToggleButton("Wrap");
     private final JToggleButton columnsButton = new JToggleButton("Columns");
+    private boolean reloadStale;
+    /** Reload: an amber pill while the file on disk has changes that aren't loaded. */
+    private final JButton reloadButton = new JButton("Reload") {
+        @Override
+        protected void paintComponent(java.awt.Graphics g0) {
+            if (reloadStale) {
+                java.awt.Graphics2D g = (java.awt.Graphics2D) g0.create();
+                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(Theme.isDark() ? new Color(0x6B5310) : new Color(0xFFE08A));
+                g.fillRoundRect(1, 2, getWidth() - 2, getHeight() - 4, 10, 10);
+                g.dispose();
+            }
+            super.paintComponent(g0);
+        }
+    };
+    private final JToggleButton autoReloadButton = new JToggleButton("Auto reload");
+    private boolean autoReload = PREFS.getBoolean("autoReload", false);
     private boolean columns = PREFS.getBoolean("columns", false);
     private boolean wrap = PREFS.getBoolean("wrap", false);
     private final JLabel status = new JLabel(" ");
@@ -319,6 +338,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tab.resultsView().setStripes(PREFS.getBoolean("stripes", true));
         tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
         tab.setColumnsVisible(columns);
+        tab.setAutoReload(autoReload);
         tabs.addTab(tab.title(), tab);
         int idx = tabs.getTabCount() - 1;
         tabs.setToolTipTextAt(idx, abs.toString());
@@ -654,6 +674,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
     }
 
+    String reloadButtonTextForTest() {
+        return reloadButton.getText();
+    }
+
     boolean isOpeningForTest(Path p) {
         return opening.contains(p.toAbsolutePath().normalize());
     }
@@ -762,14 +786,31 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
         }));
 
-        JButton findAll = new JButton("Find All");
+        JButton open = new JButton(Icons.open());
+        open.setToolTipText("Open log files (" + (isMac() ? "⌘O" : "Ctrl+O") + ")");
+        open.addActionListener(e -> openDialog());
+        JButton remote = new JButton(Icons.remote());
+        remote.setToolTipText("Open a log on another machine over SSH (" + (isMac() ? "⇧⌘O" : "Ctrl+Shift+O") + ")");
+        remote.addActionListener(e -> openRemoteDialog());
+        JButton findAll = new JButton("Find All", Icons.find());
         findAll.addActionListener(e -> findAllFromToolbar());
-        JButton prev = new JButton("▲");
+        JButton prev = new JButton(Icons.up());
         prev.setToolTipText("Previous hit (Shift+F3)");
         prev.addActionListener(e -> findNext(false));
-        JButton next = new JButton("▼");
+        JButton next = new JButton(Icons.down());
         next.setToolTipText("Next hit (F3)");
         next.addActionListener(e -> findNext(true));
+        followButton.setIcon(Icons.follow());
+        wrapButton.setIcon(Icons.wrap());
+        columnsButton.setIcon(Icons.columns());
+        reloadButton.setIcon(Icons.reload());
+        reloadButton.setToolTipText("Load what changed in the file on disk (F5)");
+        reloadButton.addActionListener(e -> reload());
+        autoReloadButton.setIcon(Icons.autoReload());
+        autoReloadButton.setSelected(autoReload);
+        autoReloadButton.setToolTipText("<html>Load changes to the file as they happen.<br>"
+                + "Off: changes wait until you click Reload (the button lights up). Follow turns it on.</html>");
+        autoReloadButton.addActionListener(e -> setAutoReload(autoReloadButton.isSelected()));
 
         followButton.setToolTipText("Follow the end of the file as it grows (tail -f)");
         followButton.addActionListener(e -> setFollow(followButton.isSelected()));
@@ -780,7 +821,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         columnsButton.setSelected(columns);
         columnsButton.addActionListener(e -> setColumns(columnsButton.isSelected()));
 
-        tb.add(new JLabel(" "));
+        tb.add(open);
+        tb.add(remote);
+        tb.addSeparator();
         tb.add(findField);
         tb.addSeparator(new Dimension(6, 1));
         tb.add(findAll);
@@ -790,6 +833,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tb.add(followButton);
         tb.add(wrapButton);
         tb.add(columnsButton);
+        tb.addSeparator();
+        tb.add(reloadButton);
+        tb.add(autoReloadButton);
         tb.add(Box.createHorizontalGlue());
         return tb;
     }
@@ -949,6 +995,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 t.setTimelineVisible(on);
             }
         }));
+        view.add(item("Reload", KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), e -> reload()));
+        view.add(item("Auto Reload", null, e -> setAutoReload(!autoReload)));
+        view.addSeparator();
         view.add(item("Columns", KeyStroke.getKeyStroke(KeyEvent.VK_K, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> setColumns(!columns)));
         view.add(item("Line Stripes", null, e -> {
@@ -1212,6 +1261,44 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         openFile(p, cs);
     }
 
+    /** Loads changes on disk as they happen (otherwise Reload does it). For every log. */
+    public void setAutoReload(boolean on) {
+        autoReload = on;
+        PREFS.putBoolean("autoReload", on);
+        autoReloadButton.setSelected(on);
+        for (LogTab t : allTabs()) {
+            t.setAutoReload(on);
+        }
+        refreshStatus();
+    }
+
+    /** Loads what changed in the current log's file. */
+    public void reload() {
+        LogTab t = currentTab();
+        if (t != null) {
+            t.reload();
+        }
+    }
+
+    /** Lights up the Reload button when the current file changed and isn't loaded yet. */
+    private void updateReloadButton(LogTab t) {
+        LogDocument.Change c = t == null ? LogDocument.Change.NONE : t.document().pendingChange();
+        boolean stale = c != LogDocument.Change.NONE;
+        reloadButton.setEnabled(t != null);
+        if (stale) {
+            reloadStale = true;
+            reloadButton.setForeground(Theme.isDark() ? new Color(0xFFE7A3) : new Color(0x5C4300));
+            reloadButton.setFont(reloadButton.getFont().deriveFont(Font.BOLD));
+            reloadButton.setText(c == LogDocument.Change.GREW
+                    ? "Reload (+" + humanBytes(t.document().pendingBytes()) + ")" : "Reload (file replaced)");
+        } else {
+            reloadStale = false;
+            reloadButton.setForeground(null);
+            reloadButton.setFont(UIManager.getFont("Button.font"));
+            reloadButton.setText("Reload");
+        }
+    }
+
     /** Shows lines as columns (time, level, thread, ...) in every log view. */
     public void setColumns(boolean on) {
         columns = on;
@@ -1264,6 +1351,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     private void refreshStatus() {
         LogTab t = currentTab();
+        updateReloadButton(t);
         if (tabs.getSelectedComponent() instanceof CompareTab ct) {
             setTitle(ct.title() + " — Logsift");
             status.setText(" ");
@@ -1307,6 +1395,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         if (t.error() != null) {
             sb.append("   ⚠ ").append(t.error());
+        }
+        if (t.document().pendingChange() != LogDocument.Change.NONE) {
+            sb.append(t.document().pendingChange() == LogDocument.Change.GREW
+                    ? "   • " + humanBytes(t.document().pendingBytes()) + " more on disk: Reload (F5) to see it"
+                    : "   • the file was replaced on disk: Reload (F5)");
         }
         if (t.remoteStatus() != null && !t.remoteStatus().equals("connected")) {
             sb.append("   ⚡ ").append(t.remoteStatus());

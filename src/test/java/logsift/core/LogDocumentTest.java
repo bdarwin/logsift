@@ -109,6 +109,48 @@ class LogDocumentTest {
     }
 
     @Test
+    void manualReloadOnlyNoticesChangesUntilReload() throws Exception {
+        Path f = dir.resolve("manual.log");
+        Files.writeString(f, "one\ntwo\n");
+        try (LogDocument doc = LogDocument.open(f)) {
+            assertTrue(doc.awaitIdle(5000));
+            java.util.concurrent.atomic.AtomicInteger staleEvents = new java.util.concurrent.atomic.AtomicInteger();
+            doc.addListener(new LogDocument.Listener() {
+                @Override
+                public void staleChanged(LogDocument d) {
+                    staleEvents.incrementAndGet();
+                }
+            });
+            doc.setAutoReload(false);
+            doc.startFollowing(20);
+            Files.writeString(f, "three\n", StandardOpenOption.APPEND);
+            long deadline = System.currentTimeMillis() + 5000;
+            while (doc.pendingChange() == LogDocument.Change.NONE && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10);
+            }
+            assertEquals(LogDocument.Change.GREW, doc.pendingChange());
+            assertEquals(6, doc.pendingBytes());
+            assertEquals(2, doc.lineCount(), "not loaded until Reload");
+            assertTrue(staleEvents.get() >= 1);
+            doc.reload();
+            assertTrue(doc.awaitIdle(5000));
+            assertEquals(3, doc.lineCount());
+            assertEquals(LogDocument.Change.NONE, doc.pendingChange());
+            // truncated: noticed as "replaced"; turning auto reload on loads it at once
+            Files.writeString(f, "new\n");
+            deadline = System.currentTimeMillis() + 5000;
+            while (doc.pendingChange() == LogDocument.Change.NONE && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10);
+            }
+            assertEquals(LogDocument.Change.REPLACED, doc.pendingChange());
+            doc.setAutoReload(true);
+            assertTrue(doc.awaitIdle(5000));
+            assertEquals("new", doc.line(0));
+            assertEquals(1, doc.lineCount());
+        }
+    }
+
+    @Test
     void interruptedReaderDoesNotBreakTheFile() throws IOException {
         Path f = dir.resolve("int.log");
         Files.writeString(f, "line one\nline two\n");
