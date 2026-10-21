@@ -1,4 +1,4 @@
-# LogMaster
+# Logsift
 
 A fast, cross-platform desktop viewer for very large log files (Java 21+, Swing + FlatLaf).
 
@@ -13,13 +13,13 @@ The goal is one tool for working with logs:
 
 ## Download
 
-Snapshot builds of the latest `main` are on the [snapshot release](https://github.com/bdarwin/logmaster/releases/tag/snapshot): Windows (x64, arm64), macOS (Apple Silicon, Intel), Linux (x64 .deb/.tar.gz, arm64 .tar.gz), and a plain zip for any OS with Java 21+. The native builds include their own Java runtime and are not code-signed (see the release notes for the macOS/Windows warnings).
+Snapshot builds of the latest `main` are on the [snapshot release](https://github.com/bdarwin/logsift/releases/tag/snapshot): Windows (x64, arm64), macOS (Apple Silicon, Intel), Linux (x64 .deb/.tar.gz, arm64 .tar.gz), and a plain zip for any OS with Java 21+. The native builds include their own Java runtime and are not code-signed (see the release notes for the macOS/Windows warnings).
 
 ## Run it
 
 ```bash
 ./gradlew run --args="/path/to/app.log"     # or open files via File → Open / drag and drop
-./gradlew installDist                       # launcher in build/install/logmaster/bin/logmaster
+./gradlew installDist                       # launcher in build/install/logsift/bin/logsift
 ```
 
 Make a test log:
@@ -85,11 +85,11 @@ When a log has timestamps, a timeline above it shows how much was logged over ti
 
 ## Text encodings
 
-LogMaster detects how a log's text is encoded: UTF-8 (with or without a byte order mark), **UTF-16** (as written by some Windows tools; with or without a byte order mark), and **Windows-1252** (Western European, used by older Windows programs). The status bar shows the encoding; **View → Encoding** reopens the log in another one (Latin-1, Cyrillic, Shift_JIS, GB18030 and more). UTF-16 logs are read through a UTF-8 copy that is kept up to date, so following a growing UTF-16 log works too. Folder search detects the encoding of each file.
+Logsift detects how a log's text is encoded: UTF-8 (with or without a byte order mark), **UTF-16** (as written by some Windows tools; with or without a byte order mark), and **Windows-1252** (Western European, used by older Windows programs). The status bar shows the encoding; **View → Encoding** reopens the log in another one (Latin-1, Cyrillic, Shift_JIS, GB18030 and more). UTF-16 logs are read through a UTF-8 copy that is kept up to date, so following a growing UTF-16 log works too. Folder search detects the encoding of each file.
 
 ## Recent files and sessions
 
-**File → Open Recent** lists the last 15 files. When LogMaster starts without a file to open, it reopens the logs that were open last time (**File → Reopen Last Session** does it any time). Every file remembers its filters, formula, level chips, *Matching only* and position, so reopening a log puts you back where you were; if the file got smaller in the meantime (truncated or rotated), it starts fresh.
+**File → Open Recent** lists the last 15 files. When Logsift starts without a file to open, it reopens the logs that were open last time (**File → Reopen Last Session** does it any time). Every file remembers its filters, formula, level chips, *Matching only* and position, so reopening a log puts you back where you were; if the file got smaller in the meantime (truncated or rotated), it starts fresh.
 
 ## Export
 
@@ -97,7 +97,7 @@ LogMaster detects how a log's text is encoded: UTF-8 (with or without a byte ord
 
 ## Columns and levels
 
-The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. LogMaster recognizes common layouts by itself: logback and log4j patterns, Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
+The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. Logsift recognizes common layouts by itself: logback and log4j patterns, Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
 
 - **Count values:** right-click a column header (Thread, Logger, Host, Status…) → *Count Values* lists every value with its number of lines. Double-click one to show only its lines, or *Hide* it.
 - **Level chips** in the Filters bar (**E W I D T**) show only some levels, together with your other filters: turn off I, D and T to see just errors and warnings, stack traces included.
@@ -108,7 +108,7 @@ Logs with one JSON object per line are recognized. With **Columns** on, the usua
 
 ## Remote logs (SSH / SFTP)
 
-**File → Open Remote (SFTP)…** (Ctrl+Shift+O) opens a log on another machine: host, user, file path, and a password or private key (`~/.ssh/id_ed25519` or `id_rsa` is suggested). Load the whole file or just the last N MB. LogMaster keeps a local copy up to date while the remote log grows (new bytes are fetched every second), starts over when it is truncated or rotated, and reconnects by itself if the connection drops (the status bar says so). Host keys are checked against `~/.ssh/known_hosts`; for a new server you are asked first. Every feature works on remote logs.
+**File → Open Remote (SFTP)…** (Ctrl+Shift+O) opens a log on another machine: host, user, file path, and a password or private key (`~/.ssh/id_ed25519` or `id_rsa` is suggested). Load the whole file or just the last N MB. Logsift keeps a local copy up to date while the remote log grows (new bytes are fetched every second), starts over when it is truncated or rotated, and reconnects by itself if the connection drops (the status bar says so). Host keys are checked against `~/.ssh/known_hosts`; for a new server you are asked first. Every feature works on remote logs.
 
 ## Merge logs by time
 
@@ -126,7 +126,7 @@ The **Messages** tab (next to Filters) groups the log's lines into kinds of mess
 
 ## Compare two logs
 
-**File → Compare With…** (Ctrl+Shift+D) compares the current log with a baseline, for example the log of a run that went well. Comparing line by line is useless for logs (every timestamp differs), so LogMaster compares **kinds of messages** (as in the Messages tab): what is **new** in this log, what is **gone**, and what happens much **more** or **less** often, with counts scaled to the logs' lengths. New errors come first. Double-click a row to find all its lines in the log that has them.
+**File → Compare With…** (Ctrl+Shift+D) compares the current log with a baseline, for example the log of a run that went well. Comparing line by line is useless for logs (every timestamp differs), so Logsift compares **kinds of messages** (as in the Messages tab): what is **new** in this log, what is **gone**, and what happens much **more** or **less** often, with counts scaled to the logs' lengths. New errors come first. Double-click a row to find all its lines in the log that has them.
 
 ## Highlight bar
 
@@ -145,9 +145,9 @@ The **Filters** panel below the log holds any number of filters (up to 26). Each
 
 **All lines / Matching only** (Ctrl+Shift+H, ⇧⌘H on macOS) switches between every line, with filtered-out lines grayed, and only the lines that pass. Your place in the file is kept when you switch, so you can filter down, click a line, switch back and see everything around it.
 
-**Keep stack traces** (on by default) treats a log line and the lines under it (stack traces, wrapped messages) as one entry: if any line of the entry matches, the whole entry is shown, and Hide filters hide whole entries. LogMaster detects how entries start from the first lines of the file (a date, a time, a syslog date, a level word, or `{` for JSON lines); the checkbox tooltip shows what it found. **Context ±N** adds N grayed lines before and after each match, with a dashed line where lines were skipped, like `grep -C`.
+**Keep stack traces** (on by default) treats a log line and the lines under it (stack traces, wrapped messages) as one entry: if any line of the entry matches, the whole entry is shown, and Hide filters hide whole entries. Logsift detects how entries start from the first lines of the file (a date, a time, a syslog date, a level word, or `{` for JSON lines); the checkbox tooltip shows what it found. **Context ±N** adds N grayed lines before and after each match, with a dashed line where lines were skipped, like `grep -C`.
 
-**Alerts:** click the bell on a filter to be told when new lines matching it are written (while the file grows). LogMaster shows a desktop notification and a popup you can click to jump to the line, beeps, and puts a count on the tab. Bursts are combined (at most one alert per filter every 3 seconds). Lines that were already in the file don't alert.
+**Alerts:** click the bell on a filter to be told when new lines matching it are written (while the file grows). Logsift shows a desktop notification and a popup you can click to jump to the line, beeps, and puts a count on the tab. Bursts are combined (at most one alert per filter every 3 seconds). Lines that were already in the file don't alert.
 
 Quick ways to add filters: select text in the log, right-click, then choose **Show / Hide / Mark lines with "…"**. Filter sets can be saved and loaded (the ⋯ menu), and filters keep working while the file grows.
 
@@ -195,7 +195,7 @@ It saves screenshots and a timing summary to `build/screenshots/`. Delete `build
 For the full, educational explanation (sparse index, SWAR byte search, the regex pre-filter, filter merging, tail and rotation, and lessons learned), see **[docs/how-it-works.md](docs/how-it-works.md)**. Short version:
 
 ```
-logmaster.core   (no UI code; could later back a VS Code extension or a CLI)
+logsift.core   (no UI code; could later back a VS Code extension or a CLI)
   FileSource      positional reads (pread), safe from many threads
   LineIndex       sparse index: chunks of 4 MB; offset of every 64th line
   LogDocument     open file + index + tail polling (growth, truncation, rotation)
@@ -213,7 +213,7 @@ logmaster.core   (no UI code; could later back a VS Code extension or a CLI)
   LogFormat       columns (regex with named groups, or JSON fields); ColumnStats counts values
   LogMerger       merges logs by time; Encoding / Utf16Mirror; RemoteMirror (SFTP)
   LineExporter    copies chosen lines' original bytes to a file
-logmaster.ui
+logsift.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
   LogTab          log view + Filters and Find results panels for one file
   FilterPanel     the filter rows, formula field and All lines / Matching only switch
@@ -221,7 +221,7 @@ logmaster.ui
   FolderSearchTab folder search form and results grouped by file
   TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
   MainFrame       window, toolbar, menus, status bar, drag & drop
-logmaster.tools
+logsift.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
 ```
 

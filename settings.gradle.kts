@@ -1,1 +1,1 @@
-rootProject.name = "logmaster"
+rootProject.name = "logsift"

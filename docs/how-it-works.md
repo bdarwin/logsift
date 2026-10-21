@@ -1,8 +1,8 @@
-# How LogMaster works
+# How Logsift works
 
-LogMaster opens multi-gigabyte logs in a fraction of a second, scrolls them smoothly, searches them at disk speed, and keeps up while they grow. None of this needs special hardware or native code. It comes from a handful of simple ideas applied carefully. This document explains those ideas, with the reasons for each choice and the mistakes that taught us something.
+Logsift opens multi-gigabyte logs in a fraction of a second, scrolls them smoothly, searches them at disk speed, and keeps up while they grow. None of this needs special hardware or native code. It comes from a handful of simple ideas applied carefully. This document explains those ideas, with the reasons for each choice and the mistakes that taught us something.
 
-Code references point to `src/main/java/logmaster/...`.
+Code references point to `src/main/java/logsift/...`.
 
 ---
 
@@ -27,14 +27,14 @@ Code references point to `src/main/java/logmaster/...`.
 ## 1. The big picture
 
 ```
-                 ┌────────────────────────── logmaster.core (no UI code) ──────────────────────────┐
+                 ┌────────────────────────── logsift.core (no UI code) ──────────────────────────┐
   log file ──►   │ FileSource ─► LineIndex ─► LogDocument ─► SearchSession ─► FilterEngine          │
   on disk        │ (pread)       (sparse      (lines, tail,  (Find All, live)   (formula over        │
                  │                index)       rotation)                         several searches)  │
                  │ ByteScan (SWAR byte search)   LineMatcher / RequiredLiteral (what to match)      │
                  │ FolderSearch (streams many files, .gz/.zip)                                      │
                  └──────────────────────────────────────────────────────────────────────────────────┘
-                 ┌────────────────────────── logmaster.ui (Swing + FlatLaf) ───────────────────────┐
+                 ┌────────────────────────── logsift.ui (Swing + FlatLaf) ───────────────────────┐
                  │ LogView (virtual list) · OverviewBar (highlight bar) · LogTab · FilterPanel      │
                  │ FolderSearchTab · MainFrame                                                      │
                  └──────────────────────────────────────────────────────────────────────────────────┘
@@ -54,7 +54,7 @@ The `core` package has no UI code, so the same engine could later sit behind a c
 
 `core/FileSource.java`
 
-Memory mapping (`FileChannel.map`) is the usual answer to "read a huge file fast". LogMaster deliberately doesn't use it:
+Memory mapping (`FileChannel.map`) is the usual answer to "read a huge file fast". Logsift deliberately doesn't use it:
 
 | Problem with memory mapping | Why it matters for a log viewer |
 |---|---|
@@ -68,7 +68,7 @@ Instead, `FileSource` uses **positional reads** (`FileChannel.read(buffer, posit
 - are **safe from many threads at once**, because each read carries its own position and there's no shared file pointer;
 - keep the file open with Java's default sharing flags on Windows (`FILE_SHARE_READ | WRITE | DELETE`), so the writing app can still rename or delete it.
 
-A test (`LogbackRotationTest`) proves the point. Real logback rotates `app.log` about 18 times in one second while LogMaster has it open and is reading it. logback must never report a failed rename or delete.
+A test (`LogbackRotationTest`) proves the point. Real logback rotates `app.log` about 18 times in one second while Logsift has it open and is reading it. logback must never report a failed rename or delete.
 
 ---
 
@@ -90,7 +90,7 @@ That's often more memory than the machine wants to give a viewer, and building t
 
 ### Store every 64th line, and scan for the rest
 
-The file is cut into **chunks of 4 MB**. For each chunk LogMaster records:
+The file is cut into **chunks of 4 MB**. For each chunk Logsift records:
 
 ```java
 record Chunk(long startByte, long endByte,   // the bytes this chunk covers
@@ -217,14 +217,14 @@ A timer checks the file every 500 ms. There are three cases:
 
 **Truncation** (`> app.log`, or an app that rewrites its log). If the file is now smaller than what was indexed, or its **first 256 bytes changed** (the "fingerprint"), every line number is invalid. The document starts over, and its `generation` number goes up, which tells searches and filters to start over too.
 
-> Lesson: a very short file that grows (say, from 40 to 400 bytes) also has a "different first 256 bytes", because there are now more of them. Comparing the whole fingerprint made LogMaster reset small files on every write. The fix is to compare only the bytes both versions have, and then remember the longer prefix.
+> Lesson: a very short file that grows (say, from 40 to 400 bytes) also has a "different first 256 bytes", because there are now more of them. Comparing the whole fingerprint made Logsift reset small files on every write. The fix is to compare only the bytes both versions have, and then remember the longer prefix.
 
 **Rotation** (the app renames `app.log` to `app.log.1` and starts a new `app.log`):
 
 - On Linux and macOS each file has an **inode** (`BasicFileAttributes.fileKey()`). If the path now has a different inode, it's a new file.
-- **Windows** reports no file key. There, if the file at the path is smaller than the file LogMaster has open, it's treated as a new file.
+- **Windows** reports no file key. There, if the file at the path is smaller than the file Logsift has open, it's treated as a new file.
 
-The lines LogMaster had shown belong to the old file, which now has a different name. LogMaster follows the **path**, because that's what the user opened and where new log lines are written.
+The lines Logsift had shown belong to the old file, which now has a different name. Logsift follows the **path**, because that's what the user opened and where new log lines are written.
 
 **The unfinished last line.** A writer may have written half a line. It is displayed, but searches treat it as *tentative*: it is searched when the file is quiet and searched again once it's complete, so a hit is never lost or counted twice.
 
@@ -236,7 +236,7 @@ The lines LogMaster had shown belong to the old file, which now has a different 
 
 ### 7.1 Plain text: search the whole buffer, then find the line
 
-The obvious way is: for each line, does it contain the text? That costs work **per line**. LogMaster flips it around:
+The obvious way is: for each line, does it contain the text? That costs work **per line**. Logsift flips it around:
 
 ```
 buffer (4 MB of whole lines):  ....\n.......\n....ERROR...\n........\n.....\n...ERROR..\n
@@ -292,7 +292,7 @@ Limits keep memory bounded: at most 20 million hits (8 bytes each), and a single
 
 `core/FilterEngine.java`, `core/FilterResult.java`, `core/Formula.java`
 
-A filter set like `(A OR B) AND NOT C` could be evaluated line by line, running every filter on every line. LogMaster does something cheaper:
+A filter set like `(A OR B) AND NOT C` could be evaluated line by line, running every filter on every line. Logsift does something cheaper:
 
 1. **Each filter is a normal live `SearchSession`**, as fast as Find All, and produces a **sorted list of matching line numbers**.
 2. The formula is evaluated over those **sorted lists**: AND is an intersection, OR is a union. Each is one linear merge, like the merge step of merge sort.
@@ -397,7 +397,7 @@ Each later feature reuses the same few building blocks: the line index, the byte
 
 **Text wrap** (`ui/LogView.java`). The view lays out each visible line into *segments* (display rows), breaking at a space near the edge if there is one. The scroll position is a line *plus* a segment within it, and the scrollbar still counts lines. Only on-screen lines are ever laid out, so wrap costs nothing on a 10 GB file.
 
-**Keeping stack traces with their line** (`core/EntryFormat.java`). From a sample of the file, LogMaster finds how an entry starts, for example `2026-10-21`, `[10:02:13`, a syslog date, a level word or `{`. A scanner like Find All then lists every line that does *not* start that way: these are continuation lines. With that sorted list, each filter's matches are widened to whole entries before AND/OR/NOT, so the formula works on entries rather than lines. Walking back from a match to the entry's first line, and forward to its last, is a short binary-search-and-walk in the continuation list.
+**Keeping stack traces with their line** (`core/EntryFormat.java`). From a sample of the file, Logsift finds how an entry starts, for example `2026-10-21`, `[10:02:13`, a syslog date, a level word or `{`. A scanner like Find All then lists every line that does *not* start that way: these are continuation lines. With that sorted list, each filter's matches are widened to whole entries before AND/OR/NOT, so the formula works on entries rather than lines. Walking back from a match to the entry's first line, and forward to its last, is a short binary-search-and-walk in the continuation list.
 
 **Context lines and time ranges** (`core/FilterResult.java`). A result now holds two sets: the lines that *match*, and the lines *shown* (matches plus context). Context in the "all except" form is a nice trick: a run of hidden lines simply shrinks by N at each end that touches a shown line. A time range is a *window* `[start, end)` of lines, because logs are mostly written in time order. The window limits both sets, and "all except" then means "all lines of the window except…".
 
@@ -411,13 +411,13 @@ Each later feature reuses the same few building blocks: the line index, the byte
 
 **Columns** (`core/LogFormat.java`). A layout is a regex with named groups, or a JSON field mapping, picked from presets by sampling. Only visible lines are split, at paint time, so columns cost nothing on huge files. *Count values* splits every entry in parallel chunks.
 
-**Encodings** (`core/Encoding.java`, `core/Utf16Mirror.java`). Windows-1252 and other single-byte encodings keep `\n` as the byte 0x0A, so the byte engine works as is: search text is encoded in the file's encoding, and lines are decoded with it. UTF-16 breaks the byte engine (a newline is two bytes), so LogMaster reads such logs through a UTF-8 copy that follows the original. The decoder keeps half a character, or half a surrogate pair, until the next bytes arrive.
+**Encodings** (`core/Encoding.java`, `core/Utf16Mirror.java`). Windows-1252 and other single-byte encodings keep `\n` as the byte 0x0A, so the byte engine works as is: search text is encoded in the file's encoding, and lines are decoded with it. UTF-16 breaks the byte engine (a newline is two bytes), so Logsift reads such logs through a UTF-8 copy that follows the original. The decoder keeps half a character, or half a surrogate pair, until the next bytes arrive.
 
 **Remote logs** (`core/RemoteMirror.java`). The same idea again: a local copy fed over SFTP with offset reads (`get(path, monitor, offset)`). It only ever appends whole lines, and the remote offset is "bytes read minus the incomplete last line". If the remote file gets smaller, the copy starts over, and the document's usual truncation handling takes care of the rest.
 
 ## 12. Lessons learned
 
-**An interrupted thread closes the file for everyone.** Java's `FileChannel` is an *interruptible channel*: if a thread is interrupted while reading, Java **closes the channel**, for every thread. LogMaster used to cancel searches by interrupting worker threads (`Future.cancel(true)`, `shutdownNow()`). So editing a filter while its search ran (which cancels the old search) could close the open file, and the whole tab stopped working. Nothing reported it, because the error went to a failure callback that nothing listened to. It surfaced as an intermittent visual-test failure. The fixes:
+**An interrupted thread closes the file for everyone.** Java's `FileChannel` is an *interruptible channel*: if a thread is interrupted while reading, Java **closes the channel**, for every thread. Logsift used to cancel searches by interrupting worker threads (`Future.cancel(true)`, `shutdownNow()`). So editing a filter while its search ran (which cancels the old search) could close the open file, and the whole tab stopped working. Nothing reported it, because the error went to a failure callback that nothing listened to. It surfaced as an intermittent visual-test failure. The fixes:
 
 - cancel cooperatively: a `volatile boolean` that the scan loops check, and never interrupt;
 - `FileSource` reopens the channel if it ever finds it closed by an interrupt, after checking that the path still points to the same file;
@@ -434,7 +434,7 @@ The fixes share a pattern. The document *remembers* state (`lastIndexMillis()`),
 
 **Overloads that look alike.** `sourceColor(long line)` and `sourceColor(int index)` both took a number. Passing an `int` row picked the wrong one, and the source stripes cycled through colors. Different names fixed it. A test that compared each stripe against the line's actual source would have caught it, so now one does.
 
-**Tests must not touch the user's settings.** For a while the visual tests wrote to the real preferences and `~/.logmaster`. Now all storage goes through one class (`AppState`), and the test tasks point it at the build folder.
+**Tests must not touch the user's settings.** For a while the visual tests wrote to the real preferences and `~/.logsift`. Now all storage goes through one class (`AppState`), and the test tasks point it at the build folder.
 
 **Measure what you think you measure.** A test once reported that changing a filter formula took 1.1 s. In fact it took 2 ms: the timer included a 360 ms UI settle pause and a slow reference computation. Benchmarks in the visual tests now stop the clock the moment the work is done.
 

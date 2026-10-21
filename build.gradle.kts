@@ -2,7 +2,7 @@ plugins {
     application
 }
 
-group = "logmaster"
+group = "logsift"
 version = "0.1.0"
 
 repositories {
@@ -32,7 +32,7 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 application {
-    mainClass = "logmaster.ui.LogMasterApp"
+    mainClass = "logsift.ui.LogsiftApp"
     applicationDefaultJvmArgs = listOf("-Xmx2g", "-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED")
 }
 
@@ -42,8 +42,8 @@ tasks.test {
         excludeTags("visual")
     }
     maxHeapSize = "1g"
-    systemProperty("lm.prefs", "/logmaster-test/ui")
-    systemProperty("lm.home", layout.buildDirectory.dir("test-home").get().asFile.absolutePath)
+    systemProperty("logsift.prefs", "/logsift-test/ui")
+    systemProperty("logsift.home", layout.buildDirectory.dir("test-home").get().asFile.absolutePath)
 }
 
 // Visual tests: generate large log files, open them in the real UI,
@@ -61,12 +61,12 @@ val visualTest by tasks.registering(Test::class) {
     maxHeapSize = "2g"
     jvmArgs("-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED")
     systemProperty("java.awt.headless", "false")
-    systemProperty("lm.visual.sizeMb", (project.findProperty("sizeMb") ?: "1024").toString())
-    systemProperty("lm.visual.dir", layout.buildDirectory.dir("visual").get().asFile.absolutePath)
-    systemProperty("lm.screenshots", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
-    // keep tests away from the user's own settings, recent files and ~/.logmaster
-    systemProperty("lm.prefs", "/logmaster-test/ui")
-    systemProperty("lm.home", layout.buildDirectory.dir("visual/home").get().asFile.absolutePath)
+    systemProperty("logsift.visual.sizeMb", (project.findProperty("sizeMb") ?: "1024").toString())
+    systemProperty("logsift.visual.dir", layout.buildDirectory.dir("visual").get().asFile.absolutePath)
+    systemProperty("logsift.screenshots", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
+    // keep tests away from the user's own settings, recent files and ~/.logsift
+    systemProperty("logsift.prefs", "/logsift-test/ui")
+    systemProperty("logsift.home", layout.buildDirectory.dir("visual/home").get().asFile.absolutePath)
     testLogging {
         events("passed", "failed", "skipped")
         showStandardStreams = true
@@ -81,7 +81,7 @@ val genLog by tasks.registering(JavaExec::class) {
     description = "Generates a realistic sample log file."
     group = "application"
     classpath = sourceSets.main.get().runtimeClasspath
-    mainClass = "logmaster.tools.LogGenerator"
+    mainClass = "logsift.tools.LogGenerator"
     val out = (project.findProperty("out") ?: layout.buildDirectory.file("sample.log").get().asFile.absolutePath).toString()
     val size = (project.findProperty("sizeMb") ?: "200").toString()
     val follow = project.findProperty("follow")?.toString()
@@ -89,12 +89,12 @@ val genLog by tasks.registering(JavaExec::class) {
 }
 
 // Regenerate the installer icons in packaging/icons (macOS .icns needs iconutil):
-//   ./gradlew genIcons && iconutil -c icns packaging/icons/logmaster.iconset -o packaging/icons/logmaster.icns
+//   ./gradlew genIcons && iconutil -c icns packaging/icons/logsift.iconset -o packaging/icons/logsift.icns
 val genIcons by tasks.registering(JavaExec::class) {
     description = "Draws the app icon and writes packaging/icons."
     group = "build"
     classpath = sourceSets.main.get().runtimeClasspath
-    mainClass = "logmaster.tools.IconGenerator"
+    mainClass = "logsift.tools.IconGenerator"
     args = listOf(layout.projectDirectory.dir("packaging/icons").asFile.absolutePath)
     jvmArgs("-Djava.awt.headless=true")
 }

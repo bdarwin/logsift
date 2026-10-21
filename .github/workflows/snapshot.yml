@@ -68,9 +68,9 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(./gradlew -q properties | sed -n 's/^version: //p' | tr -d '\r')
-          NAME=LogMaster-snapshot-${{ matrix.target }}
-          COMMON=(--name LogMaster --input build/install/logmaster/lib
-                  --main-jar "logmaster-$VERSION.jar" --main-class logmaster.ui.LogMasterApp
+          NAME=Logsift-snapshot-${{ matrix.target }}
+          COMMON=(--name Logsift --input build/install/logsift/lib
+                  --main-jar "logsift-$VERSION.jar" --main-class logsift.ui.LogsiftApp
                   --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
                   --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec
                   --vendor bdarwin --description "Viewer for very large log files")
@@ -78,21 +78,21 @@ jobs:
           case "${{ matrix.target }}" in
             macos-*)
               # macOS needs an app version whose first number is > 0, so leave the default.
-              jpackage --type dmg --dest dist --icon packaging/icons/logmaster.icns "${COMMON[@]}"
-              mv dist/LogMaster-*.dmg "dist/$NAME.dmg"
+              jpackage --type dmg --dest dist --icon packaging/icons/logsift.icns "${COMMON[@]}"
+              mv dist/Logsift-*.dmg "dist/$NAME.dmg"
               ;;
             windows-*)
-              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logmaster.ico "${COMMON[@]}"
-              pwsh -NoProfile -Command "Compress-Archive -Path pkg/LogMaster -DestinationPath dist/$NAME.zip"
+              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.ico "${COMMON[@]}"
+              pwsh -NoProfile -Command "Compress-Archive -Path pkg/Logsift -DestinationPath dist/$NAME.zip"
               ;;
             linux-*)
-              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logmaster.png "${COMMON[@]}"
-              tar -C pkg -czf "dist/$NAME.tar.gz" LogMaster
+              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.png "${COMMON[@]}"
+              tar -C pkg -czf "dist/$NAME.tar.gz" Logsift
               if [ "${{ matrix.target }}" = linux-x64 ]; then
-                jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut --icon packaging/icons/logmaster.png "${COMMON[@]}"
+                jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut --icon packaging/icons/logsift.png "${COMMON[@]}"
                 mv dist/*.deb "dist/$NAME.deb"
                 # Plain zip that runs anywhere with Java 21+ installed.
-                cp "build/distributions/logmaster-$VERSION.zip" dist/LogMaster-snapshot-any-java21.zip
+                cp "build/distributions/logsift-$VERSION.zip" dist/Logsift-snapshot-any-java21.zip
               fi
               ;;
           esac
@@ -129,12 +129,12 @@ jobs:
 
           | File | For |
           |---|---|
-          | \`LogMaster-snapshot-windows-x64.zip\` / \`-windows-arm64.zip\` | Windows: unzip, run \`LogMaster\\LogMaster.exe\` |
-          | \`LogMaster-snapshot-macos-arm64.dmg\` / \`-macos-x64.dmg\` | macOS Apple Silicon / Intel |
-          | \`LogMaster-snapshot-linux-x64.deb\` | Debian / Ubuntu |
-          | \`LogMaster-snapshot-linux-x64.tar.gz\` / \`-linux-arm64.tar.gz\` | Other Linux: unpack, run \`LogMaster/bin/LogMaster\` |
-          | \`LogMaster-snapshot-any-java21.zip\` | Any OS with Java 21+ installed: run \`bin/logmaster\` |
+          | \`Logsift-snapshot-windows-x64.zip\` / \`-windows-arm64.zip\` | Windows: unzip, run \`Logsift\\Logsift.exe\` |
+          | \`Logsift-snapshot-macos-arm64.dmg\` / \`-macos-x64.dmg\` | macOS Apple Silicon / Intel |
+          | \`Logsift-snapshot-linux-x64.deb\` | Debian / Ubuntu |
+          | \`Logsift-snapshot-linux-x64.tar.gz\` / \`-linux-arm64.tar.gz\` | Other Linux: unpack, run \`Logsift/bin/Logsift\` |
+          | \`Logsift-snapshot-any-java21.zip\` | Any OS with Java 21+ installed: run \`bin/logsift\` |
 
           The native builds include their own Java runtime. They are not code-signed:
-          - macOS: if it says the app is damaged or can't be opened, run \`xattr -dr com.apple.quarantine /Applications/LogMaster.app\`.
+          - macOS: if it says the app is damaged or can't be opened, run \`xattr -dr com.apple.quarantine /Applications/Logsift.app\`.
           - Windows: SmartScreen may warn; choose More info → Run anyway."
