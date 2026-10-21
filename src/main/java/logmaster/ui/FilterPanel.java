@@ -58,6 +58,9 @@ final class FilterPanel extends JPanel {
 
         /** Jump to the next or previous line matching this filter. */
         void navigate(FilterDef f, boolean forward);
+
+        /** A filter's alert was switched on or off. */
+        default void alertChanged(FilterDef f) {}
     }
 
     static final int MAX_FILTERS = 26;
@@ -535,6 +538,16 @@ final class FilterPanel extends JPanel {
             prev.addActionListener(e -> listener.navigate(d, false));
             JButton next = small("▼", "Next line matching this filter");
             next.addActionListener(e -> listener.navigate(d, true));
+            JToggleButton bell = new JToggleButton(new BellIcon(false));
+            bell.setSelectedIcon(new BellIcon(true));
+            bell.putClientProperty("JButton.buttonType", "toolBarButton");
+            bell.setFocusable(false);
+            bell.setSelected(d.alert);
+            bell.setToolTipText("Alert me when new lines matching this filter are written");
+            bell.addActionListener(e -> {
+                d.alert = bell.isSelected();
+                listener.alertChanged(d);
+            });
             JButton remove = small("✕", "Remove this filter");
             remove.addActionListener(e -> FilterPanel.this.removeFilter(d));
 
@@ -550,6 +563,7 @@ final class FilterPanel extends JPanel {
             add(Box.createHorizontalStrut(6));
             add(prev);
             add(next);
+            add(bell);
             add(remove);
             refresh();
         }
@@ -649,6 +663,51 @@ final class FilterPanel extends JPanel {
         }
     }
 
+    /** A small bell, outlined when off and filled amber when on. */
+    static final class BellIcon implements Icon {
+        private final boolean on;
+
+        BellIcon(boolean on) {
+            this.on = on;
+        }
+
+        @Override
+        public void paintIcon(Component c, Graphics g0, int x, int y) {
+            Graphics2D g = (Graphics2D) g0.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.translate(x, y);
+            java.awt.geom.Path2D bell = new java.awt.geom.Path2D.Double();
+            bell.moveTo(8, 2);
+            bell.curveTo(4.5, 2, 3.5, 5, 3.5, 8);
+            bell.lineTo(3.5, 10.5);
+            bell.lineTo(2, 12.5);
+            bell.lineTo(14, 12.5);
+            bell.lineTo(12.5, 10.5);
+            bell.lineTo(12.5, 8);
+            bell.curveTo(12.5, 5, 11.5, 2, 8, 2);
+            bell.closePath();
+            if (on) {
+                g.setColor(new Color(0xF5A524));
+                g.fill(bell);
+            }
+            g.setColor(on ? new Color(0xB77800) : Theme.gutterForeground());
+            g.setStroke(new java.awt.BasicStroke(1.3f));
+            g.draw(bell);
+            g.fillOval(6, 13, 4, 3);
+            g.dispose();
+        }
+
+        @Override
+        public int getIconWidth() {
+            return 16;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return 16;
+        }
+    }
+
     private static final class SwatchIcon implements Icon {
         private final FilterDef.Swatch s;
 
@@ -718,6 +777,7 @@ final class FilterPanel extends JPanel {
             p.setProperty(k + "regex", Boolean.toString(d.regex));
             p.setProperty(k + "wholeWord", Boolean.toString(d.wholeWord));
             p.setProperty(k + "enabled", Boolean.toString(d.enabled));
+            p.setProperty(k + "alert", Boolean.toString(d.alert));
         }
         return p;
     }
@@ -753,6 +813,7 @@ final class FilterPanel extends JPanel {
             d.regex = Boolean.parseBoolean(p.getProperty(k + "regex"));
             d.wholeWord = Boolean.parseBoolean(p.getProperty(k + "wholeWord"));
             d.enabled = Boolean.parseBoolean(p.getProperty(k + "enabled", "true"));
+            d.alert = Boolean.parseBoolean(p.getProperty(k + "alert", "false"));
             loaded.add(d);
         }
         defs.clear();

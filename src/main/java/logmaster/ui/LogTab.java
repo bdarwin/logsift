@@ -40,6 +40,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     interface Host {
         void tabStatusChanged(LogTab tab);
 
+        /** New lines matched a filter with an alert: tell the user. */
+        default void alert(LogTab tab, String message, long line) {}
+
         /** Runs Find All in this tab through the toolbar (so the Find box shows the query). */
         default void runFindAll(SearchQuery q) {}
     }
@@ -73,6 +76,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final Bookmarks bookmarks;
     private final BookmarksPanel bookmarksPanel;
     private int bookmarkGeneration;
+    /** Per filter with an alert: {line count when switched on, hits already seen, last alert ms, unsent count, first unsent line}. */
+    private final java.util.Map<FilterDef, long[]> alerts = new java.util.HashMap<>();
+    private int alertGeneration;
     private Formula appliedFormula;
     private boolean matchingOnly;
     private long pendingLine = -1; // line to show once indexing (and filters) reach it
@@ -1047,6 +1053,68 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         main.setHighlightRules(rules);
     }
 
+    @Override
+    public void alertChanged(FilterDef d) {
+        if (d.alert) {
+            SearchSession s = engine.session(d.id);
+            alerts.put(d, new long[] {doc.lineCount(), s == null ? 0 : s.hits().size(), 0, 0, -1});
+        } else {
+            alerts.remove(d);
+        }
+    }
+
+    /** Looks for new matching lines of filters with an alert, and reports them (at most every 3 s). */
+    private void checkAlerts() {
+        if (doc.generation() != alertGeneration) {
+            alertGeneration = doc.generation();
+            for (long[] a : alerts.values()) {
+                a[0] = 0; // a new file (rotation): everything in it is new
+                a[1] = 0;
+            }
+        }
+        long now = System.currentTimeMillis();
+        for (FilterDef d : filterPanel.filters()) {
+            if (!d.alert || !d.isActive()) {
+                continue;
+            }
+            long[] a = alerts.computeIfAbsent(d, k -> new long[] {doc.lineCount(), 0, 0, 0, -1});
+            SearchSession s = engine.session(d.id);
+            if (s == null) {
+                continue;
+            }
+            HitList hits = s.hits();
+            int n = hits.size();
+            if (n < a[1]) {
+                a[1] = 0; // search restarted
+            }
+            for (int i = (int) a[1]; i < n; i++) {
+                long line = hits.get(i);
+                if (line >= a[0]) {
+                    if (a[3] == 0) {
+                        a[4] = line;
+                    }
+                    a[3]++;
+                }
+            }
+            a[1] = n;
+            if (a[3] > 0 && now - a[2] >= 3000) {
+                String text = doc.line(a[4]);
+                String msg = String.format("%,d new line%s matching “%s”: %s", a[3], a[3] == 1 ? "" : "s",
+                        d.text, text == null ? "" : text.strip());
+                host.alert(this, msg, a[4]);
+                a[2] = now;
+                a[3] = 0;
+            }
+        }
+        if (alertTimer == null && !alerts.isEmpty()) {
+            // flush alerts that were held back by the 3 s limit
+            alertTimer = new javax.swing.Timer(1000, e -> checkAlerts());
+            alertTimer.start();
+        }
+    }
+
+    private javax.swing.Timer alertTimer;
+
     private void onFilterResult() {
         FilterResult r = engine.result();
         boolean redefined = r.version() != filterResult.version();
@@ -1061,6 +1129,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         filterResult = r;
         main.rowsChanged();
         tryPendingLine();
+        if (!alerts.isEmpty() || hasAlerts()) {
+            checkAlerts();
+        }
         updateFilterStatus();
         main.overviewChanged();
         host.tabStatusChanged(this);
@@ -1438,7 +1509,19 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         resultsHeader.setText(sb.toString());
     }
 
+    private boolean hasAlerts() {
+        for (FilterDef d : filterPanel.filters()) {
+            if (d.alert) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void close() {
+        if (alertTimer != null) {
+            alertTimer.stop();
+        }
         closeHooks.forEach(Runnable::run);
         SearchSession s = search;
         if (s != null) {

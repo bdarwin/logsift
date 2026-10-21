@@ -51,6 +51,7 @@ final class FilterDef {
     Action action = Action.SHOW;
     int swatch = -1; // index into SWATCHES; -1 = no color
     boolean enabled = true;
+    boolean alert;   // notify about new matching lines while the file grows
     String error;    // invalid regex message, or null
 
     FilterDef(char id) {

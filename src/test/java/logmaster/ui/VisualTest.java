@@ -1442,6 +1442,56 @@ class VisualTest {
         }
     }
 
+    @Test
+    @Order(22)
+    void alertsOnNewLines() throws Exception {
+        Path f = dir.resolve("alerts.log");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 2000; i++) {
+            sb.append("2026-10-21 10:00:").append(String.format("%02d", i % 60)).append(" INFO [main] ok ").append(i).append('\n');
+        }
+        sb.append("2026-10-21 10:01:00 ERROR [main] java.lang.OutOfMemoryError: old, before the alert\n");
+        Files.writeString(f, sb);
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> !tab.document().isIndexing(), 30_000, "indexed");
+        onEdt(() -> {
+            FilterDef d = tab.filterPanel().addFilter("OutOfMemory", FilterDef.Action.MARK);
+            d.matchCase = true;
+            tab.filtersChanged();
+            return null;
+        });
+        waitForFilters(tab, System.nanoTime());
+        String before = Notifier.lastMessageForTest();
+        onEdt(() -> {
+            FilterDef d = tab.filterPanel().filters().get(tab.filterPanel().filters().size() - 1);
+            d.alert = true;
+            tab.alertChanged(d);
+            frame.openFile(dir.resolve("incident.log")); // another tab is in front: expect a badge
+            return null;
+        });
+        Thread.sleep(1500);
+        assertEquals(before, Notifier.lastMessageForTest(), "lines that were already there don't alert");
+        Files.writeString(f, "2026-10-21 10:02:00 ERROR [worker-3] java.lang.OutOfMemoryError: Java heap space\n"
+                + "2026-10-21 10:02:01 ERROR [worker-4] java.lang.OutOfMemoryError: Metaspace\n",
+                java.nio.file.StandardOpenOption.APPEND);
+        waitFor(() -> Notifier.lastMessageForTest() != null && !Notifier.lastMessageForTest().equals(before),
+                15_000, "an alert for the new lines");
+        String msg = Notifier.lastMessageForTest();
+        assertTrue(msg.contains("2 new lines matching “OutOfMemory”"), msg);
+        assertTrue(msg.contains("Java heap space"), "shows the first new line: " + msg);
+        assertTrue(onEdt(() -> tab.getClientProperty("alerts")) != null, "the tab shows a badge");
+        settle();
+        shot("29-alert");
+        if (Notifier.popupForTest() != null) {
+            shotOf(Notifier.popupForTest().getRootPane(), "29b-alert-popup");
+        }
+        Notifier.dismiss();
+    }
+
     /** The time of the first line at or after {@code i} that has a timestamp. */
     private static long timeNear(List<Long> times, int i) {
         while (times.get(i) == Long.MIN_VALUE) {

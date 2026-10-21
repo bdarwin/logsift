@@ -82,7 +82,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 (java.util.function.IntConsumer) this::closeTab);
         tabs.putClientProperty("JTabbedPane.scrollButtonsPolicy", "asNeeded");
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
-        tabs.addChangeListener(e -> tabStatusChanged(currentTab()));
+        tabs.addChangeListener(e -> {
+            LogTab t = currentTab();
+            if (t != null && t.getClientProperty("alerts") != null) {
+                t.putClientProperty("alerts", null); // seen: clear the badge
+                int i = tabs.indexOfComponent(t);
+                if (t.sourceLabels() == null) {
+                    tabs.setTitleAt(i, t.title());
+                }
+            }
+            tabStatusChanged(t);
+        });
 
         JLabel empty = new JLabel("<html><div style='text-align:center'>"
                 + "<span style='font-size:16pt'>Drop log files here</span><br><br>"
@@ -284,6 +294,23 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         updateEmptyState();
         SwingUtilities.invokeLater(tab::focusFind);
         return tab;
+    }
+
+    @Override
+    public void alert(LogTab tab, String message, long line) {
+        int i = tabs.indexOfComponent(tab);
+        if (i >= 0 && tabs.getSelectedComponent() != tab) {
+            Integer n = (Integer) tab.getClientProperty("alerts");
+            int count = (n == null ? 0 : n) + 1;
+            tab.putClientProperty("alerts", count);
+            tabs.setTitleAt(i, "(" + count + ") " + tab.title());
+        }
+        Notifier.notify(this, tab.title(), message, () -> {
+            toFront();
+            tabs.setSelectedComponent(tab);
+            tab.showLine(line);
+            tab.mainView().focusView();
+        });
     }
 
     @Override
