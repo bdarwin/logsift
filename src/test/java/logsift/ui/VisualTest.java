@@ -2949,6 +2949,363 @@ class VisualTest {
         assertTrue(onEdt(() -> v.columns().hidden().isEmpty()));
     }
 
+    @Test
+    @Order(37)
+    void threadDumpsExplained() throws Exception {
+        // an application's console log with three kill -3 dumps in it
+        String dumps;
+        try (InputStream in = VisualTest.class.getResourceAsStream("/threaddumps/jstack-17.txt")) {
+            dumps = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        Path f = dir.resolve("orders-service-console.log");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 300; i++) {
+            sb.append(String.format("2026-10-22 18:5%d:%02d.%03d INFO  [http-nio-8080-exec-%d] c.a.orders.Api - GET /orders/%d%n",
+                    i / 60, i % 60, i, i % 5 + 1, 1000 + i));
+        }
+        sb.append(dumps);
+        sb.append("2026-10-22 18:59:59.000 WARN  [main] c.a.orders.App - shutting down\n");
+        Files.writeString(f, sb);
+        onEdt(() -> {
+            frame.setColumns(false);
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null
+                        && frame.currentTab().path().equals(f.toAbsolutePath().normalize())
+                        && frame.currentTab().dumpsBannerShownForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the offer to analyze the thread dumps");
+        LogTab log = onEdt(frame::currentTab);
+        waitFor(() -> !log.document().isIndexing(), 20_000, "indexing");
+        settle();
+        shot("56-log-with-thread-dumps");
+
+        // a log being followed when a dump is written to it (kill -3 on the running program)
+        Path growing = dir.resolve("billing-console.log");
+        Files.writeString(growing, "2026-10-22 18:50:00.000 INFO  [main] billing - started\n");
+        onEdt(() -> {
+            frame.openFile(growing);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null
+                        && frame.currentTab().path().equals(growing.toAbsolutePath().normalize())
+                        && !frame.currentTab().document().isIndexing());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the growing log");
+        LogTab billing = onEdt(frame::currentTab);
+        Thread.sleep(300);
+        assertTrue(!onEdt(billing::dumpsBannerShownForTest), "no dump yet");
+        Files.writeString(growing, "2026-10-22 18:50:01.000 INFO  [main] billing - working\n",
+                java.nio.file.StandardOpenOption.APPEND);
+        waitFor(() -> billing.document().lineCount() >= 2, 20_000, "a new line");
+        Thread.sleep(300);
+        Files.writeString(growing, dumps.substring(0, dumps.indexOf("JNI global")),
+                java.nio.file.StandardOpenOption.APPEND);
+        waitFor(() -> {
+            try {
+                return onEdt(billing::dumpsBannerShownForTest);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the offer once a dump was written");
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(billing));
+            frame.tabsForTest().setSelectedComponent(log);
+            return null;
+        });
+        onEdt(() -> {
+            frame.analyzeThreads(log);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentThreadsTab() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the Threads tab");
+        ThreadsTab tt = onEdt(frame::currentThreadsTab);
+        assertEquals(3, onEdt(() -> tt.dumps().size()));
+        assertEquals(2, onEdt(tt::current));
+        logsift.jvm.ThreadAnalysis.Report r = onEdt(tt::report);
+        assertEquals(logsift.jvm.ThreadAnalysis.Kind.DEADLOCK, r.findings().get(0).kind());
+        assertTrue(r.findings().stream().anyMatch(x -> x.kind() == logsift.jvm.ThreadAnalysis.Kind.CONTENTION));
+        assertTrue(onEdt(() -> frame.getTitle().startsWith("Threads: orders-service-console.log")));
+        // grouped by pool: the five http threads are one row
+        assertTrue(onEdt(() -> {
+            javax.swing.JTable t = tt.tableForTest();
+            for (int i = 0; i < t.getRowCount(); i++) {
+                if (String.valueOf(t.getValueAt(i, 1)).equals("5 blocked")) {
+                    return true;
+                }
+            }
+            return false;
+        }), "a group row for the http pool");
+        settle();
+        shot("57-threads-findings");
+
+        // Show the threads of the lock queue: the holder first, its stack says who waits
+        logsift.jvm.ThreadAnalysis.Finding queue = r.findings().stream()
+                .filter(x -> x.kind() == logsift.jvm.ThreadAnalysis.Kind.CONTENTION).findFirst().orElseThrow();
+        onEdt(() -> {
+            tt.showFinding(queue);
+            return null;
+        });
+        assertEquals(6, onEdt(() -> tt.tableForTest().getRowCount()));
+        assertEquals("db-writer", onEdt(() -> tt.stackForTest().thread().name()));
+        String html = onEdt(() -> tt.stackForTest().getText());
+        assertTrue(html.contains("5 threads wait"), "the holder's stack names who waits");
+        settle();
+        shot("58-threads-lock-queue");
+
+        // a link in the stack goes to that thread
+        String waiter = queue.keys().get(1);
+        onEdt(() -> {
+            tt.selectKey(waiter);
+            return null;
+        });
+        assertEquals(waiter, onEdt(() -> tt.stackForTest().thread().key()));
+        assertTrue(onEdt(() -> tt.stackForTest().getText()).contains("held by"));
+
+        // over time: the stuck threads are one bar
+        onEdt(() -> {
+            tt.viewsForTest().setSelectedIndex(1);
+            return null;
+        });
+        assertTrue(onEdt(() -> tt.timelineForTest().rowsForTest()) >= 8, "busy threads in the timeline");
+        onEdt(() -> {
+            tt.timelineForTest().pick(waiter, 0);
+            return null;
+        });
+        assertEquals(0, onEdt(tt::current), "a cell shows that dump");
+        settle();
+        shot("59-threads-timeline");
+
+        // what changed between the first and last dump
+        onEdt(() -> {
+            tt.viewsForTest().setSelectedIndex(2);
+            return null;
+        });
+        // (this program does the same thing in every dump: nothing changed)
+        assertTrue(onEdt(tt::changesForTest).isEmpty());
+        assertTrue(onEdt(tt::compareSummaryForTest).endsWith("nothing changed"), onEdt(tt::compareSummaryForTest));
+        onEdt(() -> {
+            tt.showUnchangedForTest(true);
+            return null;
+        });
+        List<logsift.jvm.ThreadAnalysis.Change> ch = onEdt(tt::changesForTest);
+        assertTrue(ch.size() > 10, "threads compared: " + ch.size());
+        settle();
+        shot("60-threads-compare");
+
+        // saved, they open again with the same threads
+        Path saved = dir.resolve("saved-threads.txt");
+        onEdt(() -> {
+            tt.save(saved);
+            frame.openThreadDump(saved);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentThreadsTab() != null && frame.currentThreadsTab() != tt);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the saved dumps in a new tab");
+        ThreadsTab again = onEdt(frame::currentThreadsTab);
+        assertEquals(3, onEdt(() -> again.dumps().size()));
+        for (int i = 0; i < 3; i++) {
+            int k = i;
+            assertEquals(onEdt(() -> tt.dumps().get(k).threads()), onEdt(() -> again.dumps().get(k).threads()));
+        }
+        onEdt(() -> {
+            frame.closeCurrentTabForTest();
+            return null;
+        });
+    }
+
+    @Test
+    @Order(38)
+    void attachToRunningJvmsAndProfile() throws Exception {
+        Process app = logsift.jvm.FixtureApp.start();
+        var server = org.apache.sshd.server.SshServer.setUpDefaultServer();
+        try {
+            // ---- a JVM on this computer
+            JvmDialog dlg = onEdt(frame::openJvmDialogForTest);
+            waitFor(() -> {
+                try {
+                    return onEdt(dlg::localCountForTest) > 0;
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the JVMs on this computer");
+            onEdt(() -> {
+                dlg.selectForTest(app.pid());
+                return null;
+            });
+            settle();
+            shotOf(dlg.getRootPane(), "61-attach-dialog");
+            onEdt(() -> {
+                dlg.attachSelected();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentThreadsTab() != null && frame.currentThreadsTab().isLive());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "a live Threads tab");
+            ThreadsTab live = onEdt(frame::currentThreadsTab);
+            assertEquals(1, onEdt(() -> live.dumps().size()));
+            onEdt(() -> {
+                live.takeDumps(2, 1000);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> live.dumps().size() == 3 && !live.isRecording());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "two more dumps");
+            logsift.jvm.ThreadAnalysis.Report r = onEdt(live::report);
+            assertEquals(logsift.jvm.ThreadAnalysis.Kind.DEADLOCK, r.findings().get(0).kind());
+            assertTrue(r.findings().stream().anyMatch(f -> f.kind() == logsift.jvm.ThreadAnalysis.Kind.HOT
+                    && f.title().startsWith("hot-loop")), "CPU between the dumps: " + r.findings());
+            // waiting for input, or taking this very dump, isn't being stuck
+            assertTrue(r.findings().stream().noneMatch(f -> f.kind() == logsift.jvm.ThreadAnalysis.Kind.STUCK),
+                    "nothing stuck: " + r.findings());
+            settle();
+            shot("62-threads-live-jvm");
+
+            // ---- profile it: the spinning thread's method is most of the CPU
+            onEdt(() -> {
+                live.profileButtonForTest().doClick();
+                return null;
+            });
+            ProfileTab prof = onEdt(frame::currentProfileTab);
+            assertNotNull(prof);
+            settle();
+            onEdt(() -> {
+                prof.setForTest(logsift.jvm.Profiler.Mode.CPU, null, 3);
+                prof.startProfiling();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> prof.profile() != null && !prof.isRunning());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "the CPU profile");
+            logsift.jvm.Profile p = onEdt(prof::profile);
+            long spin = p.find("logsift.jvm.FixtureApp.lambda$main$8").stream()
+                    .mapToLong(logsift.jvm.Profile.Node::total).sum();
+            assertTrue(spin * 2 > p.total(), "the hot loop: " + spin + " of " + p.total());
+            assertTrue(onEdt(() -> prof.methodsForTest().getRowCount()) > 0);
+            settle();
+            shot("63-profile-flame-graph");
+            onEdt(() -> {
+                prof.methodsForTest().getSelectionModel().setSelectionInterval(0, 0);
+                return null;
+            });
+            assertTrue(onEdt(() -> prof.graphForTest().matchedShare()) > 0, "the method is highlighted");
+            // zoom into the hot loop's frame
+            onEdt(() -> {
+                prof.graphForTest().zoomTo(p.find("logsift.jvm.FixtureApp.lambda$main$8").get(0));
+                return null;
+            });
+            settle();
+            shot("64-profile-zoomed");
+            Path saved = dir.resolve("saved-profile.collapsed.txt");
+            onEdt(() -> {
+                prof.save(saved);
+                return null;
+            });
+            assertEquals(p.total(), logsift.jvm.Profiler.open(saved).total());
+
+            // ---- the same JVM over SSH
+            Path bin = Files.createDirectories(dir.resolve("ssh-bin"));
+            server.setHost("127.0.0.1");
+            server.setPort(0);
+            server.setKeyPairProvider(new org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider(
+                    dir.resolve("jvm-hostkey.ser")));
+            server.setPasswordAuthenticator((u, pw, sess) -> u.equals("ops") && pw.equals("secret"));
+            server.setSubsystemFactories(List.of(new org.apache.sshd.sftp.server.SftpSubsystemFactory()));
+            server.setCommandFactory((channel, command) -> new org.apache.sshd.server.shell.ProcessShellFactory(
+                    command, "/bin/sh", "-c", "PATH=" + bin + ":/usr/bin:/bin; export PATH; " + command)
+                    .createShell(channel));
+            if (!System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+                server.start();
+                System.setProperty("logsift.noKnownHosts", "true");
+                JvmDialog ssh = onEdt(() -> {
+                    JvmDialog d = frame.openJvmDialogForTest();
+                    d.setSshForTest("127.0.0.1", server.getPort(), "ops", "secret");
+                    d.setRemoteJdkForTest(System.getProperty("java.home"));
+                    d.connectSsh();
+                    return d;
+                });
+                waitFor(() -> {
+                    try {
+                        return onEdt(ssh::remoteCountForTest) > 0;
+                    } catch (Exception e) {
+                        return false;
+                    }
+                }, 30_000, "the JVMs on the server");
+                onEdt(() -> {
+                    ssh.selectForTest(app.pid());
+                    return null;
+                });
+                settle();
+                shotOf(ssh.getRootPane(), "65-attach-dialog-ssh");
+                onEdt(() -> {
+                    ssh.attachSelected();
+                    return null;
+                });
+                waitFor(() -> {
+                    try {
+                        return onEdt(() -> frame.currentThreadsTab() != null && frame.currentThreadsTab() != live
+                                && frame.currentThreadsTab().isLive());
+                    } catch (Exception e) {
+                        return false;
+                    }
+                }, 60_000, "a Threads tab for the JVM on the server");
+                ThreadsTab remote = onEdt(frame::currentThreadsTab);
+                assertTrue(onEdt(remote::title).contains("on 127.0.0.1"), onEdt(remote::title));
+                assertEquals(logsift.jvm.ThreadAnalysis.Kind.DEADLOCK,
+                        onEdt(remote::report).findings().get(0).kind());
+                settle();
+                shot("66-threads-over-ssh");
+                onEdt(() -> {
+                    frame.closeCurrentTabForTest();
+                    return null;
+                });
+            }
+            // closing the tabs lets go of the JVM
+            onEdt(() -> {
+                while (frame.currentProfileTab() != null || frame.currentThreadsTab() != null) {
+                    frame.closeCurrentTabForTest();
+                }
+                return null;
+            });
+        } finally {
+            if (server.isStarted()) {
+                server.stop(true);
+            }
+            logsift.jvm.FixtureApp.stop(app);
+        }
+    }
+
     private static String details(LogTab tab) {
         try {
             return onEdt(() -> tab.detailsPanel().textForTest()).replace("\r\n", "\n");

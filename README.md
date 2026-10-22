@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-**Find out what happened, even in gigabytes of logs.** Logsift opens huge log files instantly, tails them live and points out errors, bursts and restarts. Filters, Find All, a timeline and parsed columns narrow it down. Windows, macOS and Linux.
+**Find out what happened, even in gigabytes of logs.** Logsift opens huge log files instantly, tails them live and points out errors, bursts and restarts. Filters, Find All, a timeline and parsed columns narrow it down. For Java, it explains thread dumps and profiles running JVMs, on your computer or on a server. Windows, macOS and Linux.
 
 ![Logsift with four filters combined as (A OR B) AND NOT C, the timeline on top and the highlight bar on the right](docs/screenshots/filters.png)
 
@@ -22,6 +22,8 @@
 - **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files.
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
+- **Java threads.** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log), or attach to a running JVM on your computer or on a server over SSH. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
+- **Profiling.** A flame graph of where a JVM spends its CPU, wall-clock time, memory allocations or lock waits, with async-profiler or the JVM's own Flight Recorder.
 - **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
 
 ## Download
@@ -62,7 +64,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 - **Help → Keyboard Shortcuts** (Ctrl+/ or ⌘/) lists every shortcut. **Help → Report a Bug** opens a GitHub issue with your version and system filled in.
 - **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the toolbar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
 - **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub**. Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).
-- Logsift never sends your logs anywhere. Its only other network connections are to SFTP servers you choose.
+- Logsift never sends your logs anywhere. Its only other network connections are to SSH servers you choose.
 
 ## Screenshots
 
@@ -71,6 +73,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 | ![Several Find All searches in one window, one nested inside another](docs/screenshots/find-all.png) **Several searches at once**, with a search inside another's results | ![A selected time range on the timeline, with errors filtered and their stack traces kept](docs/screenshots/timeline.png) **Timeline**: select a time range, keep stack traces |
 | ![Parsed columns with top messages below](docs/screenshots/columns-and-messages.png) **Columns** and **top messages** | ![Folder search across .log, .gz and .zip files](docs/screenshots/folder-search.png) **Folder search**, including inside .gz and .zip |
 | ![JSON log shown as columns, with a pretty-printed details panel](docs/screenshots/json.png) **JSON logs** with a details panel | ![Comparing a bad run with a good one: new, more frequent and missing messages](docs/screenshots/compare.png) **Compare** a bad run with a good one |
+| ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained | ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph |
 | ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** | |
 
 ## Run from source
@@ -191,6 +194,52 @@ Each finding has buttons to **Go to** its line, **Find all** of that message, **
 ## Tree of loggers
 
 Logs with a logger column (or class, component, thread, host…) get a tree on the left: `com.acme.db.Pool` sits under **com.acme › db**, with line counts. Uncheck a branch to hide its lines and their stack traces. Double-click a name, or right-click → *Show Only*, to see just that one; **Show all** brings everything back. The list at the top picks the column. Counts keep up while the log grows, and what you hid is remembered for the file. Close the tree with ✕, and bring it back with the **Tree** button or **View → Tree of Loggers** (Ctrl+Shift+B).
+
+## Thread dumps and running JVMs
+
+**JVM → Open Thread Dump…** reads `jstack` and `jcmd Thread.print` output, the plain and JSON files of `jcmd Thread.dump_to_file` (with virtual threads), and dumps saved by Logsift. A log with `kill -3` dumps in it (a console log, `catalina.out`, even `docker logs --timestamps` output) shows a bar offering **Analyze Threads**; **JVM → Analyze Thread Dumps in This Log** does the same for any open log. Several dumps in one file, taken some seconds apart, are read as a series.
+
+The **Threads** tab starts with what stands out, worst first. Each finding has a **Show threads** button:
+
+- **Deadlocks:** threads that wait for each other's locks (monitors and `ReentrantLock`s), as a chain.
+- **Lock queues:** several threads waiting for one lock, who holds it and what that thread is doing.
+- **Stuck threads:** in the same place in every dump (needs two or more dumps).
+- **Busy threads:** the share of a CPU core each one used between dumps.
+- **Full pools:** every thread of a pool (`http-nio-8080-exec-∗`) busy, so new work waits.
+- **Growing thread count** across the dumps.
+
+Below that:
+
+- **Threads:** the threads of one dump, grouped by pool or by identical stack, filtered by state or by text in their names and stacks. Click one to see its stack: its own code in full color and the JDK's dimmed. It also shows the lock it waits for and who holds it, and the threads waiting for the locks it holds, each a link to that thread.
+- **Timeline:** one row per thread and one cell per dump, colored by state. A stuck thread shows as one solid bar.
+- **Compare:** which threads are new, gone, or doing something else between two dumps.
+
+**JVM → Attach to a Running JVM…** (Ctrl+Shift+J) lists the Java programs running as you on this computer, or on a server over SSH (with the same login as remote logs). Pick one and its Threads tab can **Take Dump** or **Record…** several dumps some seconds apart. A dump pauses the JVM for a moment (usually milliseconds), and Logsift only reads: it changes nothing in the JVM.
+
+- **On this computer** Logsift attaches the way the JDK's own tools do. If that isn't possible, it uses `jcmd` from a JDK folder you give.
+- **On a server** it uses `jcmd`: from the JDK folder you give, the PATH, or the JDK the program itself runs on. Servers with only a Java runtime and no JDK tools work too: Logsift copies async-profiler to the server's `/tmp` and uses that. JVMs running as another user (`tomcat`, `app`) are reached with `sudo`. Logsift asks for the sudo password if it needs one and keeps it only while it runs. JVMs in containers are listed too.
+
+**Save…** writes the dumps as a text file that opens again here, or in any other tool.
+
+## Profiling
+
+**Profile…** in the Threads tab of a running JVM shows where it spends its time. Choose what to measure:
+
+- **CPU**
+- **Wall clock:** running or waiting
+- **Allocations**
+- **Locks:** waiting to get them
+
+Then choose how long, and **Start Profiling**. The JVM keeps running as usual.
+
+The result is a **flame graph**: the outermost calls on top, what they call below, each as wide as its share. Green is Java code (paler for the JDK's own), yellow native code, orange the kernel. Click a frame to zoom into it. Type in **highlight methods** to color the matches and see their share. Beside it, **Most time of their own** lists the methods that use the most; click one to highlight it.
+
+Two engines:
+
+- **async-profiler** (built in, for JVMs on Linux and macOS) also sees native code and the kernel. On Linux, CPU profiling uses perf events when the kernel allows them, and a timer otherwise (Logsift says so).
+- **Flight Recorder**, built into the JVM, works on any JVM with JFR, Windows included.
+
+**Save…** writes collapsed stacks, which open again with **JVM → Open Profile…**, along with `.jfr` recordings.
 
 ## Settings
 
@@ -327,6 +376,12 @@ logsift.core   (no UI code; could later back a VS Code extension or a CLI)
   LogFormat       columns (regex with named groups, or JSON fields); ColumnStats counts values
   LogMerger       merges logs by time; Encoding / Utf16Mirror; RemoteMirror (SFTP)
   LineExporter    copies chosen lines' original bytes to a file
+logsift.jvm     (thread dumps and running JVMs)
+  DumpParser      jstack / jcmd / kill -3 text (also inside logs), dump_to_file plain and JSON
+  ThreadAnalysis  deadlocks (cycles of lock waits), lock queues, stuck and busy threads, pools
+  LocalJvms       attach + JMX (the JVM's own diagnostic commands), or jcmd
+  SshJvms         ps, jcmd or async-profiler over SSH, sudo for other users' JVMs
+  Profiler        async-profiler or Flight Recorder → Profile (a tree of stacks)
 logsift.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
   LogTab          log view + Filters and Find results panels for one file
@@ -334,6 +389,7 @@ logsift.ui
   OverviewBar     highlight bar beside the scrollbar (errors, warnings, filters, hits)
   FolderSearchTab folder search form and results grouped by file
   TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
+  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, JvmDialog
   MainFrame       window, toolbar, menus, status bar, drag & drop
 logsift.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
@@ -355,11 +411,13 @@ Design choices:
   - A single line over 256 MB is only searched in its first 256 MB.
 - **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
 - **Time zones** are not converted: times are shown as written in each log.
+- **Thread dumps** of HotSpot JVMs (OpenJDK, Oracle, Temurin, Zulu, Corretto and the like) are read. OpenJ9 `javacore` files are not.
+- **async-profiler** runs on Linux (x64, ARM64) and macOS JVMs; for JVMs on Windows, use Flight Recorder.
 - **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows). The downloads are not code-signed yet.
 
 ## Roadmap
 
-Ideas for next versions: thread dump analysis (also live, from a running Java program), editable highlight rules and signed installers. Suggestions and bug reports are welcome in [Issues](https://github.com/bdarwin/logsift/issues).
+Ideas for next versions: continuous profiling of a running JVM, heap summaries, editable highlight rules and signed installers. Suggestions and bug reports are welcome in [Issues](https://github.com/bdarwin/logsift/issues).
 
 ## Contributing
 
@@ -368,3 +426,5 @@ Bug reports, ideas and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBU
 ## License
 
 [MIT](LICENSE) © 2026 bdarwin
+
+Logsift includes [async-profiler](https://github.com/async-profiler/async-profiler) (Apache License 2.0) for profiling and for thread dumps on servers without JDK tools.

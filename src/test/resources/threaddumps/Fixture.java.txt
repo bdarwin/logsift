@@ -1,0 +1,29 @@
+import java.util.concurrent.*;
+import java.util.concurrent.locks.*;
+
+public class Fixture {
+    static final Object A = new Object(), B = new Object(), DB = new Object();
+    static final ReentrantLock L1 = new ReentrantLock(), L2 = new ReentrantLock();
+    static volatile long sink;
+
+    static void sleep(long ms) { try { Thread.sleep(ms); } catch (InterruptedException e) { } }
+
+    static void start(String name, Runnable r) { Thread t = new Thread(r, name); t.setDaemon(true); t.start(); }
+
+    public static void main(String[] args) throws Exception {
+        start("worker-A", () -> { synchronized (A) { sleep(300); synchronized (B) { sleep(1); } } });
+        start("worker-B", () -> { synchronized (B) { sleep(300); synchronized (A) { sleep(1); } } });
+        start("lock-1", () -> { L1.lock(); sleep(300); L2.lock(); });
+        start("lock-2", () -> { L2.lock(); sleep(300); L1.lock(); });
+        start("db-writer", () -> { synchronized (DB) { sleep(10_000_000); } });
+        sleep(100);
+        for (int i = 1; i <= 5; i++) {
+            start("http-nio-8080-exec-" + i, () -> { synchronized (DB) { sink++; } });
+        }
+        ExecutorService idle = Executors.newFixedThreadPool(3, r -> { Thread t = new Thread(r); t.setDaemon(true); return t; });
+        for (int i = 0; i < 3; i++) idle.submit(() -> { });
+        start("hot-loop", () -> { while (true) { sink += System.nanoTime() % 7; } });
+        System.out.println("ready");
+        Thread.sleep(10_000_000);
+    }
+}

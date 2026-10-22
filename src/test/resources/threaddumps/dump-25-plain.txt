@@ -1,0 +1,171 @@
+2133
+2026-10-22T10:56:30.709127Z
+25.0.2
+
+#3 "main" TIMED_WAITING 2026-10-22T10:56:30.709669Z
+    at java.base/java.lang.Thread.sleepNanos0(Native Method)
+    at java.base/java.lang.Thread.sleepNanos(Thread.java:509)
+    at java.base/java.lang.Thread.sleep(Thread.java:540)
+    at Fixture.main(Fixture.java:27)
+
+#14 "Reference Handler" RUNNABLE 2026-10-22T10:56:30.709982Z
+    at java.base/java.lang.ref.Reference.waitForReferencePendingList(Native Method)
+    at java.base/java.lang.ref.Reference.processPendingReferences(Reference.java:246)
+    at java.base/java.lang.ref.Reference$ReferenceHandler.run(Reference.java:208)
+
+#15 "Finalizer" WAITING 2026-10-22T10:56:30.710029Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.lang.ref.ReferenceQueue$Lock@101f1a89>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:137)
+    at java.base/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:215)
+    - locked <java.lang.ref.ReferenceQueue$Lock@101f1a89>
+    at java.base/java.lang.ref.Finalizer$FinalizerThread.run(Finalizer.java:165)
+
+#16 "Signal Dispatcher" RUNNABLE 2026-10-22T10:56:30.710084Z
+
+#23 "Notification Thread" RUNNABLE 2026-10-22T10:56:30.710096Z
+
+#24 "Common-Cleaner" TIMED_WAITING 2026-10-22T10:56:30.710125Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.lang.ref.ReferenceQueue$Lock@3be2c67b>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:123)
+    at java.base/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:201)
+    - locked <java.lang.ref.ReferenceQueue$Lock@3be2c67b>
+    at java.base/jdk.internal.ref.CleanerImpl.run(CleanerImpl.java:146)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#25 "worker-A" BLOCKED 2026-10-22T10:56:30.710194Z
+    at Fixture.lambda$main$0(Fixture.java:14)
+    - locked <java.lang.Object@700c03f9>
+    - waiting to lock <java.lang.Object@2cf4f768>
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#26 "worker-B" BLOCKED 2026-10-22T10:56:30.710233Z
+    at Fixture.lambda$main$1(Fixture.java:15)
+    - locked <java.lang.Object@2cf4f768>
+    - waiting to lock <java.lang.Object@700c03f9>
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#27 "lock-1" WAITING 2026-10-22T10:56:30.710279Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.ReentrantLock$NonfairSync@43aeb74b>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:223)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(AbstractQueuedSynchronizer.java:790)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(AbstractQueuedSynchronizer.java:1030)
+    at java.base/java.util.concurrent.locks.ReentrantLock$Sync.lock(ReentrantLock.java:154)
+    at java.base/java.util.concurrent.locks.ReentrantLock.lock(ReentrantLock.java:323)
+    at Fixture.lambda$main$2(Fixture.java:16)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#28 "lock-2" WAITING 2026-10-22T10:56:30.710348Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.ReentrantLock$NonfairSync@6e52605b>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:223)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(AbstractQueuedSynchronizer.java:790)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(AbstractQueuedSynchronizer.java:1030)
+    at java.base/java.util.concurrent.locks.ReentrantLock$Sync.lock(ReentrantLock.java:154)
+    at java.base/java.util.concurrent.locks.ReentrantLock.lock(ReentrantLock.java:323)
+    at Fixture.lambda$main$3(Fixture.java:17)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#29 "db-writer" TIMED_WAITING 2026-10-22T10:56:30.710488Z
+    at java.base/java.lang.Thread.sleepNanos0(Native Method)
+    at java.base/java.lang.Thread.sleepNanos(Thread.java:509)
+    at java.base/java.lang.Thread.sleep(Thread.java:540)
+    at Fixture.sleep(Fixture.java:9)
+    at Fixture.lambda$main$4(Fixture.java:18)
+    - locked <java.lang.Object@6596854e>
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#30 "http-nio-8080-exec-1" BLOCKED 2026-10-22T10:56:30.710586Z
+    at Fixture.lambda$main$5(Fixture.java:21)
+    - waiting to lock <java.lang.Object@6596854e>
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#31 "http-nio-8080-exec-2" BLOCKED 2026-10-22T10:56:30.710624Z
+    at Fixture.lambda$main$5(Fixture.java:21)
+    - waiting to lock <java.lang.Object@6596854e>
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#32 "http-nio-8080-exec-3" BLOCKED 2026-10-22T10:56:30.710654Z
+    at Fixture.lambda$main$5(Fixture.java:21)
+    - waiting to lock <java.lang.Object@6596854e>
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#33 "http-nio-8080-exec-4" BLOCKED 2026-10-22T10:56:30.710685Z
+    at Fixture.lambda$main$5(Fixture.java:21)
+    - waiting to lock <java.lang.Object@6596854e>
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#34 "http-nio-8080-exec-5" BLOCKED 2026-10-22T10:56:30.710715Z
+    at Fixture.lambda$main$5(Fixture.java:21)
+    - waiting to lock <java.lang.Object@6596854e>
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#38 "hot-loop" RUNNABLE 2026-10-22T10:56:30.710786Z
+    at Fixture.lambda$main$8(Fixture.java:25)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#39 "Attach Listener" RUNNABLE 2026-10-22T10:56:30.710844Z
+    at java.base/jdk.internal.vm.ThreadSnapshot.create(Native Method)
+    at java.base/jdk.internal.vm.ThreadSnapshot.of(ThreadSnapshot.java:60)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThread(ThreadDumper.java:181)
+    at java.base/jdk.internal.vm.ThreadDumper.lambda$dumpThreads$0(ThreadDumper.java:176)
+    at java.base/java.util.stream.ReferencePipeline$2$1.accept(ReferencePipeline.java:197)
+    at java.base/java.util.Spliterators$ArraySpliterator.forEachRemaining(Spliterators.java:1024)
+    at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:570)
+    at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:560)
+    at java.base/java.util.stream.StreamSpliterators$WrappingSpliterator.forEachRemaining(StreamSpliterators.java:315)
+    at java.base/java.util.stream.Streams$ConcatSpliterator.forEachRemaining(Streams.java:734)
+    at java.base/java.util.stream.ReferencePipeline$Head.forEach(ReferencePipeline.java:803)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThreads(ThreadDumper.java:176)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThreads(ThreadDumper.java:172)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThreadsToFile(ThreadDumper.java:133)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThreads(ThreadDumper.java:73)
+
+#35 "Thread-0" WAITING 2026-10-22T10:56:30.711398Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@748e1345>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#36 "Thread-1" WAITING 2026-10-22T10:56:30.711635Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@748e1345>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#37 "Thread-2" WAITING 2026-10-22T10:56:30.711723Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@748e1345>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+

@@ -91,7 +91,7 @@ jobs:
                   --main-jar "logsift-$VERSION.jar" --main-class logsift.ui.LogsiftApp
                   --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
                   --java-options '-splash:$APPDIR/splash.png'
-                  --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets
+                  --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets,jdk.attach,java.management,java.management.rmi,jdk.jfr
                   --vendor bdarwin --description "Viewer for very large log files")
           mkdir -p dist
           ASSOC=(--file-associations packaging/file-associations/log.properties)

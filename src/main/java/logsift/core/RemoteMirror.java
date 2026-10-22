@@ -219,7 +219,7 @@ public final class RemoteMirror implements AutoCloseable {
     }
 
     /** An SSH session to the target's host (known_hosts checked, new hosts asked about). */
-    static Session openSession(Target target, Path knownHosts, Predicate<String> trustNewHost)
+    public static Session openSession(Target target, Path knownHosts, Predicate<String> trustNewHost)
             throws JSchException, IOException {
         JSch jsch = new JSch();
         if (knownHosts != null) {
@@ -284,7 +284,7 @@ public final class RemoteMirror implements AutoCloseable {
         session = null;
     }
 
-    static String describe(Exception e) {
+    public static String describe(Exception e) {
         String m = e.getMessage();
         if (e instanceof SftpException se && se.id == ChannelSftp.SSH_FX_NO_SUCH_FILE) {
             return "no such file";

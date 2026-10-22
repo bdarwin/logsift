@@ -50,7 +50,7 @@
 <body>
 <main>
   <h1>Logsift</h1>
-  <p class="lead">Find out what happened, even in gigabytes of logs. Logsift opens huge log files instantly, tails them live and points out errors, bursts and restarts. Windows, macOS and Linux.</p>
+  <p class="lead">Find out what happened, even in gigabytes of logs. Logsift opens huge log files instantly, tails them live and points out errors, bursts and restarts. For Java, it explains thread dumps and profiles running JVMs. Windows, macOS and Linux.</p>
   <div class="buttons">
     <a class="btn primary" href="https://github.com/bdarwin/logsift/releases/latest">Download</a>
     <a class="btn" href="https://github.com/bdarwin/logsift">Source on GitHub</a>
@@ -68,6 +68,8 @@
     <li><b>Folder search</b>Search whole folders in parallel, including inside .gz and .zip files.</li>
     <li><b>Remote logs</b>Browse a server over SSH/SFTP and follow its logs live.</li>
     <li><b>Analyze</b>See top messages, compare a bad run with a good one, and merge logs by time.</li>
+    <li><b>Java threads</b>Open thread dumps or attach to a running JVM, also over SSH: deadlocks, lock queues and stuck threads, pointed out.</li>
+    <li><b>Profiling</b>A flame graph of a JVM's CPU, wall-clock time, allocations or lock waits.</li>
   </ul>
 
   <h2>Screenshots</h2>
@@ -78,6 +80,8 @@
     <figure><img src="screenshots/folder-search.png" alt="Folder search" loading="lazy" width="1400" height="828"><figcaption>Folder search, including inside .gz and .zip</figcaption></figure>
     <figure><img src="screenshots/json.png" alt="JSON log with details panel" loading="lazy" width="1400" height="828"><figcaption>JSON logs with a details panel</figcaption></figure>
     <figure><img src="screenshots/compare.png" alt="Comparing two logs" loading="lazy" width="1400" height="828"><figcaption>Compare a bad run with a good one</figcaption></figure>
+    <figure><img src="screenshots/threads.png" alt="Thread dumps with deadlocks and a lock queue pointed out" loading="lazy" width="1400" height="828"><figcaption>Thread dumps, explained</figcaption></figure>
+    <figure><img src="screenshots/flame-graph.png" alt="A flame graph of a JVM's CPU use" loading="lazy" width="1400" height="828"><figcaption>Profiling with a flame graph</figcaption></figure>
     <figure><img src="screenshots/dark-mode.png" alt="Dark mode" loading="lazy" width="1400" height="828"><figcaption>Dark mode</figcaption></figure>
   </div>
 

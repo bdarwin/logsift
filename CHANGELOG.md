@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Thread dumps, explained:** JVM → Open Thread Dump… reads jstack and jcmd output, `kill -3` dumps inside a log (also with a time in front of each line), and `jcmd Thread.dump_to_file` files (plain and JSON, with virtual threads). A log with dumps in it offers **Analyze Threads**.
+- **What stands out first:** deadlocks (monitors and ReentrantLocks), threads queueing for a lock and who holds it, threads stuck in one place across dumps, threads using a lot of CPU, pools with every thread busy, and a growing thread count. Each with **Show threads**.
+- **Threads view:** grouped by pool or by identical stack, filtered by state or text. A thread's stack shows the lock it waits for and who holds it, and who waits for its locks, as links. **Timeline** shows each thread's state in every dump; **Compare** shows what changed between two dumps.
+- **Attach to a running JVM** (JVM menu, Ctrl+Shift+J): on this computer, or on a server over SSH. Take a dump, or record several some seconds apart. On servers, jcmd is found by itself (or give the JDK folder); without JDK tools, async-profiler is copied to the server's /tmp and used instead. JVMs of other users are reached with sudo (Logsift asks for the password if needed).
+- **Profiling:** a flame graph of a JVM's CPU, wall-clock time, allocations or lock waits, with async-profiler (Linux and macOS JVMs) or Flight Recorder (any JVM, Windows too), plus the methods with the most time of their own. Zoom into a frame, highlight methods, save and open profiles (collapsed stacks and `.jfr` files).
+
 ## 1.2.0
 
 - **Your own log formats:** drop a log file and Logsift works out its layout and how its times are written, or paste your log4j / logback / Python logging setup (a pattern, or a whole `logback.xml`, `log4j2.xml` or `log4j.properties`). Properties in the config (`${LOG_PATTERN}`, `${sys:PID}`) are filled in, Log4j 2 `.properties`, `.yaml` and `.json` configs work, and with several appenders the layout your log fits is used. A live preview shows how lines split into columns.

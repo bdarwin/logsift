@@ -51,6 +51,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** The user closed the tree of loggers (for every log). */
         default void setValuesTree(boolean on) {}
+
+        /** Opens the thread dumps in this log in a Threads tab. */
+        default void analyzeThreads(LogTab tab) {}
     }
 
     private final LogDocument doc;
@@ -314,8 +317,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         JPanel top = new JPanel(new BorderLayout());
         JPanel north = new JPanel(new BorderLayout());
         north.add(timeline, BorderLayout.NORTH);
-        north.add(noColumns, BorderLayout.SOUTH);
+        JPanel banners = new JPanel();
+        banners.setLayout(new javax.swing.BoxLayout(banners, javax.swing.BoxLayout.Y_AXIS));
+        banners.add(dumpsBanner);
+        banners.add(noColumns);
+        north.add(banners, BorderLayout.SOUTH);
         noColumns.setVisible(false);
+        dumpsBanner.setVisible(false);
+        checkForThreadDumps();
         JPanel logArea = new JPanel(new BorderLayout());
         logArea.add(north, BorderLayout.NORTH);
         logArea.add(main, BorderLayout.CENTER);
@@ -943,6 +952,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             bookmarks.clear(); // truncated or rotated: the bookmarked lines are gone
         }
         detectEntryFormat();
+        checkNewLinesForDumps();
         main.rowsChanged();
         tryPendingLine();
         results.view().rowsChanged();
@@ -1744,6 +1754,108 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     ValuesTreePanel valuesTree() {
         return treePanel;
+    }
+
+    /** Offers the Threads view when the file has Java thread dumps in it. */
+    private final JPanel dumpsBanner = dumpsBanner();
+
+    private JPanel dumpsBanner() {
+        JPanel p = new JPanel(new BorderLayout(10, 0));
+        p.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.uiColor("Component.borderColor", java.awt.Color.GRAY)),
+                javax.swing.BorderFactory.createEmptyBorder(5, 10, 5, 8)));
+        JLabel text = new JLabel("This file has Java thread dumps. See deadlocks, threads waiting for locks, and stuck threads.",
+                Icons.of("cpu"), javax.swing.SwingConstants.LEFT);
+        text.setIconTextGap(8);
+        p.add(text, BorderLayout.CENTER);
+        JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 4, 0));
+        buttons.setOpaque(false);
+        javax.swing.JButton analyze = new javax.swing.JButton("Analyze Threads");
+        analyze.addActionListener(e -> host.analyzeThreads(this));
+        javax.swing.JButton close = new javax.swing.JButton(Icons.of("x"));
+        close.putClientProperty("JButton.buttonType", "toolBarButton");
+        close.setToolTipText("Hide");
+        close.addActionListener(e -> {
+            dumpsDismissed = true;
+            p.setVisible(false);
+            revalidate();
+        });
+        buttons.add(analyze);
+        buttons.add(close);
+        p.add(buttons, BorderLayout.EAST);
+        return p;
+    }
+
+    boolean dumpsBannerShownForTest() {
+        return dumpsBanner.isVisible();
+    }
+
+    private long dumpsCheckedTo = -1;      // lines looked at for a dump (after the start)
+    private boolean dumpsDismissed;
+    private volatile boolean dumpsChecking;
+
+    /** A dump written while the log is followed (kill -3 on a running program): offer it too. */
+    private void checkNewLinesForDumps() {
+        if (dumpsBanner.isVisible() || dumpsDismissed || doc.isIndexing() || dumpsChecking) {
+            return;
+        }
+        long n = doc.lineCount();
+        if (dumpsCheckedTo < 0 || n < dumpsCheckedTo) {
+            dumpsCheckedTo = n; // the start of the file was looked at already
+            return;
+        }
+        if (n == dumpsCheckedTo) {
+            return;
+        }
+        long from = Math.max(dumpsCheckedTo, n - 50_000);
+        dumpsCheckedTo = n;
+        dumpsChecking = true;
+        Thread t = new Thread(() -> {
+            try {
+                String[] buf = new String[2048];
+                for (long i = from; i < n; i += buf.length) {
+                    int c = (int) Math.min(buf.length, n - i);
+                    doc.readLines(i, c, buf);
+                    for (int j = 0; j < c; j++) {
+                        if (buf[j] != null && logsift.jvm.DumpParser.startsDump(buf[j])) {
+                            SwingUtilities.invokeLater(() -> {
+                                if (!dumpsDismissed) {
+                                    dumpsBanner.setVisible(true);
+                                    revalidate();
+                                }
+                            });
+                            return;
+                        }
+                    }
+                }
+            } catch (RuntimeException e) {
+                // no offer then
+            } finally {
+                dumpsChecking = false;
+            }
+        }, "logsift-dump-check");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Looks at the start of the file for a thread dump (in the background). */
+    private void checkForThreadDumps() {
+        Thread t = new Thread(() -> {
+            try (java.io.InputStream in = java.nio.file.Files.newInputStream(doc.path())) {
+                byte[] head = in.readNBytes(512 * 1024);
+                String text = new String(head, doc.charset());
+                if (logsift.jvm.DumpParser.looksLikeDump(text)) {
+                    SwingUtilities.invokeLater(() -> {
+                        dumpsBanner.setVisible(true);
+                        revalidate();
+                    });
+                }
+            } catch (IOException | RuntimeException e) {
+                // no offer then
+            }
+        }, "logsift-dump-check");
+        t.setDaemon(true);
+        t.start();
     }
 
     /** Shown in Columns view when the log's layout isn't known. */

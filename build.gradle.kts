@@ -1,3 +1,6 @@
+import java.net.URI
+import java.security.MessageDigest
+
 plugins {
     application
 }
@@ -24,6 +27,59 @@ dependencies {
     testImplementation("org.apache.sshd:sshd-core:2.14.0")
     testImplementation("org.apache.sshd:sshd-sftp:2.14.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+// async-profiler (Apache 2.0) for profiling JVMs and for thread dumps on servers without JDK
+// tools: downloaded once (checksums checked) and packed into the app as resources.
+val asyncProfiler = "4.5"
+val agentFiles = mapOf(
+    "linux-x64" to "89546fbb9ee0fc5496c7edd4099b0709489bc78b0d8057ccbb4b801f6b032b62",
+    "linux-arm64" to "64c41d1465d60097439c50d7e924b4946f1f62b1cbd21ce5b034fad09c0d6979",
+    "macos" to "46d04ef81f532a065a0b3877e488aa706afa14aa2ea14433b323db9e6fda76dc")
+fun agentArchive(platform: String) =
+    "async-profiler-$asyncProfiler-$platform" + if (platform == "macos") ".zip" else ".tar.gz"
+val agentDownloads = File(gradle.gradleUserHomeDir, "logsift-agents/$asyncProfiler")
+
+val downloadAgents by tasks.registering {
+    description = "Downloads async-profiler (once) and checks its checksums."
+    val dir = agentDownloads
+    val files = agentFiles.mapKeys { agentArchive(it.key) }
+    outputs.dir(dir)
+    doLast {
+        fun sha256(f: File): String = MessageDigest.getInstance("SHA-256")
+            .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+        dir.mkdirs()
+        files.forEach { (name, sha) ->
+            val f = File(dir, name)
+            if (!f.exists() || sha256(f) != sha) {
+                val url = "https://github.com/async-profiler/async-profiler/releases/download/v$asyncProfiler/$name"
+                URI(url).toURL().openStream().use { input -> f.outputStream().use { input.copyTo(it) } }
+            }
+            check(sha256(f) == sha) { "Wrong checksum for $name: delete $f and build again" }
+        }
+    }
+}
+
+val agents by tasks.registering(Sync::class) {
+    description = "Puts async-profiler's launcher and library where the app finds them."
+    dependsOn(downloadAgents)
+    into(layout.buildDirectory.dir("generated/agents"))
+    includeEmptyDirs = false
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    agentFiles.keys.forEach { platform ->
+        val archive = File(agentDownloads, agentArchive(platform))
+        from(if (platform == "macos") zipTree(archive) else tarTree(resources.gzip(archive))) {
+            include("*/bin/asprof", "*/lib/libasyncProfiler.*", "*/LICENSE")
+            eachFile {
+                path = if (name == "LICENSE") "logsift/agents/LICENSE-async-profiler.txt"
+                else "logsift/agents/$platform/$name"
+            }
+        }
+    }
+}
+
+sourceSets.main {
+    resources.srcDir(agents)
 }
 
 // Builds with any JDK 21+; output targets Java 21 (LTS).

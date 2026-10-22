@@ -655,6 +655,157 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return tab;
     }
 
+    // ---------------------------------------------------------------- thread dumps
+
+    /** Opens a Threads tab with these dumps (and new ones from {@code capture}, if not null). */
+    public ThreadsTab openThreads(String source, List<logsift.jvm.ThreadDump> dumps, ThreadsTab.Capture capture) {
+        ThreadsTab tab = new ThreadsTab(source, dumps, capture);
+        tabs.addTab(tab.title(), Icons.of("cpu"), tab);
+        int i = tabs.getTabCount() - 1;
+        tabs.setToolTipTextAt(i, capture != null ? "Threads of " + capture.label() : source);
+        tabs.setSelectedIndex(i);
+        tab.onChanged(() -> {
+            int k = tabs.indexOfComponent(tab);
+            if (k >= 0) {
+                logsift.jvm.ThreadAnalysis.Report r = tab.report();
+                int problems = r == null ? 0 : r.problems();
+                tabs.setTitleAt(k, tab.title() + (problems > 0 ? " (" + problems + ")" : ""));
+            }
+            if (tabs.getSelectedComponent() == tab) {
+                refreshStatus();
+            }
+        });
+        tab.onChangedNow();
+        updateEmptyState();
+        return tab;
+    }
+
+    private JvmDialog jvmDialog;
+
+    private void openJvmDialog() {
+        if (jvmDialog != null && jvmDialog.isDisplayable()) {
+            jvmDialog.toFront();
+            return;
+        }
+        Path knownHosts = Boolean.getBoolean("logsift.noKnownHosts") ? null
+                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        jvmDialog = new JvmDialog(this, knownHosts, this::trustHost, (source, first, capture, profiling) -> {
+            ThreadsTab tab = openThreads(source, List.of(first), capture);
+            if (profiling != null) {
+                tab.setProfiler(() -> openProfile(source, profiling.target()));
+            }
+        });
+        jvmDialog.setVisible(true);
+    }
+
+    JvmDialog openJvmDialogForTest() {
+        openJvmDialog();
+        return jvmDialog;
+    }
+
+    /** Opens a Profile tab for a running JVM. */
+    ProfileTab openProfile(String source, logsift.jvm.Profiler.Target target) {
+        ProfileTab tab = new ProfileTab(source, target, null);
+        addProfileTab(tab);
+        return tab;
+    }
+
+    private void addProfileTab(ProfileTab tab) {
+        tabs.addTab(tab.title(), Icons.of("flame"), tab);
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tab.onChanged(() -> {
+            if (tabs.getSelectedComponent() == tab) {
+                refreshStatus();
+            }
+        });
+        updateEmptyState();
+    }
+
+    private void openProfileDialog() {
+        FileDialog fd = new FileDialog(this, "Open Profile (.jfr or collapsed stacks)", FileDialog.LOAD);
+        String last = PREFS.get("lastDir", null);
+        if (last != null) {
+            fd.setDirectory(last);
+        }
+        fd.setVisible(true);
+        if (fd.getFile() != null) {
+            openProfileFile(Path.of(fd.getDirectory(), fd.getFile()));
+        }
+    }
+
+    /** Shows a saved profile: a Flight Recorder file or async-profiler's collapsed stacks. */
+    void openProfileFile(Path file) {
+        ProgressDialog.run(this, "Reading " + file.getFileName() + "…",
+                (progress, cancelled) -> logsift.jvm.Profiler.open(file),
+                p -> {
+                    PREFS.put("lastDir", file.toAbsolutePath().getParent().toString());
+                    addProfileTab(new ProfileTab(file.getFileName().toString(), null, p));
+                });
+    }
+
+    /** The Profile tab shown, or null. */
+    ProfileTab currentProfileTab() {
+        return tabs.getSelectedComponent() instanceof ProfileTab t ? t : null;
+    }
+
+    /** The Threads tab shown, or null. */
+    ThreadsTab currentThreadsTab() {
+        return tabs.getSelectedComponent() instanceof ThreadsTab t ? t : null;
+    }
+
+    JTabbedPane tabsForTest() {
+        return tabs;
+    }
+
+    void closeCurrentTabForTest() {
+        closeTab(tabs.getSelectedIndex());
+    }
+
+    private void openThreadDumpDialog() {
+        FileDialog fd = new FileDialog(this, "Open Thread Dump", FileDialog.LOAD);
+        String last = PREFS.get("lastDir", null);
+        if (last != null) {
+            fd.setDirectory(last);
+        }
+        fd.setVisible(true);
+        if (fd.getFile() != null) {
+            openThreadDump(Path.of(fd.getDirectory(), fd.getFile()));
+        }
+    }
+
+    /** Reads the thread dumps in a file (jstack, jcmd, kill -3 output, JSON) into a Threads tab. */
+    public void openThreadDump(Path file) {
+        ProgressDialog.run(this, "Reading " + file.getFileName() + "…", (progress, cancelled) -> {
+            try (LogDocument doc = LogDocument.open(file)) {
+                doc.awaitIdle(600_000);
+                return logsift.jvm.DumpParser.scan(doc, progress, cancelled);
+            }
+        }, dumps -> {
+            if (dumps.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "There is no Java thread dump in " + file.getFileName() + ".",
+                        "Thread Dumps", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            PREFS.put("lastDir", file.toAbsolutePath().getParent().toString());
+            openThreads(file.getFileName().toString(), dumps, null);
+        });
+    }
+
+    @Override
+    public void analyzeThreads(LogTab t) {
+        LogDocument doc = t.document();
+        ProgressDialog.run(this, "Looking for thread dumps in " + t.title() + "…",
+                (progress, cancelled) -> logsift.jvm.DumpParser.scan(doc, progress, cancelled),
+                dumps -> {
+                    if (dumps.isEmpty()) {
+                        JOptionPane.showMessageDialog(this, "There is no Java thread dump in " + t.title() + ".",
+                                "Thread Dumps", JOptionPane.INFORMATION_MESSAGE);
+                    } else {
+                        openThreads(t.title(), dumps, null);
+                    }
+                });
+    }
+
     @Override
     public void showDiff(CompareTab ct, logsift.core.LogCompare.Diff d) {
         boolean inB = d.countB() > 0;
@@ -1236,6 +1387,25 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 e -> nextBookmark(false)));
         bar.add(go);
 
+        // ---- JVM: thread dumps (and running JVMs)
+        JMenu jvm = menu("JVM");
+        jvm.add(item("Attach to a Running JVM…", "cpu", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU | shift),
+                e -> openJvmDialog()));
+        jvm.addSeparator();
+        jvm.add(item("Open Thread Dump…", "file-text", null, e -> openThreadDumpDialog()));
+        jvm.add(item("Analyze Thread Dumps in This Log", "activity", null, e -> {
+            LogTab t = currentTab();
+            if (t == null) {
+                JOptionPane.showMessageDialog(this, "Open a log with thread dumps in it first (for example the"
+                        + " console log of an application that got kill -3).", "Thread Dumps",
+                        JOptionPane.INFORMATION_MESSAGE);
+            } else {
+                analyzeThreads(t);
+            }
+        }));
+        jvm.add(item("Open Profile…", "flame", null, e -> openProfileDialog()));
+        bar.add(jvm);
+
         // ---- Help
         JMenu help = menu("Help");
         help.add(item("Keyboard Shortcuts", "keyboard", KeyStroke.getKeyStroke(KeyEvent.VK_SLASH, MENU),
@@ -1393,6 +1563,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             f.close();
         } else if (c instanceof CompareTab ct) {
             ct.close();
+        } else if (c instanceof ThreadsTab th) {
+            th.close();
+        } else if (c instanceof ProfileTab pt) {
+            pt.close();
         }
         updateEmptyState();
     }
@@ -1831,6 +2005,20 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         formatButton.setToolTipText(t != null && t.formatChoice() != null
                 ? "Lines are read as \u201c" + fmt + "\u201d (chosen for this file). Click to change."
                 : "Lines are read as \u201c" + fmt + "\u201d (detected). Click if that is wrong.");
+        if (tabs.getSelectedComponent() instanceof ProfileTab pt) {
+            setTitle(pt.title() + " — Logsift");
+            status.setText(pt.statusText());
+            statusRight.setText(memory());
+            progress.setVisible(false);
+            return;
+        }
+        if (tabs.getSelectedComponent() instanceof ThreadsTab th) {
+            setTitle(th.title() + " — Logsift");
+            status.setText(th.statusText());
+            statusRight.setText(memory());
+            progress.setVisible(false);
+            return;
+        }
         if (tabs.getSelectedComponent() instanceof CompareTab ct) {
             setTitle(ct.title() + " — Logsift");
             status.setText(" ");
