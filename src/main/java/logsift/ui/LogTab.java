@@ -160,6 +160,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public void textsNow(int first, int count, String[] out) {
+                readNow(main, count == 1 ? -1 : 0, first, count, out);
+            }
+
+            @Override
             public boolean dimmed(int row) {
                 FilterResult r = filterResult;
                 return r.isFiltering() && !r.isMatch(row);
@@ -213,6 +218,15 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
             @Override
             public void texts(int first, int count, String[] out) {
+                filteredTexts(first, count, out, false);
+            }
+
+            @Override
+            public void textsNow(int first, int count, String[] out) {
+                filteredTexts(first, count, out, true);
+            }
+
+            private void filteredTexts(int first, int count, String[] out, boolean now) {
                 FilterResult r = filterResult;
                 int n = (int) Math.min(count, r.count() - first);
                 // read runs of consecutive lines together
@@ -224,7 +238,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                         run++;
                     }
                     String[] buf = new String[run];
-                    doc.readLines(start, run, buf);
+                    if (now) {
+                        readNow(main, count == 1 ? -1 : i, start, run, buf);
+                    } else {
+                        doc.readLines(start, run, buf);
+                    }
                     System.arraycopy(buf, 0, out, i, run);
                     i += run;
                 }
@@ -389,6 +407,18 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         });
     }
 
+    /** Who asked for lines being read in the background (a view, and which part of it). */
+    record LoadKey(Object view, int part) {}
+
+    /**
+     * Reads lines for painting without waiting for the disk; lines not in memory yet are
+     * read in the background and the view repaints when they are there.
+     */
+    void readNow(LogView view, int part, long first, int count, String[] out) {
+        doc.readLinesNow(first, count, out, new LoadKey(view, part),
+                () -> SwingUtilities.invokeLater(view::textsArrived));
+    }
+
     /** Daemon thread for format detection (shared by all tabs). */
     private static final java.util.concurrent.ExecutorService DETECT =
             java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
@@ -532,8 +562,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             return logsift.core.TimeFormat.NONE;
         }
         for (long l = line; l >= 0 && l > line - 200; l--) {
-            String text = doc.line(l);
-            long t = text == null ? logsift.core.TimeFormat.NONE : timeFormat.parse(text);
+            String text = doc.lineIfLoaded(l); // for the status bar: never wait for the disk
+            if (text == null) {
+                break;
+            }
+            long t = timeFormat.parse(text);
             if (t != logsift.core.TimeFormat.NONE) {
                 return t;
             }
@@ -1158,7 +1191,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (labels == null) {
             return null;
         }
-        String text = doc.line(line);
+        String text = doc.lineIfLoaded(line); // painting: never wait for the disk
         if (text == null || !text.startsWith("<")) {
             return null;
         }

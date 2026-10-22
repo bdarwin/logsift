@@ -67,7 +67,8 @@ public final class LogDocument implements Closeable {
 
     private volatile FileSource source;
     private volatile LineIndex index;
-    private volatile PageCache cache;
+    private volatile PageCache cache;      // lines on screen
+    private volatile PageCache bulkCache;  // line starts for background work (searches, timeline)
     private volatile long fileSize;
     private volatile boolean indexing = true;
     private volatile boolean closed;
@@ -301,17 +302,20 @@ public final class LogDocument implements Closeable {
 
     // ---------------------------------------------------------------- line access
 
-    /** Byte offset where {@code line} starts, using the given snapshot. */
+    /** Byte offset where {@code line} starts, using the given snapshot (for background work). */
     public long lineStart(LineIndex.Snapshot s, long line) {
+        return lineStart(s, line, bulkCache, false);
+    }
+
+    private long lineStart(LineIndex.Snapshot s, long line, PageCache pc, boolean cachedOnly) {
         if (line == s.lineCount) {
             return s.indexedBytes;
         }
         LineIndex.Chunk c = s.chunk(s.chunkFor(line));
         int local = (int) (line - c.firstLine());
         long pos = c.checkpoints()[local / LineIndex.SAMPLE];
-        PageCache pc = cache;
         for (int k = local % LineIndex.SAMPLE; k > 0; k--) {
-            long nl = pc.indexOf(pos, c.endByte(), (byte) '\n');
+            long nl = pc.indexOf(pos, c.endByte(), (byte) '\n', cachedOnly);
             if (nl < 0) {
                 throw new FileChangedException("Line " + line + " not found; file changed");
             }
@@ -333,14 +337,95 @@ public final class LogDocument implements Closeable {
      */
     public void readLines(long first, int count, String[] out) {
         try {
-            readLinesUnchecked(first, count, out);
+            readLinesUnchecked(first, count, out, false);
         } catch (FileChangedException | UncheckedIOException e) {
             Arrays.fill(out, 0, count, null);
             requestRefresh();
         }
     }
 
-    private void readLinesUnchecked(long first, int count, String[] out) {
+    /**
+     * Like {@link #readLines}, for painting: waits for the disk at most {@link #PAINT_WAIT_MS}
+     * (on a network drive a read can take long). If the lines are not there by then, {@code out}
+     * is filled with null, they go on being read in the background, and {@code loaded} runs (on
+     * a background thread) when they are there. A newer request from the same {@code owner}
+     * replaces one not started yet.
+     *
+     * @return whether the lines were read
+     */
+    public boolean readLinesNow(long first, int count, String[] out, Object owner, Runnable loaded) {
+        try {
+            readLinesUnchecked(first, count, out, true);
+            return true;
+        } catch (PageCache.NotLoaded e) {
+            Want w = new Want(first, count, new java.util.concurrent.CountDownLatch(1));
+            if (wanted.put(owner, w) == null) {
+                LOADERS.execute(() -> load(owner, loaded));
+            }
+            try {
+                // after a wait ran out, don't wait again for a moment (many rows, one slow drive)
+                if (System.nanoTime() - slowSince > TimeUnit.MILLISECONDS.toNanos(250)
+                        && w.done.await(PAINT_WAIT_MS, TimeUnit.MILLISECONDS)) {
+                    readLinesUnchecked(first, count, out, true);
+                    return true;
+                }
+                if (w.done.getCount() > 0) {
+                    slowSince = System.nanoTime();
+                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            } catch (PageCache.NotLoaded again) {
+                // dropped from memory meanwhile: comes with the next paint
+            }
+            Arrays.fill(out, 0, count, null);
+            return false;
+        } catch (FileChangedException | UncheckedIOException e) {
+            Arrays.fill(out, 0, count, null);
+            requestRefresh();
+            return false;
+        }
+    }
+
+    /** How long painting waits for lines that are not in memory yet. */
+    public static final long PAINT_WAIT_MS = 40;
+
+    private volatile long slowSince = System.nanoTime() - TimeUnit.SECONDS.toNanos(1);
+
+    private record Want(long first, int count, java.util.concurrent.CountDownLatch done) {}
+
+    private void load(Object owner, Runnable loaded) {
+        Want w = wanted.remove(owner);
+        if (w == null || closed) {
+            return;
+        }
+        try {
+            readLines(w.first, w.count, new String[w.count]);
+        } finally {
+            w.done.countDown();
+        }
+        if (!closed) {
+            loaded.run();
+        }
+    }
+
+    /** Text of one line if it is in memory, else null (never waits for the disk). */
+    public String lineIfLoaded(long line) {
+        String[] out = new String[1];
+        try {
+            readLinesUnchecked(line, 1, out, true);
+            return out[0];
+        } catch (PageCache.NotLoaded | FileChangedException | UncheckedIOException e) {
+            return null;
+        }
+    }
+
+    private final java.util.concurrent.ConcurrentHashMap<Object, Want> wanted =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Reads lines for painting in the background (shared by all documents). */
+    private static final ExecutorService LOADERS = Executors.newFixedThreadPool(4, daemon("logsift-load"));
+
+    private void readLinesUnchecked(long first, int count, String[] out, boolean cachedOnly) {
         LineIndex.Snapshot s = index.snapshot();
         PageCache pc = cache;
         long limit = Math.max(fileSize, s.indexedBytes);
@@ -353,16 +438,16 @@ public final class LogDocument implements Closeable {
                 continue;
             }
             if (pos < 0) {
-                pos = lineStart(s, line);
+                pos = lineStart(s, line, pc, cachedOnly);
             }
             long max = Math.min(limit, pos + MAX_DISPLAY_BYTES);
-            long nl = pc.indexOf(pos, max, (byte) '\n');
+            long nl = pc.indexOf(pos, max, (byte) '\n', cachedOnly);
             long end = nl >= 0 ? nl : max;
             int len = (int) (end - pos);
             if (buf == null || buf.length < len) {
                 buf = new byte[Math.max(len, 4096)];
             }
-            int n = pc.read(pos, buf, 0, len);
+            int n = pc.read(pos, buf, 0, len, cachedOnly);
             if (n > 0 && buf[n - 1] == '\r') {
                 n--;
             }
@@ -386,6 +471,7 @@ public final class LogDocument implements Closeable {
         }
         index = new LineIndex(chunkSize);
         cache = new PageCache(source, 512);
+        bulkCache = new PageCache(source, 64);
         fileKey = fileKey(path);
         fingerprint = readFingerprint(source);
         fileSize = source.size();
@@ -533,6 +619,7 @@ public final class LogDocument implements Closeable {
         closed = true;
         stopFollowing();
         listeners.clear();
+        wanted.clear();
         serial.shutdownNow();
         try {
             source.close();

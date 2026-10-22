@@ -2586,6 +2586,100 @@ class VisualTest {
         }
     }
 
+    @Test
+    @Order(33)
+    void slowDriveIndexingKeepsWindowResponsive() throws Exception {
+        // a log on a network share: every read takes a while
+        Path f = dir.resolve("network-share.log");
+        try (var w = Files.newBufferedWriter(f)) {
+            for (int i = 0; i < 600_000; i++) {
+                w.write(String.format("2026-10-21 10:%02d:%02d.%03d [worker-%d] %s com.acme.Service%d - request %d took %d ms%n",
+                        (i / 6000) % 60, (i / 100) % 60, i % 1000, i % 8, i % 50 == 0 ? "ERROR" : i % 7 == 0 ? "WARN " : "INFO ",
+                        i % 13, i, i % 997));
+            }
+        }
+        logsift.core.FileSource.setTestNetwork(2, 8);
+        java.util.List<String> stalls = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicLong worst = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.atomic.AtomicBoolean watching = new java.util.concurrent.atomic.AtomicBoolean(true);
+        // watches the UI thread: how long a tiny task waits, and where the thread is when it is stuck
+        Thread watchdog = new Thread(() -> {
+            while (watching.get()) {
+                java.util.concurrent.CountDownLatch ran = new java.util.concurrent.CountDownLatch(1);
+                long t0 = System.nanoTime();
+                SwingUtilities.invokeLater(ran::countDown);
+                try {
+                    if (!ran.await(250, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        for (var e : Thread.getAllStackTraces().entrySet()) {
+                            if (e.getKey().getName().startsWith("AWT-EventQueue")) {
+                                StringBuilder sb = new StringBuilder();
+                                for (StackTraceElement el : e.getValue()) {
+                                    if (el.getClassName().startsWith("logsift")) {
+                                        sb.append("\n    at ").append(el);
+                                    }
+                                }
+                                stalls.add(sb.toString());
+                            }
+                        }
+                        ran.await();
+                    }
+                    worst.accumulateAndGet(ms(t0), Math::max);
+                    Thread.sleep(20);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "edt-watchdog");
+        try {
+            watchdog.start();
+            onEdt(() -> {
+                frame.openFile(f);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f.toAbsolutePath().normalize()));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "share log opened");
+            LogTab tab = onEdt(frame::currentTab);
+            // move around while it is indexed (pages that are not read yet)
+            java.util.Random rnd = new java.util.Random(1);
+            long end = System.currentTimeMillis() + 6000;
+            while (System.currentTimeMillis() < end) {
+                onEdt(() -> {
+                    int n = tab.mainView().rowCount();
+                    if (n > 0) {
+                        tab.mainView().goToRow(rnd.nextInt(n), true);
+                    }
+                    return null;
+                });
+                Thread.sleep(150);
+            }
+            onEdt(() -> {
+                tab.mainView().goToRow(0, false);
+                return null;
+            });
+            // the lines on screen arrive and are painted
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> tab.mainView().textAtForTest(0) != null && !tab.mainView().textAtForTest(0).isEmpty());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 10_000, "first line painted");
+            settle();
+        } finally {
+            watching.set(false);
+            watchdog.join(5000);
+            logsift.core.FileSource.setTestNetwork(0, 0);
+        }
+        System.out.println("slow drive: the window waited at most " + worst.get() + " ms");
+        assertTrue(stalls.isEmpty() && worst.get() < 400, "the window froze for " + worst.get() + " ms:"
+                + String.join("\n  --", stalls.stream().distinct().limit(4).toList()));
+    }
+
     private static void waitFor(BooleanSupplier cond, long timeoutMs, String what)
             throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;

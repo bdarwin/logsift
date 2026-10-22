@@ -8,6 +8,7 @@
 - **Settings** (Ctrl+, / ⌘,): font, tab width, encoding for text that isn't UTF-8, how often files are checked for changes, reopening the last session, and more.
 - Levels written as `E`, `ERR`, `error` or `SEVERE` count as errors in your own formats (colors, error marks, F8, level chips).
 - **Open from WSL** (Windows): opens your Linux home folder.
+- **Logs on network shares:** the window no longer freezes while a big file on a share is read. Lines on screen load in the background and appear as soon as they arrive.
 - Clicking a long wrapped line that is partly off screen no longer scrolls the view.
 
 ## 1.1.0

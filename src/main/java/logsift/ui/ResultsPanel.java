@@ -418,6 +418,17 @@ final class ResultsPanel extends JPanel {
 
         @Override
         public void texts(int first, int count, String[] out) {
+            texts(first, count, out, false);
+        }
+
+        @Override
+        public void textsNow(int first, int count, String[] out) {
+            texts(first, count, out, true);
+        }
+
+        /** {@code now}: for painting, never wait for the disk (lines come later). */
+        private void texts(int first, int count, String[] out, boolean now) {
+            String[] one = new String[1];
             for (int j = 0; j < count; j++) {
                 int row = first + j;
                 if (row >= rowCount) {
@@ -427,7 +438,15 @@ final class ResultsPanel extends JPanel {
                 int i = groupIndex(row);
                 int k = row - firstRow[i] - 1;
                 FindGroup g = groups.get(i);
-                out[j] = k < 0 ? g.header() : k < g.count() ? doc.line(g.lineAt(k)) : null;
+                if (k < 0 || k >= g.count()) {
+                    out[j] = k < 0 ? g.header() : null;
+                } else if (now) {
+                    doc.readLinesNow(g.lineAt(k), 1, one, new LogTab.LoadKey(view, count == 1 ? -1 : j),
+                            () -> SwingUtilities.invokeLater(view::textsArrived));
+                    out[j] = one[0];
+                } else {
+                    out[j] = doc.line(g.lineAt(k));
+                }
             }
         }
 

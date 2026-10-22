@@ -97,7 +97,35 @@ public final class FileSource implements Closeable {
         channel = FileChannel.open(path, StandardOpenOption.READ);
     }
 
+    private static volatile int testLatencyMs;
+    private static volatile double testBytesPerMs;
+    private static final java.util.concurrent.locks.ReentrantLock TEST_LINK =
+            new java.util.concurrent.locks.ReentrantLock(true);
+
+    /**
+     * Makes reads behave like a network drive (for tests): one shared link, each read waits its
+     * turn, then {@code latencyMs} plus the time its bytes take at {@code mbPerSec}. 0: off.
+     */
+    public static void setTestNetwork(int latencyMs, double mbPerSec) {
+        testLatencyMs = latencyMs;
+        testBytesPerMs = mbPerSec * 1048.576;
+    }
+
+    private static void simulateNetwork(int bytes) {
+        TEST_LINK.lock();
+        try {
+            Thread.sleep(testLatencyMs + (long) (bytes / testBytesPerMs));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            TEST_LINK.unlock();
+        }
+    }
+
     private int readOnce(long pos, byte[] dst, int off, int len) throws IOException {
+        if (testBytesPerMs > 0) {
+            simulateNetwork(len);
+        }
         FileChannel channel = this.channel;
         ByteBuffer bb = ByteBuffer.wrap(dst, off, len);
         int total = 0;

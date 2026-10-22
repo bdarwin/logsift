@@ -61,6 +61,14 @@ public final class LogView extends JPanel {
         /** Fills {@code out[0..count)} with the text of rows {@code first..}; null if missing. */
         void texts(int first, int count, String[] out);
 
+        /**
+         * Like {@link #texts}, for painting: must not wait for a slow disk. Rows not read yet
+         * are null; the source calls {@link LogView#textsArrived()} when they are there.
+         */
+        default void textsNow(int first, int count, String[] out) {
+            texts(first, count, out);
+        }
+
         /** Largest line number shown (sizes the gutter). */
         default long maxLineNumber() {
             int n = rowCount();
@@ -543,6 +551,17 @@ public final class LogView extends JPanel {
     }
 
     // For tests: where to click to reach a column of a plain ASCII line without tabs.
+    int rowCount() {
+        return source.rowCount();
+    }
+
+    /** The text painted on screen line {@code i} (after the last paint), or null. */
+    String textAtForTest(int i) {
+        layoutDirty = true;
+        ensureLayout();
+        return i < shownCount ? shownLines[shownLine[i]].raw : null;
+    }
+
     JComponent canvasForTest() {
         return canvas;
     }
@@ -783,9 +802,14 @@ public final class LogView extends JPanel {
         }
     }
 
-    /** Lays out a single row (reads its text). */
+    /** Lays out a single row (reads its text, without waiting for the disk). */
     private Line lineAt(int row) {
-        String t = textOf(row);
+        String t = null;
+        if (row >= 0 && row < source.rowCount()) {
+            String[] one = new String[1];
+            source.textsNow(row, 1, one);
+            t = one[0];
+        }
         return new Line(row, t == null ? "" : t);
     }
 
@@ -807,7 +831,7 @@ public final class LogView extends JPanel {
         int count = Math.max(0, Math.min(vis, n - topRow));
         String[] texts = new String[count];
         if (count > 0) {
-            source.texts(topRow, count, texts);
+            source.textsNow(topRow, count, texts);
         }
         List<Line> lines = new ArrayList<>(count);
         int[] li = new int[vis];
@@ -831,6 +855,14 @@ public final class LogView extends JPanel {
         shownLine = li;
         shownSeg = sg;
         shownCount = shown;
+    }
+
+    /** Lines that were still being read are there now: paints them. Call on the UI thread. */
+    public void textsArrived() {
+        if (follow) {
+            scrollToBottom(); // wrapped lines may take more rows than thought
+        }
+        changed();
     }
 
     /** Marks the layout stale and repaints. */
