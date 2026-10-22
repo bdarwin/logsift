@@ -86,6 +86,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private boolean wrap = PREFS.getBoolean("wrap", false);
     private final JLabel status = new JLabel(" ");
     private final JLabel statusRight = new JLabel(" ");
+    private final javax.swing.JButton formatButton = new javax.swing.JButton();
+    private javax.swing.JPopupMenu formatPopup;
     private final JButton updateButton = new JButton();
     private String updateUrl = HelpSupport.REPO + "/releases/latest";
     private final JProgressBar progress = new JProgressBar(0, 1000);
@@ -867,6 +869,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    javax.swing.JButton formatButtonForTest() {
+        return formatButton;
+    }
+
+    javax.swing.JPopupMenu formatPopupForTest() {
+        return formatPopup;
+    }
+
     public LogTab currentTab() {
         return tabs.getSelectedComponent() instanceof LogTab t ? t : null;
     }
@@ -1004,6 +1014,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         right.setOpaque(false);
         right.add(statusRight, BorderLayout.CENTER);
         right.add(progress, BorderLayout.EAST);
+        formatButton.putClientProperty("JButton.buttonType", "borderless");
+        formatButton.setFocusable(false);
+        formatButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
+        formatButton.setVisible(false);
+        formatButton.addActionListener(e -> {
+            javax.swing.JPopupMenu popup = new javax.swing.JPopupMenu();
+            fillFormatMenu(popup);
+            formatPopup = popup;
+            popup.show(formatButton, 0, -popup.getPreferredSize().height);
+        });
+        right.add(formatButton, BorderLayout.WEST);
         p.add(status, BorderLayout.CENTER);
         p.add(right, BorderLayout.EAST);
         return p;
@@ -1479,7 +1500,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    private void fillFormatMenu(JMenu menu) {
+    private void fillFormatMenu(JComponent menu) {
+        Runnable separator = () -> menu.add(new javax.swing.JPopupMenu.Separator());
         menu.removeAll();
         LogTab t = currentTab();
         String choice = t == null ? null : t.formatChoice();
@@ -1502,17 +1524,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         radio.accept(logsift.core.Formats.PLAIN, logsift.core.Formats.PLAIN);
         List<logsift.core.CustomFormat> mine = AppState.customFormats();
         if (!mine.isEmpty()) {
-            menu.addSeparator();
+            separator.run();
             for (logsift.core.CustomFormat f : mine) {
                 radio.accept(f.name(), f.name());
             }
         }
-        menu.addSeparator();
+        separator.run();
         for (logsift.core.LogFormat f : logsift.core.LogFormat.presets()) {
             radio.accept(f.name(), f.name());
         }
         radio.accept("JSON lines", "JSON lines");
-        menu.addSeparator();
+        separator.run();
         JMenuItem create = item("New Format from This Log…", null, e -> newFormatFromCurrentLog());
         create.setEnabled(t != null);
         menu.add(create);
@@ -1708,6 +1730,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void refreshStatus() {
         LogTab t = currentTab();
         updateReloadButton(t);
+        String fmt = t == null || tabs.getSelectedComponent() != t ? "" : t.formatName();
+        formatButton.setVisible(!fmt.isEmpty());
+        formatButton.setText("Format: " + fmt + " \u25BE");
+        formatButton.setToolTipText(t != null && t.formatChoice() != null
+                ? "Lines are read as \u201c" + fmt + "\u201d (chosen for this file). Click to change."
+                : "Lines are read as \u201c" + fmt + "\u201d (detected). Click if that is wrong.");
         if (tabs.getSelectedComponent() instanceof CompareTab ct) {
             setTitle(ct.title() + " — Logsift");
             status.setText(" ");

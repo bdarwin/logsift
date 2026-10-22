@@ -470,6 +470,15 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         revalidate();
         tryPendingLine();
         updateFilterStatus();
+        host.tabStatusChanged(this);
+    }
+
+    /** The name of the format lines are read with (for the status bar). */
+    String formatName() {
+        if (logFormat != null) {
+            return logFormat.name();
+        }
+        return detectedGeneration < 0 && formatChoice == null ? "" : logsift.core.Formats.PLAIN;
     }
 
     // ---------------------------------------------------------------- time

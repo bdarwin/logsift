@@ -157,6 +157,124 @@ class CustomFormatTest {
     }
 
     @Test
+    void importsLog4j2ConfigsWithProperties() {
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Configuration status="WARN">
+                  <Properties>
+                    <Property name="LOG_DIR">logs</Property>
+                    <Property name="LOG_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %5p ${sys:PID} --- [%15.15t] %-40.40c{1.} : %m%n%xwEx</Property>
+                    <!-- <Property name="LOG_PATTERN">%m%n</Property> -->
+                  </Properties>
+                  <Appenders>
+                    <Console name="Console" target="SYSTEM_OUT" follow="true">
+                      <PatternLayout pattern="%style{%d{ISO8601}}{black} %highlight{%-5level }[%style{%t}{bright,blue}] %style{%C{1.}}{bright,yellow}: %msg%n%throwable"/>
+                    </Console>
+                    <RollingFile name="RollingFile" fileName="${LOG_DIR}/app.log"
+                                 filePattern="${LOG_DIR}/app-%d{yyyy-MM-dd}-%i.log.gz">
+                      <PatternLayout>
+                        <Pattern>${LOG_PATTERN}</Pattern>
+                      </PatternLayout>
+                    </RollingFile>
+                  </Appenders>
+                </Configuration>""";
+        var all = LayoutImport.convertAll(xml);
+        assertEquals(2, all.size(), all.toString());
+        var console = all.get(0);
+        assertEquals("{time} {level} [{thread}] {class}: {message}", console.pattern());
+        assertEquals("yyyy-MM-dd'T'HH:mm:ss,SSS", console.timePattern());
+        assertTrue(console.console());
+        var file = LayoutImport.convert(xml); // a file appender's, without a sample
+        assertEquals("{time} {level} {pid} --- [{thread}] {logger} : {message}", file.pattern());
+        assertEquals("yyyy-MM-dd HH:mm:ss.SSS", file.timePattern());
+        assertEquals("RollingFile \u201cRollingFile\u201d", file.where());
+        String fileLine = "2026-10-21 10:02:13.250  INFO 4242 --- [           main] c.a.DemoApplication                      : Started";
+        String consoleLine = "2026-10-21T10:02:13,250 INFO  [main] c.a.DemoApplication: Started";
+        LogFormat f = new CustomFormat("f", file.pattern(), file.timePattern(), "").compile();
+        assertEquals("4242", f.value(fileLine, "pid"));
+        assertEquals("Started", f.value(fileLine, "message"));
+        // with a sample, the layout its lines fit
+        assertEquals(console.pattern(), LayoutImport.convert(xml, List.of(consoleLine, consoleLine)).pattern());
+        assertEquals(file.pattern(), LayoutImport.convert(xml, List.of(fileLine)).pattern());
+        LogFormat c = new CustomFormat("c", console.pattern(), console.timePattern(), "").compile();
+        assertTrue(TimeFormat.inColumn(c, List.of(consoleLine), 2026).parse(consoleLine) != TimeFormat.NONE);
+    }
+
+    @Test
+    void importsOtherConfigShapes() {
+        // logback with <property>, a multi-line pattern and a time zone
+        var lb = LayoutImport.convert("""
+                <configuration>
+                  <property name="PATTERN" value="%d{HH:mm:ss.SSS, UTC} [%thread] %-5level %logger{36} - %msg%n"/>
+                  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+                    <encoder><pattern>${PATTERN}</pattern></encoder>
+                  </appender>
+                  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                    <file>app.log</file>
+                    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                      <fileNamePattern>app.%d{yyyy-MM-dd}.log</fileNamePattern>
+                    </rollingPolicy>
+                    <encoder>
+                      <pattern>
+                        %d{yyyy-MM-dd HH:mm:ss.SSS} | %-5level | %X{requestId:-none} |
+                        %logger{36} | %msg%n
+                      </pattern>
+                    </encoder>
+                  </appender>
+                </configuration>""");
+        assertEquals("{time} | {level} | {requestId} | {logger} | {message}", lb.pattern());
+        assertEquals("RollingFileAppender \u201cFILE\u201d", lb.where());
+
+        // log4j2.properties with a property and a continued line
+        var props = LayoutImport.convertAll("""
+                property.pattern = %d{DEFAULT} [%t] %-5level \\
+                    %logger{36} - %msg%n
+                appender.console.type = Console
+                appender.console.name = STDOUT
+                appender.console.layout.type = PatternLayout
+                appender.console.layout.pattern = ${pattern}
+                """);
+        assertEquals(1, props.size());
+        assertEquals("{time} [{thread}] {level} {logger} - {message}", props.get(0).pattern());
+        assertTrue(props.get(0).console());
+
+        // log4j2.yaml
+        var yaml = LayoutImport.convert("""
+                Configuration:
+                  Properties:
+                    Property:
+                      - name: log-pattern
+                        value: "%d{HH:mm:ss.SSS} %-5p %c{1} - %m%n"
+                  Appenders:
+                    Console:
+                      name: Console
+                      PatternLayout:
+                        Pattern: "${log-pattern}"
+                """);
+        assertEquals("{time} {level} {logger} - {message}", yaml.pattern());
+
+        // log4j2.json
+        var json = LayoutImport.convert("""
+                { "configuration": { "appenders": { "Console": { "name": "STDOUT",
+                    "PatternLayout": { "pattern": "%d{HH:mm:ss} %p %c{1} - %m%n" } } } } }""");
+        assertEquals("{time} {level} {logger} - {message}", json.pattern());
+
+        // Spring Boot application.properties that only changes the date
+        var spring = LayoutImport.convert("logging.pattern.dateformat=yyyy-MM-dd HH:mm:ss.SSS\nlogging.level.root=INFO");
+        assertEquals("yyyy-MM-dd HH:mm:ss.SSS", spring.timePattern());
+        assertTrue(spring.pattern().contains("{pid} --- [{thread}] {logger} : {message}"), spring.pattern());
+
+        // Log4j 2 time zones in a second {…}, %notEmpty left out, %equals
+        var tz = LayoutImport.convert("%d{yyyy-MM-dd HH:mm:ss.SSS}{GMT+0} %p %notEmpty{[%marker] }%c - %equals{%X{tid}}{}{-} %m%n");
+        assertEquals("{time} {level} {logger} - {tid} {message}", tz.pattern());
+        assertEquals("yyyy-MM-dd HH:mm:ss.SSS", tz.timePattern());
+
+        // a property that is not in the text
+        assertNull(LayoutImport.convert("<PatternLayout pattern=\"${LOG_PATTERN}\"/>"));
+        assertTrue(LayoutImport.problem("<PatternLayout pattern=\"${LOG_PATTERN}\"/>").contains("LOG_PATTERN"));
+    }
+
+    @Test
     void importsPythonFormats() {
         var r = LayoutImport.convert("format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'");
         assertEquals("{time} - {logger} - {level} - {message}", r.pattern());

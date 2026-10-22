@@ -2201,9 +2201,29 @@ class VisualTest {
         assertTrue(onEdt(() -> tab.entryFormat().startsEntry("21.10.26 10:00:13.000|I|Http|x")));
         assertTrue(!onEdt(() -> tab.entryFormat().startsEntry("    at com.acme.Pay.charge(Pay.java:12)")));
 
+        // the status bar shows the format; clicking it picks another for this file
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.formatButtonForTest().isShowing()
+                        && frame.formatButtonForTest().getText().contains("orders"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "format in the status bar");
+        onEdt(() -> {
+            frame.formatButtonForTest().doClick();
+            return null;
+        });
+        settle();
+        shot("46b-format-from-status-bar");
         // choosing a format by hand is remembered for the file
         onEdt(() -> {
-            tab.setFormatChoice(logsift.core.Formats.PLAIN);
+            for (java.awt.Component c : frame.formatPopupForTest().getComponents()) {
+                if (c instanceof javax.swing.JMenuItem mi && mi.getText().equals(logsift.core.Formats.PLAIN)) {
+                    mi.doClick();
+                }
+            }
+            frame.formatPopupForTest().setVisible(false);
             return null;
         });
         waitFor(() -> {

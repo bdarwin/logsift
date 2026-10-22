@@ -418,14 +418,19 @@ final class LogFormatsPanel extends JPanel {
 
     /** A new format (or the selected one) from a logging layout or config. */
     private boolean createFromLayout(String text, CustomFormat into) {
-        LayoutImport.Result r = LayoutImport.convert(text);
-        if (r == null) {
+        List<LayoutImport.Result> all = LayoutImport.convertAll(text);
+        if (all.isEmpty()) {
             note.setText(" ");
-            javax.swing.JOptionPane.showMessageDialog(this,
-                    "No logging layout found. Paste something like\n"
+            String problem = LayoutImport.problem(text);
+            javax.swing.JOptionPane.showMessageDialog(this, problem != null ? problem
+                            : "No logging layout found. Paste something like\n"
                             + "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n\n"
                             + "or a logback.xml, log4j2.xml, log4j.properties or Python logging format.",
                     "Log Formats", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return false;
+        }
+        LayoutImport.Result r = chooseLayout(all);
+        if (r == null) {
             return false;
         }
         CustomFormat f = new CustomFormat(into != null ? into.name() : uniqueName(defaultName()),
@@ -439,8 +444,54 @@ final class LogFormatsPanel extends JPanel {
             add(f);
             paste.setText("");
         }
-        note.setText("Converted from a " + r.from() + " layout.");
+        note.setText("Converted from a " + r.from() + " layout" + (r.where().isEmpty() ? "" : " (" + r.where() + ")")
+                + (all.size() > 1 ? ", one of " + all.size() + " in the config." : "."));
         return true;
+    }
+
+    /**
+     * The layout to use when a config has several: the one most sample lines fit, else the
+     * user picks (a file appender's first). Null if the user cancels.
+     */
+    private LayoutImport.Result chooseLayout(List<LayoutImport.Result> all) {
+        if (all.size() == 1) {
+            return all.get(0);
+        }
+        List<String> lines = sample.stream().filter(l -> !l.isBlank()).toList();
+        LayoutImport.Result best = all.get(0);
+        int top = -1;
+        int second = -1;
+        for (LayoutImport.Result r : all) {
+            int fit = lines.isEmpty() ? 0 : LayoutImport.fits(r, lines);
+            if (fit > top) {
+                second = top;
+                top = fit;
+                best = r;
+            } else if (fit > second) {
+                second = fit;
+            }
+        }
+        if (top > 0 && top > second) {
+            return best; // the sample decides
+        }
+        String[] options = new String[all.size()];
+        int preferred = 0;
+        for (int i = 0; i < all.size(); i++) {
+            LayoutImport.Result r = all.get(i);
+            options[i] = (r.where().isEmpty() ? "Layout " + (i + 1) : r.where()) + ":   " + r.pattern();
+            if (!r.console() && all.get(preferred).console()) {
+                preferred = i;
+            }
+        }
+        Object pick = javax.swing.JOptionPane.showInputDialog(this,
+                "This config has " + all.size() + " layouts. Which one wrote the log?",
+                "Log Formats", javax.swing.JOptionPane.QUESTION_MESSAGE, null, options, options[preferred]);
+        for (int i = 0; i < options.length; i++) {
+            if (options[i].equals(pick)) {
+                return all.get(i);
+            }
+        }
+        return null;
     }
 
     private String defaultName() {
@@ -495,7 +546,8 @@ final class LogFormatsPanel extends JPanel {
         }
         String fn = file.getFileName().toString().toLowerCase(Locale.ROOT);
         boolean config = fn.matches(".*\\.(xml|properties|ya?ml|json|conf|cfg|ini|toml|py)$")
-                && LayoutImport.convert(text) != null && LayoutImport.looksLikeLayout(text);
+                && LayoutImport.looksLikeLayout(text)
+                && (!LayoutImport.convertAll(text).isEmpty() || LayoutImport.problem(text) != null);
         if (config) {
             CustomFormat sel = list.getSelectedValue();
             boolean editing = sel != null && right.isAncestorOf(pattern) && pattern.isShowing();
@@ -778,8 +830,8 @@ final class LogFormatsPanel extends JPanel {
             if (s.isDataFlavorSupported(DataFlavor.stringFlavor)) {
                 try {
                     String text = (String) s.getTransferable().getTransferData(DataFlavor.stringFlavor);
-                    if (LayoutImport.looksLikeLayout(text) && LayoutImport.convert(text) != null
-                            && list.getSelectedValue() != null) {
+                    if (LayoutImport.looksLikeLayout(text) && list.getSelectedValue() != null
+                            && (!LayoutImport.convertAll(text).isEmpty() || LayoutImport.problem(text) != null)) {
                         return createFromLayout(text, list.getSelectedValue());
                     }
                 } catch (Exception e) {

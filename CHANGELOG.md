@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- **Your own log formats:** drop a log file and Logsift works out its layout and how its times are written, or paste your log4j / logback / Python logging setup (a pattern, or a whole `logback.xml`, `log4j2.xml` or `log4j.properties`). A live preview shows how lines split into columns. Choose a format by hand in View → Log Format.
+- **Your own log formats:** drop a log file and Logsift works out its layout and how its times are written, or paste your log4j / logback / Python logging setup (a pattern, or a whole `logback.xml`, `log4j2.xml` or `log4j.properties`). Properties in the config (`${LOG_PATTERN}`, `${sys:PID}`) are filled in, Log4j 2 `.properties`, `.yaml` and `.json` configs work, and with several appenders the layout your log fits is used. A live preview shows how lines split into columns.
+- **Format in the status bar:** shows how the current log is read. Click it to choose another format for that file if the detected one is wrong.
 - **Tree of loggers:** loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
 - **Settings** (Ctrl+, / ⌘,): font, tab width, encoding for text that isn't UTF-8, how often files are checked for changes, reopening the last session, and more.
 - Levels written as `E`, `ERR`, `error` or `SEVERE` count as errors in your own formats (colors, error marks, F8, level chips).
