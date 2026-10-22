@@ -154,7 +154,7 @@ class SshJvmsTest {
             assertTrue(all.size() > 1, "several views: " + all.stream().map(Profile::title).toList());
         }
         // Flight Recorder: recorded on the server, copied back over SFTP
-        ProfilerTest.checkHotLoop(t.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.CPU, 2), null,
+        ProfilerTest.checkFixtureSampled(t.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.CPU, 2), null,
                 () -> false).get(0));
         // the heap: a histogram, and a heap dump copied back
         assertTrue(HeapHistogram.parse(t.diagnostic("GC.class_histogram"), 0).rows().size() > 100);

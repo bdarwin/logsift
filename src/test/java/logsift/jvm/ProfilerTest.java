@@ -68,6 +68,15 @@ class ProfilerTest {
                 + " of " + p.total() + "; " + p.hottest(5));
     }
 
+    /**
+     * For Flight Recorder: the fixture's own code is sampled. (It samples only threads running
+     * Java code; the busy loop is mostly in native code, so it may be missed altogether.)
+     */
+    static void checkFixtureSampled(Profile p) {
+        assertTrue(p.total() > 0, "samples: " + p.warnings());
+        assertTrue(fixtureWeight(p.root()) > 0, "the fixture's code: " + p.hottest(5));
+    }
+
     /** The weight under the fixture's own frames (outermost ones). */
     private static long fixtureWeight(Profile.Node n) {
         long sum = 0;
@@ -253,7 +262,7 @@ class ProfilerTest {
         assertTrue(target.engines().contains(Profiler.Engine.JFR));
         List<Profile> views = run(Profiler.Engine.JFR, Profiler.Mode.CPU, 2);
         assertTrue(views.get(0).title().startsWith("CPU of"));
-        checkHotLoop(views.get(0));
+        checkFixtureSampled(views.get(0));
         assertTrue(views.stream().anyMatch(v -> v.title().startsWith("Allocations") && v.total() > 0),
                 "the same recording has allocations too: " + views.stream().map(Profile::title).toList());
         // a recording opened from a file: every kind it has
@@ -263,7 +272,7 @@ class ProfilerTest {
         Thread.sleep(1500);
         session.diagnostic("JFR.stop", "name=" + name, "filename=" + jfr);
         List<Profile> opened = Profiler.open(jfr);
-        checkHotLoop(opened.get(0));
+        checkFixtureSampled(opened.get(0));
         assertTrue(opened.size() > 1, "several views: " + opened.stream().map(Profile::title).toList());
     }
 
