@@ -416,7 +416,10 @@ final class LogFormatsPanel extends JPanel {
         }
     }
 
-    /** A new format (or the selected one) from a logging layout or config. */
+    /**
+     * New formats from a logging layout or config: one for each layout in it (a config often
+     * has several appenders). With {@code into}, the best one replaces that format.
+     */
     private boolean createFromLayout(String text, CustomFormat into) {
         List<LayoutImport.Result> all = LayoutImport.convertAll(text);
         if (all.isEmpty()) {
@@ -425,73 +428,90 @@ final class LogFormatsPanel extends JPanel {
             javax.swing.JOptionPane.showMessageDialog(this, problem != null ? problem
                             : "No logging layout found. Paste something like\n"
                             + "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n\n"
-                            + "or a logback.xml, log4j2.xml, log4j.properties or Python logging format.",
+                            + "or a logback.xml, log4j2.xml, log4j.properties, logging.properties or Python logging config.",
                     "Log Formats", javax.swing.JOptionPane.INFORMATION_MESSAGE);
             return false;
         }
-        LayoutImport.Result r = chooseLayout(all);
-        if (r == null) {
-            return false;
-        }
-        CustomFormat f = new CustomFormat(into != null ? into.name() : uniqueName(defaultName()),
-                r.pattern(), r.timePattern(), into != null ? into.files() : "");
-        if (into != null) {
-            int i = list.getSelectedIndex();
-            model.set(i, f);
+        List<LayoutImport.Result> ordered = order(all);
+        List<String> names = new ArrayList<>();
+        int skipped = 0;
+        int firstIndex = -1;
+        for (int k = 0; k < ordered.size(); k++) {
+            LayoutImport.Result r = ordered.get(k);
+            if (k == 0 && into != null) {
+                CustomFormat f = new CustomFormat(into.name(), r.pattern(), r.timePattern(), into.files());
+                int i = list.getSelectedIndex();
+                model.set(i, f);
+                changed = true;
+                names.add(f.name());
+                firstIndex = i;
+                continue;
+            }
+            if (exists(r)) {
+                skipped++;
+                continue;
+            }
+            String name = uniqueName(ordered.size() == 1 ? defaultName() : nameFor(r));
+            model.addElement(new CustomFormat(name, r.pattern(), r.timePattern(), ""));
             changed = true;
-            showSelected();
-        } else {
-            add(f);
+            names.add(name);
+            if (firstIndex < 0) {
+                firstIndex = model.size() - 1;
+            }
+        }
+        if (into == null) {
             paste.setText("");
         }
-        note.setText("Converted from a " + r.from() + " layout" + (r.where().isEmpty() ? "" : " (" + r.where() + ")")
-                + (all.size() > 1 ? ", one of " + all.size() + " in the config." : "."));
+        if (firstIndex >= 0) {
+            list.setSelectedIndex(firstIndex);
+            list.ensureIndexIsVisible(firstIndex);
+            showSelected();
+        }
+        LayoutImport.Result r = ordered.get(0);
+        if (all.size() == 1) {
+            note.setText("Converted from a " + r.from() + " layout" + (r.where().isEmpty() ? "" : " (" + r.where() + ")") + ".");
+        } else {
+            note.setText("<html>" + (names.isEmpty() ? "No new formats" : "Created " + names.size() + " format"
+                    + (names.size() == 1 ? "" : "s") + ": " + esc(String.join(", ", names)))
+                    + (skipped > 0 ? " (" + skipped + " already here)" : "") + ". Each log uses the one that fits it; "
+                    + "change it with the Format button in the status bar.</html>");
+        }
         return true;
     }
 
-    /**
-     * The layout to use when a config has several: the one most sample lines fit, else the
-     * user picks (a file appender's first). Null if the user cancels.
-     */
-    private LayoutImport.Result chooseLayout(List<LayoutImport.Result> all) {
-        if (all.size() == 1) {
-            return all.get(0);
-        }
+    /** The layouts the sample fits best first, then file appenders' before the console's. */
+    private List<LayoutImport.Result> order(List<LayoutImport.Result> all) {
         List<String> lines = sample.stream().filter(l -> !l.isBlank()).toList();
-        LayoutImport.Result best = all.get(0);
-        int top = -1;
-        int second = -1;
+        java.util.Map<LayoutImport.Result, Integer> fit = new java.util.IdentityHashMap<>();
         for (LayoutImport.Result r : all) {
-            int fit = lines.isEmpty() ? 0 : LayoutImport.fits(r, lines);
-            if (fit > top) {
-                second = top;
-                top = fit;
-                best = r;
-            } else if (fit > second) {
-                second = fit;
+            fit.put(r, lines.isEmpty() ? 0 : LayoutImport.fits(r, lines));
+        }
+        List<LayoutImport.Result> out = new ArrayList<>(all);
+        out.sort(java.util.Comparator.<LayoutImport.Result>comparingInt(r -> -fit.get(r))
+                .thenComparing(LayoutImport.Result::console));
+        return out;
+    }
+
+    private boolean exists(LayoutImport.Result r) {
+        for (int i = 0; i < model.size(); i++) {
+            CustomFormat f = model.get(i);
+            if (f.pattern().equals(r.pattern()) && f.timePattern().equals(r.timePattern())) {
+                return true;
             }
         }
-        if (top > 0 && top > second) {
-            return best; // the sample decides
-        }
-        String[] options = new String[all.size()];
-        int preferred = 0;
-        for (int i = 0; i < all.size(); i++) {
-            LayoutImport.Result r = all.get(i);
-            options[i] = (r.where().isEmpty() ? "Layout " + (i + 1) : r.where()) + ":   " + r.pattern();
-            if (!r.console() && all.get(preferred).console()) {
-                preferred = i;
-            }
-        }
-        Object pick = javax.swing.JOptionPane.showInputDialog(this,
-                "This config has " + all.size() + " layouts. Which one wrote the log?",
-                "Log Formats", javax.swing.JOptionPane.QUESTION_MESSAGE, null, options, options[preferred]);
-        for (int i = 0; i < options.length; i++) {
-            if (options[i].equals(pick)) {
-                return all.get(i);
-            }
-        }
-        return null;
+        return false;
+    }
+
+    /** "RollingFile “Audit”" → "Audit (Log4j 2)"; without a name, the kind of layout. */
+    private String nameFor(LayoutImport.Result r) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\u201c(.+?)\u201d").matcher(r.where());
+        String kind = r.from().replace(" console", "");
+        String base = m.find() ? m.group(1) : r.where().isEmpty() ? defaultName() : r.where();
+        return base + " (" + kind + ")";
+    }
+
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;");
     }
 
     private String defaultName() {

@@ -96,6 +96,67 @@ public final class EntryFormat {
         return best;
     }
 
+    /** The lines of one entry: {@code first..last} (inclusive) and their text. */
+    public record Entry(long first, long last, java.util.List<String> lines) {}
+
+    private static final java.util.regex.Pattern TRACE_LINE = java.util.regex.Pattern.compile(
+            "^(\\s|at |Caused by:|Suppressed:|\\.\\.\\. \\d+ (more|common frames omitted)|[a-zA-Z_$][\\w$]*(\\.[\\w$]+)+(Exception|Error|Throwable)(:|$)).*",
+            java.util.regex.Pattern.DOTALL);
+
+    /**
+     * The entry that {@code line} belongs to: the line that starts it and the lines under it
+     * (a stack trace, a wrapped message). Without a format, lines that look like part of a stack
+     * trace (indented, {@code at …}, {@code Caused by: …}) continue the entry. At most
+     * {@code maxLines} lines are looked at either way.
+     */
+    public static Entry around(LogDocument doc, EntryFormat format, long line, int maxLines) {
+        long n = doc.lineCount();
+        if (line < 0 || line >= n) {
+            return new Entry(line, line, java.util.List.of());
+        }
+        java.util.function.Predicate<String> starts = format == null
+                ? s -> !TRACE_LINE.matcher(s).matches()
+                : s -> !s.isEmpty() && format.startsEntry(s);
+        // up to the line that starts the entry
+        int back = (int) Math.min(line, maxLines);
+        String[] up = new String[back + 1];
+        doc.readLines(line - back, back + 1, up);
+        int i = back;
+        while (i > 0 && up[i] != null && !starts.test(up[i])) {
+            i--;
+        }
+        long first = line - back + i;
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (int k = i; k <= back; k++) {
+            out.add(up[k] == null ? "" : up[k]);
+        }
+        // down while lines continue it
+        long last = line;
+        long chars = 0;
+        int chunk = 256;
+        outer:
+        while (last + 1 < n && out.size() < 2 * maxLines) {
+            int k = (int) Math.min(chunk, n - last - 1);
+            String[] buf = new String[k];
+            doc.readLines(last + 1, k, buf);
+            for (String s : buf) {
+                if (s == null || starts.test(s) || out.size() >= 2 * maxLines || chars > 4_000_000) {
+                    break outer;
+                }
+                out.add(s);
+                chars += s.length();
+                last++;
+            }
+            chunk = Math.min(4096, chunk * 2);
+        }
+        // blank lines at the end belong to nobody
+        while (last > line && out.get(out.size() - 1).isBlank()) {
+            out.remove(out.size() - 1);
+            last--;
+        }
+        return new Entry(first, last, out);
+    }
+
     /** Whether this line starts a new entry. */
     public boolean startsEntry(String line) {
         byte[] b = line.getBytes(StandardCharsets.UTF_8);

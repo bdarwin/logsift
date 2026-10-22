@@ -37,6 +37,75 @@ public final class Json {
         }
     }
 
+    /** A JSON object or array found inside text: {@code text[start, end)}. */
+    public record Found(int start, int end, Object value) {}
+
+    /**
+     * The JSON objects and arrays written in {@code text} (for example after a log line's time
+     * and level), in order; each at least {@code {}}-sized and not inside another.
+     */
+    public static List<Found> findAll(String text) {
+        List<Found> out = new ArrayList<>();
+        if (text == null) {
+            return out;
+        }
+        int pos = 0;
+        int tries = 0;
+        while (pos < text.length() && tries < 2000) {
+            int o = indexOfOpen(text, pos);
+            if (o < 0) {
+                break;
+            }
+            tries++;
+            Json p = new Json(text);
+            p.i = o;
+            try {
+                Object v = p.value();
+                boolean worthIt = v instanceof Map<?, ?> m ? !m.isEmpty() : v instanceof List<?> l && !l.isEmpty()
+                        && (l.get(0) instanceof Map || l.get(0) instanceof List || l.get(0) instanceof String
+                        || l.size() > 1);
+                if (worthIt) {
+                    out.add(new Found(o, p.i, v));
+                    pos = p.i;
+                    continue;
+                }
+            } catch (RuntimeException e) {
+                // not JSON from here: try the next bracket
+            }
+            pos = o + 1;
+        }
+        return out;
+    }
+
+    /** The JSON value that is all of {@code text} (an object, array, string, …), or {@code fail}. */
+    public static Object parseValue(String text, Object fail) {
+        if (text == null) {
+            return fail;
+        }
+        String t = text.strip();
+        if (t.isEmpty()) {
+            return fail;
+        }
+        Json p = new Json(t);
+        try {
+            Object v = p.value();
+            p.space();
+            return p.i == t.length() ? v : fail;
+        } catch (RuntimeException e) {
+            return fail;
+        }
+    }
+
+    private static int indexOfOpen(String s, int from) {
+        for (int i = from; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '{' || c == '[') {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /** A number, kept as written. */
     public record Num(String text) {
         @Override

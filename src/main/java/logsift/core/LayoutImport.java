@@ -84,7 +84,8 @@ public final class LayoutImport {
         }
         Config c = new Config(text);
         for (Found f : c.found) {
-            Result r = f.layout.contains("%(") ? python(f.layout) : java(f.layout, c.log4j2);
+            Result r = f.jul ? jul(f.layout)
+                    : f.layout.contains("%(") ? python(f.layout, f.dateFormat) : java(f.layout, c.log4j2);
             if (r == null) {
                 continue;
             }
@@ -137,15 +138,29 @@ public final class LayoutImport {
     // YAML pattern: "…" (and Spring Boot's logging: pattern: console: …)
     private static final Pattern YAML = Pattern.compile(
             "(?im)^[ \\t]*-?[ \\t]*((?:default)?pattern|console|file)[ \\t]*:[ \\t]*(['\"]?)(.*(?:%|\\$\\{).*?)\\2[ \\t]*$");
+    // Python format= / "format": / fmt= (in logging.conf, a dictConfig, basicConfig(…), Formatter(…))
     private static final Pattern PYTHON = Pattern.compile(
-            "(?m)format\\s*[=:]\\s*['\"]?([^'\"\\r\\n]*%\\(.*?)['\"]?\\s*$");
+            "(?m)\\b(?:format|fmt)['\"]?\\s*[=:]\\s*(?:'([^'\\r\\n]*%\\([^'\\r\\n]*)'|\"([^\"\\r\\n]*%\\([^\"\\r\\n]*)\""
+                    + "|([^'\"\\r\\n]*%\\([^\\r\\n]*?)[ \\t]*$)");
+    private static final Pattern DATEFMT = Pattern.compile(
+            "(?m)\\bdatefmt['\"]?\\s*[=:]\\s*(?:'([^'\\r\\n]*)'|\"([^\"\\r\\n]*)\"|([^'\"\\r\\n,)]+?)[ \\t]*$)");
+    // log4j 1.x XML: <param name="ConversionPattern" value="…"/>
+    private static final Pattern PARAM = Pattern.compile(
+            "(?is)<param\\b([^>]*\\bname\\s*=\\s*[\"']ConversionPattern[\"'][^>]*)/?>");
+    // java.util.logging: java.util.logging.SimpleFormatter.format=… (also as -D…=)
+    private static final Pattern JUL = Pattern.compile(
+            "(?m)((?:java\\.util\\.logging\\.)?SimpleFormatter\\.format)[ \\t]*[=:][ \\t]*(.+?)[ \\t]*$");
 
     private static final String SPRING_DEFAULT = "%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd'T'HH:mm:ss.SSSXXX}}){faint} "
             + "%clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} "
             + "${LOG_CORRELATION_PATTERN:-}%clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n"
             + "${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}";
 
-    private record Found(String layout, String where, boolean console, int at) {}
+    private record Found(String layout, String where, boolean console, int at, String dateFormat, boolean jul) {
+        Found(String layout, String where, boolean console, int at) {
+            this(layout, where, console, at, null, false);
+        }
+    }
 
     /** The layouts in a config, with its properties filled in. */
     private static final class Config {
@@ -173,6 +188,21 @@ public final class LayoutImport {
             while (m.find()) {
                 add(xmlUnescape(m.group(1) != null ? m.group(1) : m.group(2)), m.start());
             }
+            m = PARAM.matcher(t);
+            while (m.find()) {
+                String v = attr(m.group(1), "value");
+                if (v != null) {
+                    add(xmlUnescape(v), m.start());
+                }
+            }
+            m = JUL.matcher(t);
+            while (m.find()) {
+                String v = m.group(2).strip();
+                if (v.length() > 1 && (v.startsWith("\"") && v.endsWith("\"") || v.startsWith("'") && v.endsWith("'"))) {
+                    v = v.substring(1, v.length() - 1);
+                }
+                found.add(new Found(v.replace("\\n", "%n"), "java.util.logging", false, m.start(), null, true));
+            }
             if (!xml) {
                 m = KEY.matcher(t);
                 while (m.find()) {
@@ -193,10 +223,7 @@ public final class LayoutImport {
                     add(SPRING_DEFAULT, 0, "Spring Boot's default");
                 }
                 if (found.isEmpty()) {
-                    m = PYTHON.matcher(t);
-                    if (m.find()) {
-                        found.add(new Found(m.group(1), "", false, m.start()));
-                    }
+                    python(t);
                 }
             }
             if (found.isEmpty()) {
@@ -205,11 +232,65 @@ public final class LayoutImport {
             found.sort(java.util.Comparator.comparingInt(Found::at));
         }
 
+        /** Every Python format in the text, each with the datefmt next to it. */
+        private void python(String t) {
+            Matcher m = PYTHON.matcher(t);
+            List<int[]> spans = new ArrayList<>();
+            List<String> formats = new ArrayList<>();
+            List<String> names = new ArrayList<>();
+            while (m.find()) {
+                String v = m.group(1) != null ? m.group(1) : m.group(2) != null ? m.group(2) : m.group(3);
+                spans.add(new int[] {m.start(), m.end()});
+                formats.add(v.strip());
+                names.add(pythonName(t, m.start()));
+            }
+            for (int i = 0; i < spans.size(); i++) {
+                int from = i == 0 ? 0 : spans.get(i - 1)[1];
+                int to = i + 1 < spans.size() ? spans.get(i + 1)[0] : t.length();
+                String after = t.substring(spans.get(i)[1], to);
+                String before = t.substring(from, spans.get(i)[0]);
+                Matcher d = DATEFMT.matcher(after);
+                String datefmt = null;
+                if (d.find() && !after.substring(0, d.start()).matches("(?s).*\\R\\s*\\[.*")) {
+                    datefmt = d.group(1) != null ? d.group(1) : d.group(2) != null ? d.group(2) : d.group(3);
+                } else if (t.contains("[formatter_")) {
+                    // logging.conf: a datefmt written above the format, in the same section
+                    int cut = before.lastIndexOf("\n[");
+                    Matcher b = DATEFMT.matcher(cut < 0 ? before : before.substring(cut));
+                    while (b.find()) {
+                        datefmt = b.group(1) != null ? b.group(1) : b.group(2) != null ? b.group(2) : b.group(3);
+                    }
+                }
+                found.add(new Found(formats.get(i), names.get(i), false, spans.get(i)[0],
+                        datefmt == null ? null : datefmt.strip(), false));
+            }
+        }
+
+        /** The formatter's name above a Python format ([formatter_x], or a key ending with ":"), or "". */
+        private static String pythonName(String t, int at) {
+            String before = t.substring(0, at);
+            String name = "";
+            int where = -1;
+            Matcher s = Pattern.compile("(?m)^\\s*\\[formatter_([\\w.-]+)]").matcher(before);
+            while (s.find()) {
+                name = s.group(1);
+                where = s.start();
+            }
+            Matcher y = Pattern.compile("(?m)^[ \\t]*['\"]?([\\w.-]+)['\"]?[ \\t]*:[ \\t]*\\{?[ \\t]*$").matcher(before);
+            while (y.find()) {
+                if (y.start() > where && !y.group(1).matches("(?i)formatters|handlers|loggers|root|version")) {
+                    name = y.group(1);
+                    where = y.start();
+                }
+            }
+            return name.isEmpty() ? "" : "formatter \u201c" + name + "\u201d";
+        }
+
         private void bare(String t) {
             String s = t.strip();
             if (s.contains("\n")) {
                 for (String line : s.split("\\R")) {
-                    if (line.contains("%") || line.contains("${")) {
+                    if ((line.contains("%") || line.contains("${")) && !line.matches("(?i).*Handler\\.pattern\\s*=.*")) {
                         add(line.strip(), 0, "");
                         return;
                     }
@@ -245,7 +326,7 @@ public final class LayoutImport {
             String console = null;
             while (m.find() && m.start() < at) {
                 String tag = m.group(1);
-                if (tag.matches("(?i)property|variable|springProperty|logger|root|asyncLogger|asyncRoot|Script|KeyValuePair")) {
+                if (tag.matches("(?i)property|variable|springProperty|logger|root|asyncLogger|asyncRoot|Script|KeyValuePair|param")) {
                     continue;
                 }
                 String attrs = m.group(2) + m.group(4);
@@ -642,12 +723,12 @@ public final class LayoutImport {
             Map.entry("levelno", "levelno"), Map.entry("relativeCreated", "elapsed"),
             Map.entry("created", "created"), Map.entry("msecs", "msecs"));
 
-    private static Result python(String layout) {
+    private static Result python(String layout, String datefmt) {
         StringBuilder out = new StringBuilder();
         Set<String> used = new HashSet<>();
         Matcher m = Pattern.compile("%\\((\\w+)\\)[-#0 +]*\\d*(?:\\.\\d+)?[a-zA-Z]|%%").matcher(layout);
         int last = 0;
-        boolean ms = false;
+        String msSep = null; // "%(asctime)s.%(msecs)03d": the separator before the milliseconds
         while (m.find()) {
             out.append(layout, last, m.start());
             last = m.end();
@@ -656,20 +737,211 @@ public final class LayoutImport {
                 continue;
             }
             String word = m.group(1);
-            if (word.equals("msecs") && used.contains("time")) {
-                ms = true; // "%(asctime)s.%(msecs)03d"
-                int dot = out.length() - 1;
-                if (dot >= 0 && (out.charAt(dot) == '.' || out.charAt(dot) == ',')) {
-                    out.setLength(dot);
-                }
+            if (word.equals("msecs") && out.toString().endsWith("{time}")) {
+                msSep = "";
+                continue;
+            }
+            if (word.equals("msecs") && used.contains("time") && out.length() > 6
+                    && out.substring(0, out.length() - 1).endsWith("{time}")
+                    && ".,:".indexOf(out.charAt(out.length() - 1)) >= 0) {
+                msSep = String.valueOf(out.charAt(out.length() - 1));
+                out.setLength(out.length() - 1);
                 continue;
             }
             out.append(placeholder(PY_WORDS.getOrDefault(word, clean(word)), used));
         }
         out.append(layout.substring(last));
         String pattern = tidy(out.toString());
-        String time = used.contains("time") ? (ms ? "yyyy-MM-dd HH:mm:ss" : "yyyy-MM-dd HH:mm:ss,SSS") : "";
-        return pattern.contains("{") ? new Result(pattern, ms ? "" : time, "Python logging") : null;
+        String time = "";
+        if (used.contains("time")) {
+            String base = datefmt == null || datefmt.isBlank() ? null : strftime(datefmt);
+            if (base == null) {
+                time = msSep != null ? "yyyy-MM-dd HH:mm:ss" + msSep + "SSS" : "yyyy-MM-dd HH:mm:ss,SSS";
+            } else {
+                time = msSep != null ? base + msSep + "SSS" : base;
+            }
+        }
+        return pattern.contains("{") ? new Result(pattern, time, "Python logging") : null;
+    }
+
+    /** A Python strftime date format as a Java one ("%Y-%m-%d %H:%M:%S" → "yyyy-MM-dd HH:mm:ss"), or null. */
+    static String strftime(String f) {
+        StringBuilder out = new StringBuilder();
+        StringBuilder lit = new StringBuilder();
+        for (int i = 0; i < f.length(); i++) {
+            char c = f.charAt(i);
+            if (c != '%' || i + 1 >= f.length()) {
+                lit.append(c);
+                continue;
+            }
+            char d = f.charAt(++i);
+            if (d == '-' && i + 1 < f.length()) { // %-d: no padding
+                d = f.charAt(++i);
+            }
+            String j = switch (d) {
+                case 'Y' -> "yyyy";
+                case 'y' -> "yy";
+                case 'm' -> "MM";
+                case 'd' -> "dd";
+                case 'e' -> "d";
+                case 'H' -> "HH";
+                case 'I' -> "hh";
+                case 'M' -> "mm";
+                case 'S' -> "ss";
+                case 'f' -> "SSSSSS";
+                case 'p' -> "a";
+                case 'b', 'h' -> "MMM";
+                case 'B' -> "MMMM";
+                case 'a' -> "EEE";
+                case 'A' -> "EEEE";
+                case 'j' -> "DDD";
+                case 'z' -> "Z";
+                case 'Z' -> "z";
+                case 'F' -> "yyyy-MM-dd";
+                case 'T' -> "HH:mm:ss";
+                case 'R' -> "HH:mm";
+                case '%' -> null;
+                default -> "?";
+            };
+            if (j == null) {
+                lit.append('%');
+                continue;
+            }
+            if (j.equals("?")) {
+                return null; // something we can't write as a Java date
+            }
+            out.append(quote(lit.toString())).append(j);
+            lit.setLength(0);
+        }
+        out.append(quote(lit.toString()));
+        return out.isEmpty() ? null : out.toString();
+    }
+
+    /** Literal text inside a Java date pattern: letters and brackets go in quotes. */
+    private static String quote(String lit) {
+        if (lit.isEmpty() || lit.matches("[ \\-:/.,]*")) {
+            return lit;
+        }
+        return "'" + lit.replace("'", "''") + "'";
+    }
+
+    // ---------------------------------------------------------------- java.util.logging
+
+    /**
+     * A java.util.logging SimpleFormatter format: {@code %1$tY-%1$tm-%1$td %1$tH:%1$tM:%1$tS
+     * %4$s %3$s %5$s%6$s%n} (1 the date, 2 the caller, 3 the logger, 4 the level, 5 the
+     * message, 6 the exception).
+     */
+    static Result jul(String format) {
+        Matcher m = Pattern.compile("%(?:(\\d+)\\$|(<))?[-#+ 0,(]*\\d*(?:\\.\\d+)?([tT])?([a-zA-Z%])").matcher(format);
+        StringBuilder out = new StringBuilder();
+        StringBuilder time = new StringBuilder();
+        Set<String> used = new HashSet<>();
+        int last = 0;
+        int next = 1; // arguments without an index are taken in order
+        int prevArg = 1;
+        boolean inTime = false; // the last thing written was the time column (literals may follow)
+        StringBuilder pendingLit = new StringBuilder();
+        while (m.find()) {
+            String lit = format.substring(last, m.start());
+            last = m.end();
+            char conv = m.group(4).charAt(0);
+            if (conv == 'n') {
+                pendingLit.append(lit);
+                flush(out, time, pendingLit, inTime);
+                inTime = false;
+                break; // one line is enough: the rest goes on the next lines
+            }
+            if (conv == '%') {
+                pendingLit.append(lit).append('%');
+                continue;
+            }
+            int arg = m.group(1) != null ? Integer.parseInt(m.group(1)) : m.group(2) != null ? prevArg : next++;
+            prevArg = arg;
+            pendingLit.append(lit);
+            if (m.group(3) != null) { // a date part
+                String j = julDate(conv);
+                if (j == null) {
+                    return null;
+                }
+                if (inTime) {
+                    time.append(quote(pendingLit.toString()));
+                } else {
+                    out.append(pendingLit);
+                    out.append(placeholder("time", used));
+                    if (!time.isEmpty()) {
+                        return null; // two separate dates: not something we can split
+                    }
+                }
+                pendingLit.setLength(0);
+                time.append(j);
+                inTime = true;
+                continue;
+            }
+            flush(out, time, pendingLit, inTime);
+            inTime = false;
+            String col = switch (arg) {
+                case 1 -> "time";
+                case 2 -> "source";
+                case 3 -> "logger";
+                case 4 -> "level";
+                case 5 -> "message";
+                case 6 -> null; // the exception: on the next lines
+                default -> "field" + arg;
+            };
+            if (col == null) {
+                continue;
+            }
+            if (arg == 1) {
+                time.append("EEE MMM dd HH:mm:ss zzz yyyy");
+            }
+            out.append(placeholder(col, used));
+        }
+        if (last < format.length() && !format.substring(last).isEmpty() && !format.contains("%n")) {
+            pendingLit.append(format.substring(last));
+        }
+        flush(out, time, pendingLit, inTime);
+        String pattern = tidy(out.toString());
+        return pattern.contains("{") ? new Result(pattern, time.toString(), "java.util.logging") : null;
+    }
+
+    private static void flush(StringBuilder out, StringBuilder time, StringBuilder lit, boolean inTime) {
+        out.append(lit);
+        lit.setLength(0);
+    }
+
+    private static String julDate(char c) {
+        return switch (c) {
+            case 'Y' -> "yyyy";
+            case 'y' -> "yy";
+            case 'C' -> "yy";
+            case 'm' -> "MM";
+            case 'd' -> "dd";
+            case 'e' -> "d";
+            case 'H' -> "HH";
+            case 'k' -> "H";
+            case 'I' -> "hh";
+            case 'l' -> "h";
+            case 'M' -> "mm";
+            case 'S' -> "ss";
+            case 'L' -> "SSS";
+            case 'N' -> "SSSSSSSSS";
+            case 'p' -> "a";
+            case 'z' -> "Z";
+            case 'Z' -> "z";
+            case 'B' -> "MMMM";
+            case 'b', 'h' -> "MMM";
+            case 'A' -> "EEEE";
+            case 'a' -> "EEE";
+            case 'j' -> "DDD";
+            case 'F' -> "yyyy-MM-dd";
+            case 'T' -> "HH:mm:ss";
+            case 'R' -> "HH:mm";
+            case 'r' -> "hh:mm:ss a";
+            case 'D' -> "MM/dd/yy";
+            case 'c' -> "EEE MMM dd HH:mm:ss zzz yyyy";
+            default -> null;
+        };
     }
 
     // ---------------------------------------------------------------- helpers

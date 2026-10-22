@@ -96,6 +96,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final JProgressBar progress = new JProgressBar(0, 1000);
     private float fontSize = PREFS.getFloat("fontSize", 13f);
 
+    /** Ends the program when the window is closed (set by the app, not by tests). */
+    static volatile boolean exitOnClose;
+
     public MainFrame() {
         super("Logsift");
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
@@ -150,6 +153,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 saveSession();
                 for (LogTab t : allTabs()) {
                     t.close();
+                }
+                if (exitOnClose) {
+                    // Timers and background work would keep Java running without a window
+                    // (and keep the files in use, so an uninstall can't remove them).
+                    try {
+                        PREFS.flush();
+                    } catch (java.util.prefs.BackingStoreException ex) {
+                        // saved on exit anyway, where possible
+                    }
+                    System.exit(0);
                 }
             }
         });

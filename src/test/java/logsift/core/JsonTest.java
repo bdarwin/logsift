@@ -52,4 +52,16 @@ class JsonTest {
         TimeFormat ef = TimeFormat.detect(epoch, 2026);
         assertEquals(1729500000123L, ef.parse(epoch.get(0)), ef.name());
     }
+
+    @Test
+    void findsJsonInsideText() {
+        String line = "10:02:13 INFO [main] sent {\"id\": 7, \"items\": [1, 2]} to [orders] then [\"a\",\"b\"] done";
+        List<Json.Found> f = Json.findAll(line);
+        assertEquals(2, f.size(), f.toString());
+        assertEquals("{\"id\": 7, \"items\": [1, 2]}", line.substring(f.get(0).start(), f.get(0).end()));
+        assertEquals(List.of("a", "b"), f.get(1).value());
+        assertTrue(Json.findAll("[INFO] [main] nothing {here").isEmpty());
+        assertEquals(Map.of("a", new Json.Num("1")), Json.parseValue(" {\"a\":1} ", null));
+        assertNull(Json.parseValue("{\"a\":1} x", null));
+    }
 }

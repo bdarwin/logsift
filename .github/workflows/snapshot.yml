@@ -116,6 +116,10 @@ jobs:
               python packaging/windows/add-open-with.py msi-temp/config/main.wxs msi-res/main.wxs
               jpackage --type msi --dest dist --resource-dir msi-res "${MSI[@]}" "${COMMON[@]}"
               mv dist/Logsift-*.msi "dist/$NAME.msi"
+              if [ "${{ matrix.target }}" = windows-x64 ]; then
+                # a second build of the same version, to check that it installs over the first
+                jpackage --type msi --dest msi-again --resource-dir msi-res "${MSI[@]}" "${COMMON[@]}"
+              fi
               ;;
             linux-*)
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.png "${COMMON[@]}"
@@ -151,8 +155,27 @@ jobs:
           $default = (Get-ItemProperty -LiteralPath $log -ErrorAction SilentlyContinue).'(default)'
           if ($default -and $default -match 'Logsift') { throw ".log files were taken over: $default" }
           if (-not (Test-Path (Join-Path $exe.Directory.FullName 'app\splash.png'))) { throw "no splash screen" }
-          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
+          function Entries { @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
+              Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -eq 'Logsift' }).Count }
+          # a newer build of the same version installs over it, closing the running app
+          Start-Process $exe.FullName
+          Start-Sleep -Seconds 10
+          if (-not (Get-Process Logsift -ErrorAction SilentlyContinue)) { throw "Logsift did not start" }
+          $again = Get-ChildItem msi-again/*.msi | Select-Object -First 1
+          $p = Start-Process msiexec -ArgumentList "/i `"$($again.FullName)`" /qn /l*v upgrade.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content upgrade.log -Tail 60; throw "installing a newer build failed: $($p.ExitCode)" }
+          if ((Entries) -ne 1) { throw "expected one Logsift in Installed apps, found $(Entries)" }
+          Start-Sleep -Seconds 2
+          if (Get-Process Logsift -ErrorAction SilentlyContinue) { throw "Logsift still running after the upgrade" }
+          Write-Host "Newer build installed over the old one; the running app was closed"
+          # uninstalling closes it too
+          Start-Process $exe.FullName
+          Start-Sleep -Seconds 10
+          $p = Start-Process msiexec -ArgumentList "/x `"$($again.FullName)`" /qn /l*v uninstall.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 60; throw "uninstall failed: $($p.ExitCode)" }
+          Start-Sleep -Seconds 2
+          if (Get-Process Logsift -ErrorAction SilentlyContinue) { throw "Logsift still running after uninstall" }
+          if ((Entries) -ne 0) { throw "Logsift still in Installed apps after uninstall" }
           if (Test-Path $exe.FullName) { throw "still there after uninstall" }
           if (Test-Path -LiteralPath 'HKCU:\Software\Classes\*\shell\Logsift') { throw "Open with Logsift left behind after uninstall" }
 

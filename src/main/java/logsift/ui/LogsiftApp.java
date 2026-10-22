@@ -77,6 +77,7 @@ public final class LogsiftApp {
             Theme.setFontFamily(AppState.prefs().get("fontFamily", null));
             LogView.setTabWidth(AppState.prefs().getInt("tabWidth", 4));
             Theme.apply(dark);
+            MainFrame.exitOnClose = true;
             MainFrame f = new MainFrame();
             f.setVisible(true);
             frame = f;

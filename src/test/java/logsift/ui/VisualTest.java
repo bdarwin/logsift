@@ -1596,6 +1596,13 @@ class VisualTest {
             tab.showDetailsTab();
             return null;
         });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.detailsPanel().textForTest()).contains("\"level\"");
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "details shown");
         // text components give Windows line endings on Windows
         String details = onEdt(() -> tab.detailsPanel().textForTest()).replace("\r\n", "\n");
         assertTrue(details.contains("\"level\": \"ERROR\"") && details.contains("\"tags\": [\n"), details);
@@ -2648,7 +2655,18 @@ class VisualTest {
             // move around while it is indexed (pages that are not read yet)
             java.util.Random rnd = new java.util.Random(1);
             long end = System.currentTimeMillis() + 6000;
+            boolean shotTaken = false;
             while (System.currentTimeMillis() < end) {
+                if (!shotTaken && System.currentTimeMillis() > end - 5000) {
+                    onEdt(() -> {
+                        int n = tab.mainView().rowCount();
+                        tab.mainView().goToRow(n / 2, true);
+                        return null;
+                    });
+                    Thread.sleep(500);
+                    shot("49b-share-lines-loading"); // lines still being read: gray bars and a badge
+                    shotTaken = true;
+                }
                 onEdt(() -> {
                     int n = tab.mainView().rowCount();
                     if (n > 0) {
@@ -2815,6 +2833,128 @@ class VisualTest {
             tab.setMatchingOnly(false);
             return null;
         });
+    }
+
+    @Test
+    @Order(36)
+    void columnsSelectionHiddenColumnsAndDetails() throws Exception {
+        Path f = dir.resolve("api-gateway.log");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 400; i++) {
+            String ts = String.format("2026-10-21 10:%02d:%02d.%03d", i / 60, i % 60, i);
+            if (i == 200) {
+                sb.append(ts).append(" ERROR [http-3] com.acme.api.Gateway - Upstream call failed\n")
+                        .append("java.lang.IllegalStateException: upstream returned 502\n")
+                        .append("\tat com.acme.api.Gateway.call(Gateway.java:88)\n")
+                        .append("\tat com.acme.api.Router.route(Router.java:41)\n")
+                        .append("Caused by: java.net.SocketTimeoutException: Read timed out\n")
+                        .append("\t... 2 more\n");
+            }
+            sb.append(ts).append(" INFO  [http-").append(i % 8).append("] com.acme.api.Gateway - response ")
+                    .append("{\"id\":").append(i).append(",\"payload\":\"{\\\"user\\\":\\\"u").append(i % 9)
+                    .append("\\\"}\",\"items\":[1,2]}\n");
+        }
+        Files.writeString(f, sb);
+        onEdt(() -> {
+            frame.openFile(f);
+            frame.setColumns(true);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f.toAbsolutePath().normalize())
+                        && frame.currentTab().logFormat() != null && frame.currentTab().mainView().columns() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "columns of the gateway log");
+        LogTab tab = onEdt(frame::currentTab);
+        LogView v = tab.mainView();
+
+        // hide a column: the header says what is hidden; Show All brings it back
+        onEdt(() -> {
+            tab.setColumnHidden("thread", true);
+            return null;
+        });
+        assertEquals(List.of("thread"), onEdt(() -> v.columns().hidden()));
+        assertTrue(onEdt(() -> java.util.Arrays.stream(v.columns().visible()).noneMatch(c -> v.columns().format().columns().get(c).equals("thread"))));
+
+        // select characters inside the message, in the columns view
+        String line0 = onEdt(() -> tab.document().line(0));
+        int from = line0.indexOf("response");
+        onEdt(() -> {
+            v.goToRow(0, false);
+            return null;
+        });
+        settle();
+        onEdt(() -> {
+            JComponent c = v.canvasForTest();
+            int y = v.yForRowForTest(0);
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                    InputEvent.BUTTON1_DOWN_MASK, v.xForCharForTest(0, from), y, 1, false, MouseEvent.BUTTON1));
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_DRAGGED, System.currentTimeMillis(),
+                    InputEvent.BUTTON1_DOWN_MASK, v.xForCharForTest(0, from + 8), y, 1, false, MouseEvent.BUTTON1));
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(),
+                    0, v.xForCharForTest(0, from + 8), y, 1, false, MouseEvent.BUTTON1));
+            tab.showDetailsTab();
+            return null;
+        });
+        assertEquals("response", onEdt(v::selectedText));
+        waitFor(() -> details(tab).equals("response"), 10_000, "the selection in Details");
+
+        // select the JSON: Details shows it pretty-printed, the JSON string inside opened up
+        int json = line0.indexOf('{');
+        onEdt(() -> {
+            JComponent c = v.canvasForTest();
+            int y = v.yForRowForTest(0);
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                    InputEvent.BUTTON1_DOWN_MASK, v.xForCharForTest(0, json), y, 1, false, MouseEvent.BUTTON1));
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                    InputEvent.BUTTON1_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK, v.xForCharForTest(0, line0.length()), y, 1,
+                    false, MouseEvent.BUTTON1));
+            c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(),
+                    0, v.xForCharForTest(0, line0.length()), y, 1, false, MouseEvent.BUTTON1));
+            return null;
+        });
+        assertEquals(line0.substring(json), onEdt(v::selectedText));
+        waitFor(() -> details(tab).contains("\"user\": \"u0\""), 10_000, "pretty JSON in Details");
+        assertEquals(DetailsPanel.View.JSON, onEdt(() -> tab.detailsPanel().viewForTest()));
+        settle();
+        shot("54-columns-selection-json-details");
+        // back to the text as it is
+        onEdt(() -> {
+            tab.detailsPanel().chooseForTest(DetailsPanel.View.TEXT);
+            return null;
+        });
+        assertEquals(line0.substring(json), details(tab));
+        onEdt(() -> {
+            tab.detailsPanel().chooseForTest(null);
+            return null;
+        });
+
+        // the caret on a stack trace line: Details shows the whole entry
+        onEdt(() -> {
+            v.goToRow(203, false);
+            return null;
+        });
+        waitFor(() -> details(tab).startsWith("2026-10-21 10:03:20.200 ERROR [http-3]"), 10_000, "the entry in Details");
+        assertTrue(details(tab).endsWith("\t... 2 more"), details(tab));
+        settle();
+        shot("55-details-whole-stack-trace");
+
+        onEdt(() -> {
+            tab.setColumnHidden("thread", false);
+            return null;
+        });
+        assertTrue(onEdt(() -> v.columns().hidden().isEmpty()));
+    }
+
+    private static String details(LogTab tab) {
+        try {
+            return onEdt(() -> tab.detailsPanel().textForTest()).replace("\r\n", "\n");
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static void waitFor(BooleanSupplier cond, long timeoutMs, String what)

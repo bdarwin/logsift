@@ -17,7 +17,7 @@
 - **Filters.** Show, hide or mark lines and combine filters with AND, OR and NOT. Filter by log level and time range, keep stack traces with their line, and add context lines.
 - **Timeline and highlight bar.** See error bursts at a glance and drag over a time range to zoom in.
 - **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs work too, with a pretty-printed details view.
-- **Your own log formats.** Drop a log file and Logsift works out its layout, or paste your log4j, logback or Python logging setup (even a whole `logback.xml`). A live preview shows how lines split into columns.
+- **Your own log formats.** Drop a log file and Logsift works out its layout, or paste your log4j, logback, java.util.logging or Python logging setup (even a whole `logback.xml` or `log4j2.xml`: each layout in it becomes a format). A live preview shows how lines split into columns.
 - **Tree of loggers.** Loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
 - **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files.
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
@@ -161,6 +161,8 @@ Logsift detects how a log's text is encoded: UTF-8 (with or without a byte order
 The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. Logsift recognizes common layouts by itself: logback and log4j patterns, Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
 
 - **Count values:** right-click a column header (Thread, Logger, Host, Status…) → *Count Values* lists every value with its number of lines. Double-click one to show only its lines, or *Hide* it.
+- **Hide columns:** right-click a column header → *Hide … Column*, or tick columns on and off in the same menu. The header shows **N columns hidden**; click it to see which, and **Show All Columns** brings them back. Hidden columns are remembered for each format.
+- **Select text** in cells and messages as in the plain view: drag, double-click a word, Shift+click to extend.
 - **Level chips** in the Filters bar (**E W I D T**) show only some levels, together with your other filters: turn off I, D and T to see just errors and warnings, stack traces included.
 
 ## Log formats
@@ -168,7 +170,7 @@ The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as column
 When Logsift doesn't know a log's layout, the Columns view says so and offers **Define Its Format…**. Formats are also under **View → Log Format → New Format from This Log** and in **Settings → Log Formats**. There are three ways to make one:
 
 1. **Drop a log file** (or open one). Logsift guesses the layout from its lines (time, level, `[thread]`, logger, separators like `-` `:` `|`) and how its times are written, for example `dd.MM.yy HH:mm:ss.SSS`.
-2. **Paste how your program logs:** a log4j, Log4j 2 or logback pattern such as `%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n`, a whole `logback.xml`, `log4j2.xml` or `log4j.properties`, a `log4j2.properties`, `.yaml` or `.json`, Spring Boot's layout, or a Python format such as `%(asctime)s %(levelname)s %(name)s: %(message)s`. Dropping the config file works too. Properties the pattern uses (`${LOG_PATTERN}`, `${sys:PID}`, `${env:X:-default}`) are filled in from the same file. When the config has several appenders with different layouts, the one your log's lines fit is used; if that can't be told, you pick it.
+2. **Paste how your program logs:** a log4j, Log4j 2 or logback pattern such as `%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n`, a whole `logback.xml`, `log4j2.xml` or `log4j.properties`, a `log4j2.properties`, `.yaml` or `.json`, Spring Boot's layout, a Log4j 1.x XML config, a java.util.logging `logging.properties` (`SimpleFormatter.format`), or Python logging: a format such as `%(asctime)s %(levelname)s %(name)s: %(message)s`, a `logging.conf` or dictConfig (with `datefmt`), or `basicConfig(…)` in code. Dropping the config file works too. Properties the pattern uses (`${LOG_PATTERN}`, `${sys:PID}`, `${env:X:-default}`) are filled in from the same file. When the config has several appenders or formatters with different layouts, each becomes a format, named after its appender, and each log uses the one its lines fit.
 3. **Write the pattern** yourself: `{time} {level} [{thread}] {logger} - {message}`. Columns go in braces and everything else is matched as written. `{time}` takes a timestamp and `{level}` a level word (also `E`, `ERR`, `warning`…). `{*}` skips a part, and other columns take everything up to the next character. A regex with named groups like `(?<level>…)` works too.
 
 A preview shows sample lines split into columns, with the times as they are read. Lines that don't fit continue the entry above (stack traces). A format is used when most of a log's lines fit it, or always for the file names you give (`app*.log; *.trace`). The status bar shows the format each log is read with (**Format: …**). If Logsift picked the wrong one, click it (or use **View → Log Format**) to choose another for that file, which is remembered, or to show it as plain text. Levels in your format's level column drive the colors, the error marks and the **E W I D T** chips. Formats are saved in `~/.logsift/formats.properties`, so you can copy them to another computer.
@@ -196,7 +198,7 @@ Logs with a logger column (or class, component, thread, host…) get a tree on t
 
 ## JSON logs
 
-Logs with one JSON object per line are recognized. With **Columns** on, the usual fields become columns (`@timestamp`/`ts`/`time` → Time, `level`/`severity` → Level, `thread`, `logger`, `message`/`msg`) and the rest are shown together in a Fields column. The timeline uses ISO times or epoch milliseconds in the JSON. The **Details** tab (next to Filters) shows the current line in full, and JSON lines pretty-printed with colors, which also helps with any very long line.
+Logs with one JSON object per line are recognized. With **Columns** on, the usual fields become columns (`@timestamp`/`ts`/`time` → Time, `level`/`severity` → Level, `thread`, `logger`, `message`/`msg`) and the rest are shown together in a Fields column. The timeline uses ISO times or epoch milliseconds in the JSON. The **Details** tab (next to Filters) shows the current entry in full (a line with its stack trace), or just the text you selected (several lines, or part of one). Its **Text | JSON** switch pretty-prints the JSON in it with colors, also JSON in the middle of a message, and opens up JSON written inside strings. A JSON line or selection is shown pretty-printed by itself; click **Text** to see it as written.
 
 ## Remote logs (SSH / SFTP)
 
@@ -351,7 +353,6 @@ Design choices:
 - **Very long lines:**
   - Lines over 64 KB are cut for display. Search still sees the whole line.
   - A single line over 256 MB is only searched in its first 256 MB.
-- **Columns view** selects whole lines (not parts of a cell).
 - **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
 - **Time zones** are not converted: times are shown as written in each log.
 - **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows). The downloads are not code-signed yet.

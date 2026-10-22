@@ -102,6 +102,11 @@ public final class LogView extends JPanel {
         default Color marker(int row) {
             return null;
         }
+
+        /** Shown (with a spinner) when there are no rows yet, e.g. "Reading app.log…"; null: none. */
+        default String placeholder() {
+            return null;
+        }
     }
 
     public interface Listener {
@@ -119,6 +124,9 @@ public final class LogView extends JPanel {
 
         /** A group header was clicked (or Enter, Left or Right pressed on it): fold or open it. */
         default void foldToggled(LogView view, int row) {}
+
+        /** The selected text changed (by dragging or shift-moving within a row, say). */
+        default void selectionEdited(LogView view) {}
     }
 
     private static final int MAX_COPY_ROWS = 500_000;
@@ -197,6 +205,9 @@ public final class LogView extends JPanel {
 
     // The layout of what is on screen: one entry per display row.
     private Line[] shownLines = new Line[0];
+    private int pendingShown; // rows on screen still being read
+    private long pendingSince; // when rows on screen started waiting for the disk (0: none)
+    private final Timer spinner = new Timer(80, e -> canvas.repaint());
     private int[] shownLine = new int[0]; // index into shownLines, per display row
     private int[] shownSeg = new int[0];
     private int shownCount;
@@ -460,6 +471,7 @@ public final class LogView extends JPanel {
         }
         updateFollowFromPosition();
         canvas.repaint();
+        listeners.forEach(l -> l.selectionEdited(this));
     }
 
     public void focusView() {
@@ -525,6 +537,44 @@ public final class LogView extends JPanel {
         return sb.toString();
     }
 
+    /**
+     * What is selected, {startRow, startCol, endRow, endCol} (columns are char positions,
+     * Integer.MAX_VALUE: the end of the line); null with just a caret.
+     */
+    int[] selection() {
+        return hasSelection() ? selectionBounds() : null;
+    }
+
+    /** The text of a {@link #selection()} (at most {@code maxRows} rows); safe off the UI thread. */
+    String textOf(int[] s, int maxRows) {
+        int from = s[0];
+        int to = Math.min(s[2], from + maxRows - 1);
+        StringBuilder sb = new StringBuilder();
+        String[] buf = new String[Math.min(to - from + 1, 4096)];
+        for (int first = from; first <= to; first += buf.length) {
+            int k = Math.min(buf.length, to - first + 1);
+            source.texts(first, k, buf);
+            for (int i = 0; i < k; i++) {
+                int row = first + i;
+                String t = buf[i] == null ? "" : buf[i];
+                int c0 = row == s[0] ? Math.min(s[1], t.length()) : 0;
+                int c1 = row == s[2] ? Math.min(s[3], t.length()) : t.length();
+                if (row > from) {
+                    sb.append('\n');
+                }
+                if (c1 > c0) {
+                    sb.append(t, c0, c1);
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /** The file line shown on a row (-1 if none). */
+    long lineNumberOf(int row) {
+        return row >= 0 && row < source.rowCount() ? source.lineNumber(row) : -1;
+    }
+
     /** Selected text within one line, for pre-filling Find; null if none or multi-line. */
     public String selectionForFind() {
         if (!hasSelection() || lineMode || anchor != lead) {
@@ -543,6 +593,7 @@ public final class LogView extends JPanel {
         lead = n - 1;
         lineMode = true;
         canvas.repaint();
+        listeners.forEach(l -> l.selectionEdited(this));
     }
 
     /** Whether this view's text area has keyboard focus. */
@@ -578,6 +629,12 @@ public final class LogView extends JPanel {
             }
         }
         return -1;
+    }
+
+    /** X of a char of a row's raw text in the message part (columns view too). For tests. */
+    int xForCharForTest(int row, int index) {
+        Line l = lineAt(row);
+        return l.x(0, l.col(index));
     }
 
     /** Display column where each segment of a row starts. For tests. */
@@ -637,6 +694,27 @@ public final class LogView extends JPanel {
         // then "text" is the Message cell, or the whole line, which is what wraps.
         final String[] cells;
         final int[] cellStarts;
+        boolean pending; // not read from disk yet: drawn as a gray bar
+        int textBase; // columns view: where the message cell starts in the raw line
+
+        /** Columns view: where cell {@code col} starts in the raw line (searched for if unknown). */
+        int startOf(int col) {
+            if (cells == null || col < 0 || cells[col] == null) {
+                return raw.length();
+            }
+            String v = cells[col];
+            int s = cellStarts[col];
+            if (s >= 0 && raw.startsWith(v, s)) {
+                return s;
+            }
+            int i = raw.indexOf(v);
+            return i >= 0 ? i : raw.length();
+        }
+
+        /** Columns view: whether text positions map onto the raw line by an offset. */
+        private boolean celled() {
+            return columns != null && cells != null;
+        }
 
         Line(int row, String raw) {
             this.row = row;
@@ -647,10 +725,15 @@ public final class LogView extends JPanel {
                 String[] split = cl.format().split(raw, starts);
                 this.cells = split;
                 this.cellStarts = starts;
-                this.colOf = null;
                 int msg = cl.messageColumn();
-                this.text = split == null ? expandTabs(raw, null)
-                        : (msg < 0 || split[msg] == null ? "" : split[msg].replace('\t', ' '));
+                if (split == null) { // a line without the layout (a stack trace): all of it
+                    this.colOf = raw.indexOf('\t') >= 0 ? new int[raw.length() + 1] : null;
+                    this.text = expandTabs(raw, colOf);
+                } else {
+                    this.colOf = null;
+                    this.text = msg < 0 || split[msg] == null ? "" : split[msg].replace('\t', ' ');
+                    this.textBase = startOf(msg);
+                }
             } else {
                 this.cells = null;
                 this.cellStarts = null;
@@ -672,11 +755,17 @@ public final class LogView extends JPanel {
         /** Display column of raw char index {@code c}. */
         int col(int c) {
             c = Math.min(c, raw.length());
+            if (celled()) {
+                return Math.max(0, Math.min(text.length(), c - textBase));
+            }
             return colOf == null ? c : colOf[c];
         }
 
         /** Raw char index of a display column (inverse of col). */
         int rawIndexOfCol(int dcol) {
+            if (celled()) {
+                return Math.min(raw.length(), textBase + dcol);
+            }
             if (colOf == null) {
                 return Math.min(dcol, raw.length());
             }
@@ -710,6 +799,9 @@ public final class LogView extends JPanel {
 
         /** Raw char index nearest to x on segment {@code seg} (a caret position). */
         int charAt(int seg, int x) {
+            if (celled() && seg == 0 && x < segX(0)) {
+                return cellCharAt(x);
+            }
             int s0 = segStart[seg];
             int s1 = segEnd(seg);
             int rel = x - segX(seg);
@@ -729,7 +821,7 @@ public final class LogView extends JPanel {
                 dcol = s0 + Math.round((float) rel / charWidth);
             }
             dcol = Math.max(s0, Math.min(s1, dcol));
-            int idx = dcol;
+            int idx = celled() ? textBase + dcol : dcol;
             if (colOf != null) {
                 idx = raw.length();
                 for (int i = 0; i <= raw.length(); i++) {
@@ -744,6 +836,38 @@ public final class LogView extends JPanel {
                 idx--; // never split a surrogate pair
             }
             return idx;
+        }
+
+        /** Columns view: the raw char index under x in the cells before the message. */
+        private int cellCharAt(int x) {
+            ColumnLayout cl = columns;
+            int cx = gutterWidth() - hOffset;
+            int[] visible = cl.visible();
+            for (int c = 0; c < visible.length - 1; c++) {
+                int w = cl.width(c, charWidth);
+                int col = visible[c];
+                if (x < cx + w || c == visible.length - 2) {
+                    String v = cells[col] == null ? "" : cells[col];
+                    int start = startOf(col);
+                    if (start >= raw.length()) {
+                        return x < cx ? 0 : raw.length();
+                    }
+                    int rel = x - cx;
+                    int i = 0;
+                    int prev = 0;
+                    while (i < v.length()) {
+                        int next = metrics.stringWidth(v.substring(0, i + 1));
+                        if (rel < (prev + next) / 2) {
+                            break;
+                        }
+                        prev = next;
+                        i++;
+                    }
+                    return Math.min(raw.length(), start + Math.max(0, i));
+                }
+                cx += w;
+            }
+            return textBase;
         }
 
         /** Where to break the text so each segment fits the width, preferring spaces. */
@@ -826,6 +950,7 @@ public final class LogView extends JPanel {
             return;
         }
         layoutDirty = false;
+        pendingShown = 0;
         int n = source.rowCount();
         int vis = visibleRows() + 1;
         int count = Math.max(0, Math.min(vis, n - topRow));
@@ -839,6 +964,10 @@ public final class LogView extends JPanel {
         int shown = 0;
         for (int i = 0; i < count && shown < vis; i++) {
             Line l = new Line(topRow + i, texts[i] == null ? "" : texts[i]);
+            if (texts[i] == null) {
+                l.pending = true;
+                pendingShown++;
+            }
             int first = 0;
             if (i == 0) {
                 topSeg = Math.min(topSeg, l.segCount() - 1);
@@ -1050,6 +1179,7 @@ public final class LogView extends JPanel {
         canvas.repaint();
         int r = row;
         listeners.forEach(l -> l.selectionChanged(this, r));
+        listeners.forEach(l -> l.selectionEdited(this));
     }
 
     /** Moves the lead (caret) to a character position; extends the selection if asked. */
@@ -1074,6 +1204,7 @@ public final class LogView extends JPanel {
             int r = row;
             listeners.forEach(l -> l.selectionChanged(this, r));
         }
+        listeners.forEach(l -> l.selectionEdited(this));
     }
 
     /** Extends a selection made by double-click, word by word. */
@@ -1218,15 +1349,6 @@ public final class LogView extends JPanel {
                     moveLead(row, false);
                     if (clicks == 1) {
                         listeners.forEach(l -> l.foldToggled(LogView.this, clickedRow));
-                    }
-                    return;
-                }
-                if (columns != null) {
-                    dragUnit = BY_LINE;
-                    moveLead(row, e.isShiftDown());
-                    if (clicks == 2) {
-                        int r = row;
-                        listeners.forEach(l -> l.rowActivated(LogView.this, r));
                     }
                     return;
                 }
@@ -1652,7 +1774,18 @@ public final class LogView extends JPanel {
                         g.drawLine(0, y, w, y);
                         g.setStroke(new BasicStroke(1f));
                     }
+                    if (l.pending) {
+                        paintPending(gt, l.row, y, gutter, w);
+                        paintGutter(g, l, seg, i, y, gutter, fg);
+                        continue;
+                    }
                     if (columns != null) {
+                        boolean selHere = anySel && !lineMode && l.row >= sel[0] && l.row <= sel[2];
+                        if (selHere) {
+                            int a = l.row == sel[0] ? Math.min(sel[1], l.raw.length()) : 0;
+                            int b = l.row == sel[2] ? Math.min(sel[3], l.raw.length()) : l.raw.length();
+                            paintColumnsSelection(gt, l, seg, y, a, b, l.row < sel[2], selColor);
+                        }
                         paintColumnsRow(gt, l, seg, y, lineFg[k]);
                         paintGutter(g, l, seg, i, y, gutter, fg);
                         continue;
@@ -1707,6 +1840,7 @@ public final class LogView extends JPanel {
             } finally {
                 gt.dispose();
             }
+            paintWaiting(g, w, h, gutter);
             if (columns != null) {
                 newMaxCols = Math.max(newMaxCols, columns.fixedWidth(charWidth) / charWidth + 200);
             }
@@ -1715,6 +1849,83 @@ public final class LogView extends JPanel {
                 SwingUtilities.invokeLater(LogView.this::updateScrollbars);
             }
             header.repaint();
+        }
+
+        /** A row not read yet: a soft bar of about the length of a log line. */
+        private void paintPending(Graphics2D g, int row, int y, int gutter, int w) {
+            int avail = w - gutter - 2 * charWidth;
+            int len = (int) (avail * (0.35 + 0.4 * (((row * 2654435761L) >>> 8 & 0xFF) / 255.0)));
+            Color base = Theme.gutterForeground();
+            double t = (System.currentTimeMillis() % 1600) / 1600.0;
+            double pulse = 0.5 + 0.5 * Math.sin(2 * Math.PI * t - row * 0.35);
+            int alpha = (int) (28 + 30 * pulse);
+            g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), alpha));
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int bh = Math.max(4, rowHeight / 2);
+            g.fillRoundRect(gutter + charWidth / 2, y + (rowHeight - bh) / 2, Math.max(charWidth * 6, len), bh, bh, bh);
+        }
+
+        /**
+         * While lines on screen are still being read (a slow share), or there are none yet, a
+         * badge with a spinner says so; it animates until they are there.
+         */
+        private void paintWaiting(Graphics2D g0, int w, int h, int gutter) {
+            String msg = null;
+            boolean center = false;
+            if (pendingShown > 0) {
+                long now = System.currentTimeMillis();
+                if (pendingSince == 0) {
+                    pendingSince = now;
+                }
+                if (now - pendingSince >= 300) { // not for a quick read
+                    msg = "Reading from disk…";
+                }
+            } else {
+                pendingSince = 0;
+                if (source.rowCount() == 0) {
+                    msg = source.placeholder();
+                    center = true;
+                }
+            }
+            boolean animate = pendingShown > 0 || msg != null;
+            if (animate && !spinner.isRunning()) {
+                spinner.start();
+            } else if (!animate && spinner.isRunning()) {
+                spinner.stop();
+            }
+            if (msg == null) {
+                return;
+            }
+            Graphics2D g = (Graphics2D) g0.create();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                Font f = javax.swing.UIManager.getFont("Label.font");
+                g.setFont(f == null ? font : f);
+                java.awt.FontMetrics fm = g.getFontMetrics();
+                int d = fm.getHeight() - 2; // spinner size
+                int pad = 10;
+                int bw = pad + d + 8 + fm.stringWidth(msg) + pad + 4;
+                int bh = fm.getHeight() + 12;
+                int x = gutter + (w - gutter - bw) / 2;
+                int y = center ? (h - bh) / 2 : Math.min(h - bh - 8, 24);
+                g.setColor(Theme.uiColor("ToolTip.background", Theme.background()));
+                g.fillRoundRect(x, y, bw, bh, bh, bh);
+                g.setColor(Theme.uiColor("Component.borderColor", Theme.gutterForeground()));
+                g.drawRoundRect(x, y, bw, bh, bh, bh);
+                // spinner: an arc that turns
+                int angle = (int) (System.currentTimeMillis() / 3 % 360);
+                g.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                int sx = x + pad;
+                int sy = y + (bh - d) / 2;
+                g.setColor(new Color(Theme.gutterForeground().getRGB() & 0xFFFFFF | 0x50000000, true));
+                g.drawOval(sx, sy, d, d);
+                g.setColor(Theme.uiColor("Component.accentColor", new Color(0x2563EB)));
+                g.drawArc(sx, sy, d, d, -angle, 100);
+                g.setColor(Theme.uiColor("ToolTip.foreground", Theme.foreground()));
+                g.drawString(msg, sx + d + 8, y + (bh - fm.getHeight()) / 2 + fm.getAscent());
+            } finally {
+                g.dispose();
+            }
         }
 
         /** A large ▸ / ▾ chevron at the right of the gutter for a group header. */
@@ -1836,6 +2047,46 @@ public final class LogView extends JPanel {
             gt.drawString(part, mx, y + ascent);
         }
 
+        /** Columns view: the selected characters {@code [a, b)} of a line, in its cells and message. */
+        private void paintColumnsSelection(Graphics2D g, Line l, int seg, int y, int a, int b, boolean toNext,
+                                           Color color) {
+            g.setColor(color);
+            ColumnLayout cl = columns;
+            if (l.cells != null && seg == 0) {
+                int x = gutterWidth() - hOffset;
+                int[] visible = cl.visible();
+                for (int c = 0; c < visible.length - 1; c++) {
+                    int col = visible[c];
+                    int w = cl.width(c, charWidth);
+                    String v = l.cells[col] == null ? "" : l.cells[col].replace('\t', ' ');
+                    int start = l.startOf(col);
+                    int i0 = Math.max(0, a - start);
+                    int i1 = Math.min(v.length(), b - start);
+                    if (start < l.raw.length() && i1 > i0) {
+                        int x0 = x + metrics.stringWidth(v.substring(0, i0));
+                        int x1 = Math.min(x + w - charWidth, x + metrics.stringWidth(v.substring(0, i1)));
+                        if (x1 > x0) {
+                            g.fillRect(x0, y, x1 - x0, rowHeight);
+                        }
+                    }
+                    x += w;
+                }
+            }
+            int s0 = l.segStart[seg];
+            int s1 = l.segEnd(seg);
+            int c0 = Math.max(s0, l.col(a));
+            int c1 = Math.min(s1, l.col(b));
+            boolean lastSeg = seg == l.segCount() - 1;
+            int x0 = l.x(seg, c0);
+            int x1 = c1 > c0 ? l.x(seg, c1) : x0;
+            if (lastSeg && toNext && l.col(b) >= s0) {
+                x1 += charWidth / 2; // the line break is selected too
+            }
+            if (x1 > x0) {
+                g.fillRect(x0, y, x1 - x0, rowHeight);
+            }
+        }
+
         /** Highlights Find All matches inside one cell's text drawn at x. */
         private void paintMatches(Graphics2D g, String text, int x, int y) {
             if (highlights.isEmpty() || text.isEmpty()) {
@@ -1881,12 +2132,13 @@ public final class LogView extends JPanel {
                     if (columns == null) {
                         return;
                     }
+                    if (columnMenu != null && hiddenChip().contains(e.getPoint())) {
+                        columnMenu.accept(null, e); // "2 hidden": the list of columns
+                        return;
+                    }
                     if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) {
                         if (columnMenu != null) {
-                            String col = columnAt(e.getX());
-                            if (col != null) {
-                                columnMenu.accept(col, e);
-                            }
+                            columnMenu.accept(columnAt(e.getX()), e);
                         }
                         return;
                     }
@@ -1914,12 +2166,39 @@ public final class LogView extends JPanel {
                 @Override
                 public void mouseMoved(MouseEvent e) {
                     setCursor(Cursor.getPredefinedCursor(edgeAt(e.getX()) >= 0
-                            ? Cursor.E_RESIZE_CURSOR : Cursor.DEFAULT_CURSOR));
+                            ? Cursor.E_RESIZE_CURSOR
+                            : hiddenChip().contains(e.getPoint()) ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
                 }
             };
             addMouseListener(m);
             addMouseMotionListener(m);
-            setToolTipText("Drag an edge to resize a column · right-click a column to count its values");
+            setToolTipText("Drag an edge to resize a column · right-click a column to hide it or count its values");
+        }
+
+        @Override
+        public String getToolTipText(MouseEvent e) {
+            if (columns != null && hiddenChip().contains(e.getPoint())) {
+                return "Hidden: " + String.join(", ", columns.hidden().stream()
+                        .map(n -> n.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + n.substring(1)).toList())
+                        + " · click to show them";
+            }
+            return super.getToolTipText(e);
+        }
+
+        /** The "2 hidden" chip at the right end of the header (empty when nothing is hidden). */
+        private java.awt.Rectangle hiddenChip() {
+            if (columns == null || columns.hidden().isEmpty()) {
+                return new java.awt.Rectangle();
+            }
+            java.awt.FontMetrics fm = getFontMetrics(getFont());
+            int w = fm.stringWidth(chipText()) + 20;
+            int h = getHeight() - 6;
+            return new java.awt.Rectangle(getWidth() - w - 6, 3, w, h);
+        }
+
+        private String chipText() {
+            int n = columns.hidden().size();
+            return n + (n == 1 ? " column hidden ▾" : " columns hidden ▾");
         }
 
         /** Index of the column whose right edge is near x, or -1. */
@@ -1987,6 +2266,18 @@ public final class LogView extends JPanel {
                         g.drawLine(x + w - charWidth / 2, 4, x + w - charWidth / 2, getHeight() - 4);
                         x += w;
                     }
+                }
+                java.awt.Rectangle chip = hiddenChip();
+                if (!chip.isEmpty()) {
+                    g.setClip(null);
+                    g.setFont(getFont());
+                    java.awt.FontMetrics cf = g.getFontMetrics();
+                    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    g.setColor(Theme.gutterBackground());
+                    g.fillRect(chip.x - 8, 0, getWidth() - chip.x + 8, getHeight() - 1);
+                    g.setColor(Theme.uiColor("Component.accentColor", new Color(0x2563EB)));
+                    g.drawRoundRect(chip.x, chip.y, chip.width - 1, chip.height - 1, chip.height, chip.height);
+                    g.drawString(chipText(), chip.x + 10, chip.y + (chip.height + cf.getAscent() - cf.getDescent()) / 2);
                 }
             } finally {
                 g.dispose();

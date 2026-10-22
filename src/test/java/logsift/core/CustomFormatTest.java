@@ -316,4 +316,74 @@ class CustomFormatTest {
         assertNotNull(syslogish);
         assertEquals(3, syslogish.matching(), syslogish.pattern());
     }
+
+    @Test
+    void importsLog4j1XmlJulAndPythonConfigs() {
+        var log4j1 = LayoutImport.convertAll("""
+                <log4j:configuration xmlns:log4j="http://jakarta.apache.org/log4j/">
+                  <appender name="console" class="org.apache.log4j.ConsoleAppender">
+                    <layout class="org.apache.log4j.PatternLayout">
+                      <param name="ConversionPattern" value="%d{HH:mm:ss} %-5p %c{1} - %m%n"/>
+                    </layout>
+                  </appender>
+                  <appender name="file" class="org.apache.log4j.DailyRollingFileAppender">
+                    <param name="DatePattern" value="'.'yyyy-MM-dd"/>
+                    <layout class="org.apache.log4j.PatternLayout">
+                      <param name="ConversionPattern" value="%d{ISO8601} [%t] %-5p %c - %m%n"/>
+                    </layout>
+                  </appender>
+                  <appender name="audit" class="org.apache.log4j.RollingFileAppender">
+                    <layout class="org.apache.log4j.EnhancedPatternLayout">
+                      <param value="%d{yyyy-MM-dd HH:mm:ss,SSS} %X{user} %m%n" name="ConversionPattern"/>
+                    </layout>
+                  </appender>
+                </log4j:configuration>
+                """);
+        assertEquals(3, log4j1.size(), log4j1.toString());
+        assertEquals("{time} {level} {logger} - {message}", log4j1.get(0).pattern());
+        assertTrue(log4j1.get(0).console());
+        assertEquals("{time} [{thread}] {level} {logger} - {message}", log4j1.get(1).pattern());
+        assertEquals("yyyy-MM-dd HH:mm:ss,SSS", log4j1.get(1).timePattern());
+        assertEquals("DailyRollingFileAppender \u201cfile\u201d", log4j1.get(1).where());
+        assertEquals("{time} {user} {message}", log4j1.get(2).pattern());
+
+        var jul = LayoutImport.convertAll("""
+                handlers=java.util.logging.FileHandler
+                java.util.logging.FileHandler.pattern=%h/java%u.log
+                java.util.logging.SimpleFormatter.format=%1$tY-%1$tm-%1$td %1$tH:%1$tM:%1$tS.%1$tL %4$-7s [%3$s] %5$s%6$s%n
+                """);
+        assertEquals(1, jul.size(), jul.toString());
+        assertEquals("{time} {level} [{logger}] {message}", jul.get(0).pattern());
+        assertEquals("yyyy-MM-dd HH:mm:ss.SSS", jul.get(0).timePattern());
+        CustomFormat f = new CustomFormat("jul", jul.get(0).pattern(), jul.get(0).timePattern(), "");
+        assertTrue(f.compile().matches("2026-10-21 10:02:13.456 INFO    [com.acme.App] started"));
+
+        var conf = LayoutImport.convertAll("""
+                [formatters]
+                keys=simple,detailed
+
+                [formatter_simple]
+                format=%(asctime)s - %(name)s - %(levelname)s - %(message)s
+                datefmt=%d/%m/%Y %I:%M:%S %p
+
+                [formatter_detailed]
+                format=%(asctime)s.%(msecs)03d %(levelname)-8s [%(threadName)s] %(message)s
+                datefmt=%Y-%m-%d %H:%M:%S
+                """);
+        assertEquals(2, conf.size(), conf.toString());
+        assertEquals("{time} - {logger} - {level} - {message}", conf.get(0).pattern());
+        assertEquals("dd/MM/yyyy hh:mm:ss a", conf.get(0).timePattern());
+        assertEquals("formatter \u201csimple\u201d", conf.get(0).where());
+        assertEquals("{time} {level} [{thread}] {message}", conf.get(1).pattern());
+        assertEquals("yyyy-MM-dd HH:mm:ss.SSS", conf.get(1).timePattern());
+
+        var code = LayoutImport.convertAll("""
+                logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S')
+                h.setFormatter(logging.Formatter(fmt="%(asctime)s|%(process)d|%(message)s"))
+                """);
+        assertEquals(2, code.size(), code.toString());
+        assertEquals("HH:mm:ss", code.get(0).timePattern());
+        assertEquals("{time}|{pid}|{message}", code.get(1).pattern());
+        assertEquals("yyyy-MM-dd HH:mm:ss,SSS", code.get(1).timePattern());
+    }
 }

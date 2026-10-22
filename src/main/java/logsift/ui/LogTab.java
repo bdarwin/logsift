@@ -167,6 +167,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public String placeholder() {
+                return doc.isIndexing() ? "Reading " + doc.path().getFileName() + "…" : null;
+            }
+
+            @Override
             public boolean dimmed(int row) {
                 FilterResult r = filterResult;
                 return r.isFiltering() && !r.isMatch(row);
@@ -264,18 +269,15 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             @Override
             public void selectionChanged(LogView view, int row) {
                 host.tabStatusChanged(LogTab.this);
-                updateDetails();
+            }
+
+            @Override
+            public void selectionEdited(LogView view) {
+                updateDetails(); // the line, or what is selected
             }
         });
         main.setPopupExtender(this::extendPopup);
-        main.setColumnMenu((col, e) -> {
-            JPopupMenu m = new JPopupMenu();
-            JMenuItem count = new JMenuItem("Count Values in " + col.substring(0, 1).toUpperCase()
-                    + col.substring(1) + "…");
-            count.addActionListener(a -> countValues(col));
-            m.add(count);
-            m.show(e.getComponent(), e.getX(), e.getY());
-        });
+        main.setColumnMenu(this::showColumnMenu);
         main.setOverview(overviewModel());
 
         messages = new MessagesPanel(messagesHost());
@@ -1232,8 +1234,68 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             return;
         }
         long line = currentLine();
-        details.show(line, line < 0 ? null : doc.line(line), main.fontSize());
+        float size = main.fontSize();
+        long request = ++detailsRequest;
+        int[] sel = main.selection();
+        if (sel != null) { // selected text: just that
+            long firstLine = main.lineNumberOf(sel[0]);
+            long lastLine = main.lineNumberOf(sel[2]);
+            DETAILS.execute(() -> {
+                if (detailsRequest != request) {
+                    return; // moved on
+                }
+                int rows = sel[2] - sel[0] + 1;
+                String t;
+                try {
+                    t = main.textOf(sel, MAX_DETAIL_ROWS);
+                } catch (RuntimeException ex) {
+                    return;
+                }
+                String title = rows == 1
+                        ? String.format("Selected in line %,d · %,d characters", firstLine + 1, t.length())
+                        : String.format("Selected: lines %,d – %,d · %,d lines%s", firstLine + 1, lastLine + 1, rows,
+                        rows > MAX_DETAIL_ROWS ? String.format(" (the first %,d shown)", MAX_DETAIL_ROWS) : "");
+                SwingUtilities.invokeLater(() -> {
+                    if (detailsRequest == request) {
+                        details.showSelection(title, t, size);
+                    }
+                });
+            });
+            return;
+        }
+        if (line < 0) {
+            details.show(-1, null, size);
+            return;
+        }
+        logsift.core.EntryFormat ef = entryFormat;
+        DETAILS.execute(() -> {
+            if (detailsRequest != request) {
+                return; // moved on
+            }
+            logsift.core.EntryFormat.Entry e;
+            try {
+                e = logsift.core.EntryFormat.around(doc, ef, line, 1000);
+            } catch (RuntimeException ex) {
+                e = null;
+            }
+            logsift.core.EntryFormat.Entry entry = e;
+            SwingUtilities.invokeLater(() -> {
+                if (detailsRequest == request && entry != null) {
+                    details.show(entry, line, size);
+                }
+            });
+        });
     }
+
+    private volatile long detailsRequest;
+    private static final int MAX_DETAIL_ROWS = 20_000;
+    /** Reads entries for the Details tab (off the UI thread: the disk may be slow). */
+    private static final java.util.concurrent.ExecutorService DETAILS =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "logsift-details");
+                t.setDaemon(true);
+                return t;
+            });
 
     DetailsPanel detailsPanel() {
         return details;
@@ -1710,9 +1772,97 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             noColumns.setVisible(missing);
             revalidate();
         }
-        ColumnLayout layout = columnsWanted && f != null ? new ColumnLayout(f, sourceLabels != null) : null;
+        java.util.Set<String> hide = f == null ? java.util.Set.of() : hiddenColumns();
+        ColumnLayout layout = columnsWanted && f != null ? new ColumnLayout(f, sourceLabels != null, hide) : null;
+        if (layout != null) {
+            layout.copyWidths(main.columns());
+        }
         main.setColumns(layout);
-        results.view().setColumns(layout == null ? null : new ColumnLayout(f, sourceLabels != null));
+        ColumnLayout forResults = layout == null ? null : new ColumnLayout(f, sourceLabels != null, hide);
+        if (forResults != null) {
+            forResults.copyWidths(results.view().columns());
+        }
+        results.view().setColumns(forResults);
+    }
+
+    /**
+     * The menu of a column header ({@code col} null: the "hidden" chip): hide this column,
+     * show or hide each column, show them all again.
+     */
+    private void showColumnMenu(String col, java.awt.event.MouseEvent e) {
+        ColumnLayout layout = main.columns();
+        if (layout == null) {
+            return;
+        }
+        JPopupMenu m = new JPopupMenu();
+        if (col != null) {
+            String title = col.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + col.substring(1);
+            JMenuItem count = new JMenuItem("Count Values in " + title + "…", Icons.of("chart-column"));
+            count.addActionListener(a -> countValues(col));
+            m.add(count);
+            if (!col.equals("message")) {
+                JMenuItem hide = new JMenuItem("Hide " + title + " Column", Icons.of("eye-off"));
+                hide.addActionListener(a -> setColumnHidden(col, true));
+                m.add(hide);
+            }
+            m.addSeparator();
+        }
+        JMenuItem label = new JMenuItem("Columns");
+        label.setEnabled(false);
+        m.add(label);
+        java.util.Set<String> hidden = hiddenColumns();
+        for (String c : layout.format().columns()) {
+            if (c.equals("message") || (c.equals("source") && sourceLabels == null)) {
+                continue;
+            }
+            javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(
+                    c.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + c.substring(1), !hidden.contains(c));
+            item.addActionListener(a -> setColumnHidden(c, !item.isSelected()));
+            m.add(item);
+        }
+        m.addSeparator();
+        JMenuItem all = new JMenuItem(hidden.isEmpty() ? "Show All Columns"
+                : "Show All Columns (" + hidden.size() + " hidden)", Icons.of("eye"));
+        all.setEnabled(!hidden.isEmpty());
+        all.addActionListener(a -> {
+            AppState.prefs().remove(hiddenKey());
+            applyColumns();
+        });
+        m.add(all);
+        m.show(e.getComponent(), e.getX(), e.getY());
+    }
+
+    private String hiddenKey() {
+        logsift.core.LogFormat f = logFormat;
+        String k = "hiddenColumns." + (f == null ? "" : f.name());
+        return k.length() > 80 ? k.substring(0, 80) : k; // preference keys are limited
+    }
+
+    /** Columns hidden in this tab's format (remembered per format). */
+    java.util.Set<String> hiddenColumns() {
+        String v = AppState.prefs().get(hiddenKey(), "");
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (String s : v.split(",")) {
+            if (!s.isBlank()) {
+                out.add(s.strip());
+            }
+        }
+        return out;
+    }
+
+    void setColumnHidden(String column, boolean hide) {
+        java.util.Set<String> h = hiddenColumns();
+        if (hide) {
+            h.add(column);
+        } else {
+            h.remove(column);
+        }
+        if (h.isEmpty()) {
+            AppState.prefs().remove(hiddenKey());
+        } else {
+            AppState.prefs().put(hiddenKey(), String.join(",", h));
+        }
+        applyColumns();
     }
 
     /** Counts the values of a column in the background and shows them. */

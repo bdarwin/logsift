@@ -14,6 +14,15 @@
 - **Windows: Open with Logsift** on the right-click menu of files and folders, and in the Open with list of `.log`, `.txt` and `.out` files. The installer no longer takes over `.log` files (their icon and double-click stay as they were). On macOS, Logsift is likewise offered in Open With without becoming the default.
 - **Logs on network shares:** the window no longer freezes while a big file on a share is read. Lines on screen load in the background and appear as soon as they arrive.
 - Clicking a long wrapped line that is partly off screen no longer scrolls the view.
+- **Hide columns:** right-click a column header → *Hide … Column*, or tick columns on and off. A **N columns hidden** chip in the header lists them, and **Show All Columns** brings them back. Remembered per format.
+- **Select text in the Columns view**, not just whole lines: drag across cells or the message, double-click a word.
+- **Details shows the whole entry:** a line with its stack trace, not just the one line. Select text and Details shows just that: several lines, or part of one.
+- **JSON in Details:** a **Text | JSON** switch pretty-prints the JSON in a line or selection (also JSON in the middle of a message), opening up JSON written inside strings. Switch back to see the text as it is.
+- **Loading indicator:** lines still being read from a slow disk or share show as gray bars with a *Reading from disk…* badge, and an empty log being opened says so, instead of a blank view.
+- **Config import reads more:** Log4j 1.x XML (`<param name="ConversionPattern" …/>`), java.util.logging (`SimpleFormatter.format`), every formatter in a Python config with its `datefmt`, and `basicConfig(…)` / `Formatter(…)` in Python code.
+- **A config with several layouts makes a format for each** (named after the appender), instead of asking which one. Each log uses the one it fits.
+- **Windows installer:** a new build installs over the one already there (snapshots used to need an uninstall first), and a running Logsift is closed before files are replaced or removed.
+- Logsift now exits fully when its window is closed (it could stay running in the background).
 
 ## 1.1.0
 

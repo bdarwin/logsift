@@ -13,14 +13,24 @@ final class ColumnLayout {
     private final LogFormat format;
     private final int[] visible;   // indexes into format.columns()
     private final int[] chars;     // width of each visible column but the last
+    private final List<String> hidden = new ArrayList<>(); // columns the user hid
 
     ColumnLayout(LogFormat format, boolean showSource) {
+        this(format, showSource, java.util.Set.of());
+    }
+
+    /** {@code hide}: names of columns not to show (the message is always shown). */
+    ColumnLayout(LogFormat format, boolean showSource, java.util.Set<String> hide) {
         this.format = format;
         List<Integer> cols = new ArrayList<>();
         List<String> names = format.columns();
         int message = names.indexOf("message");
         for (int i = 0; i < names.size(); i++) {
             if (i == message || (!showSource && names.get(i).equals("source"))) {
+                continue;
+            }
+            if (hide.contains(names.get(i))) {
+                hidden.add(names.get(i));
                 continue;
             }
             cols.add(i);
@@ -50,6 +60,26 @@ final class ColumnLayout {
             case "fields" -> 48;
             default -> 16;
         };
+    }
+
+    /** Columns the user hid, in the format's order. */
+    List<String> hidden() {
+        return hidden;
+    }
+
+    /** Keeps the widths the user gave columns that are in both layouts. */
+    void copyWidths(ColumnLayout old) {
+        if (old == null || old.format != format) {
+            return;
+        }
+        for (int c = 0; c < chars.length; c++) {
+            String name = format.columns().get(visible[c]);
+            for (int o = 0; o < old.chars.length; o++) {
+                if (old.format.columns().get(old.visible[o]).equals(name)) {
+                    chars[c] = old.chars[o];
+                }
+            }
+        }
     }
 
     LogFormat format() {
