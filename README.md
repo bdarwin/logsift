@@ -23,7 +23,7 @@
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
 - **Java threads.** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log), or attach to a running JVM on your computer or on a server over SSH. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
-- **Profiling.** A flame graph of where a JVM spends its CPU, wall-clock time, memory allocations or lock waits, with async-profiler or the JVM's own Flight Recorder.
+- **Profiling and memory.** Flame graphs of a JVM's CPU, wall-clock time, allocations, live objects (memory leaks), locks, native memory and native leaks, calls of a method and slow calls, or hardware events, with async-profiler or the JVM's own Flight Recorder. Compare runs, see who calls a method, and find which classes fill the heap and keep growing.
 - **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
 
 ## Download
@@ -223,23 +223,48 @@ Below that:
 
 ## Profiling
 
-**Profile…** in the Threads tab of a running JVM shows where it spends its time. Choose what to measure:
+**Profile…** in the Threads tab of a running JVM shows where it spends its time, memory or lock waits. Choose what to measure, for how long, and **Start Profiling**. The JVM keeps running as usual.
 
-- **CPU**
-- **Wall clock:** running or waiting
-- **Allocations**
-- **Locks:** waiting to get them
+| Measure | Shows |
+|---|---|
+| **CPU** | where the threads use the CPU |
+| **Wall clock** | where they spend their time, running or waiting |
+| **Allocations** | where memory is allocated, and for which classes |
+| **Live objects (memory leaks)** | objects allocated during the run and still alive at its end: what makes the heap grow |
+| **Locks** | where threads wait to get locks |
+| **Native memory** / **Native memory leaks** | native allocations (malloc, direct buffers), or only those never freed |
+| **Native locks** | waits for native (pthread) locks |
+| **Calls of a method** | every call of a method you name (`com.acme.Api.handle`, `java.io.FileInputStream.read*`), and where it comes from |
+| **Slow calls of a method** | calls slower than a time you give, with their total time |
+| **Hardware event** (Linux) | cache misses, page faults, context switches, CPU cycles… |
+| **Everything at once** | CPU, wall clock, allocations, live objects, locks and native memory from one run |
 
-Then choose how long, and **Start Profiling**. The JVM keeps running as usual.
+**Per thread** gives each thread its own flame graph.
 
-The result is a **flame graph**: the outermost calls on top, what they call below, each as wide as its share. Green is Java code (paler for the JDK's own), yellow native code, orange the kernel. Click a frame to zoom into it. Type in **highlight methods** to color the matches and see their share. Beside it, **Most time of their own** lists the methods that use the most; click one to highlight it.
+The result is a **flame graph**: the outermost calls on top, what they call below, each as wide as its share. Green is Java code (paler for the JDK's own), yellow native code, orange the kernel, and teal the class an allocation was for. To look closer:
+
+- **Click** a frame to zoom into it.
+- **Right-click** a frame for **Callers of** it (who calls it, all the way up), **Only Stacks Through** it or **Hide Stacks Through** it.
+- **Callers** turns the whole graph upside down: where the time is first, then who called it.
+- **highlight methods** colors the frames that match the text and shows their share.
+- **Most of it on their own** lists the methods with the most; click one to highlight it.
+
+Every run stays in the tab. **Compare with** an earlier run colors each frame by how its share changed: red grew, blue shrank. The method list then gets a **Change** column.
 
 Two engines:
 
-- **async-profiler** (built in, for JVMs on Linux and macOS) also sees native code and the kernel. On Linux, CPU profiling uses perf events when the kernel allows them, and a timer otherwise (Logsift says so).
-- **Flight Recorder**, built into the JVM, works on any JVM with JFR, Windows included.
+- **async-profiler** (built in, for JVMs on Linux and macOS) offers every mode above, and also sees native code and the kernel. On Linux, CPU profiling uses perf events when the kernel allows them, and a timer otherwise (Logsift says so).
+- **Flight Recorder**, built into the JVM, works on any JVM with JFR, Windows included. It measures CPU, wall clock, allocations and locks, all from one recording.
 
-**Save…** writes collapsed stacks, which open again with **JVM → Open Profile…**, along with `.jfr` recordings.
+**Save…** writes collapsed stacks. They open again with **JVM → Open Profile…**, along with `.jfr` recordings (each kind of event in them becomes a view).
+
+## The heap
+
+**Heap…** in the Threads tab of a running JVM shows what fills its heap, by class: how many objects, their size, and their share.
+
+- **Take Histogram** now, and again a little later. The **Size change** and **Objects change** columns show what grew; the classes that keep growing are where memory leaks.
+- **Only live objects** runs a full garbage collection first, so only objects still in use are counted. That pauses the JVM, longer for big heaps. Turn it off to count without the pause, garbage included. Compare histograms of the same kind.
+- **Save Heap Dump…** writes every object to a `.hprof` file for a heap analyzer. It pauses the JVM while it is written, and the file is about as big as the heap. From a server, it is copied over SSH.
 
 ## Settings
 
@@ -381,7 +406,8 @@ logsift.jvm     (thread dumps and running JVMs)
   ThreadAnalysis  deadlocks (cycles of lock waits), lock queues, stuck and busy threads, pools
   LocalJvms       attach + JMX (the JVM's own diagnostic commands), or jcmd
   SshJvms         ps, jcmd or async-profiler over SSH, sudo for other users' JVMs
-  Profiler        async-profiler or Flight Recorder → Profile (a tree of stacks)
+  Profiler        async-profiler (every mode) or Flight Recorder → Profiles (trees of stacks)
+  HeapHistogram   GC.class_histogram, and what grew between two
 logsift.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
   LogTab          log view + Filters and Find results panels for one file
@@ -389,7 +415,7 @@ logsift.ui
   OverviewBar     highlight bar beside the scrollbar (errors, warnings, filters, hits)
   FolderSearchTab folder search form and results grouped by file
   TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
-  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, JvmDialog
+  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, JvmDialog
   MainFrame       window, toolbar, menus, status bar, drag & drop
 logsift.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
@@ -417,7 +443,7 @@ Design choices:
 
 ## Roadmap
 
-Ideas for next versions: continuous profiling of a running JVM, heap summaries, editable highlight rules and signed installers. Suggestions and bug reports are welcome in [Issues](https://github.com/bdarwin/logsift/issues).
+Ideas for next versions: continuous profiling of a running JVM, editable highlight rules and signed installers. Suggestions and bug reports are welcome in [Issues](https://github.com/bdarwin/logsift/issues).
 
 ## Contributing
 

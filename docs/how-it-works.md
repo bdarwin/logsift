@@ -434,6 +434,10 @@ Because it is line by line, the same reader finds dumps in the middle of a log. 
 
 **Profiles and flame graphs** (`jvm/Profile.java`, `ui/FlameGraph.java`). async-profiler prints one line per distinct stack, outermost frame first, with how often it was seen: `Thread.run;Api.handle;Db.query 42`. Adding each line to a tree merges the common beginnings, and each node keeps its *total* (itself and below) and *self* (itself only). Flight Recorder events are turned into the same tree. The flame graph draws each node as wide as its total, so its children fit exactly under it. The list of hot methods adds up *self* per method. A method's *total* is counted only once on each path, or recursion would count it twice.
 
+**Finding leaks.** Three ways, from cheap to thorough. A *heap histogram* (`GC.class_histogram`) counts objects by class; two of them a while apart, matched by class, show what grows. *Live objects* (async-profiler's `--live`) keep the stack of each sampled allocation and drop it when the garbage collector frees the object, so what is left at the end is memory that was allocated during the run and stayed. For *native* memory, async-profiler records every `malloc` with its address and every `free`. Going through them in time order, a `malloc` whose address is never freed afterwards is a leak candidate, except in the last tenth of the run, where memory may simply not have been freed *yet*.
+
+**Comparing runs.** Two profiles are compared frame by frame. The same frame in the other profile is found by the names on its path from the top. The flame graph then colors each frame by the change in its *share* of the total (red more, blue less), so runs of different lengths compare fairly.
+
 ## 13. Lessons learned
 
 **The thread taking the dump looked stuck.** With a live JVM, the JMX thread that runs the dump command was always running the same code, so it showed up as "stuck". So did `main` reading from a console. Such threads are idle now. The visual test attaches to a real JVM and checks that nothing in it is reported as stuck.

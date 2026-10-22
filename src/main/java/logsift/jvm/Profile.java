@@ -187,6 +187,91 @@ public final class Profile {
         };
     }
 
+    /** Calls {@code each} with every stack (outermost first, names as shown) and its weight. */
+    public void forEachStack(java.util.function.BiConsumer<List<Node>, Long> each) {
+        List<Node> path = new ArrayList<>();
+        stacks(root, path, each);
+    }
+
+    private static void stacks(Node n, List<Node> path, java.util.function.BiConsumer<List<Node>, Long> each) {
+        if (n.self > 0 && !path.isEmpty()) {
+            each.accept(path, n.self);
+        }
+        for (Node c : n.children.values()) {
+            path.add(c);
+            stacks(c, path, each);
+            path.remove(path.size() - 1);
+        }
+    }
+
+    private static String raw(Node n) {
+        return n.name + suffix(n.kind);
+    }
+
+    /** The same stacks with the innermost frame first: where the time is, then who called it. */
+    public Profile reversed() {
+        Profile p = new Profile(title, unit);
+        p.warnings.addAll(warnings);
+        forEachStack((path, w) -> {
+            List<String> names = new ArrayList<>(path.size());
+            for (int i = path.size() - 1; i >= 0; i--) {
+                names.add(raw(path.get(i)));
+            }
+            p.add(names, w);
+        });
+        return p;
+    }
+
+    /** Only the stacks that pass through {@code frame} ({@code keep}), or all others. */
+    public Profile filtered(String frame, boolean keep) {
+        Profile p = new Profile(title, unit);
+        p.warnings.addAll(warnings);
+        forEachStack((path, w) -> {
+            boolean has = path.stream().anyMatch(n -> n.name.equals(frame));
+            if (has == keep) {
+                p.add(path.stream().map(Profile::raw).toList(), w);
+            }
+        });
+        return p;
+    }
+
+    /**
+     * Who calls {@code frame}: a tree starting at it, then its callers, their callers… Each
+     * stack counts once, at the innermost call of the method.
+     */
+    public Profile callersOf(String frame) {
+        Profile p = new Profile(title, unit);
+        forEachStack((path, w) -> {
+            for (int i = path.size() - 1; i >= 0; i--) {
+                if (path.get(i).name.equals(frame)) {
+                    List<String> names = new ArrayList<>(i + 1);
+                    for (int k = i; k >= 0; k--) {
+                        names.add(raw(path.get(k)));
+                    }
+                    p.add(names, w);
+                    return;
+                }
+            }
+        });
+        return p;
+    }
+
+    /** The node at the same place in this profile as {@code n} in its own (by names), or null. */
+    public Node same(Node n) {
+        List<String> names = new ArrayList<>();
+        for (Node x = n; x != null && x.parent != null; x = x.parent) {
+            names.add(0, x.name);
+        }
+        Node at = root;
+        for (String name : names) {
+            at = at.children.get(name);
+            if (at == null) {
+                return null;
+            }
+        }
+        return at;
+    }
+
     /** The methods with the most time of their own, with the time below them too. */
     public List<Method> hottest(int max) {
         Map<String, long[]> self = new HashMap<>();
@@ -279,6 +364,8 @@ public final class Profile {
             case "bytes" -> bytes(v);
             case "ns" -> v >= 1_000_000_000L ? String.format("%.1f s", v / 1e9)
                     : v >= 1_000_000 ? String.format("%.0f ms", v / 1e6) : String.format("%.0f µs", v / 1e3);
+            case "calls" -> String.format("%,d %s", v, v == 1 ? "call" : "calls");
+            case "events" -> String.format("%,d %s", v, v == 1 ? "event" : "events");
             default -> String.format("%,d %s", v, v == 1 ? "sample" : "samples");
         };
     }

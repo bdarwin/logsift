@@ -93,6 +93,8 @@ final class ThreadsTab extends JPanel {
     private final JButton record = new JButton("Record…", Icons.of("circle-dot"));
     private final JButton stop = new JButton("Stop", Icons.of("square"));
     private final JButton profileButton = new JButton("Profile…", Icons.of("flame"));
+    private final JButton heapButton = new JButton("Heap…", Icons.of("memory-stick"));
+    private Runnable heap;
     private final JButton save = new JButton("Save…", Icons.of("save"));
     private final JLabel status = new JLabel(" ");
     private volatile AtomicBoolean recording;
@@ -160,7 +162,7 @@ final class ThreadsTab extends JPanel {
         right.setOpaque(false);
         status.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
         right.add(status);
-        for (JButton b : new JButton[] {take, record, stop, profileButton, save}) {
+        for (JButton b : new JButton[] {take, record, stop, profileButton, heapButton, save}) {
             b.putClientProperty("JButton.buttonType", "toolBarButton");
             b.setFocusable(false);
             right.add(b);
@@ -168,7 +170,14 @@ final class ThreadsTab extends JPanel {
         take.setToolTipText("Take a thread dump now");
         record.setToolTipText("Take several dumps some seconds apart, to see stuck threads and CPU use");
         stop.setToolTipText("Stop recording");
-        profileButton.setToolTipText("See where the JVM spends its time (a flame graph)");
+        profileButton.setToolTipText("See where the JVM spends its time, memory or lock waits (a flame graph)");
+        heapButton.setToolTipText("See what fills the heap, by class, and what grows");
+        heapButton.addActionListener(e -> {
+            if (heap != null) {
+                heap.run();
+            }
+        });
+        heapButton.setVisible(false);
         save.setToolTipText("Save the dumps as a text file (it opens again here, or in any other tool)");
         take.addActionListener(e -> takeDumps(1, 0));
         record.addActionListener(e -> recordDialog());
@@ -256,6 +265,16 @@ final class ThreadsTab extends JPanel {
     void setProfiler(Runnable r) {
         profile = r;
         profileButton.setVisible(r != null);
+    }
+
+    /** Shows a Heap button that runs {@code r}. */
+    void setHeap(Runnable r) {
+        heap = r;
+        heapButton.setVisible(r != null);
+    }
+
+    JButton heapButtonForTest() {
+        return heapButton;
     }
 
     String statusText() {

@@ -35,6 +35,8 @@ final class FlameGraph extends JComponent implements Scrollable {
     private String exact;
     private final List<Hit> hits = new ArrayList<>();
     private Consumer<Profile.Node> onZoom = n -> { };
+    private java.util.function.BiConsumer<Profile.Node, MouseEvent> onPopup = (n, e) -> { };
+    private Profile baseline;
 
     /** A painted frame, for the mouse. */
     private record Hit(Rectangle r, Profile.Node node) {}
@@ -44,7 +46,29 @@ final class FlameGraph extends JComponent implements Scrollable {
         ToolTipManager.sharedInstance().registerComponent(this);
         addMouseListener(new MouseAdapter() {
             @Override
+            public void mousePressed(MouseEvent e) {
+                popup(e);
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                popup(e);
+            }
+
+            private void popup(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    Profile.Node n = nodeAt(e.getX(), e.getY());
+                    if (n != null) {
+                        onPopup.accept(n, e);
+                    }
+                }
+            }
+
+            @Override
             public void mouseClicked(MouseEvent e) {
+                if (e.getButton() != MouseEvent.BUTTON1) {
+                    return;
+                }
                 Profile.Node n = nodeAt(e.getX(), e.getY());
                 if (n != null) {
                     zoomTo(n == zoom ? (n.parent() == null ? n : n.parent()) : n);
@@ -69,6 +93,34 @@ final class FlameGraph extends JComponent implements Scrollable {
 
     void onZoom(Consumer<Profile.Node> c) {
         onZoom = c;
+    }
+
+    /** A right-click on a frame. */
+    void onPopup(java.util.function.BiConsumer<Profile.Node, MouseEvent> c) {
+        onPopup = c;
+    }
+
+    /** Colors frames by how their share changed since {@code before} (null: the usual colors). */
+    void setBaseline(Profile before) {
+        baseline = before;
+        repaint();
+    }
+
+    Profile baseline() {
+        return baseline;
+    }
+
+    /** The change of a frame's share since the baseline, in percentage points (NaN: new there). */
+    double change(Profile.Node n) {
+        if (baseline == null || profile == null || profile.total() == 0) {
+            return 0;
+        }
+        double now = 100.0 * n.total() / profile.total();
+        Profile.Node b = baseline.same(n);
+        if (b == null) {
+            return Double.NaN;
+        }
+        return now - 100.0 * b.total() / Math.max(1, baseline.total());
     }
 
     /** Zooms into a frame (null: everything). */
@@ -166,10 +218,16 @@ final class FlameGraph extends JComponent implements Scrollable {
         long all = profile.total();
         String total = pct(n.total(), all);
         String self = pct(n.self(), all);
+        String diff = "";
+        if (baseline != null && n != profile.root()) {
+            double c = change(n);
+            diff = Double.isNaN(c) ? "<br><b>New</b> since the run compared with"
+                    : String.format("<br>%+.1f points since the run compared with", c);
+        }
         return "<html><b>" + ThreadStackView.esc(n.name()) + "</b><br>"
                 + "With what it calls: " + total + " (" + profile.amount(n.total()) + ")<br>"
-                + "On its own: " + self + " (" + profile.amount(n.self()) + ")<br>"
-                + "<span style='color:gray'>" + kindLabel(n.kind()) + " · click to zoom</span></html>";
+                + "On its own: " + self + " (" + profile.amount(n.self()) + ")" + diff + "<br>"
+                + "<span style='color:gray'>" + kindLabel(n.kind()) + " · click to zoom, right-click for more</span></html>";
     }
 
     static String pct(long v, long all) {
@@ -241,7 +299,8 @@ final class FlameGraph extends JComponent implements Scrollable {
     private void frame(Graphics2D g, FontMetrics fm, Profile.Node n, double x, int y, double w, boolean dim) {
         int ix = (int) Math.round(x);
         int iw = Math.max(1, (int) Math.round(x + w) - ix - 1);
-        Color c = matches(n) ? (Theme.isDark() ? new Color(0xC2185B) : new Color(0xEE7AE9)) : color(n);
+        Color c = matches(n) ? (Theme.isDark() ? new Color(0xC2185B) : new Color(0xEE7AE9))
+                : baseline != null && n != profile.root() ? diffColor(change(n)) : color(n);
         if (dim) {
             c = new Color(c.getRed(), c.getGreen(), c.getBlue(), 120);
         }
@@ -276,6 +335,24 @@ final class FlameGraph extends JComponent implements Scrollable {
     private static boolean isJdk(String name) {
         return name.startsWith("java.") || name.startsWith("javax.") || name.startsWith("jdk.")
                 || name.startsWith("sun.") || name.startsWith("com.sun.");
+    }
+
+    /** Red: a bigger share than before, blue: smaller, gray: about the same. */
+    private static Color diffColor(double points) {
+        boolean dark = Theme.isDark();
+        Color same = dark ? new Color(0x52565C) : new Color(0xE1E4E8);
+        if (Double.isNaN(points)) {
+            return dark ? new Color(0xB91C1C) : new Color(0xF87171);
+        }
+        double f = Math.min(1, Math.abs(points) / 5.0); // 5 points or more: the full color
+        if (Math.abs(points) < 0.2) {
+            return same;
+        }
+        Color to = points > 0 ? (dark ? new Color(0xB91C1C) : new Color(0xF87171))
+                : (dark ? new Color(0x1D4ED8) : new Color(0x60A5FA));
+        return new Color((int) (same.getRed() + (to.getRed() - same.getRed()) * f),
+                (int) (same.getGreen() + (to.getGreen() - same.getGreen()) * f),
+                (int) (same.getBlue() + (to.getBlue() - same.getBlue()) * f));
     }
 
     private Color color(Profile.Node n) {

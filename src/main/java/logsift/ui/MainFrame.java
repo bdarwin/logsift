@@ -693,6 +693,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             ThreadsTab tab = openThreads(source, List.of(first), capture);
             if (profiling != null) {
                 tab.setProfiler(() -> openProfile(source, profiling.target()));
+                tab.setHeap(() -> openHeap(source, profiling.target()));
             }
         });
         jvmDialog.setVisible(true);
@@ -708,6 +709,24 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         ProfileTab tab = new ProfileTab(source, target, null);
         addProfileTab(tab);
         return tab;
+    }
+
+    /** Opens a Heap tab for a running JVM. */
+    HeapTab openHeap(String source, logsift.jvm.Profiler.Target target) {
+        HeapTab tab = new HeapTab(source, target);
+        tabs.addTab(tab.title(), Icons.of("memory-stick"), tab);
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tab.onChanged(() -> {
+            if (tabs.getSelectedComponent() == tab) {
+                refreshStatus();
+            }
+        });
+        updateEmptyState();
+        return tab;
+    }
+
+    HeapTab currentHeapTab() {
+        return tabs.getSelectedComponent() instanceof HeapTab t ? t : null;
     }
 
     private void addProfileTab(ProfileTab tab) {
@@ -1567,6 +1586,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             th.close();
         } else if (c instanceof ProfileTab pt) {
             pt.close();
+        } else if (c instanceof HeapTab ht) {
+            ht.close();
         }
         updateEmptyState();
     }
@@ -2005,6 +2026,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         formatButton.setToolTipText(t != null && t.formatChoice() != null
                 ? "Lines are read as \u201c" + fmt + "\u201d (chosen for this file). Click to change."
                 : "Lines are read as \u201c" + fmt + "\u201d (detected). Click if that is wrong.");
+        if (tabs.getSelectedComponent() instanceof HeapTab ht) {
+            setTitle(ht.title() + " — Logsift");
+            status.setText(ht.statusText());
+            statusRight.setText(memory());
+            progress.setVisible(false);
+            return;
+        }
         if (tabs.getSelectedComponent() instanceof ProfileTab pt) {
             setTitle(pt.title() + " — Logsift");
             status.setText(pt.statusText());

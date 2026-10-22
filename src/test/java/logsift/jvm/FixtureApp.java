@@ -16,17 +16,30 @@ public final class FixtureApp {
     static final ReentrantLock L1 = new ReentrantLock();
     static final ReentrantLock L2 = new ReentrantLock();
     static volatile long sink;
+    static final java.util.List<byte[]> LEAK = new java.util.ArrayList<>();
+    static final java.util.List<java.nio.ByteBuffer> NATIVE_LEAK = new java.util.ArrayList<>();
+
+    /** Called again and again by "worker" (for method profiling). */
+    static void work() {
+        sleep(3);
+    }
 
     private FixtureApp() {
     }
 
     /** Starts this program in a JVM of its own and waits until it is ready (for tests). */
     public static Process start() throws Exception {
+        return start(false);
+    }
+
+    /** With {@code memory}: also threads that leak heap and native memory, and one calling {@link #work}. */
+    public static Process start(boolean memory) throws Exception {
         String exe = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")
                 ? "java.exe" : "java";
         java.nio.file.Path javaExe = java.nio.file.Path.of(System.getProperty("java.home"), "bin", exe);
         Process p = new ProcessBuilder(javaExe.toString(), "-cp", System.getProperty("java.class.path"),
-                "-Xmx64m", FixtureApp.class.getName()).redirectErrorStream(true).start();
+                memory ? "-Xmx512m" : "-Xmx64m", FixtureApp.class.getName(), memory ? "memory" : "threads")
+                .redirectErrorStream(true).start();
         java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream(),
                 java.nio.charset.StandardCharsets.UTF_8));
         String line;
@@ -115,6 +128,38 @@ public final class FixtureApp {
                 sink += System.nanoTime() % 7;
             }
         });
+        if (args.length > 0 && args[0].equals("memory")) {
+            start("leaker", () -> {
+                while (true) {
+                    for (int i = 0; i < 50; i++) {
+                        byte[] garbage = new byte[1000];
+                        sink += garbage.length;
+                    }
+                    synchronized (LEAK) {
+                        if (LEAK.size() < 100_000) {
+                            LEAK.add(new byte[2048]); // kept: the heap grows by ~2 MB a second
+                        }
+                    }
+                    sleep(1);
+                }
+            });
+            start("native-leaker", () -> {
+                while (true) {
+                    java.nio.ByteBuffer b = java.nio.ByteBuffer.allocateDirect(64 * 1024);
+                    synchronized (NATIVE_LEAK) {
+                        if (NATIVE_LEAK.size() < 3000) {
+                            NATIVE_LEAK.add(b); // kept: never freed, ~3 MB a second
+                        }
+                    }
+                    sleep(20);
+                }
+            });
+            start("worker", () -> {
+                while (true) {
+                    work();
+                }
+            });
+        }
         sleep(400);
         System.out.println("ready");
         System.out.flush();

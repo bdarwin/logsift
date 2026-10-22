@@ -371,13 +371,31 @@ public final class SshJvms implements AutoCloseable {
     }
 
     /** Copies a file from the server. */
-    public void download(String remote, Path local) throws IOException {
+    public void download(String remote, Path local, java.util.function.DoubleConsumer progress) throws IOException {
         ChannelSftp sftp = null;
         try {
             sftp = (ChannelSftp) session.openChannel("sftp");
             sftp.connect(15_000);
+            long size = Math.max(1, sftp.stat(remote).getSize());
             try (OutputStream out = java.nio.file.Files.newOutputStream(local)) {
-                sftp.get(remote, out);
+                sftp.get(remote, out, progress == null ? null : new com.jcraft.jsch.SftpProgressMonitor() {
+                    private long done;
+
+                    @Override
+                    public void init(int op, String src, String dest, long max) {
+                    }
+
+                    @Override
+                    public boolean count(long n) {
+                        done += n;
+                        progress.accept(Math.min(1, done / (double) size));
+                        return true;
+                    }
+
+                    @Override
+                    public void end() {
+                    }
+                });
             }
         } catch (JSchException | SftpException e) {
             throw new IOException("cannot copy " + remote + " from the server: " + RemoteMirror.describe(e), e);

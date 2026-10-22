@@ -93,7 +93,7 @@ public final class LocalJvms {
         }
 
         public ThreadDump dump() throws IOException {
-            String text = diagnostic("threadPrint", "-l");
+            String text = diagnostic("Thread.print", "-l");
             List<ThreadDump> d = DumpParser.parse(text);
             if (d.isEmpty()) {
                 throw new IOException("the JVM's answer was not a thread dump: " + first(text));
@@ -104,17 +104,35 @@ public final class LocalJvms {
         }
 
         /**
-         * Runs a diagnostic command ({@code threadPrint}, {@code jfrStart}…; as with jcmd,
-         * {@code Thread.print}, {@code JFR.start}…) and returns its text.
+         * Runs a diagnostic command by its jcmd name ({@code Thread.print}, {@code JFR.start},
+         * {@code GC.class_histogram}…) and returns its text.
          */
-        public String diagnostic(String operation, String... args) throws IOException {
+        public String diagnostic(String command, String... args) throws IOException {
             if (closed) {
                 throw new IOException("closed");
             }
             if (mbeans != null) {
                 try {
-                    Object r = mbeans.invoke(new ObjectName("com.sun.management:type=DiagnosticCommand"), operation,
-                            new Object[] {args}, new String[] {String[].class.getName()});
+                    if (command.equals("GC.heap_dump")) {
+                        // not offered as a diagnostic command over JMX; the HotSpot MBean does it
+                        String file = java.util.Arrays.stream(args).filter(a -> !a.startsWith("-")).findFirst()
+                                .orElseThrow(() -> new IOException("no file for the heap dump"));
+                        boolean all = java.util.Arrays.asList(args).contains("-all");
+                        mbeans.invoke(new ObjectName("com.sun.management:type=HotSpotDiagnostic"), "dumpHeap",
+                                new Object[] {file, !all}, new String[] {String.class.getName(), boolean.class.getName()});
+                        return "Heap dump file created";
+                    }
+                    ObjectName dc = new ObjectName("com.sun.management:type=DiagnosticCommand");
+                    Object r;
+                    try {
+                        r = mbeans.invoke(dc, jmxName(command), new Object[] {args},
+                                new String[] {String[].class.getName()});
+                    } catch (javax.management.ReflectionException e) {
+                        if (args.length > 0) {
+                            throw e;
+                        }
+                        r = mbeans.invoke(dc, jmxName(command), new Object[0], new String[0]); // takes no arguments
+                    }
                     return String.valueOf(r);
                 } catch (IOException e) {
                     throw e;
@@ -125,7 +143,7 @@ public final class LocalJvms {
             List<String> cmd = new ArrayList<>();
             cmd.add(jcmd.toString());
             cmd.add(String.valueOf(pid));
-            cmd.add(jcmdName(operation));
+            cmd.add(command);
             cmd.addAll(List.of(args));
             return run(cmd, 60);
         }
@@ -143,17 +161,22 @@ public final class LocalJvms {
         }
     }
 
-    /** {@code threadPrint} → {@code Thread.print}, {@code jfrStart} → {@code JFR.start}. */
-    static String jcmdName(String operation) {
-        return switch (operation) {
-            case "threadPrint" -> "Thread.print";
-            case "jfrStart" -> "JFR.start";
-            case "jfrStop" -> "JFR.stop";
-            case "jfrDump" -> "JFR.dump";
-            case "vmVersion" -> "VM.version";
-            case "vmUptime" -> "VM.uptime";
-            default -> operation;
-        };
+    /** The diagnostic command MBean's name for a jcmd command: {@code GC.class_histogram} → {@code gcClassHistogram}. */
+    static String jmxName(String command) {
+        StringBuilder sb = new StringBuilder();
+        boolean firstPart = true;
+        for (String part : command.split("[._]")) {
+            if (part.isEmpty()) {
+                continue;
+            }
+            if (firstPart) {
+                sb.append(part.toLowerCase(java.util.Locale.ROOT));
+                firstPart = false;
+            } else {
+                sb.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+            }
+        }
+        return sb.toString();
     }
 
     /**

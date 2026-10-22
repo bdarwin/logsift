@@ -146,10 +146,23 @@ class SshJvmsTest {
         Profiler.Target t = Profiler.remote(p, ssh, o);
         if (Agents.has(ssh.platform())) {
             assertEquals(Profiler.Engine.ASYNC_PROFILER, t.engines().get(0));
-            ProfilerTest.checkHotLoop(t.run(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.CPU, 2, null, () -> false));
+            ProfilerTest.checkHotLoop(t.run(Profiler.Request.of(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.CPU, 2),
+                    null, () -> false).get(0));
+            // a recording written by the JVM on the server, copied back
+            List<Profile> all = t.run(Profiler.Request.of(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.ALL, 2),
+                    null, () -> false);
+            assertTrue(all.size() > 1, "several views: " + all.stream().map(Profile::title).toList());
         }
         // Flight Recorder: recorded on the server, copied back over SFTP
-        ProfilerTest.checkHotLoop(t.run(Profiler.Engine.JFR, Profiler.Mode.CPU, 2, null, () -> false));
+        ProfilerTest.checkHotLoop(t.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.CPU, 2), null,
+                () -> false).get(0));
+        // the heap: a histogram, and a heap dump copied back
+        assertTrue(HeapHistogram.parse(t.diagnostic("GC.class_histogram"), 0).rows().size() > 100);
+        Path hprof = dir.resolve("remote.hprof");
+        double[] progress = {0};
+        t.heapDump(hprof, f -> progress[0] = f, () -> false);
+        assertTrue(Files.size(hprof) > 1_000_000);
+        assertEquals(1.0, progress[0], 0.001);
     }
 
     @Test

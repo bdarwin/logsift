@@ -3136,7 +3136,7 @@ class VisualTest {
     @Test
     @Order(38)
     void attachToRunningJvmsAndProfile() throws Exception {
-        Process app = logsift.jvm.FixtureApp.start();
+        Process app = logsift.jvm.FixtureApp.start(true);
         var server = org.apache.sshd.server.SshServer.setUpDefaultServer();
         try {
             // ---- a JVM on this computer
@@ -3195,23 +3195,23 @@ class VisualTest {
             });
             ProfileTab prof = onEdt(frame::currentProfileTab);
             assertNotNull(prof);
-            settle();
-            onEdt(() -> {
-                prof.setForTest(logsift.jvm.Profiler.Mode.CPU, null, 3);
-                prof.startProfiling();
-                return null;
-            });
             waitFor(() -> {
                 try {
-                    return onEdt(() -> prof.profile() != null && !prof.isRunning());
+                    return onEdt(prof::choicesLoadedForTest);
                 } catch (Exception e) {
                     return false;
                 }
-            }, 60_000, "the CPU profile");
-            logsift.jvm.Profile p = onEdt(prof::profile);
+            }, 60_000, "what can be measured");
+            assertTrue(onEdt(prof::modesForTest).containsAll(List.of(logsift.jvm.Profiler.Mode.CPU,
+                    logsift.jvm.Profiler.Mode.ALLOC, logsift.jvm.Profiler.Mode.LOCK)));
+            settle();
+            logsift.jvm.Profile p = profileRun(prof, logsift.jvm.Profiler.Mode.CPU, 3);
             long spin = p.find("logsift.jvm.FixtureApp.lambda$main$8").stream()
                     .mapToLong(logsift.jvm.Profile.Node::total).sum();
-            assertTrue(spin * 2 > p.total(), "the hot loop: " + spin + " of " + p.total());
+            long leaker = p.find("logsift.jvm.FixtureApp.lambda$main$9").stream()
+                    .mapToLong(logsift.jvm.Profile.Node::total).sum();
+            assertTrue(spin > 0 && (spin + leaker) * 2 > p.total(), "the fixture's threads: " + spin + " + " + leaker
+                    + " of " + p.total());
             assertTrue(onEdt(() -> prof.methodsForTest().getRowCount()) > 0);
             settle();
             shot("63-profile-flame-graph");
@@ -3232,7 +3232,77 @@ class VisualTest {
                 prof.save(saved);
                 return null;
             });
-            assertEquals(p.total(), logsift.jvm.Profiler.open(saved).total());
+            assertEquals(p.total(), logsift.jvm.Profiler.open(saved).get(0).total());
+
+            // who calls Thread.sleep; then only the stacks through the hot loop
+            onEdt(() -> {
+                prof.focusForTest("callers", "java.lang.Thread.sleep");
+                return null;
+            });
+            logsift.jvm.Profile callers = onEdt(prof::profile);
+            assertEquals("java.lang.Thread.sleep", callers.root().children().get(0).name());
+            onEdt(() -> {
+                prof.focusForTest("only", "logsift.jvm.FixtureApp.lambda$main$8");
+                return null;
+            });
+            assertEquals(spin, onEdt(prof::profile).total());
+            onEdt(() -> {
+                prof.focusForTest(null, null);
+                return null;
+            });
+
+            // a second run, compared with the first: red grew, blue shrank
+            profileRun(prof, logsift.jvm.Profiler.Mode.CPU, 2);
+            assertEquals(2, onEdt(prof::runCountForTest));
+            onEdt(() -> {
+                prof.compareForTest(1);
+                return null;
+            });
+            assertNotNull(onEdt(() -> prof.graphForTest().baseline()));
+            assertEquals(4, onEdt(() -> prof.methodsForTest().getColumnCount()), "a Change column");
+            settle();
+            shot("65-profile-compared");
+
+            // memory: live objects (where the heap grows), with async-profiler where it runs
+            if (onEdt(prof::modesForTest).contains(logsift.jvm.Profiler.Mode.LIVE)) {
+                logsift.jvm.Profile liveObjects = profileRun(prof, logsift.jvm.Profiler.Mode.LIVE, 3);
+                assertTrue(liveObjects.find("byte[]").size() > 0, "the leaked arrays: " + liveObjects.hottest(5));
+                settle();
+                shot("66-profile-live-objects");
+                // everything at once: one run, several views
+                profileRun(prof, logsift.jvm.Profiler.Mode.ALL, 3);
+                assertTrue(onEdt(prof::viewCountForTest) > 2, "views of one run");
+            }
+
+            // ---- the heap: what fills it, and what grew
+            onEdt(() -> {
+                frame.tabsForTest().setSelectedComponent(live);
+                live.heapButtonForTest().doClick();
+                return null;
+            });
+            HeapTab heap = onEdt(frame::currentHeapTab);
+            assertNotNull(heap);
+            for (int i = 0; i < 2; i++) {
+                int want = i + 1;
+                onEdt(() -> {
+                    heap.setLiveForTest(true);
+                    heap.takeHistogram();
+                    return null;
+                });
+                waitFor(() -> {
+                    try {
+                        return onEdt(() -> heap.snapshotCountForTest() == want && !heap.isBusy());
+                    } catch (Exception e) {
+                        return false;
+                    }
+                }, 60_000, "histogram " + want);
+                Thread.sleep(1200);
+            }
+            assertEquals(6, onEdt(() -> heap.tableForTest().getColumnCount()), "the change columns");
+            assertTrue(onEdt(heap::statusText).contains("since #1"), onEdt(heap::statusText));
+            assertTrue(onEdt(heap::statusText).contains("grew most: byte[]"), "the leak: " + onEdt(heap::statusText));
+            settle();
+            shot("67-heap-histogram");
 
             // ---- the same JVM over SSH
             Path bin = Files.createDirectories(dir.resolve("ssh-bin"));
@@ -3304,6 +3374,25 @@ class VisualTest {
             }
             logsift.jvm.FixtureApp.stop(app);
         }
+    }
+
+    /** Runs a profile in the tab and waits for it. */
+    private static logsift.jvm.Profile profileRun(ProfileTab prof, logsift.jvm.Profiler.Mode mode, int seconds)
+            throws Exception {
+        int before = onEdt(prof::runCountForTest);
+        onEdt(() -> {
+            prof.setForTest(mode, null, seconds);
+            prof.startProfiling();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> prof.runCountForTest() > before && !prof.isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 90_000, "the " + mode + " profile");
+        return onEdt(prof::profile);
     }
 
     private static String details(LogTab tab) {
