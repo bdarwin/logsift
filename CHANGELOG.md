@@ -8,6 +8,7 @@
 - **Settings** (Ctrl+, / ⌘,): font, tab width, encoding for text that isn't UTF-8, how often files are checked for changes, reopening the last session, and more.
 - Levels written as `E`, `ERR`, `error` or `SEVERE` count as errors in your own formats (colors, error marks, F8, level chips).
 - **Open from WSL** (Windows): opens your Linux home folder.
+- **Insights:** a new tab that shows at a glance what is going on in the log: error bursts (and when), new errors and when they began, silences, restarts, and noisy messages, each with buttons to go there, show or hide it. It fills in by itself and its title counts the problems.
 - **Menus with icons, regrouped:** a new **Go** menu (Go to Line/Time, next error, bookmarks), and check marks on everything that turns on or off. New toolbar buttons for the tree of loggers and the timeline, and Settings (⚙).
 - **Splash screen** while Logsift starts.
 - **Windows: Open with Logsift** on the right-click menu of files and folders, and in the Open with list of `.log`, `.txt` and `.out` files. The installer no longer takes over `.log` files (their icon and double-click stay as they were). On macOS, Logsift is likewise offered in Open With without becoming the default.

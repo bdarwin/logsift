@@ -2733,6 +2733,90 @@ class VisualTest {
         shot("51-toolbar");
     }
 
+    @Test
+    @Order(35)
+    void insightsAtAGlance() throws Exception {
+        Path f = dir.resolve("checkout-service.log");
+        java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+        try (var w = Files.newBufferedWriter(f)) {
+            java.time.LocalDateTime t = java.time.LocalDateTime.of(2026, 10, 21, 10, 0, 0);
+            int i = 0;
+            w.write(fmt.format(t) + " INFO  [main] com.acme.CheckoutApp - Started CheckoutApp in 2.31 seconds\n");
+            while (t.isBefore(java.time.LocalDateTime.of(2026, 10, 21, 12, 0))) {
+                t = t.plusSeconds(1);
+                i++;
+                int hm = t.getHour() * 100 + t.getMinute();
+                if (hm >= 1120 && hm < 1130) {
+                    continue; // the service hung
+                }
+                String ts = fmt.format(t);
+                if (hm == 1130 && t.getSecond() == 0) {
+                    w.write(ts + " INFO  [main] com.acme.CheckoutApp - Started CheckoutApp in 2.47 seconds\n");
+                }
+                w.write(ts + " INFO  [http-" + (i % 8) + "] com.acme.web.Requests - GET /cart/" + (i % 977) + " 200 in " + (i % 90) + " ms\n");
+                if (i % 300 == 0) {
+                    w.write(ts + " ERROR [http-" + (i % 8) + "] com.acme.pay.Payments - Payment declined for order " + i + "\n");
+                }
+                if (i % 120 == 0) {
+                    w.write(ts + " WARN  [pool-1] com.acme.inventory.Client - Slow response from inventory: " + (900 + i % 300) + " ms\n");
+                }
+                if (hm >= 1042 && hm < 1045 && i % 2 == 0) {
+                    w.write(ts + " ERROR [db-" + (i % 4) + "] com.acme.db.Pool - Database connection lost after " + (20000 + i) + " ms\n");
+                }
+                if (hm >= 1100 && i % 60 == 0) {
+                    w.write(ts + " ERROR [http-" + (i % 8) + "] com.acme.cache.Redis - Cache unreachable at cache-" + (i % 3) + ".internal:6379\n");
+                }
+            }
+        }
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f.toAbsolutePath().normalize())
+                        && frame.currentTab().insightsPanel().report() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "insights of the log");
+        LogTab tab = onEdt(frame::currentTab);
+        logsift.core.Insights.Report r = onEdt(() -> tab.insightsPanel().report());
+        String all = r.findings().stream().map(x -> x.kind() + " " + x.title() + " | " + x.detail())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertEquals(logsift.core.Insights.Kind.BURST, r.findings().get(0).kind(), all);
+        assertTrue(all.contains("NEW_ERROR Cache unreachable at …"), all);
+        assertTrue(all.contains("SILENCE No lines for 10 min"), all);
+        assertTrue(all.contains("RESTART Started 2 times"), all);
+        // the tab says how many problems there are, without opening it
+        String title = onEdt(() -> {
+            JTabbedPane b = (JTabbedPane) tab.insightsPanel().getParent();
+            return b.getTitleAt(b.indexOfComponent(tab.insightsPanel()));
+        });
+        assertEquals("Insights (" + r.problems() + ")", title);
+        onEdt(() -> {
+            JTabbedPane b = (JTabbedPane) tab.insightsPanel().getParent();
+            b.setSelectedComponent(tab.insightsPanel());
+            frame.setColumns(true);
+            return null;
+        });
+        settle();
+        shot("52-insights");
+        // "Show these minutes" on the burst shows just that time
+        onEdt(() -> {
+            button(tab.insightsPanel(), "Show these minutes").doClick();
+            return null;
+        });
+        settle();
+        assertNotNull(onEdt(tab::timeRange), "time range selected");
+        shot("53-insights-burst");
+        onEdt(() -> {
+            tab.clearTimeRange();
+            tab.setMatchingOnly(false);
+            return null;
+        });
+    }
+
     private static void waitFor(BooleanSupplier cond, long timeoutMs, String what)
             throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;

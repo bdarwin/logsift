@@ -191,17 +191,28 @@ final class MessagesPanel extends JPanel {
                     return;
                 }
                 running = null;
-                analyze.setEnabled(true);
-                analyze.setText("Analyze again");
-                result = r;
-                model.refilter();
-                status.setText(String.format("%,d kinds of messages in %,d lines (%,d ms)%s",
-                        r.templates().size(), r.lines(), r.millis(),
-                        r.truncated() ? " · too many kinds, some were not counted" : ""));
+                showResult(r);
             });
         }, "logsift-messages");
         t.setDaemon(true);
         t.start();
+    }
+
+    private void showResult(MessageStats.Result r) {
+        analyze.setEnabled(true);
+        analyze.setText("Analyze again");
+        result = r;
+        model.refilter();
+        status.setText(String.format("%,d kinds of messages in %,d lines (%,d ms)%s",
+                r.templates().size(), r.lines(), r.millis(),
+                r.truncated() ? " · too many kinds, some were not counted" : ""));
+    }
+
+    /** Messages of the whole file counted elsewhere (by Insights): used if there are none yet. */
+    void useResult(MessageStats.Result r) {
+        if (r != null && result == null && running == null && scope.getSelectedIndex() == 0) {
+            showResult(r);
+        }
     }
 
     void cancel() {

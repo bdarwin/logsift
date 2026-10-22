@@ -36,6 +36,14 @@ final class Icons {
         return icon;
     }
 
+    /** The icon {@code icons/<name>.svg} in one color (for example red for errors). */
+    static Icon of(String name, Color color, int size) {
+        FlatSVGIcon icon = new FlatSVGIcon("logsift/icons/" + name + ".svg", size, size);
+        icon.setColorFilter(new FlatSVGIcon.ColorFilter(c -> new Color(color.getRed(), color.getGreen(),
+                color.getBlue(), c.getAlpha())));
+        return icon;
+    }
+
     static Icon open() {
         return of("folder-open");
     }

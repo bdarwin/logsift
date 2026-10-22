@@ -80,6 +80,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private List<String> sourceLabels;          // merged logs: the label of each source
     private final List<Runnable> closeHooks = new ArrayList<>();
     private final MessagesPanel messages;
+    private final InsightsPanel insights;
+    private int insightsGeneration = -1;
     private final Bookmarks bookmarks;
     private final BookmarksPanel bookmarksPanel;
     private final DetailsPanel details = new DetailsPanel();
@@ -277,6 +279,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         main.setOverview(overviewModel());
 
         messages = new MessagesPanel(messagesHost());
+        insights = new InsightsPanel(insightsHost());
         bookmarks = new Bookmarks(path);
         bookmarkGeneration = doc.generation();
         bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
@@ -287,6 +290,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     bookmarks.size() == 0 ? "Bookmarks" : "Bookmarks (" + bookmarks.size() + ")");
         });
         bottom.addTab("Filters", filterPanel);
+        bottom.addTab("Insights", insights);
         results = new ResultsPanel(doc, resultsHost());
         bottom.addTab("Find results", results);
         bottom.addTab("Messages", messages);
@@ -298,6 +302,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             if (bottom.getSelectedComponent() == messages && messages.result() == null
                     && !messages.isRunning()) {
                 messages.start(); // analyze the first time the tab is opened
+            }
+            if (bottom.getSelectedComponent() == insights && insights.report() == null && !insights.isRunning()) {
+                startInsights();
             }
         });
         bottom.setPreferredSize(new Dimension(400, 210));
@@ -928,6 +935,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     private void onDocChanged() {
         results.view().rowsChanged();
+        updateInsights();
         if (doc.generation() != bookmarkGeneration) {
             bookmarkGeneration = doc.generation();
             bookmarks.clear(); // truncated or rotated: the bookmarked lines are gone
@@ -1244,6 +1252,140 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     void showMessagesTab() {
         setBottomCollapsed(false);
         bottom.setSelectedComponent(messages);
+    }
+
+    /** Files up to this size get their insights by themselves once read. */
+    private static final long AUTO_INSIGHTS_BYTES = 2L << 30;
+
+    private void startInsights() {
+        insightsGeneration = doc.generation();
+        insights.start();
+    }
+
+    /** Insights for a file just read (and again after it was replaced); notes when it grew. */
+    private void updateInsights() {
+        if (insightsGeneration >= 0 && insightsGeneration != doc.generation()) {
+            insightsGeneration = -1;
+            insights.clear();
+        }
+        if (!doc.isIndexing() && insights.report() == null && !insights.isRunning() && insightsGeneration < 0
+                && doc.fileSize() <= AUTO_INSIGHTS_BYTES && doc.lineCount() > 0) {
+            startInsights();
+        }
+        if (insights.analyzedLines() >= 0) {
+            insights.setStale(doc.lineCount() - insights.analyzedLines());
+        }
+    }
+
+    InsightsPanel insightsPanel() {
+        return insights;
+    }
+
+    private InsightsPanel.Host insightsHost() {
+        return new InsightsPanel.Host() {
+            @Override
+            public logsift.core.Insights.Report analyze(AtomicBoolean cancel, java.util.function.DoubleConsumer progress,
+                                                       java.util.function.Consumer<String> step) {
+                // wait until the file is read and its errors, warnings and times are found
+                step.accept("Reading the log…");
+                long waited = 0;
+                while (doc.isIndexing() || detectedGeneration != doc.generation()
+                        || errorLines.isRunning() || warningLines.isRunning()
+                        || !errorLines.result().isComplete() || !warningLines.result().isComplete()
+                        || (timeIndex != null && timeIndex.isRunning())) {
+                    if (cancel.get() || closed) {
+                        return null;
+                    }
+                    if (waited > 600_000) {
+                        break; // still busy after ten minutes: go with what there is
+                    }
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                    waited += 100;
+                }
+                step.accept("Grouping messages…");
+                long n = doc.lineCount();
+                logsift.core.MessageStats.Result m = logsift.core.MessageStats.analyze(doc, entryFormat, 0,
+                        Long.MAX_VALUE, null, cancel::get, progress);
+                if (cancel.get()) {
+                    return null;
+                }
+                SwingUtilities.invokeLater(() -> messages.useResult(m)); // the Messages tab needn't count again
+                logsift.core.TimeFormat tf = timeFormat;
+                logsift.core.TimeIndex ti = timeIndex;
+                logsift.core.TimeIndex.Samples s = ti == null || tf == null ? null : ti.samples();
+                long lastTime = logsift.core.TimeFormat.NONE;
+                if (tf != null) {
+                    for (long l = n - 1; l >= 0 && l > n - 200 && lastTime == logsift.core.TimeFormat.NONE; l--) {
+                        String text = doc.line(l);
+                        lastTime = text == null ? logsift.core.TimeFormat.NONE : tf.parse(text);
+                    }
+                }
+                FilterResult errs = errorLines.result();
+                FilterResult warns = warningLines.result();
+                java.util.function.LongUnaryOperator lineTime = tf == null ? null : line -> {
+                    String text = doc.line(line);
+                    return text == null ? logsift.core.TimeFormat.NONE : tf.parse(text);
+                };
+                return logsift.core.Insights.analyze(new logsift.core.Insights.Input(n,
+                        s == null ? new long[0] : s.lines(), s == null ? null : s.times(), s == null ? 0 : s.n(),
+                        lastTime, matchingLines(errs), errs.matchCount(), matchingLines(warns), warns.matchCount(),
+                        m, lineTime));
+            }
+
+            @Override
+            public void goToLine(long line) {
+                showLine(line);
+                main.focusView();
+            }
+
+            @Override
+            public void showTimeRange(long from, long to) {
+                selectTimeRange(from, to);
+            }
+
+            @Override
+            public void findAll(logsift.core.MessageStats.Template t) {
+                messagesHost().findAll(t);
+            }
+
+            @Override
+            public void showOnly(logsift.core.MessageStats.Template t) {
+                messagesHost().filter(List.of(t), FilterDef.Action.SHOW);
+            }
+
+            @Override
+            public void hide(logsift.core.MessageStats.Template t) {
+                messagesHost().filter(List.of(t), FilterDef.Action.HIDE);
+            }
+
+            @Override
+            public void reportChanged(logsift.core.Insights.Report r) {
+                int i = bottom.indexOfComponent(insights);
+                long problems = r == null ? 0 : r.problems();
+                bottom.setTitleAt(i, problems == 0 ? "Insights" : "Insights (" + problems + ")");
+                bottom.setIconAt(i, problems == 0 ? null : Icons.of("circle-alert", new java.awt.Color(0xDC2626), 14));
+                bottom.setToolTipTextAt(i, r == null ? null : r.summary());
+            }
+        };
+    }
+
+    /** The lines that match (sorted), at most five million. */
+    private static long[] matchingLines(FilterResult r) {
+        long n = Math.min(r.count(), 5_000_000);
+        long[] out = new long[(int) n];
+        int k = 0;
+        for (long row = 0; row < n; row++) {
+            long line = r.lineAt(row);
+            if (r.isMatch(line)) {
+                out[k++] = line;
+            }
+        }
+        return k == out.length ? out : java.util.Arrays.copyOf(out, k);
     }
 
     private MessagesPanel.Host messagesHost() {
@@ -1917,6 +2059,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         closeHooks.forEach(Runnable::run);
         results.closeAllSessions();
         messages.cancel();
+        insights.cancel();
         engine.close();
         if (timeIndex != null) {
             timeIndex.close();

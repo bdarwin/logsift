@@ -173,6 +173,19 @@ When Logsift doesn't know a log's layout, the Columns view says so and offers **
 
 A preview shows sample lines split into columns, with the times as they are read. Lines that don't fit continue the entry above (stack traces). A format is used when most of a log's lines fit it, or always for the file names you give (`app*.log; *.trace`). The status bar shows the format each log is read with (**Format: …**). If Logsift picked the wrong one, click it (or use **View → Log Format**) to choose another for that file, which is remembered, or to show it as plain text. Levels in your format's level column drive the colors, the error marks and the **E W I D T** chips. Formats are saved in `~/.logsift/formats.properties`, so you can copy them to another computer.
 
+## Insights
+
+The **Insights** tab (next to Filters) tells you at a glance what is going on in the log. It fills in by itself once a file is read (for files up to 2 GB; bigger ones when you open the tab), and its title shows how many problems it found, so you can see them without clicking.
+
+- A summary: the time the log covers, how many lines, errors and warnings.
+- **Error bursts:** times when errors came much faster than usual, such as *10:42:00 – 10:44:58: 90 errors, 45× the usual rate*. **Show these minutes** shows just that time.
+- **New errors:** errors that only began partway through, with when they started (and stopped), then the most frequent errors.
+- **Silences:** stretches with no lines at all, when the program was stuck, stopped or not running.
+- **Restarts:** the program started more than once.
+- **Noise:** one message that fills a big part of the log; **Hide** it to see the rest.
+
+Each finding has buttons to **Go to** its line, **Find all** of that message, **Show only** it or **Hide** it. **Refresh** looks again after the log grew.
+
 ## Tree of loggers
 
 Logs with a logger column (or class, component, thread, host…) get a tree on the left: `com.acme.db.Pool` sits under **com.acme › db**, with line counts. Uncheck a branch to hide its lines and their stack traces. Double-click a name, or right-click → *Show Only*, to see just that one; **Show all** brings everything back. The list at the top picks the column. Counts keep up while the log grows, and what you hid is remembered for the file. Close the tree with ✕, and bring it back with the **Tree** button or **View → Tree of Loggers** (Ctrl+Shift+B).
