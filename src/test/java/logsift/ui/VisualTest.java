@@ -736,8 +736,8 @@ class VisualTest {
 
         // click on the second row of the wrapped line, shift-click on its third row
         String l3 = lines.get(longRow);
-        // where rows break is read again right before clicking: the layout can still change
-        // (a scrollbar appearing narrows the view), which made this test flaky on Windows
+        // where rows break is read right before clicking (the layout can still change while the
+        // log is being read); clicking a wrapped line that is partly off screen must not scroll
         settle();
         String[] got = onEdt(() -> {
             int[] at = v.segmentStartsForTest(longRow);
@@ -2238,6 +2238,137 @@ class VisualTest {
             frame.setFont(null, 13f);
             return null;
         });
+    }
+
+    @Test
+    @Order(32)
+    void treeOfLoggers() throws Exception {
+        Path app = dir.resolve("shop.log");
+        String[] loggers = {"com.acme.db.Pool", "com.acme.db.PoolMonitor", "com.acme.web.HttpServer",
+            "com.acme.web.Session", "com.acme.orders.OrderService", "org.hibernate.SQL", "main"};
+        int[] weight = {30, 3, 25, 8, 20, 12, 2};
+        StringBuilder sb = new StringBuilder();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        java.util.Random rnd = new java.util.Random(7);
+        for (int i = 0; i < 5000; i++) {
+            int r = rnd.nextInt(100);
+            int k = 0;
+            for (int acc = weight[0]; r >= acc; acc += weight[++k]) { }
+            String lg = loggers[k];
+            counts.merge(lg, 1, Integer::sum);
+            sb.append(String.format("2026-10-21 10:%02d:%02d.%03d [worker-%d] %s %s - step %d%n", i / 60 % 60, i % 60,
+                    i % 1000, i % 4, i % 50 == 0 ? "ERROR" : "INFO ", lg, i));
+            if (i % 50 == 0) {
+                sb.append("java.lang.IllegalStateException: boom\n\tat ").append(lg).append(".run(X.java:1)\n");
+            }
+        }
+        Files.writeString(app, sb.toString().replace("\\n", "\n").replace("\\t", "\t"));
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.openFile(app);
+            return null;
+        });
+        LogTab tab = onEdt(frame::currentTab);
+        ValuesTreePanel tree = tab.valuesTree();
+        waitFor(() -> tree.isShowing() && tree.valuesForTest() != null && !tree.isCountingForTest(), 20_000,
+                "the tree of loggers");
+        logsift.core.ValueTree t = tree.valuesForTest();
+        assertEquals(5000, t.root().total());
+        assertEquals("com.acme", t.root().children().get(0).label(), "com › acme joined");
+        assertEquals((long) counts.get("com.acme.db.Pool") + counts.get("com.acme.db.PoolMonitor"),
+                t.find("com.acme.db").total());
+        settle();
+        shot("48-tree-of-loggers");
+
+        // uncheck com.acme.db: its lines (and their stack traces) go away
+        onEdt(() -> {
+            tree.toggleForTest("com.acme.db");
+            return null;
+        });
+        long dbLines = counts.get("com.acme.db.Pool") + counts.get("com.acme.db.PoolMonitor");
+        waitForFilter(tab);
+        assertTrue(tab.isMatchingOnly(), "hidden lines go away");
+        long shown = onEdt(() -> tab.filterResultForTest().matchCount());
+        assertEquals(5000 - dbLines, shownEntries(app, l -> !l.contains(" com.acme.db.")), "");
+        assertEquals(shownLines(app, "com.acme.db."), shown, "lines not under com.acme.db (with their stack traces)");
+        settle();
+        shot("49-tree-hide-branch");
+
+        // double-click (Show Only): just one logger
+        onEdt(() -> {
+            tree.showOnlyForTest("org.hibernate.SQL");
+            return null;
+        });
+        waitForFilter(tab);
+        long only = onEdt(() -> tab.filterResultForTest().matchCount());
+        assertEquals(onlyLines(app, "org.hibernate.SQL"), only);
+
+        // remembered for the file
+        java.util.Properties st = onEdt(tab::saveState);
+        assertEquals("logger", st.getProperty("state.tree.column"));
+        assertTrue(st.getProperty("state.tree.hidden").contains("*com.acme"), st.getProperty("state.tree.hidden"));
+
+        // Show all, and the panel can be closed (and comes back from the View menu)
+        onEdt(() -> {
+            tree.showAllValues();
+            frame.setValuesTree(false);
+            return null;
+        });
+        assertTrue(!onEdt(tree::isVisible));
+        onEdt(() -> {
+            frame.setValuesTree(true);
+            frame.setColumns(false);
+            tab.setMatchingOnly(false);
+            return null;
+        });
+        assertTrue(onEdt(tree::isVisible));
+    }
+
+    private static void waitForFilter(LogTab tab) throws Exception {
+        Thread.sleep(150);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.filterResultForTest().isComplete() && !tab.filterEngineForTest().isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "filtering");
+        settle();
+    }
+
+    /** Lines kept when entries (a line and its stack trace) under this logger prefix are hidden. */
+    private static long shownLines(Path f, String hiddenPrefix) throws IOException {
+        long n = 0;
+        boolean hidden = false;
+        for (String l : Files.readAllLines(f)) {
+            boolean entry = l.startsWith("2026-");
+            if (entry) {
+                hidden = l.contains(" " + hiddenPrefix);
+            }
+            if (!hidden) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** Lines of entries of exactly this logger (with their stack traces). */
+    private static long onlyLines(Path f, String logger) throws IOException {
+        long n = 0;
+        boolean in = false;
+        for (String l : Files.readAllLines(f)) {
+            if (l.startsWith("2026-")) {
+                in = l.contains(" " + logger + " - ");
+            }
+            if (in) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    private static long shownEntries(Path f, java.util.function.Predicate<String> keep) throws IOException {
+        return Files.readAllLines(f).stream().filter(l -> l.startsWith("2026-")).filter(keep).count();
     }
 
     /** The first button with this text inside a component. */

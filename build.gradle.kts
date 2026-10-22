@@ -94,6 +94,18 @@ val genLog by tasks.registering(JavaExec::class) {
     args = listOfNotNull(out, size, follow?.let { "--follow=$it" })
 }
 
+// Stress test with very large logs (writes many GB; not part of the normal tests):
+//   ./gradlew stress -PstressGb=10 -PstressDir=/some/disk
+val stress by tasks.registering(JavaExec::class) {
+    description = "Measures Logsift with a multi-GB log, a huge line and 300 million short lines."
+    group = "verification"
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass = "logsift.tools.Stress"
+    jvmArgs("-Xmx2g", "-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED")
+    args = listOf((project.findProperty("stressGb") ?: "10").toString(),
+        (project.findProperty("stressDir") ?: layout.buildDirectory.dir("stress").get().asFile.absolutePath).toString())
+}
+
 // Regenerate the installer icons in packaging/icons (macOS .icns needs iconutil):
 //   ./gradlew genIcons && iconutil -c icns packaging/icons/logsift.iconset -o packaging/icons/logsift.icns
 val genIcons by tasks.registering(JavaExec::class) {

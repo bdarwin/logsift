@@ -48,6 +48,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** Opens Log Formats with a new format made from this log's lines. */
         default void defineFormat(LogTab tab) {}
+
+        /** The user closed the tree of loggers (for every log). */
+        default void setValuesTree(boolean on) {}
     }
 
     private final LogDocument doc;
@@ -286,8 +289,29 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         north.add(timeline, BorderLayout.NORTH);
         north.add(noColumns, BorderLayout.SOUTH);
         noColumns.setVisible(false);
-        top.add(north, BorderLayout.NORTH);
-        top.add(main, BorderLayout.CENTER);
+        JPanel logArea = new JPanel(new BorderLayout());
+        logArea.add(north, BorderLayout.NORTH);
+        logArea.add(main, BorderLayout.CENTER);
+        treePanel = new ValuesTreePanel(doc, new ValuesTreePanel.Listener() {
+            @Override
+            public void hiddenChanged(ValuesTreePanel p) {
+                filtersChanged();
+                if (p.hiddenColumn() != null) {
+                    setMatchingOnly(true); // hidden lines go away
+                }
+            }
+
+            @Override
+            public void closeRequested() {
+                host.setValuesTree(false);
+            }
+        });
+        side = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, treePanel, logArea);
+        side.setBorder(null);
+        side.setContinuousLayout(true);
+        side.setResizeWeight(0);
+        top.add(side, BorderLayout.CENTER);
+        updateTreeVisible();
         main.addPaintListener(timeline::repaint);
         split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, top, bottom);
         split.setResizeWeight(1.0); // the log gets the extra space
@@ -425,6 +449,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
         }
         applyColumns();
+        treePanel.setFormat(lf);
+        updateTreeVisible();
         filterPanel.setEntryFormatInfo(entryFormat == null ? null : entryFormat.name());
         applyEntryOptions();
 
@@ -909,7 +935,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         boolean indexed = doc.lineCount() > line || !doc.isIndexing();
         FilterResult r = filterResult;
         boolean filtered;
-        if (!matchingOnly || !filterPanel.hasActiveFilters()) {
+        if (!matchingOnly || (!filterPanel.hasActiveFilters()
+                && (treePanel == null || treePanel.hiddenColumn() == null))) {
             filtered = true;
         } else if (pendingExact) {
             // wait until filtering has settled (entries detected, every filter done), or a
@@ -933,6 +960,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private void goNear(long line) {
         long row = matchingOnly ? filterResult.rowAtOrAfter(line) : line;
         main.goToRow((int) Math.min(row, Integer.MAX_VALUE - 1), true);
+    }
+
+    FilterResult filterResultForTest() {
+        return filterResult;
+    }
+
+    FilterEngine filterEngineForTest() {
+        return engine;
     }
 
     boolean isMatchingOnly() {
@@ -1024,6 +1059,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
             formula = formula == null ? levels : new Formula.And(formula, levels);
         }
+        // branches unchecked in the tree of loggers
+        String treeRegex = treePanel == null || treePanel.hiddenColumn() == null || logFormat == null ? null
+                : logsift.core.ValueTree.lineRegex(logFormat, treePanel.hiddenColumn(), treePanel.hidden());
+        if (treeRegex != null) {
+            specs.add(new FilterEngine.Spec('~', new SearchQuery(treeRegex, true, true, false)));
+            Formula notHidden = new Formula.Not(new Formula.Ref('~'));
+            formula = formula == null ? notHidden : new Formula.And(formula, notHidden);
+        }
         try {
             engine.configure(specs, formula);
             appliedFormula = formula;
@@ -1047,6 +1090,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     @Override
     public void clearAllFilters() {
         clearTimeRange();
+        treePanel.showAllValues();
         setMatchingOnly(false);
     }
 
@@ -1420,6 +1464,42 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         applyColumns();
     }
 
+    // ---------------------------------------------------------------- tree of loggers
+
+    private final ValuesTreePanel treePanel;
+    private final JSplitPane side;
+    private boolean treeWanted = AppState.prefs().getBoolean("valuesTree", true);
+    private int sideDivider = -1;
+
+    /** Shows the tree of loggers (threads, components...) when the log has such a column. */
+    void setValuesTreeVisible(boolean on) {
+        treeWanted = on;
+        updateTreeVisible();
+    }
+
+    private void updateTreeVisible() {
+        boolean show = treeWanted && !ValuesTreePanel.treeColumns(logFormat).isEmpty();
+        if (show == treePanel.isVisible() && side.getDividerSize() > 0 == show) {
+            return;
+        }
+        if (!show && treePanel.isVisible()) {
+            sideDivider = side.getDividerLocation();
+        }
+        treePanel.setVisible(show);
+        side.setDividerSize(show ? 5 : 0);
+        if (show) {
+            side.setDividerLocation(sideDivider > 0 ? sideDivider : treePanel.getPreferredSize().width);
+        }
+        if (!show) {
+            treePanel.showAllValues(); // nothing stays hidden by a tree that isn't there
+        }
+        side.revalidate();
+    }
+
+    ValuesTreePanel valuesTree() {
+        return treePanel;
+    }
+
     /** Shown in Columns view when the log's layout isn't known. */
     private final JPanel noColumns = noColumnsBanner();
 
@@ -1521,6 +1601,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (formatChoice != null) {
             p.setProperty("state.format", formatChoice);
         }
+        if (treePanel.hiddenColumn() != null) {
+            p.setProperty("state.tree.column", treePanel.hiddenColumn());
+            StringBuilder sb = new StringBuilder();
+            for (logsift.core.ValueTree.Hidden h : treePanel.hidden()) {
+                sb.append(h.withChildren() ? '*' : '=').append(h.path()).append('\n');
+            }
+            p.setProperty("state.tree.hidden", sb.toString());
+        }
         return p;
     }
 
@@ -1536,6 +1624,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 return;
             }
             filterPanel.fromProperties(p);
+            String treeColumn = p.getProperty("state.tree.column");
+            if (treeColumn != null) {
+                List<logsift.core.ValueTree.Hidden> h = new ArrayList<>();
+                for (String s : p.getProperty("state.tree.hidden", "").split("\n")) {
+                    if (s.length() > 1) {
+                        h.add(new logsift.core.ValueTree.Hidden(s.substring(1), s.charAt(0) == '*'));
+                    }
+                }
+                treePanel.restoreHidden(treeColumn, h);
+            }
             setMatchingOnly(Boolean.parseBoolean(p.getProperty("state.matchingOnly", "false")));
             showLineWhenAvailable(Long.parseLong(p.getProperty("state.line", "0")));
         } catch (IOException | RuntimeException e) {
@@ -1770,6 +1868,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     void close() {
         closed = true;
+        treePanel.dispose();
         if (alertTimer != null) {
             alertTimer.stop();
         }

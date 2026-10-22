@@ -17,6 +17,8 @@
 - **Filters.** Show, hide or mark lines and combine filters with AND, OR and NOT. Filter by log level and time range, keep stack traces with their line, and add context lines.
 - **Timeline and highlight bar.** See error bursts at a glance and drag over a time range to zoom in.
 - **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs work too, with a pretty-printed details view.
+- **Your own log formats.** Drop a log file and Logsift works out its layout, or paste your log4j, logback or Python logging setup (even a whole `logback.xml`). A live preview shows how lines split into columns.
+- **Tree of loggers.** Loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
 - **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files.
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
@@ -43,6 +45,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 ## Opening logs
 
 - **Files:** File → Open, drag files onto the window, or double-click a `.log` file (the installers register Logsift for `.log`). On macOS you can also use Open With or drop files on the Dock icon. If Logsift is already running, files open in the same window.
+- **WSL (Windows):** File → Open from WSL… opens your Linux home folder. Windows reaches WSL files directly (`\\wsl.localhost\Ubuntu\…`), so they open and follow like any other file, without SSH.
 - **Command line:** `logsift app.log other.log`. `logsift --version` prints the version.
 - **Another program's output, live:** pipe it in with `-`:
 
@@ -116,6 +119,8 @@ Make a test log:
 | Search for the selected text | Ctrl+F (fills the Find box with the selected text) |
 | Font size | Ctrl+= / Ctrl+- |
 | Dark mode | View → Toggle Dark Mode |
+| Tree of loggers | Ctrl+Shift+B |
+| Settings | Ctrl+, (⌘, on macOS) |
 
 ## Folder search
 
@@ -157,6 +162,24 @@ The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as column
 
 - **Count values:** right-click a column header (Thread, Logger, Host, Status…) → *Count Values* lists every value with its number of lines. Double-click one to show only its lines, or *Hide* it.
 - **Level chips** in the Filters bar (**E W I D T**) show only some levels, together with your other filters: turn off I, D and T to see just errors and warnings, stack traces included.
+
+## Log formats
+
+When Logsift doesn't know a log's layout, the Columns view says so and offers **Define Its Format…**. Formats are also under **View → Log Format → New Format from This Log** and in **Settings → Log Formats**. There are three ways to make one:
+
+1. **Drop a log file** (or open one). Logsift guesses the layout from its lines (time, level, `[thread]`, logger, separators like `-` `:` `|`) and how its times are written, for example `dd.MM.yy HH:mm:ss.SSS`.
+2. **Paste how your program logs:** a log4j, Log4j 2 or logback pattern such as `%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n`, a whole `logback.xml`, `log4j2.xml` or `log4j.properties`, Spring Boot's layout, or a Python format such as `%(asctime)s %(levelname)s %(name)s: %(message)s`. Dropping the config file works too.
+3. **Write the pattern** yourself: `{time} {level} [{thread}] {logger} - {message}`. Columns go in braces and everything else is matched as written. `{time}` takes a timestamp and `{level}` a level word (also `E`, `ERR`, `warning`…). `{*}` skips a part, and other columns take everything up to the next character. A regex with named groups like `(?<level>…)` works too.
+
+A preview shows sample lines split into columns, with the times as they are read. Lines that don't fit continue the entry above (stack traces). A format is used when most of a log's lines fit it, or always for the file names you give (`app*.log; *.trace`). **View → Log Format** also picks a format by hand for one file, which is remembered, or shows it as plain text. Levels in your format's level column drive the colors, the error marks and the **E W I D T** chips. Formats are saved in `~/.logsift/formats.properties`, so you can copy them to another computer.
+
+## Tree of loggers
+
+Logs with a logger column (or class, component, thread, host…) get a tree on the left: `com.acme.db.Pool` sits under **com.acme › db**, with line counts. Uncheck a branch to hide its lines and their stack traces. Double-click a name, or right-click → *Show Only*, to see just that one; **Show all** brings everything back. The list at the top picks the column. Counts keep up while the log grows, and what you hid is remembered for the file. Close the tree with ✕, and bring it back with **View → Tree of Loggers** (Ctrl+Shift+B).
+
+## Settings
+
+**Settings** (Ctrl+, or Logsift → Settings on macOS) has the font and its size, tab width, line stripes, the timeline, dark mode, the encoding for text that isn't UTF-8 (for example Shift_JIS or GB18030), how often files are checked for changes, whether the last session reopens at start, update checks, and your log formats.
 
 ## JSON logs
 
@@ -233,6 +256,20 @@ Filters on a 200 MB log (1.8M lines): four filters with formula `(A OR B) AND NO
 
 Heap use stays at a few hundred MB for these sizes. The index costs about 12 MB per 100M lines.
 
+**Stress test** (`./gradlew stress -PstressGb=10`, same Mac, 2 GB heap as in the installed app):
+
+| | Time |
+|---|---|
+| 10 GB log (93.6M lines): first lines / full index | 0.01 s / 2.6 s |
+| Jump to the end, or 20 random jumps | under 10 ms |
+| Find All: 0.9M / 3.4M / 5.1M (regex) hits | 1.7 s / 1.9 s / 3.0 s |
+| Filter `ERROR AND NOT timeout` | 3.5 s |
+| Timeline / tree of loggers | 1.9 s / 10 s (in the background) |
+| One 200 MB line: open / search it | 0.02 s / 0.17 s |
+| 300 million short lines (3 GB): full index | 0.4 s |
+
+The heap stayed under 500 MB through all of it.
+
 ## Tests
 
 ```bash
@@ -308,7 +345,7 @@ Design choices:
 
 ## Roadmap
 
-Ideas for next versions: editable highlight rules, signed installers, and plugins for custom log formats. Suggestions and bug reports are welcome in [Issues](https://github.com/bdarwin/logsift/issues).
+Ideas for next versions: thread dump analysis (also live, from a running Java program), editable highlight rules and signed installers. Suggestions and bug reports are welcome in [Issues](https://github.com/bdarwin/logsift/issues).
 
 ## Contributing
 

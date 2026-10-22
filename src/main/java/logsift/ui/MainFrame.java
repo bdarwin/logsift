@@ -1043,6 +1043,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
         file.add(recent);
         file.add(item("Reopen Last Session", null, e -> restoreSession()));
+        if (WslSupport.available()) {
+            file.add(item("Open from WSL…", null, e -> openFromWsl()));
+        }
         file.add(item("Open Remote (SFTP)…", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> openRemoteDialog()));
         file.add(item("Merge Files by Time…", KeyStroke.getKeyStroke(KeyEvent.VK_M, MENU | InputEvent.SHIFT_DOWN_MASK),
@@ -1158,6 +1161,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         view.add(item("Columns", KeyStroke.getKeyStroke(KeyEvent.VK_K, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> setColumns(!columns)));
         view.add(item("Line Stripes", null, e -> setStripes(!PREFS.getBoolean("stripes", true))));
+        view.add(item("Tree of Loggers", KeyStroke.getKeyStroke(KeyEvent.VK_B, MENU | InputEvent.SHIFT_DOWN_MASK),
+                e -> setValuesTree(!PREFS.getBoolean("valuesTree", true))));
         view.add(item("Word Wrap", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
                 e -> setWrap(!wrap)));
         view.add(item("Show Matching Lines Only / All Lines",
@@ -1219,6 +1224,32 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     // ---------------------------------------------------------------- commands
+
+    /** The file dialog in a WSL distribution's home folder (Windows reaches its files directly). */
+    private void openFromWsl() {
+        List<String> distros = WslSupport.distributions();
+        if (distros.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No WSL distribution found.", "Open from WSL",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String d = distros.get(0);
+        if (distros.size() > 1) {
+            Object pick = JOptionPane.showInputDialog(this, "Distribution:", "Open from WSL",
+                    JOptionPane.QUESTION_MESSAGE, null, distros.toArray(), d);
+            if (pick == null) {
+                return;
+            }
+            d = pick.toString();
+        }
+        FileDialog fd = new FileDialog(this, "Open Log Files from " + d, FileDialog.LOAD);
+        fd.setMultipleMode(true);
+        fd.setDirectory(WslSupport.home(d).toString());
+        fd.setVisible(true);
+        for (File f : fd.getFiles()) {
+            openFile(f.toPath());
+        }
+    }
 
     private void openDialog() {
         FileDialog fd = new FileDialog(this, "Open Log Files", FileDialog.LOAD);
@@ -1509,6 +1540,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         LogView.setTabWidth(width);
         PREFS.putInt("tabWidth", width);
         applyFontSize(); // lays the lines out again
+    }
+
+    /** Shows the tree of loggers (threads, components...) beside logs that have columns. */
+    @Override
+    public void setValuesTree(boolean on) {
+        PREFS.putBoolean("valuesTree", on);
+        for (LogTab t : allTabs()) {
+            t.setValuesTreeVisible(on);
+        }
     }
 
     void setStripes(boolean on) {

@@ -926,7 +926,12 @@ public final class LogView extends JPanel {
         setTop(p[0], p[1]);
     }
 
+    private boolean clicking;
+
     private void ensureVisible(int row) {
+        if (clicking) {
+            return;
+        }
         int vis = visibleRows();
         if (row < topRow || (row == topRow && topSeg > 0)) {
             setTop(row, 0);
@@ -1149,6 +1154,17 @@ public final class LogView extends JPanel {
         MouseAdapter m = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
+                // what was clicked is on screen: don't scroll (a long wrapped line partly below
+                // the edge would jump, and a shift-click would land somewhere else)
+                clicking = true;
+                try {
+                    pressed(e);
+                } finally {
+                    clicking = false;
+                }
+            }
+
+            private void pressed(MouseEvent e) {
                 canvas.requestFocusInWindow();
                 if (e.isPopupTrigger()) {
                     popup(e);

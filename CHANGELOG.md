@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Your own log formats:** drop a log file and Logsift works out its layout and how its times are written, or paste your log4j / logback / Python logging setup (a pattern, or a whole `logback.xml`, `log4j2.xml` or `log4j.properties`). A live preview shows how lines split into columns. Choose a format by hand in View → Log Format.
+- **Tree of loggers:** loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
+- **Settings** (Ctrl+, / ⌘,): font, tab width, encoding for text that isn't UTF-8, how often files are checked for changes, reopening the last session, and more.
+- Levels written as `E`, `ERR`, `error` or `SEVERE` count as errors in your own formats (colors, error marks, F8, level chips).
+- **Open from WSL** (Windows): opens your Linux home folder.
+- Clicking a long wrapped line that is partly off screen no longer scrolls the view.
+
 ## 1.1.0
 
 - **Windows installer** (`.msi`): installs for the current user (no admin rights needed), adds a Start menu entry, and opens `.log` files.

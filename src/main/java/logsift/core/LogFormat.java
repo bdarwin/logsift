@@ -86,6 +86,11 @@ public final class LogFormat {
         return timePattern;
     }
 
+    /** The JSON field of a column (JSON lines only), or null. */
+    public String jsonKey(String column) {
+        return jsonKeys == null ? null : jsonKeys.get(column);
+    }
+
     /** Whether a line has this layout. */
     public boolean matches(String line) {
         return jsonKeys != null ? Json.parseObject(line) != null : pattern.matcher(line).matches();
