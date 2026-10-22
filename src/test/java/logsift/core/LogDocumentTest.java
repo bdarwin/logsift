@@ -131,6 +131,9 @@ class LogDocumentTest {
             assertEquals(LogDocument.Change.GREW, doc.pendingChange());
             assertEquals(6, doc.pendingBytes());
             assertEquals(2, doc.lineCount(), "not loaded until Reload");
+            while (staleEvents.get() == 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10); // the listener is told just after the change is noted
+            }
             assertTrue(staleEvents.get() >= 1);
             doc.reload();
             assertTrue(doc.awaitIdle(5000));

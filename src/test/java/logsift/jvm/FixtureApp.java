@@ -16,8 +16,6 @@ public final class FixtureApp {
     static final ReentrantLock L1 = new ReentrantLock();
     static final ReentrantLock L2 = new ReentrantLock();
     static volatile long sink;
-    static final java.util.List<byte[]> LEAK = new java.util.ArrayList<>();
-    static final java.util.List<java.nio.ByteBuffer> NATIVE_LEAK = new java.util.ArrayList<>();
 
     /** Called again and again by "worker" (for method profiling). */
     static void work() {
@@ -130,27 +128,26 @@ public final class FixtureApp {
         });
         if (args.length > 0 && args[0].equals("memory")) {
             start("leaker", () -> {
+                byte[][] kept = new byte[60_000][];
+                int at = 0;
                 while (true) {
                     for (int i = 0; i < 50; i++) {
                         byte[] garbage = new byte[1000];
                         sink += garbage.length;
                     }
-                    synchronized (LEAK) {
-                        if (LEAK.size() < 100_000) {
-                            LEAK.add(new byte[2048]); // kept: the heap grows by ~2 MB a second
-                        }
-                    }
+                    // kept for a minute or so (~2 MB a second): always new live objects, up to ~120 MB
+                    kept[at] = new byte[2048];
+                    at = (at + 1) % kept.length;
                     sleep(1);
                 }
             });
             start("native-leaker", () -> {
+                java.nio.ByteBuffer[] kept = new java.nio.ByteBuffer[2000];
+                int at = 0;
                 while (true) {
-                    java.nio.ByteBuffer b = java.nio.ByteBuffer.allocateDirect(64 * 1024);
-                    synchronized (NATIVE_LEAK) {
-                        if (NATIVE_LEAK.size() < 3000) {
-                            NATIVE_LEAK.add(b); // kept: never freed, ~3 MB a second
-                        }
-                    }
+                    // kept for a while, never freed meanwhile (~3 MB a second, up to ~128 MB)
+                    kept[at] = java.nio.ByteBuffer.allocateDirect(64 * 1024);
+                    at = (at + 1) % kept.length;
                     sleep(20);
                 }
             });

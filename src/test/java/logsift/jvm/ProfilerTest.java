@@ -259,8 +259,18 @@ class ProfilerTest {
 
     @Test
     void profilesWithFlightRecorder() throws Exception {
+        // a JVM of its own: async-profiler, once loaded into a JVM, may leave Flight Recorder no CPU samples
+        Process fresh = FixtureApp.start(true);
+        try (LocalJvms.Session s = LocalJvms.attach(fresh.pid(), null)) {
+            profileWithFlightRecorder(s, Profiler.local(new JvmProcess(fresh.pid(), "FixtureApp", "", "", "", false), s));
+        } finally {
+            FixtureApp.stop(fresh);
+        }
+    }
+
+    private void profileWithFlightRecorder(LocalJvms.Session session, Profiler.Target target) throws Exception {
         assertTrue(target.engines().contains(Profiler.Engine.JFR));
-        List<Profile> views = run(Profiler.Engine.JFR, Profiler.Mode.CPU, 2);
+        List<Profile> views = target.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.CPU, 2), null, () -> false);
         assertTrue(views.get(0).title().startsWith("CPU of"));
         checkFixtureSampled(views.get(0));
         assertTrue(views.stream().anyMatch(v -> v.title().startsWith("Allocations") && v.total() > 0),
