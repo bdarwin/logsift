@@ -136,6 +136,7 @@ jobs:
 
       - name: Try the Windows installer (install, check, uninstall)
         if: matrix.target == 'windows-x64'
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $msi = Get-ChildItem dist/*.msi | Select-Object -First 1
@@ -157,25 +158,46 @@ jobs:
           if (-not (Test-Path (Join-Path $exe.Directory.FullName 'app\splash.png'))) { throw "no splash screen" }
           function Entries { @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
               Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -eq 'Logsift' }).Count }
-          # a newer build of the same version installs over it, closing the running app
-          Start-Process $exe.FullName
-          Start-Sleep -Seconds 10
-          if (-not (Get-Process Logsift -ErrorAction SilentlyContinue)) { throw "Logsift did not start" }
-          $again = Get-ChildItem msi-again/*.msi | Select-Object -First 1
-          $p = Start-Process msiexec -ArgumentList "/i `"$($again.FullName)`" /qn /l*v upgrade.log" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content upgrade.log -Tail 60; throw "installing a newer build failed: $($p.ExitCode)" }
-          if ((Entries) -ne 1) { throw "expected one Logsift in Installed apps, found $(Entries)" }
-          Start-Sleep -Seconds 2
-          if (Get-Process Logsift -ErrorAction SilentlyContinue) { throw "Logsift still running after the upgrade" }
-          Write-Host "Newer build installed over the old one; the running app was closed"
-          # uninstalling closes it too
-          Start-Process $exe.FullName
-          Start-Sleep -Seconds 10
-          $p = Start-Process msiexec -ArgumentList "/x `"$($again.FullName)`" /qn /l*v uninstall.log" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 60; throw "uninstall failed: $($p.ExitCode)" }
-          Start-Sleep -Seconds 2
-          if (Get-Process Logsift -ErrorAction SilentlyContinue) { throw "Logsift still running after uninstall" }
-          if ((Entries) -ne 0) { throw "Logsift still in Installed apps after uninstall" }
+          function Step($what) { Write-Host "$(Get-Date -Format HH:mm:ss) $what" }
+          function Msi($msiArgs, $log) {
+            $p = Start-Process msiexec -ArgumentList $msiArgs -PassThru
+            if (-not $p.WaitForExit(240000)) {
+              Get-Process | Where-Object { $_.Name -match 'msiexec|Logsift' } | Format-Table Id, Name, MainWindowTitle | Out-String | Write-Host
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              if (Test-Path $log) { Get-Content $log -Tail 80 }
+              throw "msiexec $msiArgs did not finish in 4 minutes"
+            }
+            return $p.ExitCode
+          }
+          function StartApp {
+            $app = Start-Process $exe.FullName -PassThru
+            for ($i = 0; $i -lt 30 -and -not (Get-Process -Id $app.Id -ErrorAction SilentlyContinue).MainWindowHandle; $i++) { Start-Sleep 1 }
+            Step "Logsift running: pid $($app.Id), window '$((Get-Process -Id $app.Id -ErrorAction SilentlyContinue).MainWindowTitle)'"
+          }
+          try {
+            # a newer build of the same version installs over it, closing the running app
+            Step "starting Logsift"
+            StartApp
+            $again = Get-ChildItem msi-again/*.msi | Select-Object -First 1
+            Step "installing a newer build over it"
+            $code = Msi "/i `"$($again.FullName)`" /qn /l*v upgrade.log" upgrade.log
+            if ($code -ne 0) { Get-Content upgrade.log -Tail 60; throw "installing a newer build failed: $code" }
+            if ((Entries) -ne 1) { throw "expected one Logsift in Installed apps, found $(Entries)" }
+            Start-Sleep -Seconds 2
+            if (Get-Process Logsift -ErrorAction SilentlyContinue) { throw "Logsift still running after the upgrade" }
+            Step "newer build installed over the old one; the running app was closed"
+            # uninstalling closes it too
+            StartApp
+            Step "uninstalling while it runs"
+            $code = Msi "/x `"$($again.FullName)`" /qn /l*v uninstall.log" uninstall.log
+            if ($code -ne 0) { Get-Content uninstall.log -Tail 60; throw "uninstall failed: $code" }
+            Start-Sleep -Seconds 2
+            if (Get-Process Logsift -ErrorAction SilentlyContinue) { throw "Logsift still running after uninstall" }
+            if ((Entries) -ne 0) { throw "Logsift still in Installed apps after uninstall" }
+            Step "uninstalled"
+          } finally {
+            Get-Process Logsift -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
           if (Test-Path $exe.FullName) { throw "still there after uninstall" }
           if (Test-Path -LiteralPath 'HKCU:\Software\Classes\*\shell\Logsift') { throw "Open with Logsift left behind after uninstall" }
 
