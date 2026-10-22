@@ -14,15 +14,15 @@ dependencies {
     // SVG icons (menus, toolbar) in the theme's colors
     implementation("com.formdev:flatlaf-extras:3.7.2")
     // SSH/SFTP for remote logs (maintained fork of JSch)
-    implementation("com.github.mwiede:jsch:0.2.20")
+    implementation("com.github.mwiede:jsch:2.28.8")
 
-    testImplementation(platform("org.junit:junit-bom:5.14.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     // A real logging library that rotates files, for the rotation test.
-    testImplementation("ch.qos.logback:logback-classic:1.5.18")
+    testImplementation("ch.qos.logback:logback-classic:1.6.5")
     // an SFTP server inside the tests, for remote logs
-    testImplementation("org.apache.sshd:sshd-core:2.14.0")
-    testImplementation("org.apache.sshd:sshd-sftp:2.14.0")
+    testImplementation("org.apache.sshd:sshd-core:2.20.0")
+    testImplementation("org.apache.sshd:sshd-sftp:2.20.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
