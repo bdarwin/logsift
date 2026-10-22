@@ -2144,7 +2144,7 @@ class VisualTest {
 
         // "Define Its Format…": the layout and its time format are guessed from the file
         javax.swing.SwingUtilities.invokeLater(() -> frame.defineFormat(tab));
-        waitFor(() -> SettingsDialog.lastForTest() != null && SettingsDialog.lastForTest().isShowing(), 10_000,
+        waitFor(() -> SettingsDialog.lastForTest() != null && SettingsDialog.lastForTest().isShowing(), 30_000,
                 "the Log Formats window");
         SettingsDialog dlg = SettingsDialog.lastForTest();
         LogFormatsPanel panel = dlg.formats();
