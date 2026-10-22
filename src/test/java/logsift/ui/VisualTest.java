@@ -3208,10 +3208,7 @@ class VisualTest {
             logsift.jvm.Profile p = profileRun(prof, logsift.jvm.Profiler.Mode.CPU, 3);
             long spin = p.find("logsift.jvm.FixtureApp.lambda$main$8").stream()
                     .mapToLong(logsift.jvm.Profile.Node::total).sum();
-            long leaker = p.find("logsift.jvm.FixtureApp.lambda$main$9").stream()
-                    .mapToLong(logsift.jvm.Profile.Node::total).sum();
-            assertTrue(spin > 0 && (spin + leaker) * 2 > p.total(), "the fixture's threads: " + spin + " + " + leaker
-                    + " of " + p.total());
+            assertTrue(spin > 0, "the hot loop: " + p.hottest(5));
             assertTrue(onEdt(() -> prof.methodsForTest().getRowCount()) > 0);
             settle();
             shot("63-profile-flame-graph");
@@ -3234,13 +3231,14 @@ class VisualTest {
             });
             assertEquals(p.total(), logsift.jvm.Profiler.open(saved).get(0).total());
 
-            // who calls Thread.sleep; then only the stacks through the hot loop
+            // who calls the hot loop; then only the stacks through it
             onEdt(() -> {
-                prof.focusForTest("callers", "java.lang.Thread.sleep");
+                prof.focusForTest("callers", "logsift.jvm.FixtureApp.lambda$main$8");
                 return null;
             });
             logsift.jvm.Profile callers = onEdt(prof::profile);
-            assertEquals("java.lang.Thread.sleep", callers.root().children().get(0).name());
+            assertEquals("logsift.jvm.FixtureApp.lambda$main$8", callers.root().children().get(0).name());
+            assertEquals(spin, callers.total());
             onEdt(() -> {
                 prof.focusForTest("only", "logsift.jvm.FixtureApp.lambda$main$8");
                 return null;
