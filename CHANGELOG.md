@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
 - **Your own log formats:** drop a log file and Logsift works out its layout and how its times are written, or paste your log4j / logback / Python logging setup (a pattern, or a whole `logback.xml`, `log4j2.xml` or `log4j.properties`). Properties in the config (`${LOG_PATTERN}`, `${sys:PID}`) are filled in, Log4j 2 `.properties`, `.yaml` and `.json` configs work, and with several appenders the layout your log fits is used. A live preview shows how lines split into columns.
 - **Format in the status bar:** shows how the current log is read. Click it to choose another format for that file if the detected one is wrong.
