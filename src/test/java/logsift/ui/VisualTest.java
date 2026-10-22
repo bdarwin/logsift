@@ -736,11 +736,15 @@ class VisualTest {
 
         // click on the second row of the wrapped line, shift-click on its third row
         String l3 = lines.get(longRow);
-        String selected = onEdt(() -> {
+        // where rows break is read again right before clicking: the layout can still change
+        // (a scrollbar appearing narrows the view), which made this test flaky on Windows
+        settle();
+        String[] got = onEdt(() -> {
+            int[] at = v.segmentStartsForTest(longRow);
             int y = v.yForRowForTest(longRow);
             JComponent c = v.canvasForTest();
-            int x1 = v.xForSegmentColumnForTest(longRow, 1, segs[1] + 4);
-            int x2 = v.xForSegmentColumnForTest(longRow, 2, segs[2] + 7);
+            int x1 = v.xForSegmentColumnForTest(longRow, 1, at[1] + 4);
+            int x2 = v.xForSegmentColumnForTest(longRow, 2, at[2] + 7);
             int lineH = rowHeightOf(v);
             c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
                     InputEvent.BUTTON1_DOWN_MASK, x1, y + lineH, 1, false, MouseEvent.BUTTON1));
@@ -751,10 +755,9 @@ class VisualTest {
                     1, false, MouseEvent.BUTTON1));
             c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(),
                     InputEvent.SHIFT_DOWN_MASK, x2, y + 2 * lineH, 1, false, MouseEvent.BUTTON1));
-            return v.selectedText();
+            return new String[] {v.selectedText(), l3.substring(at[1] + 4, at[2] + 7)};
         });
-        assertEquals(l3.substring(segs[1] + 4, segs[2] + 7), selected,
-                "selection across wrapped rows");
+        assertEquals(got[1], got[0], "selection across wrapped rows");
 
         // follow shows the very end of the last line
         boolean lastVisible = onEdt(() -> {
@@ -2093,6 +2096,164 @@ class VisualTest {
             err.dispose();
             return null;
         });
+    }
+
+    @Test
+    @Order(31)
+    void customLogFormatsAndSettings() throws Exception {
+        // a log in a layout Logsift doesn't know: "|"-separated, day-first dates with 2-digit years
+        Path orders = dir.resolve("orders.log");
+        StringBuilder sb = new StringBuilder();
+        String[] comps = {"OrderService", "Payments", "Cache", "Http"};
+        String[] lv = {"I", "I", "W", "E"};
+        for (int i = 0; i < 400; i++) {
+            int s = 13 + i;
+            sb.append(String.format("21.10.26 10:%02d:%02d.%03d|%s|%s|%s%n", s / 60 % 60, s % 60, i * 7 % 1000,
+                    lv[i % 4], comps[i % 4], i % 4 == 3 ? "payment " + i + " failed: card declined" : "request " + i + " ok"));
+            if (i % 4 == 3) {
+                sb.append("java.lang.IllegalStateException: declined\n    at com.acme.Pay.charge(Pay.java:12)\n");
+            }
+        }
+        Files.writeString(orders, sb.toString().replace("\\n", "\n"));
+        onEdt(() -> {
+            frame.openFile(orders);
+            frame.setColumns(true);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                LogTab t = onEdt(frame::currentTab);
+                return t != null && t.path().equals(orders.toAbsolutePath().normalize()) && t.noColumnsShownForTest();
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the unknown-layout banner");
+        LogTab tab = onEdt(frame::currentTab);
+        settle();
+        shot("43-unknown-layout");
+
+        // "Define Its Format…": the layout and its time format are guessed from the file
+        javax.swing.SwingUtilities.invokeLater(() -> frame.defineFormat(tab));
+        waitFor(() -> SettingsDialog.lastForTest() != null && SettingsDialog.lastForTest().isShowing(), 10_000,
+                "the Log Formats window");
+        SettingsDialog dlg = SettingsDialog.lastForTest();
+        LogFormatsPanel panel = dlg.formats();
+        settle();
+        assertEquals("{time}|{level}|{field3}|{message}", onEdt(() -> panel.patternField().getText()));
+        assertEquals("dd.MM.yy HH:mm:ss.SSS", onEdt(() -> panel.timeField().getText()));
+        waitFor(() -> panel.statusLabel().getText().contains("times read"), 5_000, "status: " + panel.statusLabel().getText());
+        assertTrue(panel.statusLabel().getText().startsWith("200 of 300 lines fit"), panel.statusLabel().getText());
+        // rename the guessed column
+        onEdt(() -> {
+            panel.patternField().setText("{time}|{level}|{component}|{message}");
+            return null;
+        });
+        Thread.sleep(400);
+        settle();
+        assertEquals("component", onEdt(() -> panel.previewTable().getColumnName(3)));
+        shotOf(dlg.getRootPane(), "44-format-guessed-from-log");
+
+        // New → paste a whole logback.xml: converted into a pattern and a time format
+        onEdt(() -> {
+            button(panel, "New").doClick();
+            panel.pasteArea().setText("""
+                    <configuration>
+                      <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+                        <encoder>
+                          <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+                        </encoder>
+                      </appender>
+                    </configuration>""");
+            return null;
+        });
+        settle();
+        shotOf(dlg.getRootPane(), "45-add-format-start");
+        onEdt(() -> {
+            button(panel, "Create Format").doClick();
+            return null;
+        });
+        settle();
+        assertEquals("{time} [{thread}] {level} {logger} - {message}", onEdt(() -> panel.patternField().getText()));
+        assertEquals("yyyy-MM-dd HH:mm:ss.SSS", onEdt(() -> panel.timeField().getText()));
+        assertEquals(2, (int) onEdt(() -> panel.formatList().getModel().getSize()));
+
+        // closing saves the formats; the open log now has columns and a timeline
+        onEdt(() -> {
+            dlg.dispose();
+            return null;
+        });
+        assertTrue(Files.readString(AppState.formatsFile()).contains("component"), "saved");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null && "orders".equals(tab.logFormat().name())
+                        && !tab.noColumnsShownForTest() && tab.timeIndex() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "columns from the new format");
+        settle();
+        shot("46-custom-format-columns");
+        // "E" in the level column counts as an error: marks, F8 and the level buttons
+        waitFor(() -> tab.errorLines().result().matchCount() == 100, 20_000, "100 error lines");
+        // a stack trace stays with its entry: entries start with lines that fit the format
+        assertTrue(onEdt(() -> tab.entryFormat().startsEntry("21.10.26 10:00:13.000|I|Http|x")));
+        assertTrue(!onEdt(() -> tab.entryFormat().startsEntry("    at com.acme.Pay.charge(Pay.java:12)")));
+
+        // choosing a format by hand is remembered for the file
+        onEdt(() -> {
+            tab.setFormatChoice(logsift.core.Formats.PLAIN);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() == null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "plain text");
+        assertEquals(logsift.core.Formats.PLAIN, tab.saveState().getProperty("state.format"));
+        onEdt(() -> {
+            tab.setFormatChoice(null);
+            frame.setColumns(false);
+            return null;
+        });
+
+        // Settings → General
+        javax.swing.SwingUtilities.invokeLater(() -> frame.showSettings(null));
+        waitFor(() -> SettingsDialog.lastForTest() != dlg && SettingsDialog.lastForTest() != null
+                && SettingsDialog.lastForTest().isShowing(), 10_000, "Settings");
+        SettingsDialog general = SettingsDialog.lastForTest();
+        settle();
+        shotOf(general.getRootPane(), "47-settings");
+        onEdt(() -> {
+            frame.setTabWidth(8);
+            frame.setFont(null, 14f);
+            general.dispose();
+            return null;
+        });
+        assertEquals(8, LogView.tabWidth());
+        assertEquals(8, AppState.prefs().getInt("tabWidth", 0));
+        onEdt(() -> {
+            frame.setTabWidth(4);
+            frame.setFont(null, 13f);
+            return null;
+        });
+    }
+
+    /** The first button with this text inside a component. */
+    private static javax.swing.AbstractButton button(java.awt.Container c, String text) {
+        for (java.awt.Component k : c.getComponents()) {
+            if (k instanceof javax.swing.AbstractButton b && text.equals(b.getText())) {
+                return b;
+            }
+            if (k instanceof java.awt.Container sub) {
+                javax.swing.AbstractButton b = button(sub, text);
+                if (b != null) {
+                    return b;
+                }
+            }
+        }
+        return null;
     }
 
     /** The time of the first line at or after {@code i} that has a timestamp. */

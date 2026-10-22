@@ -327,7 +327,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 java.nio.charset.Charset cs = forced;
                 if (cs == null) {
                     try {
-                        cs = logsift.core.Encoding.detect(abs);
+                        cs = logsift.core.Encoding.detect(abs, fallbackEncoding());
                     } catch (IOException e) {
                         cs = java.nio.charset.StandardCharsets.UTF_8;
                     }
@@ -1116,6 +1116,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         edit.add(item("Go to Line…", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU), e -> goToLineDialog()));
         edit.add(item("Go to Time…", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> goToTimeDialog()));
+        if (!isMac()) { // on macOS, Settings is in the application menu
+            edit.addSeparator();
+            edit.add(item("Settings…", KeyStroke.getKeyStroke(KeyEvent.VK_COMMA, MENU), e -> showSettings(null)));
+        }
         bar.add(edit);
 
         JMenu view = new JMenu("View");
@@ -1132,26 +1136,28 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
         }
         view.add(encoding);
-        view.add(item("Timeline", null, e -> {
-            boolean on = !PREFS.getBoolean("timeline", true);
-            PREFS.putBoolean("timeline", on);
-            for (LogTab t : allTabs()) {
-                t.setTimelineVisible(on);
+        JMenu format = new JMenu("Log Format");
+        format.addMenuListener(new javax.swing.event.MenuListener() {
+            @Override
+            public void menuSelected(javax.swing.event.MenuEvent e) {
+                fillFormatMenu(format);
             }
-        }));
+
+            @Override
+            public void menuDeselected(javax.swing.event.MenuEvent e) {}
+
+            @Override
+            public void menuCanceled(javax.swing.event.MenuEvent e) {}
+        });
+        fillFormatMenu(format);
+        view.add(format);
+        view.add(item("Timeline", null, e -> setTimeline(!PREFS.getBoolean("timeline", true))));
         view.add(item("Reload", KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), e -> reload()));
         view.add(item("Auto Reload", null, e -> setAutoReload(!autoReload)));
         view.addSeparator();
         view.add(item("Columns", KeyStroke.getKeyStroke(KeyEvent.VK_K, MENU | InputEvent.SHIFT_DOWN_MASK),
                 e -> setColumns(!columns)));
-        view.add(item("Line Stripes", null, e -> {
-            boolean on = !PREFS.getBoolean("stripes", true);
-            PREFS.putBoolean("stripes", on);
-            for (LogTab t : allTabs()) {
-                t.mainView().setStripes(on);
-                t.resultsView().setStripes(on);
-            }
-        }));
+        view.add(item("Line Stripes", null, e -> setStripes(!PREFS.getBoolean("stripes", true))));
         view.add(item("Word Wrap", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
                 e -> setWrap(!wrap)));
         view.add(item("Show Matching Lines Only / All Lines",
@@ -1184,10 +1190,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         help.add(item("Open Error Log", null, e -> openErrorLog()));
         help.addSeparator();
         help.add(item("Check for Updates…", null, e -> checkForUpdates(true)));
-        javax.swing.JCheckBoxMenuItem auto = new javax.swing.JCheckBoxMenuItem("Check for Updates Automatically",
-                PREFS.getBoolean("updates.auto", true));
-        auto.addActionListener(e -> PREFS.putBoolean("updates.auto", auto.isSelected()));
-        help.add(auto);
+        autoUpdates.setSelected(PREFS.getBoolean("updates.auto", true));
+        autoUpdates.addActionListener(e -> PREFS.putBoolean("updates.auto", autoUpdates.isSelected()));
+        help.add(autoUpdates);
         if (!isMac()) { // on macOS, About is in the application menu
             help.addSeparator();
             help.add(item("About Logsift", null, e -> HelpSupport.showAbout(this)));
@@ -1401,8 +1406,154 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     private void changeFont(int delta) {
-        fontSize = Math.max(8, Math.min(32, fontSize + delta));
+        setFont(Theme.fontFamily(), fontSize + delta);
+    }
+
+    // ---------------------------------------------------------------- settings
+
+    private final javax.swing.JCheckBoxMenuItem autoUpdates =
+            new javax.swing.JCheckBoxMenuItem("Check for Updates Automatically");
+
+    /** Opens Settings (on the given tab, or General). */
+    void showSettings(String tab) {
+        LogTab t = currentTab();
+        SettingsDialog d = settingsDialog(t);
+        d.showTab(tab);
+        d.setVisible(true);
+    }
+
+    /** Settings on the Log Formats tab, with a new format guessed from the current log. */
+    void newFormatFromCurrentLog() {
+        SettingsDialog d = settingsDialog(currentTab());
+        d.showTab(SettingsDialog.FORMATS);
+        d.formats().newFromSample();
+        d.setVisible(true);
+    }
+
+    private SettingsDialog settingsDialog(LogTab t) {
+        return new SettingsDialog(this, t == null ? List.of() : t.sampleLines(300),
+                t == null || t.path().getFileName() == null ? null : t.path().getFileName().toString());
+    }
+
+    @Override
+    public void defineFormat(LogTab tab) {
+        tabs.setSelectedComponent(tab);
+        newFormatFromCurrentLog();
+    }
+
+    /** The user's formats changed: every log works out its layout again. */
+    void formatsChanged() {
+        for (LogTab t : allTabs()) {
+            t.redetect();
+        }
+    }
+
+    private void fillFormatMenu(JMenu menu) {
+        menu.removeAll();
+        LogTab t = currentTab();
+        String choice = t == null ? null : t.formatChoice();
+        logsift.core.LogFormat now = t == null ? null : t.logFormat();
+        javax.swing.ButtonGroup group = new javax.swing.ButtonGroup();
+        java.util.function.BiConsumer<String, String> radio = (label, name) -> {
+            javax.swing.JRadioButtonMenuItem mi = new javax.swing.JRadioButtonMenuItem(label,
+                    java.util.Objects.equals(choice, name));
+            mi.setEnabled(t != null);
+            mi.addActionListener(e -> {
+                LogTab cur = currentTab();
+                if (cur != null) {
+                    cur.setFormatChoice(name);
+                }
+            });
+            group.add(mi);
+            menu.add(mi);
+        };
+        radio.accept("Detect Automatically" + (choice == null && now != null ? " (" + now.name() + ")" : ""), null);
+        radio.accept(logsift.core.Formats.PLAIN, logsift.core.Formats.PLAIN);
+        List<logsift.core.CustomFormat> mine = AppState.customFormats();
+        if (!mine.isEmpty()) {
+            menu.addSeparator();
+            for (logsift.core.CustomFormat f : mine) {
+                radio.accept(f.name(), f.name());
+            }
+        }
+        menu.addSeparator();
+        for (logsift.core.LogFormat f : logsift.core.LogFormat.presets()) {
+            radio.accept(f.name(), f.name());
+        }
+        radio.accept("JSON lines", "JSON lines");
+        menu.addSeparator();
+        JMenuItem create = item("New Format from This Log…", null, e -> newFormatFromCurrentLog());
+        create.setEnabled(t != null);
+        menu.add(create);
+        menu.add(item("Edit Log Formats…", null, e -> showSettings(SettingsDialog.FORMATS)));
+    }
+
+    float fontSize() {
+        return fontSize;
+    }
+
+    /** The font for logs (family null: automatic) and its size. */
+    void setFont(String family, float size) {
+        Theme.setFontFamily(family);
+        if (family == null) {
+            PREFS.remove("fontFamily");
+        } else {
+            PREFS.put("fontFamily", family);
+        }
+        fontSize = Math.max(8, Math.min(32, size));
         PREFS.putFloat("fontSize", fontSize);
+        applyFontSize();
+    }
+
+    void setTabWidth(int width) {
+        LogView.setTabWidth(width);
+        PREFS.putInt("tabWidth", width);
+        applyFontSize(); // lays the lines out again
+    }
+
+    void setStripes(boolean on) {
+        PREFS.putBoolean("stripes", on);
+        for (LogTab t : allTabs()) {
+            t.mainView().setStripes(on);
+            t.resultsView().setStripes(on);
+        }
+    }
+
+    void setTimeline(boolean on) {
+        PREFS.putBoolean("timeline", on);
+        for (LogTab t : allTabs()) {
+            t.setTimelineVisible(on);
+        }
+    }
+
+    void setDark(boolean on) {
+        if (on != Theme.isDark()) {
+            toggleDark();
+        }
+    }
+
+    void setPollMillis(int ms) {
+        PREFS.putInt("pollMs", ms);
+        for (LogTab t : allTabs()) {
+            t.setPollMillis(ms);
+        }
+    }
+
+    void setAutoUpdates(boolean on) {
+        PREFS.putBoolean("updates.auto", on);
+        autoUpdates.setSelected(on);
+    }
+
+    /** How text that is neither UTF-8 nor UTF-16 is read. */
+    java.nio.charset.Charset fallbackEncoding() {
+        try {
+            return java.nio.charset.Charset.forName(PREFS.get("fallbackEncoding", "windows-1252"));
+        } catch (IllegalArgumentException e) {
+            return logsift.core.Encoding.WINDOWS_1252;
+        }
+    }
+
+    private void applyFontSize() {
         for (LogTab t : allTabs()) {
             t.mainView().setFontSize(fontSize);
             t.resultsView().setFontSize(fontSize);

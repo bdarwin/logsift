@@ -114,7 +114,16 @@ public final class LogView extends JPanel {
     }
 
     private static final int MAX_COPY_ROWS = 500_000;
-    private static final int TAB = 4;
+    private static volatile int tabWidth = 4;
+
+    /** How many columns a tab character moves to (2, 4 or 8). */
+    static void setTabWidth(int width) {
+        tabWidth = Math.max(1, Math.min(16, width));
+    }
+
+    static int tabWidth() {
+        return tabWidth;
+    }
     /** Continuation segments of a wrapped line are indented by this many columns. */
     private static final int WRAP_INDENT = 2;
     private static final int MAX_SEGMENTS = 2000;
@@ -1416,7 +1425,8 @@ public final class LogView extends JPanel {
             }
             char c = s.charAt(i);
             if (c == '\t') {
-                int spaces = TAB - sb.length() % TAB;
+                int tab = tabWidth;
+                int spaces = tab - sb.length() % tab;
                 sb.append(" ".repeat(spaces));
             } else {
                 sb.append(c);
@@ -1799,9 +1809,10 @@ public final class LogView extends JPanel {
         }
 
         private Color levelColor(String level, Color fallback) {
-            return switch (level.trim()) {
-                case "ERROR", "FATAL", "SEVERE", "CRITICAL" -> Theme.errorMark();
-                case "WARN", "WARNING" -> new Color(0xC27C00);
+            String l = logsift.core.Levels.normalize(level);
+            return l == null ? fallback : switch (l) {
+                case "ERROR" -> Theme.errorMark();
+                case "WARN" -> new Color(0xC27C00);
                 case "DEBUG", "TRACE" -> Theme.gutterForeground();
                 default -> fallback;
             };

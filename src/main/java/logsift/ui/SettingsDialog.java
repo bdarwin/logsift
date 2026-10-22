@@ -1,0 +1,214 @@
+package logsift.ui;
+
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.prefs.Preferences;
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JSpinner;
+import javax.swing.JTabbedPane;
+import javax.swing.KeyStroke;
+import javax.swing.SpinnerNumberModel;
+
+/**
+ * Settings: how logs look, how files are read, updates, and the user's log formats. Changes
+ * apply at once; log formats are saved when the window closes.
+ */
+final class SettingsDialog extends JDialog {
+    static final String FORMATS = "Log Formats";
+
+    private static final Preferences PREFS = AppState.prefs();
+    private final MainFrame frame;
+    private final LogFormatsPanel formats;
+    private final JTabbedPane tabs = new JTabbedPane();
+    private static SettingsDialog lastForTest;
+
+    /**
+     * @param sample lines of the open log (for the formats preview)
+     * @param sampleName its file name, or null
+     */
+    SettingsDialog(MainFrame frame, List<String> sample, String sampleName) {
+        super(frame, MainFrame.isMac() ? "Settings" : "Settings", ModalityType.APPLICATION_MODAL);
+        this.frame = frame;
+        formats = new LogFormatsPanel(sample, sampleName);
+        tabs.addTab("General", general());
+        tabs.addTab(FORMATS, formats);
+        JButton close = new JButton("Close");
+        close.addActionListener(e -> dispose());
+        getRootPane().setDefaultButton(close);
+        getRootPane().registerKeyboardAction(e -> dispose(), KeyStroke.getKeyStroke("ESCAPE"),
+                JComponent.WHEN_IN_FOCUSED_WINDOW);
+        JPanel south = new JPanel(new BorderLayout());
+        south.setBorder(BorderFactory.createEmptyBorder(6, 10, 10, 10));
+        JLabel where = new JLabel("<html><small>Log formats are saved in " + AppState.formatsFile()
+                + " (copy it to use them on another computer).</small></html>");
+        where.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        south.add(where, BorderLayout.CENTER);
+        south.add(close, BorderLayout.EAST);
+        add(tabs, BorderLayout.CENTER);
+        add(south, BorderLayout.SOUTH);
+        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        setSize(new Dimension(940, 700));
+        setLocationRelativeTo(frame);
+        lastForTest = this;
+    }
+
+    void showTab(String name) {
+        tabs.setSelectedIndex(name != null && name.equals(FORMATS) ? 1 : 0);
+    }
+
+    LogFormatsPanel formats() {
+        return formats;
+    }
+
+    static SettingsDialog lastForTest() {
+        return lastForTest;
+    }
+
+    @Override
+    public void dispose() {
+        if (formats.save()) {
+            frame.formatsChanged();
+        }
+        super.dispose();
+    }
+
+    // ---------------------------------------------------------------- General
+
+    private JComponent general() {
+        JPanel p = new JPanel(new GridBagLayout());
+        p.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+        GridBagConstraints l = new GridBagConstraints();
+        l.gridx = 0;
+        l.anchor = GridBagConstraints.WEST;
+        l.insets = new Insets(5, 0, 5, 12);
+        GridBagConstraints f = new GridBagConstraints();
+        f.gridx = 1;
+        f.anchor = GridBagConstraints.WEST;
+        f.insets = new Insets(5, 0, 5, 0);
+        f.weightx = 1;
+
+        heading(p, "Logs", l, f, false);
+        List<String> fonts = new ArrayList<>();
+        fonts.add("Automatic (" + Theme.autoFontFamily() + ")");
+        fonts.addAll(Theme.monospacedFamilies());
+        JComboBox<String> font = new JComboBox<>(fonts.toArray(String[]::new));
+        font.setSelectedItem(Theme.fontFamily() != null && fonts.contains(Theme.fontFamily())
+                ? Theme.fontFamily() : fonts.get(0));
+        font.setMaximumRowCount(20);
+        SpinnerNumberModel sizeModel = new SpinnerNumberModel(Math.round(frame.fontSize()), 8, 32, 1);
+        JSpinner size = new JSpinner(sizeModel);
+        font.addActionListener(e -> frame.setFont(font.getSelectedIndex() <= 0 ? null : (String) font.getSelectedItem(),
+                sizeModel.getNumber().floatValue()));
+        size.addChangeListener(e -> frame.setFont(Theme.fontFamily(), sizeModel.getNumber().floatValue()));
+        JPanel fontRow = new JPanel(new BorderLayout(8, 0));
+        fontRow.add(font, BorderLayout.CENTER);
+        fontRow.add(size, BorderLayout.EAST);
+        add(p, l, f, "Font", fontRow);
+
+        JComboBox<String> tab = new JComboBox<>(new String[] {"2", "4", "8"});
+        tab.setSelectedItem(Integer.toString(LogView.tabWidth()));
+        tab.addActionListener(e -> frame.setTabWidth(Integer.parseInt((String) tab.getSelectedItem())));
+        add(p, l, f, "Tab width", tab);
+
+        JCheckBox stripes = check("Stripe every other line", PREFS.getBoolean("stripes", true), frame::setStripes);
+        add(p, l, f, "", stripes);
+        JCheckBox timeline = check("Show the timeline", PREFS.getBoolean("timeline", true), frame::setTimeline);
+        add(p, l, f, "", timeline);
+        JCheckBox dark = check("Dark mode", Theme.isDark(), frame::setDark);
+        add(p, l, f, "", dark);
+
+        heading(p, "Files", l, f, true);
+        List<String> names = new ArrayList<>();
+        for (String cs : new String[] {"windows-1252", "ISO-8859-1", "ISO-8859-15", "windows-1250", "windows-1251",
+            "Shift_JIS", "EUC-JP", "GB18030", "Big5", "EUC-KR", "KOI8-R"}) {
+            if (Charset.isSupported(cs)) {
+                names.add(cs);
+            }
+        }
+        JComboBox<String> enc = new JComboBox<>(names.stream()
+                .map(n -> logsift.core.Encoding.label(Charset.forName(n))).toArray(String[]::new));
+        enc.setSelectedIndex(Math.max(0, names.indexOf(frame.fallbackEncoding().name())));
+        enc.addActionListener(e -> PREFS.put("fallbackEncoding", names.get(enc.getSelectedIndex())));
+        add(p, l, f, "Text that isn't UTF-8", enc);
+        note(p, l, f, "UTF-8 and UTF-16 are recognized by themselves. Others are read this way "
+                + "(View → Encoding changes it for one file).");
+
+        int[] millis = {250, 500, 1000, 2000, 5000};
+        String[] labels = {"4 times a second", "Twice a second", "Every second", "Every 2 seconds", "Every 5 seconds"};
+        JComboBox<String> poll = new JComboBox<>(labels);
+        int now = PREFS.getInt("pollMs", 500);
+        for (int i = 0; i < millis.length; i++) {
+            if (millis[i] == now) {
+                poll.setSelectedIndex(i);
+            }
+        }
+        poll.addActionListener(e -> frame.setPollMillis(millis[poll.getSelectedIndex()]));
+        add(p, l, f, "Check files for changes", poll);
+        note(p, l, f, "Less often uses less power with many open files, or files on network drives.");
+
+        JCheckBox session = check("Reopen the files that were open last time", PREFS.getBoolean("restoreSession", true),
+                on -> PREFS.putBoolean("restoreSession", on));
+        add(p, l, f, "At start", session);
+
+        heading(p, "Updates", l, f, true);
+        JCheckBox updates = check("Check for new versions once a day", PREFS.getBoolean("updates.auto", true),
+                frame::setAutoUpdates);
+        add(p, l, f, "", updates);
+        note(p, l, f, "Asks GitHub for the latest version number only; nothing about you or your logs is sent.");
+
+        GridBagConstraints end = new GridBagConstraints();
+        end.gridx = 0;
+        end.gridy = GridBagConstraints.RELATIVE;
+        end.weighty = 1;
+        p.add(new JLabel(), end);
+        return p;
+    }
+
+    private static void heading(JPanel p, String text, GridBagConstraints l, GridBagConstraints f, boolean gap) {
+        JLabel h = new JLabel(text);
+        h.setFont(h.getFont().deriveFont(Font.BOLD));
+        GridBagConstraints c = (GridBagConstraints) l.clone();
+        c.gridy = GridBagConstraints.RELATIVE;
+        c.gridwidth = 2;
+        c.insets = new Insets(gap ? 16 : 0, 0, 4, 0);
+        p.add(h, c);
+    }
+
+    private static void add(JPanel p, GridBagConstraints l, GridBagConstraints f, String label, JComponent field) {
+        l.gridy = GridBagConstraints.RELATIVE;
+        f.gridy = GridBagConstraints.RELATIVE;
+        p.add(new JLabel(label), l);
+        p.add(field, f);
+    }
+
+    private static void note(JPanel p, GridBagConstraints l, GridBagConstraints f, String text) {
+        JLabel n = new JLabel(text);
+        n.setFont(n.getFont().deriveFont(n.getFont().getSize2D() - 1));
+        n.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        GridBagConstraints c = (GridBagConstraints) f.clone();
+        c.insets = new Insets(0, 0, 4, 0);
+        p.add(new JLabel(), l);
+        p.add(n, c);
+    }
+
+    private static JCheckBox check(String text, boolean on, java.util.function.Consumer<Boolean> change) {
+        JCheckBox b = new JCheckBox(text, on);
+        b.addActionListener(e -> change.accept(b.isSelected()));
+        return b;
+    }
+}

@@ -25,19 +25,64 @@ public final class TimeFormat {
         APACHE,     // [21/Oct/2026:10:02:13 +0000]
         TIME,       // 10:02:13.123
         EPOCH,      // 1729500000 or 1729500000123
-        JSON_EPOCH  // {"ts":1729500000123, ...} (a JSON field holding epoch seconds or millis)
+        JSON_EPOCH, // {"ts":1729500000123, ...} (a JSON field holding epoch seconds or millis)
+        PATTERN,    // written with a date-time pattern the user gave (a column's value)
+        COLUMN      // the time column of a custom format, read with an inner format
     }
 
     private final Kind kind;
     private final String name;
     private final boolean anywhere;
     private final int defaultYear;
+    private final java.time.format.DateTimeFormatter formatter; // PATTERN
+    private final LogFormat columns;                             // COLUMN
+    private final TimeFormat inner;                              // COLUMN: reads the column's value
 
     private TimeFormat(Kind kind, String name, boolean anywhere, int defaultYear) {
+        this(kind, name, anywhere, defaultYear, null, null, null);
+    }
+
+    private TimeFormat(Kind kind, String name, boolean anywhere, int defaultYear,
+                       java.time.format.DateTimeFormatter formatter, LogFormat columns, TimeFormat inner) {
         this.kind = kind;
         this.name = name;
         this.anywhere = anywhere;
         this.defaultYear = defaultYear;
+        this.formatter = formatter;
+        this.columns = columns;
+        this.inner = inner;
+    }
+
+    /** Times written with a date-time pattern like {@code dd.MM.yyyy HH:mm:ss.SSS}. */
+    static TimeFormat ofPattern(String pattern, int year) {
+        return new TimeFormat(Kind.PATTERN, pattern, false, year, CustomFormat.formatter(pattern), null, null);
+    }
+
+    /**
+     * Times from the {@code time} column of a format: with its time pattern, or else the common
+     * timestamp most of the sample's values have. Null if neither works.
+     */
+    static TimeFormat inColumn(LogFormat format, List<String> sample, int year) {
+        if (!format.columns().contains("time")) {
+            return null;
+        }
+        TimeFormat values;
+        if (format.timePattern() != null) {
+            values = ofPattern(format.timePattern(), year);
+        } else {
+            List<String> v = new java.util.ArrayList<>();
+            for (String s : sample) {
+                String t = s == null ? null : format.value(s, "time");
+                if (t != null) {
+                    v.add(t);
+                }
+            }
+            values = detect(v, year);
+            if (values == null) {
+                return null;
+            }
+        }
+        return new TimeFormat(Kind.COLUMN, values.name(), true, year, null, format, values);
     }
 
     public String name() {
@@ -101,6 +146,13 @@ public final class TimeFormat {
 
     /** The time of the line in {@code b[start, end)}, or {@link #NONE}. */
     public long parse(byte[] b, int start, int end) {
+        if (kind == Kind.COLUMN) {
+            String v = columns.value(new String(b, start, end - start, StandardCharsets.UTF_8), "time");
+            return v == null ? NONE : inner.parse(v);
+        }
+        if (kind == Kind.PATTERN) {
+            return parsePattern(new String(b, start, end - start, StandardCharsets.UTF_8));
+        }
         start = EntryFormat.skipSourceTag(b, start, end); // merged logs: "<node1> 2026-..."
         if (!anywhere) {
             int p = start;
@@ -136,7 +188,41 @@ public final class TimeFormat {
             case TIME -> time(b, p, end);
             case EPOCH -> epoch(b, p, end);
             case JSON_EPOCH -> jsonEpoch(b, p, Math.min(end, p + SEARCH_BYTES), end);
+            case PATTERN, COLUMN -> NONE; // handled in parse
         };
+    }
+
+    /** A value written with the user's pattern; spaces count once ("Oct  1" is "Oct 1"). */
+    private long parsePattern(String text) {
+        String s = text.strip().replaceAll(" {2,}", " ");
+        java.time.temporal.TemporalAccessor t;
+        try {
+            t = formatter.parse(s);
+        } catch (java.time.DateTimeException e) {
+            return NONE;
+        }
+        long day = 0; // a time without a date counts from 1970-01-01, like plain times
+        if (t.isSupported(java.time.temporal.ChronoField.MONTH_OF_YEAR)
+                && t.isSupported(java.time.temporal.ChronoField.DAY_OF_MONTH)) {
+            int y = t.isSupported(java.time.temporal.ChronoField.YEAR)
+                    ? t.get(java.time.temporal.ChronoField.YEAR) : defaultYear;
+            day = daysFromCivil(y, t.get(java.time.temporal.ChronoField.MONTH_OF_YEAR),
+                    t.get(java.time.temporal.ChronoField.DAY_OF_MONTH));
+        }
+        long ms = 0;
+        if (t.isSupported(java.time.temporal.ChronoField.HOUR_OF_DAY)) {
+            ms += t.get(java.time.temporal.ChronoField.HOUR_OF_DAY) * 3_600_000L;
+        }
+        if (t.isSupported(java.time.temporal.ChronoField.MINUTE_OF_HOUR)) {
+            ms += t.get(java.time.temporal.ChronoField.MINUTE_OF_HOUR) * 60_000L;
+        }
+        if (t.isSupported(java.time.temporal.ChronoField.SECOND_OF_MINUTE)) {
+            ms += t.get(java.time.temporal.ChronoField.SECOND_OF_MINUTE) * 1000L;
+        }
+        if (t.isSupported(java.time.temporal.ChronoField.NANO_OF_SECOND)) {
+            ms += t.getLong(java.time.temporal.ChronoField.NANO_OF_SECOND) / 1_000_000L;
+        }
+        return day * 86_400_000L + ms;
     }
 
     // yyyy-MM-dd[ T]HH:mm:ss[.SSS]

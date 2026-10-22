@@ -46,6 +46,30 @@ final class AppState {
         }
     }
 
+    // ---------------------------------------------------------------- log formats
+
+    private static volatile List<logsift.core.CustomFormat> formats;
+
+    /** Where the user's log formats are saved (a file that can be copied to another computer). */
+    static Path formatsFile() {
+        return home().resolve("formats.properties");
+    }
+
+    /** The user's own log formats. */
+    static List<logsift.core.CustomFormat> customFormats() {
+        List<logsift.core.CustomFormat> f = formats;
+        if (f == null) {
+            f = List.copyOf(logsift.core.CustomFormat.load(formatsFile()));
+            formats = f;
+        }
+        return f;
+    }
+
+    static void saveCustomFormats(List<logsift.core.CustomFormat> list) throws IOException {
+        formats = List.copyOf(list);
+        logsift.core.CustomFormat.save(formatsFile(), list);
+    }
+
     // ---------------------------------------------------------------- recent files
 
     static List<Path> recentFiles() {

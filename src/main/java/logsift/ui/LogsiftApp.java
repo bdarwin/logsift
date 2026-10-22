@@ -74,11 +74,14 @@ public final class LogsiftApp {
         }
         SwingUtilities.invokeLater(() -> {
             boolean dark = AppState.prefs().getBoolean("dark", false);
+            Theme.setFontFamily(AppState.prefs().get("fontFamily", null));
+            LogView.setTabWidth(AppState.prefs().getInt("tabWidth", 4));
             Theme.apply(dark);
             MainFrame f = new MainFrame();
             f.setVisible(true);
             frame = f;
-            if (files.isEmpty() && capture == null && pending.isEmpty()) {
+            if (files.isEmpty() && capture == null && pending.isEmpty()
+                    && AppState.prefs().getBoolean("restoreSession", true)) {
                 f.restoreSession(); // reopen what was open last time
             }
             for (Path p : files) {
@@ -118,6 +121,13 @@ public final class LogsiftApp {
         }
         if (d.isSupported(Desktop.Action.APP_ABOUT)) {
             d.setAboutHandler(e -> HelpSupport.showAbout(frame));
+        }
+        if (d.isSupported(Desktop.Action.APP_PREFERENCES)) {
+            d.setPreferencesHandler(e -> SwingUtilities.invokeLater(() -> {
+                if (frame != null) {
+                    frame.showSettings(null);
+                }
+            }));
         }
     }
 }

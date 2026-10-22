@@ -17,8 +17,10 @@ public final class EntryFormat {
     private final String name;
     private final byte[] shape;      // null for level words
     private final byte[][] words;    // level words (when shape is null)
+    private final LogFormat lines;   // or: lines with this layout start entries
 
     private EntryFormat(String name, String shape, String... words) {
+        this.lines = null;
         this.name = name;
         this.shape = shape == null ? null : shape.getBytes(StandardCharsets.US_ASCII);
         this.words = new byte[words.length][];
@@ -44,6 +46,18 @@ public final class EntryFormat {
             new EntryFormat("level first (ERROR …)", null,
                     "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "FATAL", "SEVERE", "NOTICE",
                     "[ERROR", "[WARN", "[INFO", "[DEBUG", "[TRACE", "[FATAL"));
+
+    private EntryFormat(LogFormat lines) {
+        this.name = "lines in the format " + lines.name();
+        this.shape = null;
+        this.words = new byte[0][];
+        this.lines = lines;
+    }
+
+    /** Entries start with each line that has this layout (for the user's own formats). */
+    public static EntryFormat matching(LogFormat format) {
+        return new EntryFormat(format);
+    }
 
     /** A short description for the UI, like "date and time (2026-10-21 10:02:13)". */
     public String name() {
@@ -110,6 +124,9 @@ public final class EntryFormat {
 
     /** Whether the line in {@code buf[start, end)} starts a new entry. */
     boolean startsEntry(byte[] buf, int start, int end) {
+        if (lines != null) {
+            return lines.matches(new String(buf, start, end - start, StandardCharsets.UTF_8));
+        }
         start = skipSourceTag(buf, start, end);
         if (shape != null) {
             if (end - start < shape.length) {

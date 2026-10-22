@@ -45,6 +45,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** Runs Find All in this tab through the toolbar (so the Find box shows the query). */
         default void runFindAll(SearchQuery q) {}
+
+        /** Opens Log Formats with a new format made from this log's lines. */
+        default void defineFormat(LogTab tab) {}
     }
 
     private final LogDocument doc;
@@ -132,8 +135,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             main.overviewChanged();
             timeline.refresh();
         });
-        errorLines = levelSearch("ERROR", "FATAL", "SEVERE", "CRITICAL");
-        warningLines = levelSearch("WARN", "WARNING");
+        errorLines = levelSearch(logsift.core.Levels.ERROR);
+        warningLines = levelSearch(logsift.core.Levels.WARN);
         errorMarks = OverviewBar.of(errorLines::result);
         warningMarks = OverviewBar.of(warningLines::result);
 
@@ -279,7 +282,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.setPreferredSize(new Dimension(400, 210));
         bottom.putClientProperty("JTabbedPane.tabHeight", 26);
         JPanel top = new JPanel(new BorderLayout());
-        top.add(timeline, BorderLayout.NORTH);
+        JPanel north = new JPanel(new BorderLayout());
+        north.add(timeline, BorderLayout.NORTH);
+        north.add(noColumns, BorderLayout.SOUTH);
+        noColumns.setVisible(false);
+        top.add(north, BorderLayout.NORTH);
         top.add(main, BorderLayout.CENTER);
         main.addPaintListener(timeline::repaint);
         split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, top, bottom);
@@ -318,7 +325,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 SwingUtilities.invokeLater(() -> host.tabStatusChanged(LogTab.this));
             }
         });
-        doc.startFollowing(500);
+        doc.startFollowing(AppState.prefs().getInt("pollMs", 500));
         updateFilterStatus();
         // A small file may be fully indexed before the listener above was added, so look at it
         // once now too (detects entries and timestamps).
@@ -345,8 +352,6 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             String[] sample = new String[(int) Math.min(n, 2000)];
             doc.readLines(0, sample.length, sample);
             List<String> lines = java.util.Arrays.asList(sample);
-            logsift.core.EntryFormat ef = logsift.core.EntryFormat.detect(lines);
-            logsift.core.LogFormat lf = logsift.core.LogFormat.detect(lines);
             int year = java.time.Year.now().getValue();
             try {
                 year = java.time.Instant.ofEpochMilli(java.nio.file.Files.getLastModifiedTime(doc.path())
@@ -354,8 +359,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             } catch (IOException e) {
                 // keep this year
             }
-            logsift.core.TimeFormat tf = logsift.core.TimeFormat.detect(lines, year);
-            SwingUtilities.invokeLater(() -> applyDetected(gen, ef, lf, tf));
+            logsift.core.Formats.Detected d = logsift.core.Formats.detect(lines, AppState.customFormats(),
+                    path.getFileName() == null ? "" : path.getFileName().toString(), formatChoice, year);
+            SwingUtilities.invokeLater(() -> applyDetected(gen, d.entries(), d.columns(), d.times()));
         });
     }
 
@@ -368,6 +374,37 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             });
 
     private int detectingGeneration = -1;
+    private volatile String formatChoice; // format chosen by hand (its name), Formats.PLAIN, or null: detect
+
+    /** The format chosen by hand for this file, {@link logsift.core.Formats#PLAIN}, or null (detected). */
+    String formatChoice() {
+        return formatChoice;
+    }
+
+    /** Uses this format (by name; null: detect it again) and reads the file's layout again. */
+    void setFormatChoice(String name) {
+        formatChoice = name;
+        redetect();
+    }
+
+    /** Works out the layout again (after the user's formats changed). */
+    void redetect() {
+        detectedGeneration = -1;
+        detectingGeneration = -1;
+        detectEntryFormat();
+    }
+
+    /** How often the file is checked for changes. */
+    void setPollMillis(int ms) {
+        doc.startFollowing(ms);
+    }
+
+    /** The first lines of the file (for previews), at most {@code max}. */
+    List<String> sampleLines(int max) {
+        String[] sample = new String[(int) Math.min(doc.lineCount(), max)];
+        doc.readLines(0, sample.length, sample);
+        return java.util.Arrays.asList(sample);
+    }
 
     private void applyDetected(int gen, logsift.core.EntryFormat ef, logsift.core.LogFormat lf,
                                logsift.core.TimeFormat tf) {
@@ -376,7 +413,17 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         detectedGeneration = gen;
         entryFormat = ef;
+        boolean levelsChanged = !java.util.Objects.equals(
+                logsift.core.Levels.lineRegex(logFormat, List.of("ERROR")),
+                logsift.core.Levels.lineRegex(lf, List.of("ERROR")));
         logFormat = lf;
+        if (levelsChanged) { // the user's format reads levels from its level column
+            configureLevelSearch(errorLines, List.of(logsift.core.Levels.ERROR), lf);
+            configureLevelSearch(warningLines, List.of(logsift.core.Levels.WARN), lf);
+            if (filterPanel.levelWords() != null) {
+                filtersChanged();
+            }
+        }
         applyColumns();
         filterPanel.setEntryFormatInfo(entryFormat == null ? null : entryFormat.name());
         applyEntryOptions();
@@ -551,19 +598,41 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         engine.setContext(filterPanel.contextLines());
     }
 
-    /** Lines containing any of these words (whole word, exact case), kept up to date. */
-    private FilterEngine levelSearch(String... words) {
+    /** Lines of this level (ERROR or WARN), kept up to date. */
+    private FilterEngine levelSearch(String level) {
         FilterEngine e = new FilterEngine(doc);
-        List<FilterEngine.Spec> specs = new ArrayList<>();
-        List<Character> ids = new ArrayList<>();
-        for (int i = 0; i < words.length; i++) {
-            char id = (char) ('A' + i);
-            specs.add(new FilterEngine.Spec(id, new SearchQuery(words[i], true, false, true)));
-            ids.add(id);
-        }
-        e.configure(specs, Formula.auto(ids, List.of()));
+        configureLevelSearch(e, List.of(level), null);
         e.addListener(x -> marksUpdate.run());
         return e;
+    }
+
+    /** The usual words of each level, like ERROR, FATAL, SEVERE and CRITICAL for errors. */
+    private static List<String> levelWords(String level) {
+        int i = java.util.Arrays.asList("ERROR", "WARN", "INFO", "DEBUG", "TRACE").indexOf(level);
+        return i < 0 ? List.of() : List.of(FilterPanel.LEVEL_WORDS[i]);
+    }
+
+    /**
+     * Searches for lines of these levels: with the user's format, by its level column (so "E" or
+     * "error" count too); otherwise by the usual words (whole word, exact case).
+     */
+    private static void configureLevelSearch(FilterEngine e, List<String> levels, logsift.core.LogFormat format) {
+        List<FilterEngine.Spec> specs = new ArrayList<>();
+        List<Character> ids = new ArrayList<>();
+        String regex = logsift.core.Levels.lineRegex(format, levels);
+        if (regex != null) {
+            specs.add(new FilterEngine.Spec('A', new SearchQuery(regex, true, true, false)));
+            ids.add('A');
+        } else {
+            for (String level : levels) {
+                for (String w : levelWords(level)) {
+                    char id = (char) ('A' + ids.size());
+                    specs.add(new FilterEngine.Spec(id, new SearchQuery(w, true, false, true)));
+                    ids.add(id);
+                }
+            }
+        }
+        e.configure(specs, Formula.auto(ids, List.of()));
     }
 
     private OverviewBar.Model overviewModel() {
@@ -931,12 +1000,21 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         // level chips: AND (any of the chosen level words), using ids that aren't letters
         List<String> levelWords = filterPanel.levelWords();
+        String levelRegex = levelWords == null ? null
+                : logsift.core.Levels.lineRegex(logFormat, filterPanel.chosenLevels());
         if (levelWords != null) {
             List<Character> ids = new ArrayList<>();
-            for (int i = 0; i < levelWords.size(); i++) {
-                char id = (char) ('0' + i);
-                specs.add(new FilterEngine.Spec(id, new SearchQuery(levelWords.get(i), true, false, true)));
-                ids.add(id);
+            if (levelRegex != null) { // the user's format: by its level column
+                if (!filterPanel.chosenLevels().isEmpty()) {
+                    specs.add(new FilterEngine.Spec('0', new SearchQuery(levelRegex, true, true, false)));
+                    ids.add('0');
+                }
+            } else {
+                for (int i = 0; i < levelWords.size(); i++) {
+                    char id = (char) ('0' + i);
+                    specs.add(new FilterEngine.Spec(id, new SearchQuery(levelWords.get(i), true, false, true)));
+                    ids.add(id);
+                }
             }
             Formula levels = ids.isEmpty() ? null : Formula.auto(ids, List.of());
             if (levels == null) {
@@ -1342,8 +1420,32 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         applyColumns();
     }
 
+    /** Shown in Columns view when the log's layout isn't known. */
+    private final JPanel noColumns = noColumnsBanner();
+
+    private JPanel noColumnsBanner() {
+        JPanel p = new JPanel(new BorderLayout(10, 0));
+        p.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.uiColor("Component.borderColor", java.awt.Color.GRAY)),
+                javax.swing.BorderFactory.createEmptyBorder(5, 10, 5, 8)));
+        p.add(new JLabel("Logsift doesn't know this log's layout, so it can't show it as columns."), BorderLayout.CENTER);
+        javax.swing.JButton define = new javax.swing.JButton("Define Its Format…");
+        define.addActionListener(e -> host.defineFormat(this));
+        p.add(define, BorderLayout.EAST);
+        return p;
+    }
+
+    boolean noColumnsShownForTest() {
+        return noColumns.isVisible();
+    }
+
     private void applyColumns() {
         logsift.core.LogFormat f = logFormat;
+        boolean missing = columnsWanted && f == null && detectedGeneration >= 0;
+        if (noColumns.isVisible() != missing) {
+            noColumns.setVisible(missing);
+            revalidate();
+        }
         ColumnLayout layout = columnsWanted && f != null ? new ColumnLayout(f, sourceLabels != null) : null;
         main.setColumns(layout);
         results.view().setColumns(layout == null ? null : new ColumnLayout(f, sourceLabels != null));
@@ -1416,11 +1518,18 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         p.setProperty("state.size", Long.toString(doc.fileSize()));
         p.setProperty("state.line", Long.toString(Math.max(0, currentLine())));
         p.setProperty("state.matchingOnly", Boolean.toString(matchingOnly));
+        if (formatChoice != null) {
+            p.setProperty("state.format", formatChoice);
+        }
         return p;
     }
 
     /** Applies remembered state, unless the file got smaller since (then lines moved). */
     void restoreState(java.util.Properties p) {
+        String format = p.getProperty("state.format"); // kept even when the file got smaller
+        if (format != null) {
+            setFormatChoice(format);
+        }
         try {
             long size = Long.parseLong(p.getProperty("state.size", "0"));
             if (doc.fileSize() < size) {

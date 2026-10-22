@@ -283,6 +283,18 @@ final class FilterPanel extends JPanel {
         return all ? null : out;
     }
 
+    /** The levels whose chips are on (ERROR, WARN, INFO, DEBUG, TRACE). */
+    java.util.List<String> chosenLevels() {
+        String[] names = {"ERROR", "WARN", "INFO", "DEBUG", "TRACE"};
+        java.util.List<String> out = new ArrayList<>();
+        for (int i = 0; i < levelChips.length; i++) {
+            if (levelChips[i].isSelected()) {
+                out.add(names[i]);
+            }
+        }
+        return out;
+    }
+
     /** Turns level chips on or off (by letter, for example "E", "W"). For tests and the API. */
     void setLevels(String... chips) {
         java.util.List<String> on = java.util.List.of(chips);

@@ -16,11 +16,13 @@ public final class LogFormat {
     private final Pattern pattern;          // null for JSON lines
     private final List<String> columns;
     private final java.util.Map<String, String> jsonKeys; // column -> JSON key (JSON lines only)
+    private final boolean custom;           // made by the user (see CustomFormat)
+    private final String timePattern;       // how the time column is written (custom only), or null
 
-    private static final String TS = "\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?";
-    private static final String LEVEL = "TRACE|DEBUG|INFO|NOTICE|WARN(?:ING)?|ERROR|SEVERE|FATAL|CRITICAL";
+    static final String TS = "\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?";
+    static final String LEVEL = "TRACE|DEBUG|INFO|NOTICE|WARN(?:ING)?|ERROR|SEVERE|FATAL|CRITICAL";
     /** Lines of merged logs start with a source label. */
-    private static final String SOURCE = "(?:<(?<source>[^>\\s]{1,40})> )?";
+    static final String SOURCE = "(?:<(?<source>[^>\\s]{1,40})> )?";
 
     /** Common layouts, most specific first. */
     static final List<LogFormat> PRESETS = List.of(
@@ -44,12 +46,19 @@ public final class LogFormat {
      * @throws IllegalArgumentException if it has no named groups
      */
     public LogFormat(String name, String regex) {
+        this(name, regex, false, null);
+    }
+
+    /** A format made by the user; {@code timePattern} (or null) says how its time column is written. */
+    LogFormat(String name, String regex, boolean custom, String timePattern) {
         this.name = name;
         this.pattern = Pattern.compile(regex);
         this.columns = groupNames(regex);
         this.jsonKeys = null;
+        this.custom = custom;
+        this.timePattern = timePattern;
         if (columns.isEmpty()) {
-            throw new IllegalArgumentException("The pattern needs named groups like (?<level>...)");
+            throw new IllegalArgumentException("The pattern needs at least one column, like {level}");
         }
     }
 
@@ -58,6 +67,42 @@ public final class LogFormat {
         this.pattern = null;
         this.columns = List.copyOf(columns);
         this.jsonKeys = jsonKeys;
+        this.custom = false;
+        this.timePattern = null;
+    }
+
+    /** The built-in layouts, for choosing one by hand. */
+    public static List<LogFormat> presets() {
+        return PRESETS;
+    }
+
+    /** Whether the user made this format. */
+    public boolean isCustom() {
+        return custom;
+    }
+
+    /** How the time column is written (a date-time pattern like {@code dd.MM.yyyy HH:mm:ss}), or null. */
+    public String timePattern() {
+        return timePattern;
+    }
+
+    /** Whether a line has this layout. */
+    public boolean matches(String line) {
+        return jsonKeys != null ? Json.parseObject(line) != null : pattern.matcher(line).matches();
+    }
+
+    /** The value of one column in a line, or null if the line doesn't have this layout. */
+    public String value(String line, String column) {
+        int i = columns.indexOf(column);
+        if (i < 0) {
+            return null;
+        }
+        if (jsonKeys != null) {
+            String[] v = split(line, null);
+            return v == null ? null : v[i];
+        }
+        Matcher m = pattern.matcher(line);
+        return m.matches() ? m.group(column) : null;
     }
 
     /** Common JSON field names for each column, most usual first. */
@@ -127,6 +172,14 @@ public final class LogFormat {
 
     /** The layout most sample lines follow (at least 30% of entry lines), or null. */
     public static LogFormat detect(List<String> sample) {
+        return detect(sample, List.of());
+    }
+
+    /**
+     * Like {@link #detect(List)}, also trying the user's formats (first, so they win a tie
+     * with a built-in layout).
+     */
+    public static LogFormat detect(List<String> sample, List<LogFormat> extra) {
         LogFormat json = detectJson(sample);
         if (json != null) {
             return json;
@@ -142,7 +195,12 @@ public final class LogFormat {
         if (nonBlank < 3) {
             return null;
         }
-        for (LogFormat f : PRESETS) {
+        List<LogFormat> candidates = new ArrayList<>(extra);
+        candidates.addAll(PRESETS);
+        for (LogFormat f : candidates) {
+            if (f.pattern == null) {
+                continue;
+            }
             int hits = 0;
             Matcher m = f.pattern.matcher("");
             for (String s : sample) {
@@ -151,7 +209,10 @@ public final class LogFormat {
                 }
             }
             double share = (double) hits / nonBlank;
-            if (share > bestShare + 1e-9) {
+            // a tie goes to the layout with more columns (a loose one like "{word} {message}"
+            // fits anything), then to the one tried first (the user's)
+            boolean tie = best != null && Math.abs(share - bestShare) <= 1e-9;
+            if (share > bestShare + 1e-9 || (tie && f.columns.size() > best.columns.size())) {
                 best = f;
                 bestShare = share;
             }

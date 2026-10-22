@@ -24,15 +24,24 @@ public final class Encoding {
 
     /** The encoding of a file (from its first 64 KB). */
     public static Charset detect(Path file) throws IOException {
+        return detect(file, WINDOWS_1252);
+    }
+
+    /** Like {@link #detect(Path)}; text that is neither UTF-8 nor UTF-16 is read as {@code other}. */
+    public static Charset detect(Path file, Charset other) throws IOException {
         byte[] head = new byte[SAMPLE];
         int n;
         try (InputStream in = Files.newInputStream(file)) {
             n = in.readNBytes(head, 0, head.length);
         }
-        return detect(head, n);
+        return detect(head, n, other);
     }
 
     public static Charset detect(byte[] b, int n) {
+        return detect(b, n, WINDOWS_1252);
+    }
+
+    public static Charset detect(byte[] b, int n, Charset other) {
         if (n >= 3 && (b[0] & 0xFF) == 0xEF && (b[1] & 0xFF) == 0xBB && (b[2] & 0xFF) == 0xBF) {
             return StandardCharsets.UTF_8;
         }
@@ -63,7 +72,7 @@ public final class Encoding {
                 return StandardCharsets.UTF_16BE;
             }
         }
-        return isUtf8(b, n) ? StandardCharsets.UTF_8 : WINDOWS_1252;
+        return isUtf8(b, n) ? StandardCharsets.UTF_8 : other;
     }
 
     /** Whether the bytes are valid UTF-8 (a sequence cut at the end of the sample is fine). */

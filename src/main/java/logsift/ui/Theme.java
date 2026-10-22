@@ -120,15 +120,59 @@ final class Theme {
     private static final String[] MONO_FONTS = {"JetBrains Mono", "Cascadia Mono", "Consolas",
         "Menlo", "SF Mono", "DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono"};
 
+    private static volatile String fontFamily; // chosen in Settings; null: the first one available
+
+    /** The font for logs (null: pick a good monospaced one). */
+    static void setFontFamily(String family) {
+        fontFamily = family;
+    }
+
+    static String fontFamily() {
+        return fontFamily;
+    }
+
     static Font monoFont(float size) {
-        Set<String> available = Set.of(GraphicsEnvironment.getLocalGraphicsEnvironment()
-                .getAvailableFontFamilyNames());
+        String chosen = fontFamily;
+        if (chosen != null && fontFamilies().contains(chosen)) {
+            return new Font(chosen, Font.PLAIN, 12).deriveFont(size);
+        }
+        return new Font(autoFontFamily(), Font.PLAIN, 12).deriveFont(size);
+    }
+
+    /** The monospaced font used when none is chosen. */
+    static String autoFontFamily() {
+        Set<String> available = fontFamilies();
         for (String name : MONO_FONTS) {
             if (available.contains(name)) {
-                return new Font(name, Font.PLAIN, 12).deriveFont(size);
+                return name;
             }
         }
-        return new Font(Font.MONOSPACED, Font.PLAIN, 12).deriveFont(size);
+        return Font.MONOSPACED;
+    }
+
+    private static Set<String> families;
+
+    private static synchronized Set<String> fontFamilies() {
+        if (families == null) {
+            families = Set.of(GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames());
+        }
+        return families;
+    }
+
+    /** Installed fonts whose letters all have the same width (for the Settings list). */
+    static java.util.List<String> monospacedFamilies() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        for (String f : new java.util.TreeSet<>(fontFamilies())) {
+            java.awt.FontMetrics fm = g.getFontMetrics(new Font(f, Font.PLAIN, 12));
+            if (fm.charWidth('i') == fm.charWidth('W') && fm.charWidth('i') > 0
+                    && new Font(f, Font.PLAIN, 12).canDisplay('a')) {
+                out.add(f);
+            }
+        }
+        g.dispose();
+        return out;
     }
 
     static Color uiColor(String key, Color fallback) {
