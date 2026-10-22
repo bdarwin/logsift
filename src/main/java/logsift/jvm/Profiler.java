@@ -410,7 +410,8 @@ public final class Profiler {
                 }
                 if (r.mode() == Mode.ALL || r.mode() == Mode.NATIVE_LEAKS) {
                     String file = sh.tempFile(".jfr");
-                    SshJvms.Result res = sh.asprof(asprofArgs(r, sh.pid(), file), r.seconds() + 120, cancelled);
+                    SshJvms.Result res = sh.asprof(asprofArgs(r, sh.pid(), file, sh.platform()), r.seconds() + 120,
+                            cancelled);
                     if (res == null) {
                         sh.remove(file);
                         return null;
@@ -449,7 +450,7 @@ public final class Profiler {
         }
 
         private Profile collapsed(Request r, String title, String cpuEvent, BooleanSupplier cancelled) throws IOException {
-            List<String> args = asprofArgs(r, sh.pid(), null);
+            List<String> args = asprofArgs(r, sh.pid(), null, sh.platform());
             if (cpuEvent != null) {
                 args.set(args.indexOf("cpu"), cpuEvent);
             }
@@ -512,6 +513,14 @@ public final class Profiler {
 
     /** The asprof arguments for a run ({@code jfr}: write a JFR file there instead of collapsed text). */
     static List<String> asprofArgs(Request r, long pid, String jfr) {
+        return asprofArgs(r, pid, jfr, "linux-x64");
+    }
+
+    /**
+     * The same for a platform. On macOS, CPU and wall clock can't both use their usual signals,
+     * so "everything" there samples CPU time with a timer, and names each event itself.
+     */
+    static List<String> asprofArgs(Request r, long pid, String jfr, String platform) {
         List<String> a = new ArrayList<>(List.of("-d", String.valueOf(r.seconds())));
         switch (r.mode()) {
             case CPU -> a.addAll(List.of("-e", "cpu"));
@@ -524,7 +533,14 @@ public final class Profiler {
             case METHOD_CALLS -> a.addAll(List.of("-e", r.method().trim()));
             case METHOD_LATENCY -> a.addAll(List.of("--trace", r.method().trim() + ":" + r.latencyMs() + "ms"));
             case HARDWARE -> a.addAll(List.of("-e", r.event().trim()));
-            case ALL -> a.add("--all");
+            case ALL -> {
+                if ("macos".equals(platform)) {
+                    a.addAll(List.of("-e", "itimer", "--alloc", "512k", "--live", "--lock", "10ms", "--wall", "20ms",
+                            "--nativemem", "0"));
+                } else {
+                    a.add("--all");
+                }
+            }
         }
         if (r.perThread()) {
             a.add("-t");
@@ -561,19 +577,37 @@ public final class Profiler {
         return out;
     }
 
+    /**
+     * The profiles to show: the one asked for first if it has anything, else the first that has;
+     * the empty ones are left out, and said so.
+     */
     private static List<Profile> views(Map<Mode, Profile> all, Mode first) {
         List<Profile> out = new ArrayList<>();
+        List<String> empty = new ArrayList<>();
         Profile f = all.get(first);
-        if (f != null) {
+        if (f != null && f.total() > 0) {
             out.add(f);
         }
         for (Map.Entry<Mode, Profile> e : all.entrySet()) {
-            if (e.getKey() != first && e.getValue().total() > 0) {
+            if (e.getValue() == f && f.total() > 0) {
+                continue;
+            }
+            if (e.getValue().total() > 0) {
                 out.add(e.getValue());
+            } else {
+                empty.add(e.getKey().label);
             }
         }
-        if (out.isEmpty() && !all.isEmpty()) {
-            out.add(all.values().iterator().next());
+        if (out.isEmpty()) {
+            out.add(f != null ? f : all.values().iterator().next()); // nothing at all: say so on the one asked for
+            return out;
+        }
+        if (all.size() > 1 && !empty.isEmpty()) {
+            String note = "Nothing came back for: " + String.join(", ", empty) + ".";
+            for (Profile p : out) {
+                p.warnings().removeIf(w -> w.startsWith("The recording has no"));
+                p.warn(note);
+            }
         }
         return out;
     }

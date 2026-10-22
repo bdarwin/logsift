@@ -166,6 +166,11 @@ class ProfilerTest {
                         true, "com.acme.Api.handle", 20, ""), pid, null));
         assertEquals(List.of("-d", "5", "--all", "-o", "jfr", "-f", "/tmp/x.jfr", "42"),
                 Profiler.asprofArgs(Profiler.Request.of(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.ALL, 5), pid, "/tmp/x.jfr"));
+        // macOS: CPU by timer, beside wall clock (its "all" records no CPU there)
+        assertEquals(List.of("-d", "5", "-e", "itimer", "--alloc", "512k", "--live", "--lock", "10ms", "--wall", "20ms",
+                "--nativemem", "0", "-o", "jfr", "-f", "/tmp/x.jfr", "42"),
+                Profiler.asprofArgs(Profiler.Request.of(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.ALL, 5), pid,
+                        "/tmp/x.jfr", "macos"));
         assertEquals(List.of("-d", "5", "-e", "cache-misses", "-o", "collapsed", "-a", "42"),
                 Profiler.asprofArgs(new Profiler.Request(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.HARDWARE, 5,
                         false, "", 0, "cache-misses"), pid, null));
@@ -254,6 +259,10 @@ class ProfilerTest {
         Set<String> kinds = views.stream().map(v -> v.title().replaceFirst(" of .*", "")).collect(Collectors.toSet());
         // which events a machine delivers in one run varies (a view without any is left out)
         assertTrue(kinds.size() >= 3 && kinds.contains("Wall clock"), "views: " + kinds);
+        assertTrue(views.get(0).total() > 0, "it opens on a view with something in it");
+        if ("macos".equals(Agents.localPlatform())) {
+            assertTrue(kinds.contains("CPU"), "CPU too (on macOS, sampled by a timer): " + kinds);
+        }
         assertTrue(views.stream().allMatch(v -> v.total() > 0 || v == views.get(0)));
     }
 
