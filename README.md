@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-**A fast, free log viewer for very large log files.** Open a multi-gigabyte log in under a second, tail it live, and cut it down to what matters with filters, Find All, a timeline and parsed columns. Works on Windows, macOS and Linux.
+**Find out what happened, even in gigabytes of logs.** Logsift opens huge log files instantly, tails them live and points out errors, bursts and restarts. Filters, Find All, a timeline and parsed columns narrow it down. Windows, macOS and Linux.
 
 ![Logsift with four filters combined as (A OR B) AND NOT C, the timeline on top and the highlight bar on the right](docs/screenshots/filters.png)
 
