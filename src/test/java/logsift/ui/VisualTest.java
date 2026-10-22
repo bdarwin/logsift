@@ -740,8 +740,10 @@ class VisualTest {
         // log is being read); clicking a wrapped line that is partly off screen must not scroll
         settle();
         String[] got = onEdt(() -> {
+            v.goToRow(longRow, false); // on screen right now (a small screen may have scrolled it away)
             int[] at = v.segmentStartsForTest(longRow);
             int y = v.yForRowForTest(longRow);
+            assertTrue(y >= 0, "the long line is on screen");
             JComponent c = v.canvasForTest();
             int x1 = v.xForSegmentColumnForTest(longRow, 1, at[1] + 4);
             int x2 = v.xForSegmentColumnForTest(longRow, 2, at[2] + 7);
