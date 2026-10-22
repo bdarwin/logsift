@@ -84,8 +84,8 @@ public final class LogsiftApp {
                     && AppState.prefs().getBoolean("restoreSession", true)) {
                 f.restoreSession(); // reopen what was open last time
             }
-            for (Path p : files) {
-                f.openFile(p);
+            if (!files.isEmpty()) {
+                f.openFiles(files);
             }
             if (capture != null) {
                 f.openPiped(capture);

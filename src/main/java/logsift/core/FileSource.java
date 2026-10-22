@@ -114,7 +114,10 @@ public final class FileSource implements Closeable {
     private static void simulateNetwork(int bytes) {
         TEST_LINK.lock();
         try {
-            Thread.sleep(testLatencyMs + (long) (bytes / testBytesPerMs));
+            double rate = testBytesPerMs; // may have been switched off while waiting
+            if (rate > 0) {
+                Thread.sleep(testLatencyMs + (long) (bytes / rate));
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {

@@ -11,6 +11,8 @@ repositories {
 
 dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
+    // SVG icons (menus, toolbar) in the theme's colors
+    implementation("com.formdev:flatlaf-extras:3.7.2")
     // SSH/SFTP for remote logs (maintained fork of JSch)
     implementation("com.github.mwiede:jsch:0.2.20")
 
@@ -114,6 +116,16 @@ val genIcons by tasks.registering(JavaExec::class) {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "logsift.tools.IconGenerator"
     args = listOf(layout.projectDirectory.dir("packaging/icons").asFile.absolutePath)
+    jvmArgs("-Djava.awt.headless=true")
+}
+
+// Regenerate the splash screen in packaging/splash:  ./gradlew genSplash
+val genSplash by tasks.registering(JavaExec::class) {
+    description = "Draws the splash screen and writes packaging/splash."
+    group = "build"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "logsift.tools.SplashGenerator"
+    args = listOf(layout.projectDirectory.dir("packaging/splash").asFile.absolutePath)
     jvmArgs("-Djava.awt.headless=true")
 }
 

@@ -85,9 +85,12 @@ jobs:
             LABEL=snapshot
           fi
           NAME=Logsift-$LABEL-${{ matrix.target }}
+          # splash screen, shown by the launcher before Java starts
+          cp packaging/splash/splash.png packaging/splash/splash@2x.png build/install/logsift/lib/
           COMMON=(--name Logsift --input build/install/logsift/lib
                   --main-jar "logsift-$VERSION.jar" --main-class logsift.ui.LogsiftApp
                   --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
+                  --java-options '-splash:$APPDIR/splash.png'
                   --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets
                   --vendor bdarwin --description "Viewer for very large log files")
           mkdir -p dist
@@ -102,10 +105,16 @@ jobs:
             windows-*)
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.ico "${COMMON[@]}"
               pwsh -NoProfile -Command "Compress-Archive -Path pkg/Logsift -DestinationPath dist/$NAME.zip"
-              # Installer: per user (no admin rights needed), Start menu entry, opens .log files
-              jpackage --type msi --dest dist --app-version "$VERSION" --icon packaging/icons/logsift.ico \
-                --win-per-user-install --win-menu --win-menu-group Logsift --win-shortcut-prompt \
-                --win-upgrade-uuid 2cf55e2a-4bbe-4a4c-8397-7b68517646a0 "${ASSOC[@]}" "${COMMON[@]}"
+              # Installer: per user (no admin rights needed), Start menu entry, "Open with Logsift"
+              # on files and folders (not taking over .log files). jpackage can't add that, so its
+              # installer script is built once, patched, and used for the real build.
+              MSI=(--app-version "$VERSION" --icon packaging/icons/logsift.ico
+                   --win-per-user-install --win-menu --win-menu-group Logsift --win-shortcut-prompt
+                   --win-upgrade-uuid 2cf55e2a-4bbe-4a4c-8397-7b68517646a0)
+              jpackage --type msi --dest msi-first --temp msi-temp "${MSI[@]}" "${COMMON[@]}"
+              mkdir -p msi-res
+              python packaging/windows/add-open-with.py msi-temp/config/main.wxs msi-res/main.wxs
+              jpackage --type msi --dest dist --resource-dir msi-res "${MSI[@]}" "${COMMON[@]}"
               mv dist/Logsift-*.msi "dist/$NAME.msi"
               ;;
             linux-*)
@@ -133,12 +142,19 @@ jobs:
           Write-Host "Installed: $($exe.FullName)"
           $out = & $exe.FullName --version | Out-String
           Write-Host "Reports: $out"
-          $assoc = Get-ChildItem "HKCU:\Software\Classes" -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq '.log' }
-          if (-not $assoc) { throw ".log is not associated" }
-          Write-Host ".log association: $((Get-ItemProperty $assoc.PSPath).'(default)')"
+          $cmd = 'HKCU:\Software\Classes\*\shell\Logsift\command'
+          if (-not (Test-Path -LiteralPath $cmd)) { throw "no Open with Logsift on files" }
+          Write-Host "Open with Logsift: $((Get-ItemProperty -LiteralPath $cmd).'(default)')"
+          if (-not (Test-Path -LiteralPath 'HKCU:\Software\Classes\Directory\shell\Logsift\command')) { throw "no Open with Logsift on folders" }
+          if (-not (Test-Path -LiteralPath 'HKCU:\Software\Classes\.log\OpenWithList\Logsift.exe')) { throw "not in Open with for .log" }
+          $log = 'HKCU:\Software\Classes\.log'
+          $default = (Get-ItemProperty -LiteralPath $log -ErrorAction SilentlyContinue).'(default)'
+          if ($default -and $default -match 'Logsift') { throw ".log files were taken over: $default" }
+          if (-not (Test-Path (Join-Path $exe.Directory.FullName 'app\splash.png'))) { throw "no splash screen" }
           $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
           if (Test-Path $exe.FullName) { throw "still there after uninstall" }
+          if (Test-Path -LiteralPath 'HKCU:\Software\Classes\*\shell\Logsift') { throw "Open with Logsift left behind after uninstall" }
 
       - uses: actions/upload-artifact@v5
         with:

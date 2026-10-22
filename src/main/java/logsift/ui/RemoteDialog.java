@@ -487,7 +487,7 @@ final class RemoteDialog extends JDialog {
                                                        int row, int col) {
             RemoteBrowser.Entry e = (RemoteBrowser.Entry) v;
             super.getTableCellRendererComponent(t, e.name(), sel, focus, row, col);
-            setIcon(e.dir() ? Icons.open() : Icons.file());
+            setIcon(e.dir() ? Icons.folder() : Icons.file());
             return this;
         }
     }

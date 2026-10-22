@@ -44,7 +44,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 
 ## Opening logs
 
-- **Files:** File → Open, drag files onto the window, or double-click a `.log` file (the installers register Logsift for `.log`). On macOS you can also use Open With or drop files on the Dock icon. If Logsift is already running, files open in the same window.
+- **Files:** File → Open, or drag files onto the window. On Windows, right-click a file or folder → **Open with Logsift** (a folder opens a search in it); Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does. On macOS, use Open With or drop files on the Dock icon. If Logsift is already running, files open in the same window.
 - **WSL (Windows):** File → Open from WSL… opens your Linux home folder. Windows reaches WSL files directly (`\\wsl.localhost\Ubuntu\…`), so they open and follow like any other file, without SSH.
 - **Command line:** `logsift app.log other.log`. `logsift --version` prints the version.
 - **Another program's output, live:** pipe it in with `-`:
@@ -135,7 +135,7 @@ Make a test log:
 
 When a log has timestamps, a timeline above it shows how much was logged over time, with **errors in red and warnings in amber**, so incidents stand out at a glance. The box shows which part of the file you are looking at.
 
-- **Click** the timeline to jump to that time. **Edit → Go to Time…** (Ctrl+Shift+L) takes `10:05`, `10:05:30.250` or `2026-10-21 10:05`.
+- **Click** the timeline to jump to that time. **Go → Go to Time…** (Ctrl+Shift+L) takes `10:05`, `10:05:30.250` or `2026-10-21 10:05`.
 - **Drag** across it to show only that time range. The range works with the filters: drag over an incident, add an ERROR filter, and you see just the errors of the incident. Click ✕ on the range to show all times again.
 - The status bar shows the time of the current line.
 - Recognized formats: `2026-10-21 10:02:13`, ISO with `T`, `2026/10/21`, `21-10-2026`, `21.10.2026`, `21-Oct-2026`, syslog `Oct 21 10:02:13`, Apache `[21/Oct/2026:10:02:13 +0000]`, timestamps inside JSON lines, time only, and epoch seconds or milliseconds. Times are shown as written in the log (time zones are not converted).
@@ -175,7 +175,7 @@ A preview shows sample lines split into columns, with the times as they are read
 
 ## Tree of loggers
 
-Logs with a logger column (or class, component, thread, host…) get a tree on the left: `com.acme.db.Pool` sits under **com.acme › db**, with line counts. Uncheck a branch to hide its lines and their stack traces. Double-click a name, or right-click → *Show Only*, to see just that one; **Show all** brings everything back. The list at the top picks the column. Counts keep up while the log grows, and what you hid is remembered for the file. Close the tree with ✕, and bring it back with **View → Tree of Loggers** (Ctrl+Shift+B).
+Logs with a logger column (or class, component, thread, host…) get a tree on the left: `com.acme.db.Pool` sits under **com.acme › db**, with line counts. Uncheck a branch to hide its lines and their stack traces. Double-click a name, or right-click → *Show Only*, to see just that one; **Show all** brings everything back. The list at the top picks the column. Counts keep up while the log grows, and what you hid is remembered for the file. Close the tree with ✕, and bring it back with the **Tree** button or **View → Tree of Loggers** (Ctrl+Shift+B).
 
 ## Settings
 

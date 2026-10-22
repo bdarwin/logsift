@@ -26,6 +26,7 @@ import javax.swing.Action;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.JButton;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
@@ -64,6 +65,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final JToggleButton followButton = new JToggleButton("Follow");
     private final JToggleButton wrapButton = new JToggleButton("Wrap");
     private final JToggleButton columnsButton = new JToggleButton("Columns");
+    private final JToggleButton treeButton = new JToggleButton("Tree");
+    private final JToggleButton timelineButton = new JToggleButton("Timeline");
     private boolean reloadStale;
     /** Reload: an amber pill while the file on disk has changes that aren't loaded. */
     private final JButton reloadButton = new JButton("Reload") {
@@ -157,7 +160,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** Opens files handed over by the system or a second launch, and comes to the front. */
     public void openFiles(List<Path> files) {
         for (Path p : files) {
-            openFile(p);
+            if (Files.isDirectory(p)) {
+                openFolderSearch(p); // a folder (Open with Logsift on a folder): search in it
+            } else {
+                openFile(p);
+            }
         }
         if (getExtendedState() == ICONIFIED) {
             setExtendedState(NORMAL);
@@ -967,6 +974,18 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         columnsButton.setToolTipText("Show lines as columns: time, level, thread, logger, message");
         columnsButton.setSelected(columns);
         columnsButton.addActionListener(e -> setColumns(columnsButton.isSelected()));
+        treeButton.setIcon(Icons.of("list-tree"));
+        treeButton.setToolTipText("Tree of loggers (threads, components…) on the left: hide or show their lines ("
+                + (isMac() ? "⇧⌘B" : "Ctrl+Shift+B") + ")");
+        treeButton.setSelected(PREFS.getBoolean("valuesTree", true));
+        treeButton.addActionListener(e -> setValuesTree(treeButton.isSelected()));
+        timelineButton.setIcon(Icons.of("chart-column"));
+        timelineButton.setToolTipText("Timeline: lines over time, errors in red; click it to jump to a time");
+        timelineButton.setSelected(PREFS.getBoolean("timeline", true));
+        timelineButton.addActionListener(e -> setTimeline(timelineButton.isSelected()));
+        JButton settings = new JButton(Icons.of("settings"));
+        settings.setToolTipText("Settings: font, log formats, encoding… (" + (isMac() ? "⌘," : "Ctrl+,") + ")");
+        settings.addActionListener(e -> showSettings(null));
 
         tb.add(open);
         tb.add(remote);
@@ -980,6 +999,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tb.add(followButton);
         tb.add(wrapButton);
         tb.add(columnsButton);
+        tb.add(treeButton);
+        tb.add(timelineButton);
         tb.addSeparator();
         tb.add(reloadButton);
         tb.add(autoReloadButton);
@@ -991,6 +1012,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         updateButton.setVisible(false);
         updateButton.addActionListener(e -> HelpSupport.browse(this, updateUrl));
         tb.add(updateButton);
+        tb.add(settings);
         return tb;
     }
 
@@ -1032,77 +1054,74 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     private JMenuBar buildMenus() {
         JMenuBar bar = new JMenuBar();
+        int shift = InputEvent.SHIFT_DOWN_MASK;
 
-        JMenu file = new JMenu("File");
-        file.add(item("Open…", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU), e -> openDialog()));
-        JMenu recent = new JMenu("Open Recent");
-        recent.addMenuListener(new javax.swing.event.MenuListener() {
-            @Override
-            public void menuSelected(javax.swing.event.MenuEvent e) {
-                recent.removeAll();
-                List<Path> files = AppState.recentFiles();
-                if (files.isEmpty()) {
-                    JMenuItem none = new JMenuItem("No recent files");
-                    none.setEnabled(false);
-                    recent.add(none);
-                    return;
-                }
-                for (Path p : files) {
-                    JMenuItem mi = new JMenuItem(p.getFileName() + "   —   " + p.getParent());
-                    mi.addActionListener(a -> openFile(p));
-                    recent.add(mi);
-                }
-                recent.addSeparator();
-                recent.add(item("Clear Recent Files", null, a -> AppState.clearRecent()));
+        // ---- File: opening things, then making things from files, then leaving
+        JMenu file = menu("File");
+        file.add(item("Open…", "folder-open", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU), e -> openDialog()));
+        JMenu recent = submenu("Open Recent", "history");
+        onOpen(recent, () -> {
+            recent.removeAll();
+            List<Path> files = AppState.recentFiles();
+            if (files.isEmpty()) {
+                JMenuItem none = new JMenuItem("No recent files");
+                none.setEnabled(false);
+                recent.add(none);
+                return;
             }
-
-            @Override
-            public void menuDeselected(javax.swing.event.MenuEvent e) {}
-
-            @Override
-            public void menuCanceled(javax.swing.event.MenuEvent e) {}
+            for (Path p : files) {
+                JMenuItem mi = new JMenuItem(p.getFileName() + "   —   " + p.getParent());
+                mi.addActionListener(a -> openFile(p));
+                recent.add(mi);
+            }
+            recent.addSeparator();
+            recent.add(item("Clear Recent Files", null, a -> AppState.clearRecent()));
         });
         file.add(recent);
-        file.add(item("Reopen Last Session", null, e -> restoreSession()));
-        if (WslSupport.available()) {
-            file.add(item("Open from WSL…", null, e -> openFromWsl()));
-        }
-        file.add(item("Open Remote (SFTP)…", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU | InputEvent.SHIFT_DOWN_MASK),
+        file.add(item("Open Remote (SFTP)…", "server", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU | shift),
                 e -> openRemoteDialog()));
-        file.add(item("Merge Files by Time…", KeyStroke.getKeyStroke(KeyEvent.VK_M, MENU | InputEvent.SHIFT_DOWN_MASK),
-                e -> mergeDialog()));
-        file.add(item("Compare With…", KeyStroke.getKeyStroke(KeyEvent.VK_D, MENU | InputEvent.SHIFT_DOWN_MASK),
-                e -> compareDialog()));
-        file.add(item("Search in Folder…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU | InputEvent.SHIFT_DOWN_MASK),
-                e -> openFolderSearch(null)));
-        file.add(item("Close Tab", KeyStroke.getKeyStroke(KeyEvent.VK_W, MENU), e -> closeTab(tabs.getSelectedIndex())));
+        if (WslSupport.available()) {
+            file.add(item("Open from WSL…", "square-terminal", null, e -> openFromWsl()));
+        }
+        file.add(item("Reopen Last Session", "rotate-ccw", null, e -> restoreSession()));
         file.addSeparator();
-        JMenu export = new JMenu("Export");
-        export.add(item("Lines Shown by Filters…", KeyStroke.getKeyStroke(KeyEvent.VK_E, MENU | InputEvent.SHIFT_DOWN_MASK),
+        file.add(item("Search in Folder…", "folder-search", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU | shift),
+                e -> openFolderSearch(null)));
+        file.add(item("Merge Files by Time…", "git-merge", KeyStroke.getKeyStroke(KeyEvent.VK_M, MENU | shift),
+                e -> mergeDialog()));
+        file.add(item("Compare With…", "git-compare", KeyStroke.getKeyStroke(KeyEvent.VK_D, MENU | shift),
+                e -> compareDialog()));
+        file.addSeparator();
+        JMenu export = submenu("Export", "download");
+        export.add(item("Lines Shown by Filters…", "filter", KeyStroke.getKeyStroke(KeyEvent.VK_E, MENU | shift),
                 e -> exportLines("filtered")));
-        export.add(item("Find Results…", null, e -> exportLines("find")));
-        export.add(item("Selected Lines…", null, e -> exportLines("selection")));
-        export.add(item("Everything in the View…", null, e -> exportLines("view")));
+        export.add(item("Find Results…", "search", null, e -> exportLines("find")));
+        export.add(item("Selected Lines…", "text-select", null, e -> exportLines("selection")));
+        export.add(item("Everything in the View…", "file-text", null, e -> exportLines("view")));
         file.add(export);
         file.addSeparator();
-        file.add(item(isMac() ? "Quit" : "Exit", isMac() ? null : KeyStroke.getKeyStroke(KeyEvent.VK_Q, MENU), e -> dispose()));
+        file.add(item("Close Tab", "x", KeyStroke.getKeyStroke(KeyEvent.VK_W, MENU), e -> closeTab(tabs.getSelectedIndex())));
+        if (!isMac()) { // on macOS, Quit is in the application menu
+            file.add(item("Exit", "log-out", KeyStroke.getKeyStroke(KeyEvent.VK_Q, MENU), e -> dispose()));
+        }
         bar.add(file);
 
-        JMenu edit = new JMenu("Edit");
-        edit.add(item("Copy", KeyStroke.getKeyStroke(KeyEvent.VK_C, MENU), e -> {
+        // ---- Edit: copying, finding, settings
+        JMenu edit = menu("Edit");
+        edit.add(item("Copy", "copy", KeyStroke.getKeyStroke(KeyEvent.VK_C, MENU), e -> {
             LogView v = LogView.lastFocused();
             if (v != null) {
                 v.copySelection();
             }
         }));
-        edit.add(item("Select All", KeyStroke.getKeyStroke(KeyEvent.VK_A, MENU), e -> {
+        edit.add(item("Select All", "text-select", KeyStroke.getKeyStroke(KeyEvent.VK_A, MENU), e -> {
             LogView v = LogView.lastFocused();
             if (v != null) {
                 v.selectAll();
             }
         }));
         edit.addSeparator();
-        edit.add(item("Find…", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU), e -> {
+        edit.add(item("Find…", "search", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU), e -> {
             // text selected in the log becomes the search text
             LogView v = LogView.lastFocused();
             String s = v != null && v.isViewFocused() ? v.selectionForFind() : null;
@@ -1112,44 +1131,62 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             findField.requestFocusInWindow();
             findField.selectAll();
         }));
-        edit.add(item("Find Next", KeyStroke.getKeyStroke(KeyEvent.VK_F3, 0), e -> findNext(true)));
-        edit.add(item("Find Previous", KeyStroke.getKeyStroke(KeyEvent.VK_F3, InputEvent.SHIFT_DOWN_MASK), e -> findNext(false)));
+        edit.add(item("Find Next", "arrow-down", KeyStroke.getKeyStroke(KeyEvent.VK_F3, 0), e -> findNext(true)));
+        edit.add(item("Find Previous", "arrow-up", KeyStroke.getKeyStroke(KeyEvent.VK_F3, shift), e -> findNext(false)));
         if (isMac()) {
-            edit.add(item("Find Next (⌘G)", KeyStroke.getKeyStroke(KeyEvent.VK_G, MENU), e -> findNext(true)));
-            edit.add(item("Find Previous (⇧⌘G)", KeyStroke.getKeyStroke(KeyEvent.VK_G, MENU | InputEvent.SHIFT_DOWN_MASK), e -> findNext(false)));
+            edit.add(item("Find Next (⌘G)", null, KeyStroke.getKeyStroke(KeyEvent.VK_G, MENU), e -> findNext(true)));
+            edit.add(item("Find Previous (⇧⌘G)", null, KeyStroke.getKeyStroke(KeyEvent.VK_G, MENU | shift), e -> findNext(false)));
         }
-        edit.add(item("Next Error", KeyStroke.getKeyStroke(KeyEvent.VK_F8, 0), e -> nextError(true)));
-        edit.add(item("Previous Error", KeyStroke.getKeyStroke(KeyEvent.VK_F8, InputEvent.SHIFT_DOWN_MASK), e -> nextError(false)));
-        edit.add(item("Close Results", KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, InputEvent.SHIFT_DOWN_MASK), e -> {
+        edit.add(item("Close Results", "panel-bottom-close", KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, shift), e -> {
             LogTab t = currentTab();
             if (t != null) {
                 t.closeResults();
             }
         }));
-        edit.addSeparator();
-        edit.add(item("Toggle Bookmark", KeyStroke.getKeyStroke(KeyEvent.VK_F2, MENU), e -> {
-            LogTab t = currentTab();
-            if (t != null) {
-                t.toggleBookmark();
-            }
-        }));
-        edit.add(item("Next Bookmark", KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), e -> nextBookmark(true)));
-        edit.add(item("Previous Bookmark", KeyStroke.getKeyStroke(KeyEvent.VK_F2, InputEvent.SHIFT_DOWN_MASK),
-                e -> nextBookmark(false)));
-        edit.addSeparator();
-        edit.add(item("Go to Line…", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU), e -> goToLineDialog()));
-        edit.add(item("Go to Time…", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU | InputEvent.SHIFT_DOWN_MASK),
-                e -> goToTimeDialog()));
         if (!isMac()) { // on macOS, Settings is in the application menu
             edit.addSeparator();
-            edit.add(item("Settings…", KeyStroke.getKeyStroke(KeyEvent.VK_COMMA, MENU), e -> showSettings(null)));
+            edit.add(item("Settings…", "settings", KeyStroke.getKeyStroke(KeyEvent.VK_COMMA, MENU), e -> showSettings(null)));
         }
         bar.add(edit);
 
-        JMenu view = new JMenu("View");
-        view.add(item("Follow (Tail)", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU), e -> setFollow(!followButton.isSelected())));
+        // ---- View: what is shown and how
+        JMenu view = menu("View");
+        view.add(check("Follow (Tail)", "arrow-down-to-line", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU),
+                followButton::isSelected, e -> setFollow(!followButton.isSelected())));
+        view.add(item("Reload", "refresh-cw", KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), e -> reload()));
+        view.add(check("Auto Reload", "refresh-ccw-dot", null, () -> autoReload, e -> setAutoReload(!autoReload)));
         view.addSeparator();
-        JMenu encoding = new JMenu("Encoding");
+        view.add(check("Columns", "columns-3", KeyStroke.getKeyStroke(KeyEvent.VK_K, MENU | shift),
+                () -> columns, e -> setColumns(!columns)));
+        view.add(check("Word Wrap", "wrap-text", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
+                () -> wrap, e -> setWrap(!wrap)));
+        view.add(check("Matching Lines Only", "list-filter", KeyStroke.getKeyStroke(KeyEvent.VK_H, MENU | shift),
+                () -> currentTab() != null && currentTab().isMatchingOnly(), e -> {
+                    LogTab t = currentTab();
+                    if (t != null) {
+                        t.setMatchingOnly(!t.isMatchingOnly());
+                    }
+                }));
+        view.addSeparator();
+        view.add(check("Tree of Loggers", "list-tree", KeyStroke.getKeyStroke(KeyEvent.VK_B, MENU | shift),
+                () -> PREFS.getBoolean("valuesTree", true), e -> setValuesTree(!PREFS.getBoolean("valuesTree", true))));
+        view.add(check("Timeline", "chart-column", null,
+                () -> PREFS.getBoolean("timeline", true), e -> setTimeline(!PREFS.getBoolean("timeline", true))));
+        view.add(check("Bottom Panel", "panel-bottom", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU),
+                () -> currentTab() != null && !currentTab().isBottomCollapsed(), e -> {
+                    LogTab t = currentTab();
+                    if (t != null) {
+                        t.toggleBottom();
+                    }
+                }));
+        view.add(check("Line Stripes", "rows-3", null,
+                () -> PREFS.getBoolean("stripes", true), e -> setStripes(!PREFS.getBoolean("stripes", true))));
+        view.addSeparator();
+        JMenu format = submenu("Log Format", "braces");
+        onOpen(format, () -> fillFormatMenu(format));
+        fillFormatMenu(format);
+        view.add(format);
+        JMenu encoding = submenu("Encoding", "languages");
         encoding.add(item("Detect Automatically", null, e -> reopenWithEncoding(null)));
         encoding.addSeparator();
         for (String cs : new String[] {"UTF-8", "windows-1252", "ISO-8859-1", "ISO-8859-15", "UTF-16LE",
@@ -1160,11 +1197,79 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
         }
         view.add(encoding);
-        JMenu format = new JMenu("Log Format");
-        format.addMenuListener(new javax.swing.event.MenuListener() {
+        view.addSeparator();
+        view.add(item("Bigger Font", "a-arrow-up", KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, MENU), e -> changeFont(1)));
+        view.add(item("Smaller Font", "a-arrow-down", KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, MENU), e -> changeFont(-1)));
+        view.add(check("Dark Mode", "moon", null, Theme::isDark, e -> toggleDark()));
+        bar.add(view);
+
+        // ---- Go: moving around the log
+        JMenu go = menu("Go");
+        go.add(item("Go to Line…", "hash", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU), e -> goToLineDialog()));
+        go.add(item("Go to Time…", "clock", KeyStroke.getKeyStroke(KeyEvent.VK_L, MENU | shift),
+                e -> goToTimeDialog()));
+        go.addSeparator();
+        go.add(item("Next Error", "circle-alert", KeyStroke.getKeyStroke(KeyEvent.VK_F8, 0), e -> nextError(true)));
+        go.add(item("Previous Error", null, KeyStroke.getKeyStroke(KeyEvent.VK_F8, shift), e -> nextError(false)));
+        go.addSeparator();
+        go.add(item("Toggle Bookmark", "bookmark", KeyStroke.getKeyStroke(KeyEvent.VK_F2, MENU), e -> {
+            LogTab t = currentTab();
+            if (t != null) {
+                t.toggleBookmark();
+            }
+        }));
+        go.add(item("Next Bookmark", "chevron-down", KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), e -> nextBookmark(true)));
+        go.add(item("Previous Bookmark", "chevron-up", KeyStroke.getKeyStroke(KeyEvent.VK_F2, shift),
+                e -> nextBookmark(false)));
+        bar.add(go);
+
+        // ---- Help
+        JMenu help = menu("Help");
+        help.add(item("Keyboard Shortcuts", "keyboard", KeyStroke.getKeyStroke(KeyEvent.VK_SLASH, MENU),
+                e -> HelpSupport.shortcutsDialog(this, getJMenuBar()).setVisible(true)));
+        help.add(item("Documentation", "book-open", null, e -> HelpSupport.browse(this, HelpSupport.DOCS)));
+        help.addSeparator();
+        help.add(item("Report a Bug or Suggest a Feature…", "bug", null,
+                e -> HelpSupport.browse(this, HelpSupport.bugReportUrl(null, null))));
+        help.add(item("Open Error Log", "file-warning", null, e -> openErrorLog()));
+        help.addSeparator();
+        help.add(item("Check for Updates…", "circle-arrow-down", null, e -> checkForUpdates(true)));
+        autoUpdates.setSelected(PREFS.getBoolean("updates.auto", true));
+        autoUpdates.addActionListener(e -> PREFS.putBoolean("updates.auto", autoUpdates.isSelected()));
+        help.add(autoUpdates);
+        if (!isMac()) { // on macOS, About is in the application menu
+            help.addSeparator();
+            help.add(item("About Logsift", "info", null, e -> HelpSupport.showAbout(this)));
+        }
+        bar.add(help);
+        return bar;
+    }
+
+    /** A top-level menu whose check marks are brought up to date each time it opens. */
+    private JMenu menu(String name) {
+        JMenu m = new JMenu(name);
+        onOpen(m, () -> {
+            for (java.awt.Component c : m.getMenuComponents()) {
+                if (c instanceof JCheckBoxMenuItem cb
+                        && cb.getClientProperty("state") instanceof java.util.function.BooleanSupplier st) {
+                    cb.setSelected(st.getAsBoolean());
+                }
+            }
+        });
+        return m;
+    }
+
+    private static JMenu submenu(String name, String icon) {
+        JMenu m = new JMenu(name);
+        m.setIcon(Icons.of(icon));
+        return m;
+    }
+
+    private static void onOpen(JMenu m, Runnable r) {
+        m.addMenuListener(new javax.swing.event.MenuListener() {
             @Override
             public void menuSelected(javax.swing.event.MenuEvent e) {
-                fillFormatMenu(format);
+                r.run();
             }
 
             @Override
@@ -1173,58 +1278,33 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             @Override
             public void menuCanceled(javax.swing.event.MenuEvent e) {}
         });
-        fillFormatMenu(format);
-        view.add(format);
-        view.add(item("Timeline", null, e -> setTimeline(!PREFS.getBoolean("timeline", true))));
-        view.add(item("Reload", KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), e -> reload()));
-        view.add(item("Auto Reload", null, e -> setAutoReload(!autoReload)));
-        view.addSeparator();
-        view.add(item("Columns", KeyStroke.getKeyStroke(KeyEvent.VK_K, MENU | InputEvent.SHIFT_DOWN_MASK),
-                e -> setColumns(!columns)));
-        view.add(item("Line Stripes", null, e -> setStripes(!PREFS.getBoolean("stripes", true))));
-        view.add(item("Tree of Loggers", KeyStroke.getKeyStroke(KeyEvent.VK_B, MENU | InputEvent.SHIFT_DOWN_MASK),
-                e -> setValuesTree(!PREFS.getBoolean("valuesTree", true))));
-        view.add(item("Word Wrap", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
-                e -> setWrap(!wrap)));
-        view.add(item("Show Matching Lines Only / All Lines",
-                KeyStroke.getKeyStroke(KeyEvent.VK_H, MENU | InputEvent.SHIFT_DOWN_MASK), e -> {
-                    LogTab t = currentTab();
-                    if (t != null) {
-                        t.setMatchingOnly(!t.isMatchingOnly());
-                    }
-                }));
-        view.add(item("Fold / Open Bottom Panel", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU), e -> {
-            LogTab t = currentTab();
-            if (t != null) {
-                t.toggleBottom();
-            }
-        }));
-        view.addSeparator();
-        view.add(item("Bigger Font", KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, MENU), e -> changeFont(1)));
-        view.add(item("Smaller Font", KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, MENU), e -> changeFont(-1)));
-        view.addSeparator();
-        view.add(item("Toggle Dark Mode", null, e -> toggleDark()));
-        bar.add(view);
+    }
 
-        JMenu help = new JMenu("Help");
-        help.add(item("Keyboard Shortcuts", KeyStroke.getKeyStroke(KeyEvent.VK_SLASH, MENU),
-                e -> HelpSupport.shortcutsDialog(this, getJMenuBar()).setVisible(true)));
-        help.add(item("Documentation", null, e -> HelpSupport.browse(this, HelpSupport.DOCS)));
-        help.addSeparator();
-        help.add(item("Report a Bug or Suggest a Feature…", null,
-                e -> HelpSupport.browse(this, HelpSupport.bugReportUrl(null, null))));
-        help.add(item("Open Error Log", null, e -> openErrorLog()));
-        help.addSeparator();
-        help.add(item("Check for Updates…", null, e -> checkForUpdates(true)));
-        autoUpdates.setSelected(PREFS.getBoolean("updates.auto", true));
-        autoUpdates.addActionListener(e -> PREFS.putBoolean("updates.auto", autoUpdates.isSelected()));
-        help.add(autoUpdates);
-        if (!isMac()) { // on macOS, About is in the application menu
-            help.addSeparator();
-            help.add(item("About Logsift", null, e -> HelpSupport.showAbout(this)));
+    private static JMenuItem item(String name, String icon, KeyStroke key, java.util.function.Consumer<ActionEvent> a) {
+        JMenuItem mi = item(name, key, a);
+        if (icon != null) {
+            mi.setIcon(Icons.of(icon));
         }
-        bar.add(help);
-        return bar;
+        return mi;
+    }
+
+    /** An on/off item: shows {@code state} with a check mark; choosing it runs {@code a}. */
+    private static JCheckBoxMenuItem check(String name, String icon, KeyStroke key,
+                                           java.util.function.BooleanSupplier state,
+                                           java.util.function.Consumer<ActionEvent> a) {
+        JCheckBoxMenuItem mi = new JCheckBoxMenuItem(action(name, e -> {
+            a.accept(e);
+            ((JCheckBoxMenuItem) e.getSource()).setSelected(state.getAsBoolean());
+        }));
+        mi.putClientProperty("state", state);
+        if (icon != null) {
+            mi.setIcon(Icons.of(icon));
+        }
+        if (key != null) {
+            mi.setAccelerator(key);
+        }
+        mi.setSelected(state.getAsBoolean());
+        return mi;
     }
 
     private static JMenuItem item(String name, KeyStroke key, java.util.function.Consumer<ActionEvent> a) {
@@ -1568,6 +1648,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     @Override
     public void setValuesTree(boolean on) {
         PREFS.putBoolean("valuesTree", on);
+        treeButton.setSelected(on);
         for (LogTab t : allTabs()) {
             t.setValuesTreeVisible(on);
         }
@@ -1583,6 +1664,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     void setTimeline(boolean on) {
         PREFS.putBoolean("timeline", on);
+        timelineButton.setSelected(on);
         for (LogTab t : allTabs()) {
             t.setTimelineVisible(on);
         }

@@ -2,6 +2,7 @@ package logsift.ui;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Graphics2D;
@@ -2678,6 +2679,58 @@ class VisualTest {
         System.out.println("slow drive: the window waited at most " + worst.get() + " ms");
         assertTrue(stalls.isEmpty() && worst.get() < 400, "the window froze for " + worst.get() + " ms:"
                 + String.join("\n  --", stalls.stream().distinct().limit(4).toList()));
+    }
+
+    @Test
+    @Order(34)
+    void menusWithIcons() throws Exception {
+        javax.swing.JMenu view = onEdt(() -> {
+            javax.swing.JMenuBar bar = frame.getJMenuBar();
+            for (int i = 0; i < bar.getMenuCount(); i++) {
+                if (bar.getMenu(i).getText().equals("View")) {
+                    return bar.getMenu(i);
+                }
+            }
+            return null;
+        });
+        assertNotNull(view);
+        onEdt(() -> {
+            view.doClick();
+            return null;
+        });
+        settle();
+        // on/off items show their state; most items have an icon
+        int checks = onEdt(() -> {
+            int n = 0;
+            for (java.awt.Component c : view.getMenuComponents()) {
+                if (c instanceof javax.swing.JCheckBoxMenuItem cb && cb.getText().equals("Timeline")) {
+                    assertEquals(AppState.prefs().getBoolean("timeline", true), cb.isSelected());
+                }
+                if (c instanceof javax.swing.JCheckBoxMenuItem) {
+                    n++;
+                }
+            }
+            return n;
+        });
+        assertTrue(checks >= 8, "on/off items: " + checks);
+        shotOf(view.getPopupMenu(), "50-view-menu");
+        onEdt(() -> {
+            javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath();
+            return null;
+        });
+        // the share log was read with its layout once the drive was fast again
+        LogTab cur = onEdt(frame::currentTab);
+        if (cur != null && cur.path().getFileName().toString().equals("network-share.log")) {
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> cur.logFormat() != null && cur.timeIndex() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "layout and timeline of the share log");
+        }
+        settle();
+        shot("51-toolbar");
     }
 
     private static void waitFor(BooleanSupplier cond, long timeoutMs, String what)
