@@ -19,8 +19,9 @@ Code references point to `src/main/java/logsift/...`.
 9. [The view: drawing only what is visible](#9-the-view-drawing-only-what-is-visible)
 10. [Folder search](#10-folder-search)
 11. [More features, and the idea behind each](#11-more-features-and-the-idea-behind-each)
-12. [Lessons learned](#12-lessons-learned)
-13. [Numbers](#13-numbers)
+12. [Java threads and profiling](#12-java-threads-and-profiling)
+13. [Lessons learned](#13-lessons-learned)
+14. [Numbers](#14-numbers)
 
 ---
 
@@ -415,7 +416,29 @@ Each later feature reuses the same few building blocks: the line index, the byte
 
 **Remote logs** (`core/RemoteMirror.java`). The same idea again: a local copy fed over SFTP with offset reads (`get(path, monitor, offset)`). It only ever appends whole lines, and the remote offset is "bytes read minus the incomplete last line". If the remote file gets smaller, the copy starts over, and the document's usual truncation handling takes care of the rest.
 
-## 12. Lessons learned
+## 12. Java threads and profiling
+
+This part lives in its own package, `logsift.jvm`, again without UI code.
+
+**Reading thread dumps** (`jvm/DumpParser.java`). A dump is text, so reading it is a small state machine fed one line at a time. `Full thread dump` starts a dump; the line just before it, if it is a time, says when. A line like `"name" #12 daemon prio=5 … nid=0x5f03` starts a thread, `java.lang.Thread.State:` gives its state, `at …` lines are frames, and `- locked <0x…>`, `- waiting to lock <0x…>`, `- parking to wait for <0x…>` are notes on the frame above. The JVM's own deadlock report after the threads repeats thread names (`"worker-A":`), so the reader stops taking threads at `JNI global references` or `Found one Java-level deadlock`.
+
+Because it is line by line, the same reader finds dumps in the middle of a log. When a program gets `kill -3`, its console log suddenly contains a dump. If the log puts a time in front of every line (`docker logs --timestamps`), the text before `Full thread dump` becomes a pattern: digits may change, the rest must stay. That pattern is cut off the following lines. The newer formats of `jcmd Thread.dump_to_file` (plain text, and JSON with virtual threads) have readers of their own and give the same model. Tests read real dumps from JDK 8, 11, 17, 21 and 25 of a program built to deadlock, and dumps written back by Logsift read the same again.
+
+**Finding deadlocks** (`jvm/ThreadAnalysis.java`). Every thread holds some locks (`locked`, and the "ownable synchronizers" of `ReentrantLock` and friends) and waits for at most one. So *thread → the holder of the lock it waits for* is a graph in which every node has at most one outgoing edge. Following the edges from each thread either ends, or comes back to a thread already on the path, and that loop is a deadlock. Each thread is visited once, so this is linear in the number of threads. A quirk to get right: a thread in `Object.wait()` is listed as having `locked` the object it waits on, but it has let it go while it waits. Counting it as held would show deadlocks that aren't there.
+
+**Stuck and busy threads across dumps.** Threads are matched between dumps by their Java id (`#12`). A thread's *stack key* is its state plus every frame and the kind of lock in each note. Threads with the same key in every dump, which aren't idle (waiting for work in a pool, a selector, a timer), are stuck. CPU use comes from `cpu=` and `elapsed=` in the thread headers (JDK 11+): the change in CPU time divided by the change in elapsed time is the share of one core used between the dumps.
+
+**Attaching to a running JVM** (`jvm/LocalJvms.java`). The JDK's attach API lists JVMs and attaches to one. Logsift then asks it to start its local JMX agent and calls the `DiagnosticCommand` MBean, which runs the same commands as `jcmd` (`threadPrint`, `jfrStart`…). The answer is the same text as `jcmd <pid> Thread.print -l`, so there is just one parser for files and live JVMs. If attaching fails, `jcmd` itself is run.
+
+**Over SSH** (`jvm/SshJvms.java`). `ps` lists the processes, and `/tmp/hsperfdata_*` adds JVMs whose command doesn't say `java`. Then `jcmd` runs on the server, found in the folder you give, on the PATH, or next to the JVM's own `java` (`/proc/<pid>/exe`). On servers with only a Java runtime there is no `jcmd`. Logsift then copies async-profiler's launcher there over SFTP (once; the size is checked next time). Like `jcmd`, it can run diagnostic commands in a JVM. A JVM of another user is reached with `sudo -u`, or as root for async-profiler, which takes on the JVM's user itself.
+
+**Profiles and flame graphs** (`jvm/Profile.java`, `ui/FlameGraph.java`). async-profiler prints one line per distinct stack, outermost frame first, with how often it was seen: `Thread.run;Api.handle;Db.query 42`. Adding each line to a tree merges the common beginnings, and each node keeps its *total* (itself and below) and *self* (itself only). Flight Recorder events are turned into the same tree. The flame graph draws each node as wide as its total, so its children fit exactly under it. The list of hot methods adds up *self* per method. A method's *total* is counted only once on each path, or recursion would count it twice.
+
+## 13. Lessons learned
+
+**The thread taking the dump looked stuck.** With a live JVM, the JMX thread that runs the dump command was always running the same code, so it showed up as "stuck". So did `main` reading from a console. Such threads are idle now. The visual test attaches to a real JVM and checks that nothing in it is reported as stuck.
+
+**A lambda's class looked like a Java module.** `jcmd Thread.dump_to_file` writes frames as `java.base/java.lang.Thread.sleep`, with the module before the slash. A lambda frame is `Fixture$$Lambda/0x0000000800c01440.run`, so splitting at the slash turned the lambda's class into a "module". A slash after a `$`, or before `0x`, is a hidden class now.
 
 **An interrupted thread closes the file for everyone.** Java's `FileChannel` is an *interruptible channel*: if a thread is interrupted while reading, Java **closes the channel**, for every thread. Logsift used to cancel searches by interrupting worker threads (`Future.cancel(true)`, `shutdownNow()`). So editing a filter while its search ran (which cancels the old search) could close the open file, and the whole tab stopped working. Nothing reported it, because the error went to a failure callback that nothing listened to. It surfaced as an intermittent visual-test failure. The fixes:
 
@@ -444,7 +467,7 @@ The fixes share a pattern. The document *remembers* state (`lastIndexMillis()`),
 
 ---
 
-## 13. Numbers
+## 14. Numbers
 
 Measured by `./gradlew visualTest` on an Apple Silicon Mac (10 cores) with the file already in the OS cache. With a cold cache, disk speed sets the limit.
 
