@@ -71,15 +71,18 @@ def main(src, dst):
     s, n = re.subn(r'(<Product\b[^>]*?\bId=)"[^"]*"', r'\1"*"', s, count=1, flags=re.S)
     if n != 1:
         sys.exit(f'{src}: no Product Id to replace')
-    if '<MajorUpgrade' not in s:
-        sys.exit(f'{src}: no MajorUpgrade element')
-
-    def same_version(m):
+    # jpackage's Upgrade table leaves out the version being installed (and counts it as a
+    # downgrade): include it in the upgrade, so a new build of the same version replaces the old
+    def upgrade_version(m):
         tag = m.group(0)
-        if 'AllowSameVersionUpgrades' in tag or 'AllowDowngrades="yes"' in tag:
-            return tag
-        return tag.replace('<MajorUpgrade', '<MajorUpgrade AllowSameVersionUpgrades="yes"', 1)
-    s = re.sub(r'<MajorUpgrade\b[^>]*>', same_version, s)
+        if 'JP_UPGRADABLE_FOUND' in tag:
+            return re.sub(r'IncludeMaximum="[^"]*"', 'IncludeMaximum="yes"', tag)
+        if 'JP_DOWNGRADABLE_FOUND' in tag:
+            return re.sub(r'IncludeMinimum="[^"]*"', 'IncludeMinimum="no"', tag)
+        return tag
+    s, n = re.subn(r'<UpgradeVersion\b[^>]*/>', upgrade_version, s, flags=re.S)
+    if n < 2 or 'IncludeMaximum="yes"' not in s or 'IncludeMinimum="no"' not in s:
+        sys.exit(f'{src}: Upgrade table not as expected')
 
     if UTIL_NS not in s:
         s, n = re.subn(r'<Wix\b', f'<Wix xmlns:util="{UTIL_NS}"', s, count=1)
@@ -87,9 +90,6 @@ def main(src, dst):
             sys.exit(f'{src}: no Wix element')
     open(dst, 'w', encoding='utf-8').write(s)
     print(f'{dst}: added Open with Logsift, same-version upgrades, closing a running Logsift')
-    for line in s.splitlines():
-        if 'MajorUpgrade' in line or '<Product' in line or '<Wix' in line or ' Id="*"' in line:
-            print('   ', line.strip())
 
 
 if __name__ == '__main__':
