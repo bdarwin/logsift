@@ -355,22 +355,76 @@ public final class FolderSearch implements AutoCloseable {
         }
     }
 
+    /** Separates the levels of a zip inside a zip in {@link FileResult#entry()}. */
+    public static final String NESTED = "!/";
+    /** How deep zips inside zips are followed. */
+    static final int MAX_DEPTH = 5;
+
     private void searchZip(Path file) throws IOException {
-        try (ZipInputStream zin = new ZipInputStream(
-                new BufferedInputStream(Files.newInputStream(file), 1 << 16))) {
-            ZipEntry e;
-            while ((e = zin.getNextEntry()) != null && !cancelled) {
-                String name = e.getName();
-                String base = name.substring(name.lastIndexOf('/') + 1);
-                if (!e.isDirectory() && nameMatches(base)) {
-                    // don't let the search close the zip stream at the end of an entry
-                    InputStream entry = new FilterInputStream(zin) {
-                        @Override
-                        public void close() {}
-                    };
-                    searchStream(new FileResult(file, name), entry);
-                }
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 1 << 16)) {
+            searchZip(file, in, "", 1);
+        }
+    }
+
+    /**
+     * The entries of a zip (read from {@code in}) whose names match; zips inside are searched
+     * too, and .gz entries unpacked.
+     */
+    private void searchZip(Path file, InputStream in, String prefix, int depth) throws IOException {
+        ZipInputStream zin = new ZipInputStream(in);
+        ZipEntry e;
+        while ((e = zin.getNextEntry()) != null && !cancelled) {
+            String name = e.getName();
+            String base = name.substring(name.lastIndexOf('/') + 1);
+            if (e.isDirectory()) {
+                continue;
             }
+            // don't let the search close the zip stream at the end of an entry
+            InputStream entry = new FilterInputStream(zin) {
+                @Override
+                public void close() {}
+            };
+            if (isZip(Path.of(base))) {
+                if (depth < MAX_DEPTH) {
+                    searchZip(file, new BufferedInputStream(entry, 1 << 16), prefix + name + NESTED, depth + 1);
+                }
+            } else if (isGzip(Path.of(base))) {
+                if (nameOrRotatedMatches(base.substring(0, base.length() - 3))) {
+                    searchStream(new FileResult(file, prefix + name),
+                            new GZIPInputStream(new BufferedInputStream(entry, 1 << 16), 1 << 16));
+                }
+            } else if (nameOrRotatedMatches(base)) {
+                searchStream(new FileResult(file, prefix + name), entry);
+            }
+        }
+    }
+
+    /**
+     * The content of a zip entry as the search read it: {@code entry} may name zips inside the
+     * zip (separated by {@link #NESTED}), and a .gz entry is unpacked.
+     */
+    public static InputStream openEntry(Path zip, String entry) throws IOException {
+        String[] parts = entry.split(java.util.regex.Pattern.quote(NESTED), -1);
+        InputStream in = new BufferedInputStream(Files.newInputStream(zip), 1 << 16);
+        try {
+            for (String part : parts) {
+                ZipInputStream zin = new ZipInputStream(in);
+                in = zin;
+                ZipEntry e;
+                while ((e = zin.getNextEntry()) != null && !e.getName().equals(part)) {
+                    // skip
+                }
+                if (e == null) {
+                    throw new IOException("no " + part + " in " + zip.getFileName());
+                }
+                in = new BufferedInputStream(zin, 1 << 16);
+            }
+            String last = parts[parts.length - 1];
+            return isGzip(Path.of(last.substring(last.lastIndexOf('/') + 1)))
+                    ? new GZIPInputStream(in, 1 << 16) : in;
+        } catch (IOException | RuntimeException ex) {
+            in.close();
+            throw ex;
         }
     }
 

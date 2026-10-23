@@ -11,6 +11,7 @@
 - **Thread names connect logs and dumps:** right-click a line → **Show Thread in Threads** shows its stack in a dump (names the log cut short still match); **Lines in Log** in the Threads tab shows only a thread's lines.
 - **JMX port:** attach to a JVM through `-Dcom.sun.management.jmxremote.port`, from anywhere, without SSH: thread dumps, heap histograms, and Flight Recorder profiles streamed back over the port.
 - **Spring Boot's log layout** is recognized (time, level, process id, application, thread, logger, message).
+- **Folder search looks inside zips inside zips** (up to 5 levels), and inside `.gz` files and rotated logs (`app.log.1`) in a zip. Double-clicking such a line unpacks it through each level. The count of files with hits no longer counts each entry of a zip as a file.
 - **The heap:** what fills it, by class, and what grew between two histograms (where memory leaks). Save a heap dump (`.hprof`), also from a server over SSH.
 
 ## 1.2.0
