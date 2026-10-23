@@ -18,6 +18,7 @@
 - **Timeline and highlight bar.** See error bursts at a glance and drag over a time range to zoom in.
 - **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs and CSV files work too, with a pretty-printed details view.
 - **Your own log formats.** Drop a log file and Logsift works out its layout, or paste your log4j, logback, java.util.logging or Python logging setup (even a whole `logback.xml` or `log4j2.xml`: each layout in it becomes a format). A live preview shows how lines split into columns.
+- **Exceptions by root cause.** Java stack traces and Python tracebacks grouped by what went wrong and where in your own code: "60 × NullPointerException at PriceCalculator.discount", with the stack, what wrapped it, and each time it happened.
 - **Follow a request.** Right-click a line with a trace or request ID (or select any text) → **Follow**: the request's lines in order, across threads, open logs or a whole folder (zips too), with the time between them and the longest wait marked.
 - **Tree of loggers.** Loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
 - **Zips, .gz files and the web.** Drop a `.zip` and it opens as a tab with its folders and files (zips inside it too); open any of them as a log, with everything a log has, merge them by time, or search them all. A `.gz` opens directly. Open logs from web addresses, or download several and search them together.
@@ -197,6 +198,14 @@ The **Insights** tab (next to Filters) tells you at a glance what is going on in
 - **Noise:** one message that fills a big part of the log; **Hide** it to see the rest.
 
 Each finding has buttons to **Go to** its line, **Find all** of that message, **Show only** it or **Hide** it. **Refresh** looks again after the log grew.
+
+## Exceptions
+
+The **Exceptions** tab groups the log's exceptions by their **root cause** (the innermost `Caused by:` in Java, the first exception of a chained Python traceback) and **where it was thrown in your own code**. Frames of the JDK, Python and well-known frameworks and libraries (Spring, Hibernate, Netty, connection pools, `site-packages`…) are skipped when deciding where. So 60 `NullPointerException`s thrown in `PriceCalculator.discount` are one row, however they were wrapped and whatever their messages said, and the same exception thrown somewhere else is another.
+
+- Each row: how many times, the exception and its message, where, and the first and last time. Wrappers are named after it (*in NestedServletException, IllegalStateException*).
+- The right side shows the root cause's stack with your own frames as links and runs of framework frames folded, then what caught and wrapped it. **◀ ▶** step through every time it happened, and the log goes there.
+- It fills in with Insights, which names the two most frequent root causes; **Show in Exceptions** goes to one. Java (`at …`, `Caused by:`, `... 5 more`, `Suppressed:`) and Python (`Traceback (most recent call last):`, chained with "During handling of the above exception…") stacks are read.
 
 ## Following a request
 

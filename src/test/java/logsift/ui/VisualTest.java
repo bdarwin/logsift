@@ -4043,6 +4043,107 @@ class VisualTest {
         }, 20_000, "the bank's line");
     }
 
+    @Test
+    @Order(42)
+    void exceptionsByRootCause() throws Exception {
+        StringBuilder sb = new StringBuilder();
+        java.util.Random rnd = new java.util.Random(3);
+        long t0 = java.time.LocalDateTime.of(2026, 10, 21, 10, 0, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
+        for (int i = 0; i < 3000; i++) {
+            String time = TimelineBar.formatFull(t0 + i * 1200L).substring(0, 23);
+            int kind = i % 50 == 7 ? 0 : i % 160 == 11 ? 1 : i % 400 == 13 ? 2 : -1;
+            if (kind < 0) {
+                sb.append(time).append(" INFO  [http-nio-8080-exec-").append(i % 8 + 1)
+                        .append("] c.a.shop.OrderController - order ").append(1000 + i).append(" placed in ")
+                        .append(20 + rnd.nextInt(200)).append(" ms\n");
+                continue;
+            }
+            sb.append(time).append(" ERROR [http-nio-8080-exec-").append(i % 8 + 1)
+                    .append("] o.a.c.c.C.[dispatcherServlet] - Servlet.service() threw exception\n");
+            if (kind == 0) { // the same NPE from the price calculator, wrapped
+                sb.append("org.springframework.web.util.NestedServletException: Request processing failed\n")
+                        .append("\tat org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)\n")
+                        .append("\tat org.springframework.web.servlet.FrameworkServlet.doPost(FrameworkServlet.java:909)\n")
+                        .append("\tat javax.servlet.http.HttpServlet.service(HttpServlet.java:665)\n")
+                        .append("Caused by: java.lang.IllegalStateException: Could not place order ").append(1000 + i).append('\n')
+                        .append("\tat com.acme.shop.OrderService.place(OrderService.java:142)\n")
+                        .append("\tat com.acme.shop.OrderController.create(OrderController.java:57)\n")
+                        .append("\tat jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)\n")
+                        .append("\t... 3 more\n")
+                        .append("Caused by: java.lang.NullPointerException: Cannot invoke \"com.acme.shop.Coupon.percent()\" because \"coupon\" is null\n")
+                        .append("\tat com.acme.shop.PriceCalculator.discount(PriceCalculator.java:88)\n")
+                        .append("\tat com.acme.shop.PriceCalculator.total(PriceCalculator.java:42)\n")
+                        .append("\tat com.acme.shop.OrderService.place(OrderService.java:139)\n")
+                        .append("\t... 5 more\n");
+            } else if (kind == 1) {
+                sb.append("org.springframework.dao.DataAccessResourceFailureException: could not acquire connection\n")
+                        .append("\tat org.springframework.orm.jpa.vendor.HibernateJpaDialect.convert(HibernateJpaDialect.java:277)\n")
+                        .append("\tat com.acme.shop.OrderRepository.save(OrderRepository.java:31)\n")
+                        .append("Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms.\n")
+                        .append("\tat com.zaxxer.hikari.pool.HikariPool.createTimeoutException(HikariPool.java:696)\n")
+                        .append("\tat com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:181)\n")
+                        .append("\tat com.acme.shop.OrderRepository.save(OrderRepository.java:31)\n")
+                        .append("\t... 1 more\n");
+            } else {
+                sb.append("java.lang.ArithmeticException: / by zero\n")
+                        .append("\tat com.acme.shop.Stats.average(Stats.java:19)\n")
+                        .append("\tat com.acme.shop.ReportJob.run(ReportJob.java:44)\n");
+            }
+        }
+        Path log = dir.resolve("orders-errors.log");
+        Files.writeString(log, sb.toString());
+        onEdt(() -> {
+            frame.setColumns(false);
+            frame.openFiles(List.of(log));
+            return null;
+        });
+        LogTab tab = waitForTab("orders-errors.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.exceptionsPanel().result() != null && tab.insightsPanel().report() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the exceptions (with Insights)");
+        ExceptionsPanel ep = onEdt(tab::exceptionsPanel);
+        logsift.core.Exceptions.Result r = onEdt(ep::result);
+        assertEquals(3, r.groups().size(), r.groups().stream().map(logsift.core.Exceptions.Group::key).toList().toString());
+        logsift.core.Exceptions.Group npe = r.groups().get(0);
+        assertEquals("java.lang.NullPointerException", npe.root().type());
+        assertEquals(60, npe.count());
+        assertEquals("PriceCalculator.discount(PriceCalculator.java:88)", npe.root().where().shortText());
+        assertEquals(List.of("NestedServletException", "IllegalStateException"), npe.wrappers(), "outermost first");
+        assertEquals("java.sql.SQLTransientConnectionException", r.groups().get(1).root().type());
+        assertEquals("OrderRepository.save(OrderRepository.java:31)", r.groups().get(1).root().where().shortText(),
+                "the pool's frames are a library's");
+        assertTrue(onEdt(ep::summaryForTest).startsWith("87 exceptions, 3 different"), onEdt(ep::summaryForTest));
+        // Insights names the top root causes
+        List<logsift.core.Insights.Finding> fs = onEdt(() -> tab.insightsPanel().report().findings());
+        assertTrue(fs.stream().anyMatch(f -> f.kind() == logsift.core.Insights.Kind.EXCEPTION
+                && f.title().equals("NullPointerException at PriceCalculator.discount(PriceCalculator.java:88) (60×)")),
+                fs.stream().map(logsift.core.Insights.Finding::title).toList().toString());
+        // step through the occurrences: the log follows
+        onEdt(() -> {
+            tab.showExceptionsTab();
+            ep.tableForTest().setRowSelectionInterval(0, 0);
+            ep.stepForTest(1);
+            return null;
+        });
+        assertEquals(npe.keptLines()[1], onEdt(tab::currentLine));
+        assertTrue(onEdt(ep::occurrenceForTest).contains("2 of 60"), onEdt(ep::occurrenceForTest));
+        String html = onEdt(ep::stackForTest);
+        assertTrue(html.contains("PriceCalculator.total(PriceCalculator.java:42)"), html);
+        settle();
+        shot("78-exceptions");
+        onEdt(() -> {
+            ep.tableForTest().setRowSelectionInterval(1, 1);
+            return null;
+        });
+        html = onEdt(ep::stackForTest);
+        assertTrue(html.contains("1 framework frame"), "the pool's frames folded: " + html);
+        assertTrue(html.contains("HikariPool.createTimeoutException"), "the first frame is always shown");
+    }
+
     /** Waits until the current tab is a log titled so. */
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {

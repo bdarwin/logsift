@@ -17,7 +17,7 @@ public final class Insights {
 
     public enum Severity { ERROR, WARN, INFO, OK }
 
-    public enum Kind { BURST, ERROR_KIND, NEW_ERROR, WARNING_KIND, SILENCE, RESTART, NOISE, CALM }
+    public enum Kind { BURST, ERROR_KIND, NEW_ERROR, EXCEPTION, WARNING_KIND, SILENCE, RESTART, NOISE, CALM }
 
     /**
      * One finding. {@code line}: where to go (or -1); {@code from}/{@code to}: a time range to
@@ -45,6 +45,54 @@ public final class Insights {
 
     /** Most findings of one kind shown. */
     static final int MAX_PER_KIND = 3;
+
+    /** The report, with the most frequent root causes of the log's exceptions (null: none looked for). */
+    public static Report analyze(Input in, Exceptions.Result exceptions) {
+        Report r = analyze(in);
+        if (exceptions == null || exceptions.groups().isEmpty()) {
+            return r;
+        }
+        List<Finding> out = new ArrayList<>(r.findings());
+        out.removeIf(f -> f.kind == Kind.CALM);
+        boolean timed = r.firstTime() != TimeFormat.NONE;
+        WITH_DATE.set(timed && r.lastTime() - r.firstTime() > 20 * 3_600_000L);
+        try {
+            out.addAll(exceptionKinds(in, exceptions, timed));
+        } finally {
+            WITH_DATE.remove();
+        }
+        out.sort(Comparator.comparingInt((Finding f) -> f.severity.ordinal()).thenComparingInt(f -> order(f.kind)));
+        return new Report(r.summary(), r.firstTime(), r.lastTime(), r.lines(), r.errors(), r.warnings(), out);
+    }
+
+    /** The exceptions that happen most, by root cause and where it was thrown. */
+    static List<Finding> exceptionKinds(Input in, Exceptions.Result ex, boolean timed) {
+        List<Finding> out = new ArrayList<>();
+        for (Exceptions.Group g : ex.groups().subList(0, Math.min(2, ex.groups().size()))) {
+            Exceptions.Thrown root = g.root();
+            Exceptions.Frame w = root.where();
+            String title = root.simpleType() + (w == null ? "" : " at " + w.shortText())
+                    + String.format(" (%,d×)", g.count());
+            StringBuilder d = new StringBuilder("Root cause");
+            if (!root.message().isEmpty()) {
+                String m = root.message().replace('\n', ' ');
+                d.append(": ").append(m.length() > 80 ? m.substring(0, 77) + "…" : m);
+            }
+            if (!g.wrappers().isEmpty()) {
+                d.append("   ·   wrapped in ").append(String.join(", ", g.wrappers()));
+            }
+            if (timed && g.count() > 1) {
+                d.append("   ·   ").append(time(exactTime(in, g.firstLine()))).append(" → ")
+                        .append(time(exactTime(in, g.lastLine())));
+            }
+            if (ex.groups().size() > 2 && out.isEmpty()) {
+                d.append("   ·   ").append(ex.groups().size()).append(" kinds in all");
+            }
+            out.add(new Finding(Kind.EXCEPTION, Severity.ERROR, title, d.toString(), g.firstLine(),
+                    TimeFormat.NONE, TimeFormat.NONE, null));
+        }
+        return out;
+    }
 
     public static Report analyze(Input in) {
         boolean timed = in.samples >= 2 && in.sampleTimes != null;
@@ -86,12 +134,13 @@ public final class Insights {
         return switch (k) {
             case BURST -> 0;
             case NEW_ERROR -> 1;
-            case RESTART -> 2;
-            case SILENCE -> 3;
-            case ERROR_KIND -> 4;
-            case WARNING_KIND -> 5;
-            case NOISE -> 6;
-            case CALM -> 7;
+            case EXCEPTION -> 2;
+            case RESTART -> 3;
+            case SILENCE -> 4;
+            case ERROR_KIND -> 5;
+            case WARNING_KIND -> 6;
+            case NOISE -> 7;
+            case CALM -> 8;
         };
     }
 

@@ -48,6 +48,9 @@ final class InsightsPanel extends JPanel {
 
         void hide(logsift.core.MessageStats.Template t);
 
+        /** Shows the exception that starts at this line in the Exceptions tab. */
+        default void showException(long line) {}
+
         /** The report changed (for the tab title). */
         void reportChanged(Insights.Report report);
     }
@@ -256,6 +259,10 @@ final class InsightsPanel extends JPanel {
         if (f.template() != null) {
             actions.add(action("Hide", "Hide lines of this message", () -> host.hide(f.template())));
         }
+        if (f.kind() == Insights.Kind.EXCEPTION) {
+            actions.add(action("Show in Exceptions", "Its stack, where it was thrown, and every time it happened",
+                    () -> host.showException(f.line())));
+        }
         if (f.line() >= 0) {
             actions.add(action("Go to", "Go to the line", () -> host.goToLine(f.line())));
         }
@@ -315,6 +322,7 @@ final class InsightsPanel extends JPanel {
         String name = switch (f.kind()) {
             case BURST -> "flame";
             case NEW_ERROR -> "sparkles";
+            case EXCEPTION -> "bug";
             case ERROR_KIND -> "circle-alert";
             case WARNING_KIND -> "triangle-alert";
             case SILENCE -> "circle-pause";

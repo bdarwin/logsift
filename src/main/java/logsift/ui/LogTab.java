@@ -58,6 +58,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         /** Shows the thread a line names in a thread dump of the log's JVM. */
         default void showThread(LogTab tab, String thread) {}
 
+        /** Opens the source file of a stack frame at its line. */
+        default void openSource(LogTab tab, logsift.core.Exceptions.Frame frame) {}
+
         /** Every open log (to follow a request through them). */
         default List<LogTab> openLogs() {
             return List.of();
@@ -97,6 +100,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final MessagesPanel messages;
     private final InsightsPanel insights;
     private RequestPanel request; // made the first time a request is followed
+    private final ExceptionsPanel exceptions;
     private int insightsGeneration = -1;
     private final Bookmarks bookmarks;
     private final BookmarksPanel bookmarksPanel;
@@ -298,6 +302,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         messages = new MessagesPanel(messagesHost());
         insights = new InsightsPanel(insightsHost());
+        exceptions = new ExceptionsPanel(exceptionsHost());
         bookmarks = new Bookmarks(this.path, doc::fileSize);
         bookmarkGeneration = doc.generation();
         bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
@@ -309,6 +314,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         });
         bottom.addTab("Filters", filterPanel);
         bottom.addTab("Insights", insights);
+        bottom.addTab("Exceptions", exceptions);
         results = new ResultsPanel(doc, resultsHost());
         bottom.addTab("Find results", results);
         bottom.addTab("Messages", messages);
@@ -323,6 +329,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
             if (bottom.getSelectedComponent() == insights && insights.report() == null && !insights.isRunning()) {
                 startInsights();
+            }
+            if (bottom.getSelectedComponent() == exceptions && exceptions.result() == null
+                    && !exceptions.isRunning() && !insights.isRunning()) {
+                exceptions.start();
             }
         });
         bottom.setPreferredSize(new Dimension(400, 210));
@@ -1411,6 +1421,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     return null;
                 }
                 SwingUtilities.invokeLater(() -> messages.useResult(m)); // the Messages tab needn't count again
+                step.accept("Looking for exceptions…");
+                logsift.core.Exceptions.Result ex = analyzeExceptions(cancel::get, null);
+                if (cancel.get() || ex == null) {
+                    return null;
+                }
+                SwingUtilities.invokeLater(() -> exceptions.useResult(ex, n));
                 logsift.core.TimeFormat tf = timeFormat;
                 logsift.core.TimeIndex ti = timeIndex;
                 logsift.core.TimeIndex.Samples s = ti == null || tf == null ? null : ti.samples();
@@ -1430,7 +1446,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 return logsift.core.Insights.analyze(new logsift.core.Insights.Input(n,
                         s == null ? new long[0] : s.lines(), s == null ? null : s.times(), s == null ? 0 : s.n(),
                         lastTime, matchingLines(errs), errs.matchCount(), matchingLines(warns), warns.matchCount(),
-                        m, lineTime));
+                        m, lineTime), ex);
             }
 
             @Override
@@ -1460,12 +1476,113 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public void showException(long line) {
+                showExceptionsTab();
+                exceptions.select(line);
+            }
+
+            @Override
             public void reportChanged(logsift.core.Insights.Report r) {
                 int i = bottom.indexOfComponent(insights);
                 long problems = r == null ? 0 : r.problems();
                 bottom.setTitleAt(i, problems == 0 ? "Insights" : "Insights (" + problems + ")");
                 bottom.setIconAt(i, problems == 0 ? null : Icons.of("circle-alert", new java.awt.Color(0xDC2626), 14));
                 bottom.setToolTipTextAt(i, r == null ? null : r.summary());
+            }
+        };
+    }
+
+    // ---------------------------------------------------------------- exceptions
+
+    ExceptionsPanel exceptionsPanel() {
+        return exceptions;
+    }
+
+    void showExceptionsTab() {
+        setBottomCollapsed(false);
+        bottom.setSelectedComponent(exceptions);
+    }
+
+    /** Finds and groups the log's exceptions (null if cancelled). */
+    logsift.core.Exceptions.Result analyzeExceptions(java.util.function.BooleanSupplier stop,
+                                                     java.util.function.DoubleConsumer progress) {
+        List<SearchSession> sessions = new ArrayList<>();
+        try {
+            for (String re : logsift.core.Exceptions.STACK_SEARCHES) {
+                sessions.add(new SearchSession(doc, new SearchQuery(re, true, true, false)).start());
+            }
+            for (SearchSession s : sessions) {
+                while (!s.awaitIdle(200)) {
+                    if (stop.getAsBoolean() || closed) {
+                        return null;
+                    }
+                }
+            }
+            int total = 0;
+            for (SearchSession s : sessions) {
+                total += s.hits().size();
+            }
+            long[] lines = new long[Math.min(total, 20_000_000)];
+            int k = 0;
+            for (SearchSession s : sessions) {
+                HitList h = s.hits();
+                for (int i = 0; i < h.size() && k < lines.length; i++) {
+                    lines[k++] = h.get(i);
+                }
+            }
+            java.util.Arrays.sort(lines, 0, k);
+            logsift.core.EntryFormat ef = entryFormat;
+            return logsift.core.Exceptions.analyze(lines, k, doc::line, ef == null ? null : ef::startsEntry,
+                    () -> stop.getAsBoolean() || closed, progress);
+        } finally {
+            sessions.forEach(SearchSession::close);
+        }
+    }
+
+    private ExceptionsPanel.Host exceptionsHost() {
+        return new ExceptionsPanel.Host() {
+            @Override
+            public logsift.core.Exceptions.Result analyze(AtomicBoolean cancel,
+                                                          java.util.function.DoubleConsumer progress) {
+                while (doc.isIndexing() || detectedGeneration != doc.generation()) {
+                    if (cancel.get() || closed) {
+                        return null;
+                    }
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+                return analyzeExceptions(cancel::get, progress);
+            }
+
+            @Override
+            public void goToLine(long line) {
+                showLine(line);
+            }
+
+            @Override
+            public String describeLine(long line) {
+                return messagesHost().describeLine(line);
+            }
+
+            @Override
+            public void findAll(String regex) {
+                host.runFindAll(new SearchQuery(regex, true, true, false));
+            }
+
+            @Override
+            public void openSource(logsift.core.Exceptions.Frame frame) {
+                host.openSource(LogTab.this, frame);
+            }
+
+            @Override
+            public void resultChanged(logsift.core.Exceptions.Result r) {
+                int i = bottom.indexOfComponent(exceptions);
+                int kinds = r == null ? 0 : r.groups().size();
+                bottom.setTitleAt(i, kinds == 0 ? "Exceptions" : "Exceptions (" + kinds + ")");
             }
         };
     }
@@ -1729,6 +1846,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             menu.add(hint);
         } else {
             String shown = sel.length() > 40 ? sel.substring(0, 40) + "…" : sel;
+            JMenuItem find = new JMenuItem("Find All “" + shown + "”", Icons.of("search"));
+            find.setToolTipText("List every line with this text below, with its count");
+            find.addActionListener(e -> host.runFindAll(new SearchQuery(sel, true, false, false)));
+            menu.add(find);
             for (FilterDef.Action a : FilterDef.Action.values()) {
                 JMenuItem mi = new JMenuItem(a.label + " lines with “" + shown + "”");
                 mi.setToolTipText(a.tip);
@@ -2636,6 +2757,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         results.closeAllSessions();
         messages.cancel();
         insights.cancel();
+        exceptions.cancel();
         if (request != null) {
             request.cancel();
         }
