@@ -3646,6 +3646,11 @@ class VisualTest {
         assertEquals(List.of("data.zip", "  exports", "    orders.csv"), onEdt(at::rowsForTest));
         onEdt(() -> {
             at.selectForTest("data.zip!/exports/orders.csv");
+            return null;
+        });
+        settle();
+        shot("73b-zip-filtered");
+        onEdt(() -> {
             at.openSelected();
             return null;
         });
