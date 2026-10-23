@@ -20,11 +20,23 @@ import java.util.TreeMap;
  */
 final class Bookmarks {
     private final Path file;
+    private final java.util.function.LongSupplier size;
     private final TreeMap<Long, String> marks = new TreeMap<>();
     private final List<Runnable> listeners = new ArrayList<>();
 
-    Bookmarks(Path file) {
+    /**
+     * @param shownSize the size of what is shown: used when the file is not on disk as such (a
+     *     file in a zip, shown from an unpacked copy)
+     */
+    Bookmarks(Path file, java.util.function.LongSupplier shownSize) {
         this.file = file;
+        this.size = () -> {
+            try {
+                return Files.size(file);
+            } catch (IOException e) {
+                return shownSize.getAsLong();
+            }
+        };
         load();
     }
 
@@ -108,7 +120,7 @@ final class Bookmarks {
         try (Reader r = Files.newBufferedReader(p, StandardCharsets.UTF_8)) {
             props.load(r);
             long savedSize = Long.parseLong(props.getProperty("size", "0"));
-            if (Files.size(file) < savedSize) {
+            if (size.getAsLong() < savedSize) {
                 Files.deleteIfExists(p); // truncated or replaced: the lines moved
                 return;
             }
@@ -132,14 +144,14 @@ final class Bookmarks {
             Files.createDirectories(p.getParent());
             Properties props = new Properties();
             props.setProperty("file", file.toAbsolutePath().toString());
-            props.setProperty("size", Long.toString(Files.size(file)));
+            props.setProperty("size", Long.toString(size.getAsLong()));
             for (Map.Entry<Long, String> e : marks.entrySet()) {
                 props.setProperty("line." + e.getKey(), e.getValue());
             }
             try (Writer w = Files.newBufferedWriter(p, StandardCharsets.UTF_8)) {
                 props.store(w, "Logsift bookmarks");
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             // not fatal: bookmarks just won't be remembered
         }
     }

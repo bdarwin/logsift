@@ -49,6 +49,43 @@ public final class Archives {
         }
     }
 
+    /**
+     * A file inside a zip, named like a file on disk: {@code /logs/bundle.zip/data.zip/x.csv}
+     * is {@code x.csv} in {@code data.zip} in {@code bundle.zip}. Recent files, sessions and a
+     * file's remembered state use this name.
+     */
+    public static Path pathOf(Path zip, String entry) {
+        return zip.resolve(entry.replace(NESTED, "/"));
+    }
+
+    /** A zip and the name of a file in it ({@link #NESTED} between the levels of zips inside). */
+    public record Located(Path zip, String entry) {}
+
+    /**
+     * The zip a path names a file in ({@link #pathOf}), or null if no folder of the path is
+     * named like a zip. Only the name is looked at (a real folder called x.zip is possible: the
+     * caller checks the disk).
+     */
+    public static Located locate(Path p) {
+        Path abs = p.toAbsolutePath().normalize();
+        int n = abs.getNameCount();
+        for (int i = 0; i < n - 1; i++) {
+            if (isZip(abs.getName(i).toString())) {
+                Path zip = abs.getRoot() == null ? abs.subpath(0, i + 1) : abs.getRoot().resolve(abs.subpath(0, i + 1));
+                StringBuilder entry = new StringBuilder();
+                for (int k = i + 1; k < n; k++) {
+                    String seg = abs.getName(k).toString();
+                    entry.append(seg);
+                    if (k < n - 1) {
+                        entry.append(isZip(seg) ? NESTED : "/");
+                    }
+                }
+                return new Located(zip, entry.toString());
+            }
+        }
+        return null;
+    }
+
     public static boolean isZip(String name) {
         return name.toLowerCase(Locale.ROOT).endsWith(".zip");
     }

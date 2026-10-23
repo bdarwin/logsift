@@ -66,6 +66,17 @@ class ArchivesTest {
         assertEquals(List.of("bad.zip", "ok.log"), Archives.list(f, () -> false).stream().map(Archives.Entry::name).toList());
     }
 
+    @Test
+    void namesFilesInZipsLikeFilesOnDisk() {
+        Path zip = dir.resolve("bundle.zip");
+        Path p = Archives.pathOf(zip, "data.zip!/exports/orders.csv");
+        assertEquals(zip.resolve("data.zip").resolve("exports").resolve("orders.csv"), p);
+        assertEquals(new Archives.Located(zip, "data.zip!/exports/orders.csv"), Archives.locate(p));
+        assertEquals(new Archives.Located(zip, "app.log"), Archives.locate(zip.resolve("app.log")));
+        assertEquals(null, Archives.locate(dir.resolve("app.log")));
+        assertEquals(null, Archives.locate(zip), "the zip itself is not a file in a zip");
+    }
+
     static byte[] bytes(String s) {
         return s.getBytes(StandardCharsets.UTF_8);
     }

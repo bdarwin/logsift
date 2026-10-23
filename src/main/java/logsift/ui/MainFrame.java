@@ -313,7 +313,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 return t;
             });
 
-    private record Opened(java.nio.charset.Charset charset, LogDocument doc) {}
+    private record Opened(java.nio.charset.Charset charset, LogDocument doc, Path read) {}
 
     /**
      * Opens (or selects) a file. The slow parts (checking the file, reading its start to detect
@@ -324,24 +324,36 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
      */
     public void openFile(Path path, java.nio.charset.Charset forced, java.util.function.Consumer<LogTab> then) {
         Path abs = path.toAbsolutePath().normalize();
-        if (logsift.core.Archives.isZip(abs)) {
-            openArchive(abs, true, then);
-            return;
-        }
-        if (logsift.core.Archives.isGzip(abs)) {
-            openUnpacked(abs, null, -1, abs.toString(), true, then);
-            return;
-        }
         for (int i = 0; i < tabs.getTabCount(); i++) {
             if (tabs.getComponentAt(i) instanceof LogTab lt && lt.path().equals(abs)) {
                 tabs.setSelectedIndex(i);
-                AppState.addRecent(abs);
+                if (!isOwnCopy(abs)) {
+                    AppState.addRecent(abs);
+                }
                 if (then != null) {
                     then.accept(lt);
                 }
                 return;
             }
         }
+        if (logsift.core.Archives.isZip(abs)) {
+            openArchive(abs, then);
+            return;
+        }
+        logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
+        if (in != null || logsift.core.Archives.isGzip(abs)) {
+            openPacked(abs, in, forced, then);
+            return;
+        }
+        openReal(abs, abs, forced, then);
+    }
+
+    /**
+     * Opens {@code read} in a tab named by {@code abs}: the same file, or (for a file in a zip
+     * or a .gz) the unpacked copy of it.
+     */
+    private void openReal(Path read, Path abs, java.nio.charset.Charset forced,
+                          java.util.function.Consumer<LogTab> then) {
         if (!opening.add(abs)) {
             return; // already on its way
         }
@@ -351,21 +363,21 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 if (testDelay > 0) {
                     Thread.sleep(testDelay);
                 }
-                if (!Files.isRegularFile(abs)) {
+                if (!Files.isRegularFile(read)) {
                     throw new IOException("Not a file (or not reachable): " + abs);
                 }
                 java.nio.charset.Charset cs = forced;
                 if (cs == null) {
                     try {
-                        cs = logsift.core.Encoding.detect(abs, fallbackEncoding());
+                        cs = logsift.core.Encoding.detect(read, fallbackEncoding());
                     } catch (IOException e) {
                         cs = java.nio.charset.StandardCharsets.UTF_8;
                     }
                 }
                 if (logsift.core.Encoding.isUtf16(cs)) {
-                    return new Opened(cs, null);
+                    return new Opened(cs, null, read);
                 }
-                return new Opened(cs, LogDocument.open(abs, logsift.core.LineIndex.DEFAULT_CHUNK_SIZE, cs));
+                return new Opened(cs, LogDocument.open(read, logsift.core.LineIndex.DEFAULT_CHUNK_SIZE, cs), read);
             } catch (IOException e) {
                 throw new java.io.UncheckedIOException(e);
             } catch (InterruptedException e) {
@@ -432,7 +444,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void finishOpen(Path abs, Opened r, java.util.function.Consumer<LogTab> then) {
         opening.remove(abs);
         if (r.doc() == null) {
-            openUtf16(abs, r.charset(), then);
+            openUtf16(abs, r.read(), r.charset(), then);
             return;
         }
         LogTab tab = new LogTab(r.doc(), abs, null, this);
@@ -456,14 +468,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     /** UTF-16 logs are read through a UTF-8 copy that follows the original. */
-    private void openUtf16(Path abs, java.nio.charset.Charset cs, java.util.function.Consumer<LogTab> then) {
+    private void openUtf16(Path abs, Path read, java.nio.charset.Charset cs,
+                           java.util.function.Consumer<LogTab> then) {
         ProgressDialog.run(this, "Converting " + abs.getFileName() + " from " + cs.name() + "…",
                 (progress, cancelled) -> {
                     Path dir = Files.createTempDirectory("logsift-utf16-");
                     dir.toFile().deleteOnExit();
                     Path copy = dir.resolve(abs.getFileName().toString());
                     copy.toFile().deleteOnExit();
-                    return logsift.core.Utf16Mirror.create(abs, copy, cs, progress, cancelled);
+                    return logsift.core.Utf16Mirror.create(read, copy, cs, progress, cancelled);
                 },
                 mirror -> {
                     try {
@@ -498,8 +511,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         int idx = tabs.getTabCount() - 1;
         tabs.setToolTipTextAt(idx, abs.toString());
         tabs.setSelectedIndex(idx);
-        PREFS.put("lastDir", abs.getParent().toString());
-        AppState.addRecent(abs);
+        if (!isOwnCopy(abs)) {
+            logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
+            Path dirOf = in != null ? in.zip().getParent() : abs.getParent();
+            if (dirOf != null) {
+                PREFS.put("lastDir", dirOf.toString());
+            }
+            AppState.addRecent(abs);
+        }
         java.util.Properties state = AppState.loadFileState(abs);
         if (state != null) {
             tab.restoreState(state);
@@ -818,9 +837,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         Path p = tab.path();
         String tmp = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize().toString();
-        if (sftp == null && (tab.sourceLabels() != null || p.toAbsolutePath().normalize().toString().startsWith(tmp)
-                && p.toString().contains("logsift-"))) {
-            return; // a merged log, or another copy of Logsift's own
+        if (sftp == null && (tab.sourceLabels() != null || isOwnCopy(p) || tab.origin() != null
+                || logsift.core.Archives.locate(p) != null || logsift.core.Archives.isGzip(p))) {
+            return; // a merged log, a copy of Logsift's own, or a file from an archive (no JVM writes it)
         }
         JvmBar bar = new JvmBar(jvmBarHost, tab.title(), sftp == null ? p : null, tab.document().path(),
                 tab.document().charset(), sftp);
@@ -1081,7 +1100,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** Opens a new Folder Search tab (folder null = the current file's folder or the last one). */
     public FolderSearchTab openFolderSearch(Path folder) {
         if (folder == null && currentTab() != null) {
-            folder = currentTab().path().getParent();
+            // a file in a zip: search that zip
+            logsift.core.Archives.Located in = logsift.core.Archives.locate(currentTab().path());
+            folder = in != null ? in.zip() : currentTab().path().getParent();
         }
         String text = findField.getText().isEmpty() ? null : findField.getText();
         FolderSearchTab tab = new FolderSearchTab(this, folder, text);
@@ -1124,67 +1145,34 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         refreshStatus();
     }
 
-    /** Unpacked copies of compressed files, so opening the same hit twice is instant. */
-    private final java.util.Map<String, Path> unpacked = new java.util.concurrent.ConcurrentHashMap<>();
-
     @Override
     public void openHit(logsift.core.FolderSearch.FileResult f, long line, SearchQuery q) {
-        if (!f.isCompressed()) {
-            openAt(f.file(), line, q);
-            return;
-        }
-        String name = (f.entry() != null ? f.entry().substring(f.entry().lastIndexOf('/') + 1)
-                : f.file().getFileName().toString()).replaceFirst("(?i)\\.gz$", "");
-        status.setText("Unpacking " + name + "…");
-        Thread t = new Thread(() -> {
-            try {
-                Path out = unpack(f, name);
-                SwingUtilities.invokeLater(() -> openAt(out, line, q));
-            } catch (IOException | RuntimeException e) {
-                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
-                        "Cannot unpack " + name + ":\n" + e.getMessage(), "Open",
-                        JOptionPane.ERROR_MESSAGE));
-            }
-        }, "logsift-unpack");
-        t.setDaemon(true);
-        t.start();
-    }
-
-    private Path unpack(logsift.core.FolderSearch.FileResult f, String name) throws IOException {
-        String key = f.file() + "!" + f.entry() + "@" + Files.getLastModifiedTime(f.file()).toMillis();
-        Path done = unpacked.get(key);
-        if (done != null && Files.exists(done)) {
-            return done;
-        }
-        Path dir = Files.createTempDirectory("logsift-");
-        dir.toFile().deleteOnExit();
-        Path out = dir.resolve(name.isEmpty() ? "entry.log" : name);
-        if (f.entry() != null) {
-            try (var in = logsift.core.FolderSearch.openEntry(f.file(), f.entry())) {
-                Files.copy(in, out);
-            }
-        } else {
-            try (var in = new java.util.zip.GZIPInputStream(Files.newInputStream(f.file()), 1 << 16)) {
-                Files.copy(in, out);
-            }
-        }
-        out.toFile().deleteOnExit();
-        unpacked.put(key, out);
-        return out;
+        // a file in a zip opens by its name in the zip, like any log (unpacked once)
+        openAt(f.entry() == null ? f.file() : logsift.core.Archives.pathOf(f.file(), f.entry()), line, q);
     }
 
     // ---------------------------------------------------------------- zip, gz and URLs
 
-    private ArchiveDialog archiveDialog;
+    /** Whether a file is one of Logsift's own temporary copies (a download, a merge). */
+    private static boolean isOwnCopy(Path p) {
+        String tmp = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize().toString();
+        String s = p.toAbsolutePath().normalize().toString();
+        return s.startsWith(tmp) && s.contains("logsift-");
+    }
 
     /**
-     * Shows what is in a zip, to open some of its files or search them all. A zip with one file
-     * opens that file right away.
+     * Opens a zip as a tab with its files (zips inside it too). A zip with one file opens that
+     * file right away.
      *
-     * @param remember whether the zip goes into the recent files
      * @param then gets the tab, when one file was opened right away
      */
-    void openArchive(Path zip, boolean remember, java.util.function.Consumer<LogTab> then) {
+    void openArchive(Path zip, java.util.function.Consumer<LogTab> then) {
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof ArchiveTab at && at.zip().equals(zip)) {
+                tabs.setSelectedIndex(i);
+                return;
+            }
+        }
         status.setText("Reading " + zip.getFileName() + "…");
         new javax.swing.SwingWorker<List<logsift.core.Archives.Entry>, Void>() {
             @Override
@@ -1198,42 +1186,77 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 try {
                     entries = get();
                 } catch (Exception e) {
-                    Throwable c = e.getCause() != null ? e.getCause() : e;
-                    showOpenError(zip, c);
+                    status.setText(" ");
+                    showOpenError(zip, e.getCause() != null ? e.getCause() : e);
                     return;
                 }
                 status.setText(" ");
-                if (remember) {
+                if (!isOwnCopy(zip)) {
                     AppState.addRecent(zip);
+                    if (zip.getParent() != null) {
+                        PREFS.put("lastDir", zip.getParent().toString());
+                    }
                 }
                 List<logsift.core.Archives.Entry> files = entries.stream()
                         .filter(e -> !logsift.core.Archives.isZip(e.fileName())).toList();
                 if (files.size() == 1) {
-                    openEntry(zip, files.get(0), then);
+                    openFile(logsift.core.Archives.pathOf(zip, files.get(0).name()), null, then);
                     return;
                 }
-                if (archiveDialog != null) {
-                    archiveDialog.dispose();
-                }
-                archiveDialog = new ArchiveDialog(MainFrame.this, zip,
-                        chosen -> chosen.forEach(e -> openEntry(zip, e, null)),
-                        () -> searchInArchive(zip));
-                archiveDialog.setEntries(entries);
-                archiveDialog.setVisible(true);
+                ArchiveTab tab = new ArchiveTab(zip, archiveHost);
+                tab.setEntries(entries);
+                tabs.addTab(tab.title(), Icons.of("folder-archive"), tab);
+                int i = tabs.getTabCount() - 1;
+                tabs.setToolTipTextAt(i, zip.toString());
+                tabs.setSelectedIndex(i);
+                updateEmptyState();
+                SwingUtilities.invokeLater(tab::focusTree);
             }
         }.execute();
     }
+
+    private final ArchiveTab.Host archiveHost = new ArchiveTab.Host() {
+        @Override
+        public void openEntries(Path zip, List<logsift.core.Archives.Entry> entries) {
+            for (logsift.core.Archives.Entry e : entries) {
+                openFile(logsift.core.Archives.pathOf(zip, e.name()));
+            }
+        }
+
+        @Override
+        public void mergeEntries(Path zip, List<logsift.core.Archives.Entry> entries) {
+            ProgressDialog.run(MainFrame.this, "Unpacking " + entries.size() + " files…", (progress, cancelled) -> {
+                List<Path> copies = new ArrayList<>();
+                for (int i = 0; i < entries.size(); i++) {
+                    int at = i;
+                    logsift.core.Archives.Entry e = entries.get(i);
+                    Path c = unpack(zip, e.name(), e.size(), p -> progress.accept((at + p) / entries.size()),
+                            cancelled);
+                    if (c == null) {
+                        return null;
+                    }
+                    copies.add(c);
+                }
+                return copies;
+            }, copies -> {
+                if (copies != null) {
+                    mergeFiles(copies);
+                }
+            });
+        }
+
+        @Override
+        public void searchArchive(Path zip) {
+            searchInArchive(zip);
+        }
+    };
 
     String statusTextForTest() {
         return status.getText();
     }
 
-    ArchiveDialog archiveDialogForTest() {
-        return archiveDialog != null && archiveDialog.isVisible() ? archiveDialog : null;
-    }
-
-    private void openEntry(Path zip, logsift.core.Archives.Entry e, java.util.function.Consumer<LogTab> then) {
-        openUnpacked(zip, e.name(), e.size(), zip + " › " + e.label(), false, then);
+    ArchiveTab currentArchiveTabForTest() {
+        return tabs.getSelectedComponent() instanceof ArchiveTab a ? a : null;
     }
 
     FolderSearchTab searchInArchiveForTest(Path zip) {
@@ -1247,62 +1270,65 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return t;
     }
 
+    /** Unpacked copies of files in zips and .gz files, so opening one again is instant. */
+    private final java.util.Map<String, Path> unpacked = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
-     * Unpacks an entry of a zip (or, with {@code entry} null, a .gz file) to a temporary file
-     * and opens it. Unpacked once per session (until the archive changes).
+     * Unpacks a file of a zip (or, with {@code entry} null, a .gz file) to a temporary file, once
+     * per session (again if the archive changed). Runs in the background.
      *
-     * @param label what the tab's tooltip says it is
-     * @param remember whether the archive goes into the recent files (the copy never does)
+     * @return the copy, or null if cancelled
      */
-    void openUnpacked(Path archive, String entry, long size, String label, boolean remember,
-                      java.util.function.Consumer<LogTab> then) {
-        String fileName = logsift.core.Archives.gunzippedName(entry != null
-                ? logsift.core.Archives.baseName(entry) : archive.getFileName().toString());
-        java.util.function.Consumer<Path> show = copy -> openFile(copy, null, tab -> {
-            AppState.removeRecent(copy);
-            if (remember) {
-                AppState.addRecent(archive);
-            }
-            if (archive.getParent() != null) {
-                PREFS.put("lastDir", archive.getParent().toString());
-            }
-            int i = tabs.indexOfComponent(tab);
-            if (i >= 0) {
-                tabs.setToolTipTextAt(i, label);
-            }
-            tab.setOrigin(label);
-            if (then != null) {
-                then.accept(tab);
-            }
-        });
-        String key;
-        try {
-            key = archive + "!" + entry + "@" + Files.getLastModifiedTime(archive).toMillis();
-        } catch (IOException e) {
-            showOpenError(archive, e);
-            return;
-        }
+    private Path unpack(Path archive, String entry, long size, java.util.function.DoubleConsumer progress,
+                        java.util.function.BooleanSupplier cancelled) throws IOException {
+        String key = archive + "!" + entry + "@" + Files.getLastModifiedTime(archive).toMillis();
         Path done = unpacked.get(key);
         if (done != null && Files.exists(done)) {
-            show.accept(done);
+            return done;
+        }
+        String name = logsift.core.Archives.gunzippedName(entry != null
+                ? logsift.core.Archives.baseName(entry) : archive.getFileName().toString());
+        Path dir = Files.createTempDirectory("logsift-unpack-");
+        dir.toFile().deleteOnExit();
+        Path out = dir.resolve(name.isBlank() ? "entry.log" : name);
+        if (!logsift.core.Archives.extract(archive, entry, size, out, progress, cancelled)) {
+            Files.deleteIfExists(dir);
+            return null;
+        }
+        out.toFile().deleteOnExit();
+        unpacked.put(key, out);
+        return out;
+    }
+
+    /**
+     * Opens a file in a zip ({@code abs} names it as {@code x.zip/dir/file}) or a .gz file: it
+     * is unpacked to a temporary copy, and the tab is named, remembered and reopened by
+     * {@code abs}, like any file.
+     */
+    private void openPacked(Path abs, logsift.core.Archives.Located in, java.nio.charset.Charset forced,
+                            java.util.function.Consumer<LogTab> then) {
+        if (!opening.add(abs)) {
             return;
         }
-        ProgressDialog.run(this, "Unpacking " + fileName + "…", (progress, cancelled) -> {
-            Path dir = Files.createTempDirectory("logsift-unpack-");
-            dir.toFile().deleteOnExit();
-            Path out = dir.resolve(fileName.isBlank() ? "entry.log" : fileName);
-            if (!logsift.core.Archives.extract(archive, entry, size, out, progress, cancelled)) {
-                Files.deleteIfExists(dir);
-                return null;
+        String name = logsift.core.Archives.gunzippedName(abs.getFileName().toString());
+        ProgressDialog.run(this, "Unpacking " + name + "…", (progress, cancelled) -> {
+            if (in != null && Files.isRegularFile(abs)) {
+                return abs; // a real file in a folder that happens to be called x.zip
             }
-            out.toFile().deleteOnExit();
-            return out;
-        }, out -> {
-            if (out != null) {
-                unpacked.put(key, out);
-                show.accept(out);
+            Path archive = in != null ? in.zip() : abs;
+            if (!Files.isRegularFile(archive)) {
+                throw new IOException("Not a file (or not reachable): " + archive);
             }
-        });
+            return unpack(archive, in != null ? in.entry() : null, -1, progress, cancelled);
+        }, copy -> {
+            opening.remove(abs);
+            if (copy != null) {
+                openReal(copy, abs, forced, then);
+            }
+        }, e -> {
+            opening.remove(abs);
+            showOpenError(abs, e);
+        }, () -> opening.remove(abs));
     }
 
     private UrlDialog urlDialog;
@@ -1351,12 +1377,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 Path f = got.get(0);
                 String url = urls.get(0).toString();
                 if (logsift.core.Archives.isZip(f)) {
-                    openArchive(f, false, null);
-                } else if (logsift.core.Archives.isGzip(f)) {
-                    openUnpacked(f, null, -1, url, false, null);
+                    openArchive(f, null);
                 } else {
                     openFile(f, null, tab -> {
-                        AppState.removeRecent(f);
                         int i = tabs.indexOfComponent(tab);
                         if (i >= 0) {
                             tabs.setToolTipTextAt(i, url);
@@ -2063,7 +2086,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         int dot = name.lastIndexOf('.');
         String base = dot > 0 ? name.substring(0, dot) : name;
         FileDialog fd = new FileDialog(this, "Export Lines", FileDialog.SAVE);
-        fd.setDirectory(t.path().getParent().toString());
+        logsift.core.Archives.Located in = logsift.core.Archives.locate(t.path());
+        Path dirOf = in != null ? in.zip().getParent() : t.path().getParent();
+        if (dirOf != null && !isOwnCopy(dirOf)) {
+            fd.setDirectory(dirOf.toString());
+        }
         fd.setFile(base + suffix + ".log");
         fd.setVisible(true);
         if (fd.getFile() == null) {

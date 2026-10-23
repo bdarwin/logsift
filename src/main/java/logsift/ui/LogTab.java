@@ -63,7 +63,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final Path path;
     private final String encodingLabel;
     private String remoteLabel;          // "user@host:/path" for remote logs
-    private String origin;               // a copy's source: "x.zip › y.log" or a web address
+    private String origin;               // a download's web address
     private volatile String remoteStatus;
     private final Host host;
     private final LogView main = new LogView();
@@ -289,7 +289,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         messages = new MessagesPanel(messagesHost());
         insights = new InsightsPanel(insightsHost());
-        bookmarks = new Bookmarks(path);
+        bookmarks = new Bookmarks(this.path, doc::fileSize);
         bookmarkGeneration = doc.generation();
         bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
         bookmarks.addListener(() -> {
@@ -922,7 +922,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     /** Marks this tab as a remote log (shown by its address, not remembered locally). */
-    /** Where the file came from, when it is a copy (a zip's entry, a web address), or null. */
+    /** Where a downloaded copy came from (its web address), or null. Such a tab isn't remembered. */
     void setOrigin(String label) {
         this.origin = label;
         host.tabStatusChanged(this);
@@ -2184,7 +2184,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     /** Whether this tab's state should be remembered (not for temporary merged files). */
     boolean remembersState() {
-        return sourceLabels == null && remoteLabel == null;
+        return sourceLabels == null && remoteLabel == null && origin == null;
     }
 
     /** Shows or hides the Filters / Find results area. */

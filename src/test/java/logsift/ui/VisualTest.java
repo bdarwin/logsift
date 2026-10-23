@@ -3614,36 +3614,45 @@ class VisualTest {
             z.write(inner.toByteArray());
         }
 
-        // a zip: its files (and those of the zip inside), to pick from
+        // a dropped zip opens as a tab: its folders, files and the zip inside it as a tree
         onEdt(() -> {
             frame.setColumns(true);
-            frame.openFile(zip);
+            frame.openFiles(List.of(zip)); // as when dropped on the window
             return null;
         });
         waitFor(() -> {
             try {
-                return onEdt(() -> frame.archiveDialogForTest() != null);
+                return onEdt(() -> frame.currentArchiveTabForTest() != null);
             } catch (Exception e) {
                 return false;
             }
-        }, 20_000, "the zip's files");
-        ArchiveDialog ad = onEdt(frame::archiveDialogForTest);
-        assertEquals(List.of("data.zip!/exports/orders.csv", "logs/app.log", "logs/old.log.gz"),
-                onEdt(ad::shownForTest), "files of the zip inside are listed, not the zip itself");
-        assertTrue(AppState.recentFiles().get(0).equals(zip.toAbsolutePath().normalize()), "the zip is a recent file");
-        settle();
-        shotOf(ad.getRootPane(), "73-zip-contents");
+        }, 20_000, "the zip's tab");
+        ArchiveTab at = onEdt(frame::currentArchiveTabForTest);
+        assertEquals(List.of("data.zip", "  exports", "    orders.csv", "logs", "  app.log", "  old.log.gz"),
+                onEdt(at::rowsForTest), "folders and the zip inside, open");
+        assertEquals("3 files, 41.49 KB unpacked", onEdt(at::summaryForTest));
+        assertEquals(zip.toAbsolutePath().normalize(), AppState.recentFiles().get(0), "the zip is a recent file");
         onEdt(() -> {
-            ad.setFilterForTest("csv");
+            at.selectForTest("logs/app.log", "logs/old.log.gz");
             return null;
         });
-        assertEquals(List.of("data.zip!/exports/orders.csv"), onEdt(ad::shownForTest));
+        settle();
+        shot("73-zip-contents");
         onEdt(() -> {
-            ad.selectForTest("data.zip!/exports/orders.csv");
-            ad.openSelected();
+            at.setFilterForTest("csv");
+            return null;
+        });
+        assertEquals(List.of("data.zip!/exports/orders.csv"), onEdt(at::shownForTest), "filtered");
+        assertEquals(List.of("data.zip", "  exports", "    orders.csv"), onEdt(at::rowsForTest));
+        onEdt(() -> {
+            at.selectForTest("data.zip!/exports/orders.csv");
+            at.openSelected();
             return null;
         });
         LogTab csvTab = waitForTab("orders.csv");
+        Path csvPath = zip.toAbsolutePath().normalize().resolve("data.zip").resolve("exports").resolve("orders.csv");
+        assertEquals(csvPath, onEdt(csvTab::path), "named by its place in the zip");
+        assertEquals(csvPath, AppState.recentFiles().get(0), "a recent file by that name, not the copy");
         waitFor(() -> {
             try {
                 return onEdt(() -> csvTab.logFormat() != null);
@@ -3654,17 +3663,12 @@ class VisualTest {
         logsift.core.LogFormat f = onEdt(csvTab::logFormat);
         assertTrue(f.isCsv(), f.name());
         assertEquals(List.of("time", "level", "Host", "User", "message"), f.columns());
-        String tip = onEdt(() -> frame.tabsForTest().getToolTipTextAt(frame.tabsForTest().indexOfComponent(csvTab)));
-        assertTrue(tip.endsWith("support-bundle.zip › data.zip › exports/orders.csv"), tip);
-        assertTrue(AppState.recentFiles().stream().noneMatch(p -> p.toString().contains("logsift-unpack-")),
-                "the unpacked copy is not a recent file");
         onEdt(() -> {
             frame.findAll(new SearchQuery("Payment failed", true, false, false));
             return null;
         });
         assertEquals(16, waitForSearch(csvTab).hits().size(), "16 failed payments");
-        assertTrue(onEdt(frame::statusTextForTest).contains("support-bundle.zip › data.zip › exports/orders.csv"),
-                "the status bar names where it came from: " + onEdt(frame::statusTextForTest));
+        assertTrue(onEdt(frame::statusTextForTest).contains(csvPath.toString()), onEdt(frame::statusTextForTest));
         // the tree has the hosts (the header row is not a host); unchecking one hides its rows
         ValuesTreePanel hosts = csvTab.valuesTree();
         waitFor(() -> hosts.isShowing() && hosts.valuesForTest() != null && !hosts.isCountingForTest(), 20_000,
@@ -3686,17 +3690,49 @@ class VisualTest {
         settle();
         shot("74-csv-columns");
 
-        // a .gz opens right away, named without .gz
+        // like any log: bookmarks are remembered, and it opens again by its name (recent files, sessions)
+        onEdt(() -> {
+            csvTab.mainView().goToRow(26, true);
+            csvTab.toggleBookmark();
+            frame.closeFile(csvPath);
+            frame.openFile(csvPath);
+            return null;
+        });
+        LogTab again = waitForTab("orders.csv");
+        assertTrue(again != csvTab);
+        assertEquals(java.util.Set.of(26L), onEdt(() -> again.bookmarks().all().keySet()), "bookmark kept");
+
+        // several files of the zip merged by time
+        onEdt(() -> {
+            frame.tabsForTest().setSelectedComponent(at);
+            at.setFilterForTest("");
+            at.selectForTest("logs/app.log", "logs/old.log.gz");
+            at.mergeButtonForTest().doClick();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().sourceLabels() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the merged log");
+        LogTab merged = onEdt(frame::currentTab);
+        waitFor(() -> merged.document().lineCount() >= 600, 30_000, "both logs merged");
+        assertEquals(600, merged.document().lineCount());
+
+        // a .gz opens right away, by its own name
         Path gz = box.resolve("worker.log.gz");
         try (var o = new java.util.zip.GZIPOutputStream(Files.newOutputStream(gz))) {
             o.write(log.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
         onEdt(() -> {
-            frame.openFile(gz);
+            frame.openFiles(List.of(gz));
             return null;
         });
-        LogTab gzTab = waitForTab("worker.log");
+        LogTab gzTab = waitForTab("worker.log.gz");
         assertEquals(300, onEdt(() -> gzTab.document().lineCount()));
+        assertEquals(gz.toAbsolutePath().normalize(), onEdt(gzTab::path));
         assertEquals(gz.toAbsolutePath().normalize(), AppState.recentFiles().get(0), "the .gz is the recent file");
         // a zip with one file opens it right away
         Path one = box.resolve("single.zip");
@@ -3710,20 +3746,7 @@ class VisualTest {
         });
         waitForTab("only.log");
         // search in a whole zip
-        onEdt(() -> {
-            frame.openFile(zip);
-            return null;
-        });
-        waitFor(() -> {
-            try {
-                return onEdt(() -> frame.archiveDialogForTest() != null);
-            } catch (Exception e) {
-                return false;
-            }
-        }, 20_000, "the zip's files again");
         FolderSearchTab zs = onEdt(() -> {
-            ArchiveDialog d = frame.archiveDialogForTest();
-            d.dispose();
             FolderSearchTab t = frame.searchInArchiveForTest(zip);
             t.search(zip, "", new SearchQuery("ERROR", true, false, false));
             return t;
