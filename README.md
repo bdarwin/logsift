@@ -77,6 +77,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 
 | | |
 |---|---|
+| ![The find bar at the top of a log: matches lit up, 1 of 31](docs/screenshots/find-bar.png) **Find** (Ctrl+F): matches light up as you type | ![A search turned into a filter, shown as a chip above the log with the chosen levels](docs/screenshots/filter-chips.png) **Filters** as chips above the log: click one to turn it off |
 | ![Several Find All searches in one window, one nested inside another](docs/screenshots/find-all.png) **Several searches at once**, with a search inside another's results | ![A selected time range on the timeline, with errors filtered and their stack traces kept](docs/screenshots/timeline.png) **Timeline**: select a time range, keep stack traces |
 | ![Parsed columns with top messages below](docs/screenshots/columns-and-messages.png) **Columns** and **top messages** | ![Folder search across .log, .gz and .zip files](docs/screenshots/folder-search.png) **Folder search**, including inside .gz and .zip |
 | ![JSON log shown as columns, with a pretty-printed details panel](docs/screenshots/json.png) **JSON logs** with a details panel | ![Comparing a bad run with a good one: new, more frequent and missing messages](docs/screenshots/compare.png) **Compare** a bad run with a good one |
@@ -105,10 +106,12 @@ Make a test log:
 | Action | Shortcut (macOS uses ⌘ in place of Ctrl) |
 |---|---|
 | Open files (or drag files onto the window) | Ctrl+O |
-| Find All (results panel opens below) | type in the Find box, Enter |
-| Match case / whole word / regex | `Aa` `W` `.*` buttons inside the Find box |
-| Next / previous hit | F3 / Shift+F3 (also ⌘G / ⇧⌘G on macOS), or ▲ ▼ |
-| Stop a running search | Esc in the Find box |
+| Find in this log (matches light up as you type) | Ctrl+F, or **Find** in the log's bar; the selected text becomes the search |
+| Next / previous match | Enter / Shift+Enter in the find bar, F3 / Shift+F3 anywhere (also ⌘G / ⇧⌘G on macOS) |
+| Match case / whole word / regex | `Aa` `W` `.*` buttons inside the find box |
+| Find All (every match listed below the log) | Ctrl+Enter in the find bar, or **Find All** |
+| Turn the search into a filter | **Filter ▾** in the find bar: show only, hide or color its lines |
+| Close the find bar | Esc |
 | Close results | Shift+Esc |
 | Jump from a result to the line | click it, or move with the arrow keys in the results |
 | Wrap long lines | Alt+Z (⌥Z on macOS), or the Wrap button (works in the Columns view too) |
@@ -126,11 +129,10 @@ Make a test log:
 | Go to time | Ctrl+Shift+L |
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
 | Fold / open the bottom panel | Ctrl+J, the ▾ button, or double-click a tab |
-| Follow the end of the file (tail -f) | Ctrl+T, the Follow button, or End |
-| Load changes to the file | F5 or Reload (it lights up when the file changed); **Auto reload** loads them as they happen |
+| Follow the end of the file (tail -f) | Ctrl+T, **Follow** in the log's bar, or End |
+| Load changes to the file | F5 or the log's **Reload** (it lights up when the file changed); **Auto reload** in the toolbar loads them as they happen, for every log |
 | Select text | drag; double-click = word, triple-click or click the line number = whole line; Shift+click extends |
 | Copy | Ctrl+C (with nothing selected, copies the current line) · Select all: Ctrl+A |
-| Search for the selected text | Ctrl+F (fills the Find box with the selected text) |
 | Font size | Ctrl+= / Ctrl+- |
 | Dark mode | View → Toggle Dark Mode |
 | Tree of loggers | Ctrl+Shift+B |
@@ -362,7 +364,19 @@ The **Messages** tab (next to Filters) groups the log's lines into kinds of mess
 
 A narrow bar beside the scrollbar shows the whole file at a glance. It has red marks for errors (ERROR, FATAL, SEVERE, CRITICAL), amber for warnings, a second lane for Find All hits and colored filters, and a box showing where you are. Click a mark to jump to that line; hover to see it. F8 / Shift+F8 jump to the next or previous error. The marks stay up to date while the file grows.
 
+## Find
+
+**Ctrl+F** (⌘F on macOS) opens a find bar at the top of the log, with the selected text filled in. Matches light up as you type and the log goes to the first one; the bar counts them ("3 of 1,240"). **Enter** and **Shift+Enter** go to the next and previous match, and **Esc** closes the bar. From there:
+
+- **Find All** (Ctrl+Enter) lists every match in **Find results** below the log, where several searches can stay side by side.
+- **Filter ▾** turns the search into a filter: show only the matching lines, hide them, or color them.
+- The folder button searches for it in a whole folder, zips included (Ctrl+Shift+F).
+
+Each log has its own bar for what belongs to it: **Find**, **Filters**, the filters that are on, **Follow** and **Reload**. The window's toolbar holds what applies to every log: open, folder search, wrap, columns, the tree, the timeline and auto reload.
+
 ## Filters
+
+Filters that are on show as **chips** in the log's bar: click a chip to turn its filter off or on, ✕ to remove it, right-click to change what it does. Chosen levels, a time range and branches hidden in the tree show as chips too.
 
 The **Filters** panel below the log holds any number of filters (up to 26). Each one has:
 
@@ -379,7 +393,7 @@ The **Filters** panel below the log holds any number of filters (up to 26). Each
 
 **Alerts:** click the bell on a filter to be told when new lines matching it are written (while the file grows). Logsift shows a desktop notification and a popup you can click to jump to the line, beeps, and puts a count on the tab. Bursts are combined (at most one alert per filter every 3 seconds). Lines that were already in the file don't alert.
 
-**Clear all** (next to + Add filter) removes every filter, turns all levels back on and clears the time range. In Find results, **Close** removes the selected search, **Close all** removes every one, and the ✕ in the Find box closes the selected search.
+**Clear all** (next to + Add filter) removes every filter, turns all levels back on and clears the time range. In Find results, **Close** removes the selected search, **Close all** removes every one, and Shift+Esc closes the selected search.
 
 Quick ways to add filters: select text in the log, right-click, then choose **Show / Hide / Mark lines with "…"**. Filter sets can be saved and loaded (the ⋯ menu), and filters keep working while the file grows.
 

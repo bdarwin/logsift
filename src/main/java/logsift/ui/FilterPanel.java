@@ -433,8 +433,25 @@ final class FilterPanel extends JPanel {
         return best;
     }
 
-    private void removeFilter(FilterDef d) {
+    void removeFilter(FilterDef d) {
         defs.remove(d);
+        rebuildRows();
+        listener.filtersChanged();
+    }
+
+    /** Turns a filter on or off (from its chip above the log). */
+    void setFilterEnabled(FilterDef d, boolean on) {
+        d.enabled = on;
+        rebuildRows();
+        listener.filtersChanged();
+    }
+
+    /** Changes what a filter does: show, hide or color its lines. */
+    void setFilterAction(FilterDef d, FilterDef.Action a) {
+        d.action = a;
+        if (a != FilterDef.Action.HIDE && d.swatch < 0) {
+            d.swatch = nextSwatch();
+        }
         rebuildRows();
         listener.filtersChanged();
     }

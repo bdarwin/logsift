@@ -58,31 +58,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     private final JTabbedPane tabs = new JTabbedPane();
     private final JPanel center = new JPanel(new CardLayout());
-    private final JTextField findField = new JTextField(28);
-    private final JToggleButton matchCase = toggle("Aa", "Match case");
-    private final JToggleButton wholeWord = toggle("W", "Whole word");
-    private final JToggleButton regex = toggle(".*", "Regular expression");
-    private final JToggleButton followButton = new JToggleButton("Follow");
     private final JToggleButton wrapButton = new JToggleButton("Wrap");
     private final JToggleButton columnsButton = new JToggleButton("Columns");
     private final JToggleButton treeButton = new JToggleButton("Tree");
     private final JToggleButton timelineButton = new JToggleButton("Timeline");
-    private boolean reloadStale;
-    /** Reload: an amber pill while the file on disk has changes that aren't loaded. */
-    private final JButton reloadButton = new JButton("Reload") {
-        @Override
-        protected void paintComponent(java.awt.Graphics g0) {
-            if (reloadStale) {
-                java.awt.Graphics2D g = (java.awt.Graphics2D) g0.create();
-                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
-                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-                g.setColor(Theme.isDark() ? new Color(0x6B5310) : new Color(0xFFE08A));
-                g.fillRoundRect(1, 2, getWidth() - 2, getHeight() - 4, 10, 10);
-                g.dispose();
-            }
-            super.paintComponent(g0);
-        }
-    };
     private final JToggleButton autoReloadButton = new JToggleButton("Auto reload");
     private boolean autoReload = PREFS.getBoolean("autoReload", false);
     private boolean columns = PREFS.getBoolean("columns", false);
@@ -1099,12 +1078,22 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Opens a new Folder Search tab (folder null = the current file's folder or the last one). */
     public FolderSearchTab openFolderSearch(Path folder) {
+        LogTab cur = currentTab();
+        return openFolderSearch(folder, cur == null || cur.findBar().text().isEmpty() ? null : cur.findBar().text());
+    }
+
+    @Override
+    public void searchInFolder(String text) {
+        openFolderSearch(null, text.isEmpty() ? null : text);
+    }
+
+    /** Opens a new Folder Search tab with this text to find (or none). */
+    FolderSearchTab openFolderSearch(Path folder, String text) {
         if (folder == null && currentTab() != null) {
             // a file in a zip: search that zip
             logsift.core.Archives.Located in = logsift.core.Archives.locate(currentTab().path());
             folder = in != null ? in.zip() : currentTab().path().getParent();
         }
-        String text = findField.getText().isEmpty() ? null : findField.getText();
         FolderSearchTab tab = new FolderSearchTab(this, folder, text);
         tab.resultsView().setFontSize(fontSize);
         tabs.addTab(tab.title(), tab);
@@ -1407,7 +1396,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     String reloadButtonTextForTest() {
-        return reloadButton.getText();
+        return currentTab() == null ? "" : currentTab().logBar().reloadText();
     }
 
     boolean isOpeningForTest(Path p) {
@@ -1474,13 +1463,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return tabs.getSelectedComponent() instanceof LogTab t ? t : null;
     }
 
-    /** Runs Find All in the current tab with the given query (also fills the toolbar). */
+    /** Runs Find All in the current tab: every match is listed below the log. */
     public void findAll(SearchQuery q) {
-        findField.setText(q.text());
-        matchCase.setSelected(q.matchCase());
-        regex.setSelected(q.regex());
-        wholeWord.setSelected(q.wholeWord());
-        findAllFromToolbar();
+        LogTab t = currentTab();
+        if (t == null || q.text().isEmpty()) {
+            return;
+        }
+        try {
+            t.findAll(q);
+        } catch (PatternSyntaxException ex) {
+            status.setText("Invalid regular expression: " + ex.getDescription());
+        }
     }
 
     public void setFollow(boolean on) {
@@ -1488,7 +1481,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         if (t != null) {
             t.mainView().setFollow(on);
         }
-        followButton.setSelected(on);
     }
 
     // ---------------------------------------------------------------- toolbar & menus
@@ -1498,62 +1490,24 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tb.setFloatable(false);
         tb.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
 
-        findField.putClientProperty("JTextField.placeholderText", "Find  (Enter = Find All)");
-        findField.putClientProperty("JTextField.showClearButton", true);
-        // the ✕ in the Find box also closes the selected search's results
-        findField.putClientProperty("JTextField.clearCallback", (Runnable) () -> {
-            findField.setText("");
-            LogTab t = currentTab();
-            if (t != null) {
-                t.closeResults();
-            }
-        });
-        JToolBar inField = new JToolBar();
-        inField.setFloatable(false);
-        inField.setOpaque(false);
-        inField.add(matchCase);
-        inField.add(wholeWord);
-        inField.add(regex);
-        findField.putClientProperty("JTextField.trailingComponent", inField);
-        findField.setMaximumSize(new Dimension(520, 32));
-        findField.addActionListener(e -> findAllFromToolbar());
-        findField.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "stopSearch");
-        findField.getActionMap().put("stopSearch", action("Stop", e -> {
-            LogTab t = currentTab();
-            if (t != null) {
-                t.stopSearch();
-                t.mainView().focusView();
-            }
-        }));
-
         JButton open = new JButton(Icons.open());
         open.setToolTipText("Open log files (" + (isMac() ? "⌘O" : "Ctrl+O") + ")");
         open.addActionListener(e -> openDialog());
         JButton remote = new JButton(Icons.remote());
         remote.setToolTipText("Open a log on another machine over SSH (" + (isMac() ? "⇧⌘O" : "Ctrl+Shift+O") + ")");
         remote.addActionListener(e -> openRemoteDialog());
-        JButton findAll = new JButton("Find All", Icons.find());
-        findAll.addActionListener(e -> findAllFromToolbar());
-        JButton prev = new JButton(Icons.up());
-        prev.setToolTipText("Previous hit (Shift+F3)");
-        prev.addActionListener(e -> findNext(false));
-        JButton next = new JButton(Icons.down());
-        next.setToolTipText("Next hit (F3)");
-        next.addActionListener(e -> findNext(true));
-        followButton.setIcon(Icons.follow());
+        JButton folderSearch = new JButton(Icons.of("folder-search"));
+        folderSearch.setToolTipText("Search in a folder: every log in it, and in its zips ("
+                + (isMac() ? "⇧⌘F" : "Ctrl+Shift+F") + ")");
+        folderSearch.addActionListener(e -> openFolderSearch(null));
         wrapButton.setIcon(Icons.wrap());
         columnsButton.setIcon(Icons.columns());
-        reloadButton.setIcon(Icons.reload());
-        reloadButton.setToolTipText("Load what changed in the file on disk (F5)");
-        reloadButton.addActionListener(e -> reload());
         autoReloadButton.setIcon(Icons.autoReload());
         autoReloadButton.setSelected(autoReload);
-        autoReloadButton.setToolTipText("<html>Load changes to the file as they happen.<br>"
-                + "Off: changes wait until you click Reload (the button lights up). Follow turns it on.</html>");
+        autoReloadButton.setToolTipText("<html>Load changes to files as they happen, in every log.<br>"
+                + "Off: changes wait until you click a log's Reload (it lights up). Follow turns it on.</html>");
         autoReloadButton.addActionListener(e -> setAutoReload(autoReloadButton.isSelected()));
 
-        followButton.setToolTipText("Follow the end of the file as it grows (tail -f)");
-        followButton.addActionListener(e -> setFollow(followButton.isSelected()));
         wrapButton.setToolTipText("Wrap long lines (" + (isMac() ? "⌥Z" : "Alt+Z") + ")");
         wrapButton.setSelected(wrap);
         wrapButton.addActionListener(e -> setWrap(wrapButton.isSelected()));
@@ -1573,22 +1527,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         settings.setToolTipText("Settings: font, log formats, encoding… (" + (isMac() ? "⌘," : "Ctrl+,") + ")");
         settings.addActionListener(e -> showSettings(null));
 
+        // the toolbar: what applies to every log (each log's own bar has Find, filters, Follow, Reload)
         tb.add(open);
         tb.add(remote);
+        tb.add(folderSearch);
         tb.addSeparator();
-        tb.add(findField);
-        tb.addSeparator(new Dimension(6, 1));
-        tb.add(findAll);
-        tb.add(prev);
-        tb.add(next);
-        tb.addSeparator();
-        tb.add(followButton);
         tb.add(wrapButton);
         tb.add(columnsButton);
         tb.add(treeButton);
         tb.add(timelineButton);
         tb.addSeparator();
-        tb.add(reloadButton);
         tb.add(autoReloadButton);
         tb.add(Box.createHorizontalGlue());
         updateButton.putClientProperty("JButton.buttonType", "toolBarButton");
@@ -1709,16 +1657,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
         }));
         edit.addSeparator();
-        edit.add(item("Find…", "search", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU), e -> {
-            // text selected in the log becomes the search text
-            LogView v = LogView.lastFocused();
-            String s = v != null && v.isViewFocused() ? v.selectionForFind() : null;
-            if (s != null) {
-                findField.setText(s);
-            }
-            findField.requestFocusInWindow();
-            findField.selectAll();
-        }));
+        edit.add(item("Find…", "search", KeyStroke.getKeyStroke(KeyEvent.VK_F, MENU), e -> openFind()));
         edit.add(item("Find Next", "arrow-down", KeyStroke.getKeyStroke(KeyEvent.VK_F3, 0), e -> findNext(true)));
         edit.add(item("Find Previous", "arrow-up", KeyStroke.getKeyStroke(KeyEvent.VK_F3, shift), e -> findNext(false)));
         if (isMac()) {
@@ -1740,7 +1679,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         // ---- View: what is shown and how
         JMenu view = menu("View");
         view.add(check("Follow (Tail)", "arrow-down-to-line", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU),
-                followButton::isSelected, e -> setFollow(!followButton.isSelected())));
+                () -> currentTab() != null && currentTab().mainView().isFollow(),
+                e -> setFollow(currentTab() == null || !currentTab().mainView().isFollow())));
         view.add(item("Reload", "refresh-cw", KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), e -> reload()));
         view.add(check("Auto Reload", "refresh-ccw-dot", null, () -> autoReload, e -> setAutoReload(!autoReload)));
         view.addSeparator();
@@ -2005,32 +1945,39 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         updateEmptyState();
     }
 
-    private void findAllFromToolbar() {
-        LogTab t = currentTab();
-        String text = findField.getText();
-        if (t == null || text.isEmpty()) {
+    /** Opens the current log's find bar (Ctrl+F); text selected in the log becomes the search. */
+    void openFind() {
+        if (tabs.getSelectedComponent() instanceof FolderSearchTab f) {
+            f.focusFind();
             return;
         }
-        SearchQuery q = new SearchQuery(text, matchCase.isSelected(), regex.isSelected(),
-                wholeWord.isSelected());
-        try {
-            t.findAll(q);
-            findField.putClientProperty("JComponent.outline", null);
-        } catch (PatternSyntaxException ex) {
-            findField.putClientProperty("JComponent.outline", "error");
-            status.setText("Invalid regular expression: " + ex.getDescription());
+        LogTab t = currentTab();
+        if (t != null) {
+            LogView v = LogView.lastFocused();
+            String sel = v != null && v.isViewFocused() ? v.selectionForFind() : null;
+            t.openFindBar(sel);
         }
     }
 
+    /** F3: the find bar's next match, or else the selected Find All's next hit. */
     private void findNext(boolean forward) {
         LogTab t = currentTab();
         if (t == null) {
             return;
         }
-        if (t.search() == null || !t.search().query().text().equals(findField.getText())) {
-            findAllFromToolbar();
+        FindBar fb = t.findBar();
+        boolean ok;
+        if (fb.isVisible() && fb.typedQuery() != null) {
+            ok = fb.next(forward);
+        } else if (t.currentFind() != null) {
+            ok = t.findNext(forward);
+        } else if (fb.typedQuery() != null) {
+            t.openFindBar(null); // the last search again
+            ok = true;
+        } else {
+            ok = false;
         }
-        if (!t.findNext(forward)) {
+        if (!ok) {
             Toolkit.getDefaultToolkit().beep();
         }
     }
@@ -2377,22 +2324,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    /** Lights up the Reload button when the current file changed and isn't loaded yet. */
+    /** Lights up the current log's Reload button when its file changed and isn't loaded yet. */
     private void updateReloadButton(LogTab t) {
-        LogDocument.Change c = t == null ? LogDocument.Change.NONE : t.document().pendingChange();
-        boolean stale = c != LogDocument.Change.NONE;
-        reloadButton.setEnabled(t != null);
-        if (stale) {
-            reloadStale = true;
-            reloadButton.setForeground(Theme.isDark() ? new Color(0xFFE7A3) : new Color(0x5C4300));
-            reloadButton.setFont(reloadButton.getFont().deriveFont(Font.BOLD));
-            reloadButton.setText(c == LogDocument.Change.GREW
-                    ? "Reload (+" + humanBytes(t.document().pendingBytes()) + ")" : "Reload (file replaced)");
-        } else {
-            reloadStale = false;
-            reloadButton.setForeground(null);
-            reloadButton.setFont(UIManager.getFont("Button.font"));
-            reloadButton.setText("Reload");
+        if (t != null) {
+            t.updateReloadButton();
         }
     }
 
@@ -2451,7 +2386,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     @Override
     public void tabStatusChanged(LogTab tab) {
         if (tab != null && tab == currentTab()) {
-            followButton.setSelected(tab.mainView().isFollow());
             refreshStatus();
         }
     }

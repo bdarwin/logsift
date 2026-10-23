@@ -84,6 +84,9 @@ class VisualTest {
             }
         }
         AppState.prefs().removeNode();
+        // the test's own JVM writes the logs here: no "this JVM writes this log" bar in the
+        // screenshots, except in the test about that bar
+        System.setProperty("logsift.noJvmBar", "true");
         big = dir.resolve("big-" + sizeMb + "mb.log");
         stats = generateIfNeeded(big, sizeMb);
         onEdt(() -> {
@@ -3398,6 +3401,15 @@ class VisualTest {
     @Test
     @Order(39)
     void aLogKnowsItsJvm() throws Exception {
+        System.clearProperty("logsift.noJvmBar");
+        try {
+            aLogKnowsItsJvmWithBar();
+        } finally {
+            System.setProperty("logsift.noJvmBar", "true");
+        }
+    }
+
+    private void aLogKnowsItsJvmWithBar() throws Exception {
         // a running program that writes its log here, with a JMX port too
         Path log = dir.resolve("fixture-app.log");
         Files.deleteIfExists(log);
@@ -3866,13 +3878,12 @@ class VisualTest {
         }
         Path log = dir.resolve("shop-requests.log");
         Files.writeString(log, sb.toString());
-        System.setProperty("logsift.noJvmBar", "true"); // the test's own JVM is no part of these screenshots
         onEdt(() -> {
             frame.setColumns(true);
             frame.openFiles(List.of(log));
             return null;
         });
-        LogTab tab = waitForTabThenBar("shop-requests.log");
+        LogTab tab = waitForTab("shop-requests.log");
         waitFor(() -> {
             try {
                 return onEdt(() -> tab.logFormat() != null && !tab.document().isIndexing());
@@ -4093,13 +4104,12 @@ class VisualTest {
         }
         Path log = dir.resolve("orders-errors.log");
         Files.writeString(log, sb.toString());
-        System.setProperty("logsift.noJvmBar", "true"); // the test's own JVM is no part of these screenshots
         onEdt(() -> {
             frame.setColumns(false);
             frame.openFiles(List.of(log));
             return null;
         });
-        LogTab tab = waitForTabThenBar("orders-errors.log");
+        LogTab tab = waitForTab("orders-errors.log");
         waitFor(() -> {
             try {
                 return onEdt(() -> tab.exceptionsPanel().result() != null && tab.insightsPanel().report() != null);
@@ -4228,13 +4238,12 @@ class VisualTest {
         }
         Path log = dir.resolve("shop-metrics.log");
         Files.writeString(log, sb.toString());
-        System.setProperty("logsift.noJvmBar", "true"); // the test's own JVM is no part of these screenshots
         onEdt(() -> {
             frame.setColumns(true);
             frame.openFiles(List.of(log));
             return null;
         });
-        LogTab tab = waitForTabThenBar("shop-metrics.log");
+        LogTab tab = waitForTab("shop-metrics.log");
         waitFor(() -> {
             try {
                 return onEdt(() -> tab.metricsPanel().metrics() != null && tab.insightsPanel().report() != null);
@@ -4319,13 +4328,97 @@ class VisualTest {
         });
     }
 
-    /** {@link #waitForTab}, then lets later logs get their JVM bar again. */
-    private LogTab waitForTabThenBar(String title) throws Exception {
-        try {
-            return waitForTab(title);
-        } finally {
-            System.clearProperty("logsift.noJvmBar");
+    @Test
+    @Order(45)
+    void findBarAndFilterChips() throws Exception {
+        StringBuilder sb = new StringBuilder();
+        long t0 = java.time.LocalDateTime.of(2026, 10, 21, 10, 2, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
+        for (int i = 0; i < 3000; i++) {
+            boolean declined = i % 97 == 13;
+            sb.append(TimelineBar.formatFull(t0 + i * 150L).substring(0, 23))
+                    .append(declined ? " WARN  " : i % 11 == 0 ? " DEBUG " : " INFO  ")
+                    .append("[http-nio-8080-exec-").append(i % 12 + 1).append("] c.a.shop.OrderController - ")
+                    .append(declined ? "card declined by bank requestId=r-" + i : "201 Created requestId=r-" + i)
+                    .append('\n');
         }
+        Path log = dir.resolve("shop-find.log");
+        Files.writeString(log, sb.toString());
+        onEdt(() -> {
+            frame.openFiles(List.of(log));
+            return null;
+        });
+        LogTab tab = waitForTab("shop-find.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !tab.document().isIndexing() && tab.document().lineCount() >= 3000);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the log");
+        // Ctrl+F: typing finds and goes to the first match
+        onEdt(() -> {
+            tab.mainView().goToRow(0, true);
+            frame.openFind();
+            tab.findBar().field().setText("declined");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.findBar().countText().startsWith("1 of"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the first match");
+        assertTrue(onEdt(() -> tab.findBar().isVisible()), "Ctrl+F opens the find bar");
+        long first = onEdt(tab::currentLine);
+        assertEquals(13, first, "typing goes to the first match");
+        assertEquals("1 of 31", onEdt(() -> tab.findBar().countText()));
+        long second = onEdt(() -> {
+            tab.findBar().next(true);
+            return tab.currentLine();
+        });
+        assertEquals(110, second, "Enter: the next match");
+        assertEquals("2 of 31", onEdt(() -> tab.findBar().countText()));
+        assertEquals(13L, (long) onEdt(() -> {
+            tab.findBar().next(false);
+            return tab.currentLine();
+        }), "Shift+Enter: the previous match");
+        assertTrue(onEdt(() -> tab.currentFind() == null), "no Find All results until asked");
+        settle();
+        shot("84-find-bar");
+
+        // Filter ▾ → Show only matching lines: a chip above the log
+        onEdt(() -> {
+            tab.findBar().filter(FilterDef.Action.SHOW);
+            tab.filterPanel().setLevels("E", "W");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !tab.filterEngine().isRunning()
+                        && tab.logBar().chipTexts().equals(List.of("Show: declined", "Levels: ERROR, WARN")));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the filter chips");
+        assertTrue(!onEdt(() -> tab.findBar().isVisible()), "the search became a filter");
+        assertTrue(onEdt(tab::isMatchingOnly), "only matching lines");
+        assertEquals(31L, (long) onEdt(() -> tab.filterResultForTest().count()));
+        settle();
+        shot("85-filter-chips");
+
+        // clicking a chip turns its filter off
+        onEdt(() -> {
+            FilterDef d = tab.filterPanel().filters().get(0);
+            tab.filterPanel().setFilterEnabled(d, false);
+            return null;
+        });
+        assertEquals(List.of("Show: declined (off)", "Levels: ERROR, WARN"), onEdt(() -> tab.logBar().chipTexts()));
+        onEdt(() -> {
+            tab.filterPanel().clearAll();
+            frame.closeCurrentTabForTest();
+            return null;
+        });
     }
 
     /** Waits until the current tab is a log titled so. */

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Find bar (Ctrl+F):** finding in a log is now a bar at the top of the log, as in most programs. Matches light up as you type, Enter and Shift+Enter go to the next and previous one, and it counts them ("3 of 1,240"). **Find All** lists them below the log, **Filter ▾** turns the search into a filter, and Esc closes it.
+- **Each log has its own bar:** Find, Filters, the filters that are on as **chips** (click to turn one off, ✕ to remove it), Follow and Reload. The toolbar now holds only what applies to every log: open, folder search, wrap, columns, tree, timeline and auto reload.
+- Adding a filter from the right-click menu no longer switches the panel below to Filters: it shows up as a chip.
 - **Full pools are found when their threads wait on the database:** threads waiting for a pool's connection or reading a JDBC or HTTP answer count as busy, not idle.
 - **Python thread dumps:** `py-spy dump` output and `faulthandler` dumps (also inside a log) open in the Threads view, with thread names, idle or active (and who holds the GIL), and stacks.
 - **Known problems in Insights:** about 30 problems that look the same in every log (a connection pool that ran out, a full thread pool, out of memory, GC pauses, untrusted certificates, timeouts, database deadlocks, Kafka rebalances, a container killed for memory, gunicorn worker timeouts, unhandled asyncio errors, Celery retries…), each with **What to Try**.

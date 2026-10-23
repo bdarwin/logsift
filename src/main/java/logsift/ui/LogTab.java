@@ -68,6 +68,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** Opens a file (or selects its tab) at a line, with this search run in it. */
         default void openAt(Path file, long line, SearchQuery q) {}
+
+        /** Opens Search in Folder for this text. */
+        default void searchInFolder(String text) {}
     }
 
     private final LogDocument doc;
@@ -81,6 +84,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     /** Every Find All, as foldable groups in one window. */
     private ResultsPanel results;
     private final FilterPanel filterPanel = new FilterPanel(this);
+    private FindBar findBar;
+    private LogBar logBar;
     private final JTabbedPane bottom = new JTabbedPane();
     private final JSplitPane split;
     private final int dividerSize;
@@ -283,6 +288,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         main.addListener(new LogView.Listener() {
             @Override
             public void followChanged(LogView view, boolean follow) {
+                if (logBar != null) {
+                    logBar.setFollow(follow);
+                }
                 applyAutoReload(); // following the end means loading changes as they come
                 host.tabStatusChanged(LogTab.this);
             }
@@ -345,6 +353,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.setPreferredSize(new Dimension(400, 210));
         bottom.putClientProperty("JTabbedPane.tabHeight", 26);
         JPanel top = new JPanel(new BorderLayout());
+        findBar = new FindBar(findBarHost());
+        logBar = new LogBar(this);
+        JPanel bars = new JPanel(new BorderLayout());
+        bars.add(logBar, BorderLayout.NORTH);
+        bars.add(findBar, BorderLayout.CENTER);
+        top.add(bars, BorderLayout.NORTH);
         JPanel north = new JPanel(new BorderLayout());
         north.add(timeline, BorderLayout.NORTH);
         JPanel banners = new JPanel();
@@ -413,7 +427,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
             @Override
             public void staleChanged(LogDocument d) {
-                SwingUtilities.invokeLater(() -> host.tabStatusChanged(LogTab.this));
+                SwingUtilities.invokeLater(() -> {
+                    updateReloadButton();
+                    host.tabStatusChanged(LogTab.this);
+                });
             }
         });
         doc.startFollowing(AppState.prefs().getInt("pollMs", 500));
@@ -766,6 +783,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 for (FindGroup f : results.groups()) {
                     other.add(new OverviewBar.MarkSet("Find “" + f.title() + "”", f.colors()[2], f.marks()));
                 }
+                OverviewBar.Marks quick = findBar == null ? null : findBar.marks();
+                if (quick != null) {
+                    other.add(new OverviewBar.MarkSet("Find “" + findBar.text() + "”", Theme.SEARCH_COLORS[0][2], quick));
+                }
                 for (FilterDef d : filterPanel.filters()) {
                     SearchSession fs = d.isActive() && d.color() != null ? engine.session(d.id) : null;
                     if (fs != null) {
@@ -1080,6 +1101,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     /** Shows only lines passing the filters, or all lines. Keeps the current line in view. */
     void setMatchingOnly(boolean on) {
         filterPanel.setMatchingOnly(on);
+        if (logBar != null) {
+            logBar.update();
+        }
         if (on == matchingOnly) {
             return;
         }
@@ -1768,8 +1792,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (d != null) {
             d.matchCase = true;
             filterPanel.refreshRow(d);
-            filtersChanged();
-            bottom.setSelectedComponent(filterPanel);
+            filtersChanged(); // it shows as a chip above the log
         }
     }
 
@@ -1895,17 +1918,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         filterPanel.setResultText(text);
         for (FilterDef d : filterPanel.filters()) {
-            SearchSession s = d.isActive() ? engine.session(d.id) : null;
-            String c = "";
-            if (d.error != null) {
-                c = "invalid";
-            } else if (s != null) {
-                c = String.format("%,d", s.hits().size()) + (s.isRunning() ? "…" : "");
-                if (s.isLimitReached()) {
-                    c += "+";
-                }
-            }
-            filterPanel.setCount(d, c);
+            filterPanel.setCount(d, filterCount(d));
+        }
+        if (logBar != null) {
+            logBar.setResultText(r.isFiltering() ? text.replaceAll("\\s{3}.*", "") : "");
+            logBar.update();
         }
     }
 
@@ -2760,12 +2777,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
             @Override
             public void resultsChanged() {
-                List<LogView.Highlight> hl = new ArrayList<>();
-                for (FindGroup g : results.groups()) {
-                    hl.add(g.highlight());
-                }
-                main.setHighlights(hl);
-                main.overviewChanged();
+                updateSearchHighlights();
                 int n = results.groups().size();
                 bottom.setTitleAt(bottom.indexOfComponent(results),
                         n == 0 ? "Find results" : n == 1 ? String.format("Find results (%,d)",
@@ -2776,6 +2788,145 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             @Override
             public void extendPopup(LogView view, JPopupMenu menu) {
                 LogTab.this.extendPopup(view, menu);
+            }
+        };
+    }
+
+    /** Matches of Find All searches and of the find bar, in the log and its overview. */
+    private void updateSearchHighlights() {
+        List<LogView.Highlight> hl = new ArrayList<>();
+        for (FindGroup g : results.groups()) {
+            hl.add(g.highlight());
+        }
+        LogView.Highlight quick = findBar == null ? null : findBar.highlight();
+        if (quick != null) {
+            hl.add(quick);
+        }
+        main.setHighlights(hl);
+        main.overviewChanged();
+    }
+
+    // ---------------------------------------------------------------- find bar and log bar
+
+    FindBar findBar() {
+        return findBar;
+    }
+
+    LogBar logBar() {
+        return logBar;
+    }
+
+    /** Opens the find bar (Ctrl+F); text selected in the log becomes the search. */
+    void openFindBar(String text) {
+        if (text == null && main.isViewFocused()) {
+            text = main.selectionForFind();
+        }
+        findBar.open(text);
+    }
+
+    /** Opens the Filters tab below the log. */
+    void showFilters() {
+        setBottomCollapsed(false);
+        bottom.setSelectedComponent(filterPanel);
+    }
+
+    void updateReloadButton() {
+        logBar.updateReload(doc);
+    }
+
+    /** "10:02:13 – 10:05:00" of the selected time range, or "". */
+    String timeRangeText() {
+        long[] r = timeRange;
+        if (r == null) {
+            return "";
+        }
+        String a = TimelineBar.formatFull(r[0]).replaceFirst("\\.000$", "");
+        String b = TimelineBar.formatFull(r[1]).replaceFirst("\\.000$", "");
+        if (a.length() > 11 && b.length() > 11 && a.substring(0, 11).equals(b.substring(0, 11))) {
+            b = b.substring(11); // same day
+        }
+        return a + " – " + b;
+    }
+
+    /** How many branches are unchecked in the tree of loggers. */
+    int treeHiddenCount() {
+        return treePanel == null || treePanel.hiddenColumn() == null ? 0 : treePanel.hidden().size();
+    }
+
+    void showAllTreeValues() {
+        treePanel.showAllValues();
+    }
+
+    /** A filter's number of matching lines ("1,234", "invalid", or "" when off). */
+    String filterCount(FilterDef d) {
+        SearchSession s = d.isActive() ? engine.session(d.id) : null;
+        if (d.error != null) {
+            return "invalid";
+        }
+        if (s == null) {
+            return "";
+        }
+        String c = String.format("%,d", s.hits().size()) + (s.isRunning() ? "…" : "");
+        return s.isLimitReached() ? c + "+" : c;
+    }
+
+    private FindBar.Host findBarHost() {
+        return new FindBar.Host() {
+            @Override
+            public LogDocument document() {
+                return doc;
+            }
+
+            @Override
+            public long currentLine() {
+                return LogTab.this.currentLine();
+            }
+
+            @Override
+            public long firstVisibleLine() {
+                long row = Math.max(0, main.topRow());
+                return matchingOnly ? (filterResult.count() == 0 ? 0
+                        : filterResult.lineAt(Math.min(row, filterResult.count() - 1))) : row;
+            }
+
+            @Override
+            public void showLine(long line) {
+                LogTab.this.showLine(line);
+            }
+
+            @Override
+            public void searchChanged() {
+                updateSearchHighlights();
+            }
+
+            @Override
+            public void findAll(SearchQuery q) {
+                host.runFindAll(q);
+            }
+
+            @Override
+            public void filter(SearchQuery q, FilterDef.Action action) {
+                FilterDef d = filterPanel.addFilter(q.text(), action);
+                if (d != null) {
+                    d.matchCase = q.matchCase();
+                    d.regex = q.regex();
+                    d.wholeWord = q.wholeWord();
+                    filterPanel.refreshRow(d);
+                    filtersChanged();
+                    if (action != FilterDef.Action.MARK) {
+                        setMatchingOnly(true);
+                    }
+                }
+            }
+
+            @Override
+            public void searchInFolder(String text) {
+                host.searchInFolder(text);
+            }
+
+            @Override
+            public void closed() {
+                main.focusView();
             }
         };
     }
@@ -2869,6 +3020,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         closeHooks.forEach(Runnable::run);
         results.closeAllSessions();
+        findBar.dispose();
         messages.cancel();
         insights.cancel();
         exceptions.cancel();
