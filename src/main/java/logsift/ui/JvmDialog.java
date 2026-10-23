@@ -34,6 +34,8 @@ import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.table.AbstractTableModel;
 import logsift.core.RemoteMirror;
+import logsift.jvm.JmxJvms;
+import logsift.jvm.JvmLink;
 import logsift.jvm.JvmProcess;
 import logsift.jvm.LocalJvms;
 import logsift.jvm.SshJvms;
@@ -45,14 +47,19 @@ import logsift.jvm.ThreadDump;
  */
 final class JvmDialog extends JDialog {
 
-    /** Where the chosen JVM goes: its first dump and how to take more. */
+    /** Where the chosen JVM goes: its first dump, how to take more, and its link. */
     interface Host {
-        void attached(String source, ThreadDump first, ThreadsTab.Capture capture, Profiling profiling);
+        void attached(JvmConnector.Connection c);
     }
 
-    /** How to profile the attached JVM (null where it can't be). */
-    interface Profiling {
-        logsift.jvm.Profiler.Target target();
+    /**
+     * What to offer first: where the JVM probably is, and which one (from a log's link or what
+     * the log says about itself).
+     */
+    record Suggestion(JvmLink.Kind kind, String host, int port, String user, long pid, String program) {
+        boolean matches(JvmProcess p) {
+            return pid >= 0 && p.pid() == pid && (program.isEmpty() || JvmLink.sameProgram(program, p.name()));
+        }
     }
 
     private final Preferences p = AppState.prefs();
@@ -88,18 +95,41 @@ final class JvmDialog extends JDialog {
     private SshJvms ssh;
     private RemoteMirror.Target sshTarget;
 
+    // ---- a JMX port
+    private final JTextField jmxHost = new JTextField(p.get("jvm.jmx.host", ""), 20);
+    private final JTextField jmxPort = new JTextField(p.get("jvm.jmx.port", "9010"), 5);
+    private final JTextField jmxUser = new JTextField(p.get("jvm.jmx.user", ""), 10);
+    private final JPasswordField jmxPassword = new JPasswordField(12);
+    private final JCheckBox jmxSsl = new JCheckBox("SSL", p.getBoolean("jvm.jmx.ssl", false));
+    private final JLabel jmxStatus = new JLabel(" ");
+
     private final JButton attach = new JButton("Attach");
+    private final JvmConnector connector;
+    private Suggestion suggestion;
+    private final JLabel heading = new JLabel();
 
     JvmDialog(Window owner, Path knownHosts, Predicate<String> trustHost, Host host) {
-        super(owner, "Attach to a JVM", ModalityType.MODELESS);
+        this(owner, knownHosts, trustHost, host, null, null);
+    }
+
+    /**
+     * With {@code forLog} (a log's name), the dialog links that log to the JVM chosen, and
+     * offers {@code suggestion} first.
+     */
+    JvmDialog(Window owner, Path knownHosts, Predicate<String> trustHost, Host host, String forLog,
+              Suggestion suggestion) {
+        super(owner, forLog == null ? "Attach to a JVM" : "Link to a JVM", ModalityType.MODELESS);
         this.host = host;
         this.knownHosts = knownHosts;
         this.trustHost = trustHost;
+        this.connector = new JvmConnector(owner, knownHosts, trustHost);
+        this.suggestion = suggestion;
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
 
         where.addTab("This computer", Icons.of("cpu"), localPanel());
         where.addTab("Server (SSH)", Icons.of("server"), sshPanel());
-        where.setSelectedIndex(p.getInt("jvm.where", 0));
+        where.addTab("JMX port", Icons.of("plug"), jmxPanel());
+        where.setSelectedIndex(Math.min(p.getInt("jvm.where", 0), 2));
         where.addChangeListener(e -> {
             p.putInt("jvm.where", where.getSelectedIndex());
             updateAttach();
@@ -120,6 +150,12 @@ final class JvmDialog extends JDialog {
 
         JPanel root = new JPanel(new BorderLayout(0, 8));
         root.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        if (forLog != null) {
+            heading.setText("<html>Which JVM writes <b>" + esc(forLog) + "</b>? Logsift remembers it for this log"
+                    + " (and others in its folder), by program, so it finds it again after a restart.</html>");
+            root.add(heading, BorderLayout.NORTH);
+            attach.setText("Link");
+        }
         root.add(where, BorderLayout.CENTER);
         root.add(south, BorderLayout.SOUTH);
         setContentPane(root);
@@ -131,8 +167,78 @@ final class JvmDialog extends JDialog {
                 closeSsh();
             }
         });
+        if (suggestion != null) {
+            applySuggestion();
+        }
         refreshLocal();
         updateAttach();
+    }
+
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;");
+    }
+
+    /** Fills in where the suggested JVM is, and goes there (connecting at once where no password is needed). */
+    private void applySuggestion() {
+        Suggestion sg = suggestion;
+        switch (sg.kind()) {
+            case LOCAL -> where.setSelectedIndex(0);
+            case SSH -> {
+                where.setSelectedIndex(1);
+                if (!sg.host().isEmpty()) {
+                    boolean same = sg.host().equalsIgnoreCase(p.get("remote.host", ""));
+                    sshHost.setText(sg.host());
+                    if (sg.port() > 0) {
+                        sshPort.setText(Integer.toString(sg.port()));
+                    }
+                    if (!sg.user().isEmpty()) {
+                        sshUser.setText(sg.user());
+                    }
+                    if (!same) {
+                        password.setText("");
+                    }
+                    if (useKey.isSelected() && !key.getText().isBlank()) {
+                        SwingUtilities.invokeLater(this::connectSsh); // a key: no password to ask for
+                    } else {
+                        SwingUtilities.invokeLater(() -> (usePassword.isSelected() ? password : sshHost)
+                                .requestFocusInWindow());
+                    }
+                }
+            }
+            case JMX -> {
+                where.setSelectedIndex(2);
+                jmxHost.setText(sg.host());
+                if (sg.port() > 0) {
+                    jmxPort.setText(Integer.toString(sg.port()));
+                }
+                jmxUser.setText(sg.user());
+                if (!sg.user().isEmpty()) {
+                    SwingUtilities.invokeLater(jmxPassword::requestFocusInWindow);
+                }
+            }
+        }
+    }
+
+    /** Selects the suggested JVM in a list just filled. */
+    private void selectSuggested(List<JvmProcess> l, JTable t) {
+        Suggestion sg = suggestion;
+        if (sg == null) {
+            return;
+        }
+        int best = -1;
+        for (int i = 0; i < l.size(); i++) {
+            if (sg.matches(l.get(i))) {
+                best = i;
+                break;
+            }
+            if (best < 0 && JvmLink.sameProgram(sg.program(), l.get(i).name())) {
+                best = i;
+            }
+        }
+        if (best >= 0) {
+            t.getSelectionModel().setSelectionInterval(best, best);
+            t.scrollRectToVisible(t.getCellRect(best, 0, true));
+        }
     }
 
     private void closeSsh() {
@@ -183,6 +289,7 @@ final class JvmDialog extends JDialog {
                 localModel.fireTableDataChanged();
                 if (!local.isEmpty()) {
                     localTable.getSelectionModel().setSelectionInterval(0, 0);
+                    selectSuggested(local, localTable);
                 }
                 localStatus.setText(found.isEmpty()
                         ? (LocalJvms.canAttach() ? "No other Java programs are running as you."
@@ -247,6 +354,14 @@ final class JvmDialog extends JDialog {
         where.setSelectedIndex(1);
     }
 
+    int whereForTest() {
+        return where.getSelectedIndex();
+    }
+
+    String sshHostForTest() {
+        return sshHost.getText();
+    }
+
     void setRemoteJdkForTest(String jdk) {
         remoteJdk.setText(jdk);
     }
@@ -300,6 +415,7 @@ final class JvmDialog extends JDialog {
                 remoteModel.fireTableDataChanged();
                 if (!remote.isEmpty()) {
                     remoteTable.getSelectionModel().setSelectionInterval(0, 0);
+                    selectSuggested(remote, remoteTable);
                 }
                 sshStatus.setText("Connected to " + s.label() + " · " + (found.isEmpty() ? "no Java programs running"
                         : found.size() + (found.size() == 1 ? " Java program" : " Java programs")));
@@ -309,6 +425,91 @@ final class JvmDialog extends JDialog {
             connect.setEnabled(true);
             sshStatus.setText("Could not connect: " + e.getMessage());
         });
+    }
+
+    // ---------------------------------------------------------------- a JMX port
+
+    private JPanel jmxPanel() {
+        jmxHost.putClientProperty("JTextField.placeholderText", "server, or a service:jmx: URL");
+        jmxUser.putClientProperty("JTextField.placeholderText", "if it asks");
+        jmxPassword.putClientProperty("JTextField.placeholderText", "if it asks");
+        jmxPassword.setToolTipText("Kept only while Logsift runs");
+        jmxHost.addActionListener(e -> attachSelected());
+        jmxPort.addActionListener(e -> attachSelected());
+        jmxPassword.addActionListener(e -> attachSelected());
+        jmxHost.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                updateAttach();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                updateAttach();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                updateAttach();
+            }
+        });
+        JPanel conn = new JPanel();
+        conn.setLayout(new BoxLayout(conn, BoxLayout.Y_AXIS));
+        conn.add(line(new JLabel("Host"), jmxHost, new JLabel("Port"), jmxPort, jmxSsl));
+        conn.add(line(new JLabel("User"), jmxUser, new JLabel("Password"), jmxPassword));
+        conn.add(line(jmxStatus));
+        JLabel how = new JLabel("<html>For a JVM started with <tt>-Dcom.sun.management.jmxremote.port=9010</tt>"
+                + " (and <tt>-Djava.rmi.server.hostname</tt> set to its address), from anywhere: no SSH needed.<br><br>"
+                + "Over JMX, Logsift takes thread dumps and heap histograms, and profiles with Flight Recorder"
+                + " (CPU, wall clock, allocations and locks), the recording sent back over the same port."
+                + " Heap dumps and async-profiler need SSH or this computer.</html>");
+        how.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        how.setBorder(BorderFactory.createEmptyBorder(12, 6, 0, 6));
+        how.setVerticalAlignment(javax.swing.SwingConstants.TOP);
+        JPanel panel = new JPanel(new BorderLayout(0, 0));
+        panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
+        panel.add(conn, BorderLayout.NORTH);
+        panel.add(how, BorderLayout.CENTER);
+        return panel;
+    }
+
+    void setJmxForTest(String h, int port) {
+        jmxHost.setText(h);
+        jmxPort.setText(Integer.toString(port));
+        jmxUser.setText("");
+        where.setSelectedIndex(2);
+    }
+
+    private void attachJmx() {
+        int port;
+        try {
+            port = Integer.parseInt(jmxPort.getText().trim());
+        } catch (NumberFormatException e) {
+            jmxStatus.setText("The port is a number, such as 9010.");
+            return;
+        }
+        JmxJvms.Address a = new JmxJvms.Address(jmxHost.getText(), port, jmxUser.getText(),
+                new String(jmxPassword.getPassword()), jmxSsl.isSelected());
+        p.put("jvm.jmx.host", a.host());
+        p.put("jvm.jmx.port", Integer.toString(port));
+        p.put("jvm.jmx.user", a.user());
+        p.putBoolean("jvm.jmx.ssl", a.ssl());
+        attach.setEnabled(false);
+        jmxStatus.setText("Connecting to " + a.label() + "…");
+        background(() -> {
+            JvmConnector.Connection c = connector.jmx(a);
+            SwingUtilities.invokeLater(() -> done(jmxStatus, c));
+        }, e -> {
+            updateAttach();
+            jmxStatus.setText("Could not connect: " + e.getMessage());
+        });
+    }
+
+    private void done(JLabel status, JvmConnector.Connection c) {
+        status.setText(" ");
+        updateAttach();
+        host.attached(c);
+        dispose();
     }
 
     int remoteCountForTest() {
@@ -322,6 +523,10 @@ final class JvmDialog extends JDialog {
     // ---------------------------------------------------------------- attaching
 
     private void updateAttach() {
+        if (where.getSelectedIndex() == 2) {
+            attach.setEnabled(!jmxHost.getText().isBlank());
+            return;
+        }
         boolean onServer = where.getSelectedIndex() == 1;
         JTable t = onServer ? remoteTable : localTable;
         attach.setEnabled(t.getSelectedRow() >= 0 && (!onServer || ssh != null));
@@ -341,6 +546,12 @@ final class JvmDialog extends JDialog {
     }
 
     void attachSelected() {
+        if (where.getSelectedIndex() == 2) {
+            if (!jmxHost.getText().isBlank()) {
+                attachJmx();
+            }
+            return;
+        }
         boolean onServer = where.getSelectedIndex() == 1;
         JTable t = onServer ? remoteTable : localTable;
         int r = t.getSelectedRow();
@@ -362,37 +573,8 @@ final class JvmDialog extends JDialog {
         String jdk = localJdk.getText().trim();
         p.put("jvm.localJdk", jdk);
         background(() -> {
-            LocalJvms.Session s = LocalJvms.attach(jvm.pid(), jdk);
-            ThreadDump first;
-            try {
-                first = s.dump();
-            } catch (IOException e) {
-                s.close();
-                throw e;
-            }
-            ThreadsTab.Capture c = new ThreadsTab.Capture() {
-                @Override
-                public String label() {
-                    return jvm.name() + " (" + jvm.pid() + ")";
-                }
-
-                @Override
-                public ThreadDump take() throws Exception {
-                    return s.dump();
-                }
-
-                @Override
-                public void close() {
-                    s.close();
-                }
-            };
-            Profiling prof = () -> logsift.jvm.Profiler.local(jvm, s);
-            SwingUtilities.invokeLater(() -> {
-                status.setText(" ");
-                updateAttach();
-                host.attached(jvm.name() + " (" + jvm.pid() + ")", first, c, prof);
-                dispose();
-            });
+            JvmConnector.Connection c = connector.local(jvm, jdk);
+            SwingUtilities.invokeLater(() -> done(status, c));
         }, e -> {
             updateAttach();
             status.setText("Could not attach: " + e.getMessage());
@@ -403,103 +585,15 @@ final class JvmDialog extends JDialog {
         RemoteMirror.Target t = sshTarget;
         String jdk = remoteJdk.getText().trim();
         p.put("jvm.jdk." + t.host(), jdk);
-        String[] sudoPw = {sudoPassword.getPassword().length == 0 ? null : new String(sudoPassword.getPassword())};
+        String sudoPw = sudoPassword.getPassword().length == 0 ? null : new String(sudoPassword.getPassword());
         boolean useSudo = sudo.isSelected();
         background(() -> {
-            // a connection of its own, for as long as the tab is open
-            SshJvms conn = SshJvms.connect(t, knownHosts, trustHost);
-            RemoteCapture c = new RemoteCapture(conn, t, jvm, new SshJvms.Options(jdk, useSudo, sudoPw[0]));
-            ThreadDump first;
-            try {
-                first = c.take();
-            } catch (Exception e) {
-                c.close();
-                throw e instanceof IOException io ? io : new IOException(e.getMessage(), e);
-            }
-            Profiling prof = () -> logsift.jvm.Profiler.remote(jvm, c.conn(), c.options());
-            SwingUtilities.invokeLater(() -> {
-                status.setText(" ");
-                updateAttach();
-                host.attached(jvm.name() + " on " + t.host(), first, c, prof);
-                dispose();
-            });
+            JvmConnector.Connection c = connector.ssh(t, jvm, new SshJvms.Options(jdk, useSudo, sudoPw));
+            SwingUtilities.invokeLater(() -> done(status, c));
         }, e -> {
             updateAttach();
             status.setText("Could not take a dump: " + e.getMessage());
         });
-    }
-
-    /** Dumps of a JVM on a server; reconnects, and asks for the sudo password when needed. */
-    private final class RemoteCapture implements ThreadsTab.Capture {
-        private SshJvms conn;
-        private final RemoteMirror.Target target;
-        private final JvmProcess jvm;
-        private SshJvms.Options options;
-
-        RemoteCapture(SshJvms conn, RemoteMirror.Target target, JvmProcess jvm, SshJvms.Options options) {
-            this.conn = conn;
-            this.target = target;
-            this.jvm = jvm;
-            this.options = options;
-        }
-
-        synchronized SshJvms conn() {
-            return conn;
-        }
-
-        synchronized SshJvms.Options options() {
-            return options;
-        }
-
-        @Override
-        public String label() {
-            return jvm.name() + " (" + jvm.pid() + ") on " + target.host();
-        }
-
-        @Override
-        public synchronized ThreadDump take() throws Exception {
-            if (!conn.isConnected()) {
-                conn.close();
-                conn = SshJvms.connect(target, knownHosts, trustHost);
-            }
-            for (int tries = 0; ; tries++) {
-                try {
-                    return conn.dump(jvm, options);
-                } catch (SshJvms.SudoPasswordNeeded e) {
-                    String pw = askSudoPassword(e.getMessage(), tries > 0);
-                    if (pw == null) {
-                        throw e;
-                    }
-                    options = new SshJvms.Options(options.jdkHome(), true, pw);
-                }
-            }
-        }
-
-        @Override
-        public synchronized void close() {
-            conn.close();
-        }
-    }
-
-    /** Asks (on the EDT) for the sudo password; null if cancelled. */
-    private String askSudoPassword(String why, boolean again) {
-        String[] out = new String[1];
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                JPasswordField f = new JPasswordField(16);
-                JPanel pn = new JPanel(new BorderLayout(0, 6));
-                pn.add(new JLabel("<html>" + (again ? "That password didn't work. " : "") + why
-                        + ".<br>Your sudo password on the server:</html>"), BorderLayout.NORTH);
-                pn.add(f, BorderLayout.CENTER);
-                if (JOptionPane.showConfirmDialog(getOwner(), pn, "sudo", JOptionPane.OK_CANCEL_OPTION,
-                        JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION) {
-                    out[0] = new String(f.getPassword());
-                }
-            });
-        } catch (Exception e) {
-            return null;
-        }
-        return out[0];
     }
 
     // ---------------------------------------------------------------- bits

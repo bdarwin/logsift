@@ -22,7 +22,8 @@
 - **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files.
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
-- **Java threads.** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log), or attach to a running JVM on your computer or on a server over SSH. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
+- **Java threads.** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log), or attach to a running JVM on your computer, on a server over SSH, or through its JMX port. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
+- **A log knows its JVM.** Open a log and Logsift names the JVM writing it, with its threads, profile and heap a click away. Right-click a line to see its thread's stack; from a thread, show only its lines.
 - **Profiling and memory.** Flame graphs of a JVM's CPU, wall-clock time, allocations, live objects (memory leaks), locks, native memory and native leaks, calls of a method and slow calls, or hardware events, with async-profiler or the JVM's own Flight Recorder. Compare runs, see who calls a method, and find which classes fill the heap and keep growing.
 - **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
 
@@ -74,7 +75,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 | ![Parsed columns with top messages below](docs/screenshots/columns-and-messages.png) **Columns** and **top messages** | ![Folder search across .log, .gz and .zip files](docs/screenshots/folder-search.png) **Folder search**, including inside .gz and .zip |
 | ![JSON log shown as columns, with a pretty-printed details panel](docs/screenshots/json.png) **JSON logs** with a details panel | ![Comparing a bad run with a good one: new, more frequent and missing messages](docs/screenshots/compare.png) **Compare** a bad run with a good one |
 | ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained | ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph |
-| ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** | |
+| ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** | ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |
 
 ## Run from source
 
@@ -161,7 +162,7 @@ Logsift detects how a log's text is encoded: UTF-8 (with or without a byte order
 
 ## Columns and levels
 
-The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. Logsift recognizes common layouts by itself: logback and log4j patterns, Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
+The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. Logsift recognizes common layouts by itself: logback and log4j patterns, Spring Boot's default layout (with its process id), Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
 
 - **Count values:** right-click a column header (Thread, Logger, Host, Status…) → *Count Values* lists every value with its number of lines. Double-click one to show only its lines, or *Hide* it.
 - **Hide columns:** right-click a column header → *Hide … Column*, or tick columns on and off in the same menu. The header shows **N columns hidden**; click it to see which, and **Show All Columns** brings them back. Hidden columns are remembered for each format.
@@ -218,6 +219,22 @@ Below that:
 
 - **On this computer** Logsift attaches the way the JDK's own tools do. If that isn't possible, it uses `jcmd` from a JDK folder you give.
 - **On a server** it uses `jcmd`: from the JDK folder you give, the PATH, or the JDK the program itself runs on. Servers with only a Java runtime and no JDK tools work too: Logsift copies async-profiler to the server's `/tmp` and uses that. JVMs running as another user (`tomcat`, `app`) are reached with `sudo`. Logsift asks for the sudo password if it needs one and keeps it only while it runs. JVMs in containers are listed too.
+- **Through a JMX port** (a JVM started with `-Dcom.sun.management.jmxremote.port=9010`), from anywhere, with no SSH: give the host and port, and the user and password if the port has them. Over JMX, Logsift takes thread dumps and heap histograms, and profiles with Flight Recorder, the recording sent back over the same port. Heap dumps and async-profiler need SSH or this computer.
+
+### A log and its JVM
+
+A log tab shows which JVM writes the log, in a bar above it, with **Threads**, **Profile** and **Heap** buttons. Logsift finds it by itself:
+
+- **On this computer**, and on the server of a log opened over SSH: the JVM that has the log open (Linux and macOS; on Windows, by the process id the log names), the one it was linked to before, or the one the log names.
+- **A log on a shared drive, or copied from a server:** Logsift reads what the log says about itself (Spring Boot's startup line names the program, its host and its process id) and which server the drive is on, and offers **Find Its JVM…** with those filled in.
+- **Any log:** **JVM → Link This Log to a JVM…** picks the JVM by hand: on this computer, over SSH, or through a JMX port.
+
+The link is remembered for the log and for the other logs in its folder, by program (`orders.jar`, `com.acme.App`), not by process id, so it finds the JVM again after a restart or a new version of the jar. The bar's menu links another JVM, or forgets the link.
+
+Thread names connect the two:
+
+- **Right-click a line → Show Thread in Threads** shows that thread's stack in a dump of the JVM, taking one if needed. A name the log cut short (Spring Boot keeps the last 15 characters, `nio-8080-exec-1`) still finds `http-nio-8080-exec-1`.
+- **Lines in Log** in the Threads tab (or right-click a thread) shows only the lines that thread wrote. This works for dumps found in a log too.
 
 **Save…** writes the dumps as a text file that opens again here, or in any other tool.
 
@@ -406,6 +423,9 @@ logsift.jvm     (thread dumps and running JVMs)
   ThreadAnalysis  deadlocks (cycles of lock waits), lock queues, stuck and busy threads, pools
   LocalJvms       attach + JMX (the JVM's own diagnostic commands), or jcmd
   SshJvms         ps, jcmd or async-profiler over SSH, sudo for other users' JVMs
+  JmxJvms         a JMX port: diagnostic commands, Flight Recorder streamed back
+  LogOrigin       which JVM writes a log: who has it open, what it says, its file server
+  JvmLink         a log's JVM, remembered by program
   Profiler        async-profiler (every mode) or Flight Recorder → Profiles (trees of stacks)
   HeapHistogram   GC.class_histogram, and what grew between two
 logsift.ui
@@ -415,7 +435,7 @@ logsift.ui
   OverviewBar     highlight bar beside the scrollbar (errors, warnings, filters, hits)
   FolderSearchTab folder search form and results grouped by file
   TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
-  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, JvmDialog
+  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, JvmDialog, JvmBar
   MainFrame       window, toolbar, menus, status bar, drag & drop
 logsift.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)

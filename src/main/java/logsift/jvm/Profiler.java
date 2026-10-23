@@ -129,6 +129,11 @@ public final class Profiler {
 
         /** Writes a heap dump (.hprof) of the JVM to {@code local}. */
         void heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException;
+
+        /** Why heap dumps can't be saved here, or null if they can. */
+        default String noHeapDump() {
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------- where the JVM is
@@ -330,6 +335,68 @@ public final class Profiler {
                 }
             }
         });
+    }
+
+    /** A JVM reached through its JMX port: Flight Recorder only, the recording streamed back. */
+    public static Target jmx(JmxJvms.Session session) {
+        return new Target() {
+            @Override
+            public String label() {
+                return session.label();
+            }
+
+            @Override
+            public List<Engine> engines() {
+                return List.of(Engine.JFR);
+            }
+
+            @Override
+            public List<Mode> modes(Engine engine) {
+                return List.of(Mode.CPU, Mode.WALL, Mode.ALLOC, Mode.LOCK, Mode.ALL);
+            }
+
+            @Override
+            public List<String> hardwareEvents() {
+                return List.of();
+            }
+
+            @Override
+            public List<Profile> run(Request r, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
+                if (r.engine() != Engine.JFR || !JFR_MODES.contains(r.mode())) {
+                    throw new IOException("Over a JMX port only Flight Recorder can profile; " + r.mode().label
+                            + " needs async-profiler (connect over SSH or on that computer)");
+                }
+                String suffix = " of " + session.label() + " · " + r.seconds() + " s";
+                Thread ticker = ticker(r.seconds(), progress, cancelled);
+                Path local = Files.createTempFile("logsift-", ".jfr");
+                try {
+                    if (!session.record(r.seconds(), local, cancelled)) {
+                        return null;
+                    }
+                    Map<Mode, Profile> all = fromJfr(local, EnumSet.of(Mode.CPU, Mode.WALL, Mode.ALLOC, Mode.LOCK),
+                            r.perThread(), m -> m.label + suffix);
+                    return views(all, r.mode() == Mode.ALL ? Mode.CPU : r.mode());
+                } finally {
+                    ticker.interrupt();
+                    Files.deleteIfExists(local);
+                }
+            }
+
+            @Override
+            public String diagnostic(String command, String... args) throws IOException {
+                return session.diagnostic(command, args);
+            }
+
+            @Override
+            public void heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
+                throw new IOException(JmxJvms.HEAP_DUMP);
+            }
+
+            @Override
+            public String noHeapDump() {
+                return JmxJvms.HEAP_DUMP;
+            }
+        };
     }
 
     private static String[] prepend(String first, String... rest) {

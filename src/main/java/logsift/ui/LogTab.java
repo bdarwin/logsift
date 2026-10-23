@@ -54,6 +54,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** Opens the thread dumps in this log in a Threads tab. */
         default void analyzeThreads(LogTab tab) {}
+
+        /** Shows the thread a line names in a thread dump of the log's JVM. */
+        default void showThread(LogTab tab, String thread) {}
     }
 
     private final LogDocument doc;
@@ -319,6 +322,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         north.add(timeline, BorderLayout.NORTH);
         JPanel banners = new JPanel();
         banners.setLayout(new javax.swing.BoxLayout(banners, javax.swing.BoxLayout.Y_AXIS));
+        this.banners = banners;
         banners.add(dumpsBanner);
         banners.add(noColumns);
         north.add(banners, BorderLayout.SOUTH);
@@ -1669,6 +1673,17 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     : "Bookmark This Line");
             bm.addActionListener(e -> toggleBookmark());
             menu.add(bm);
+            String thread = threadOf(cur);
+            if (thread != null) {
+                String shown = thread.length() > 40 ? thread.substring(0, 40) + "…" : thread;
+                JMenuItem th = new JMenuItem("Show Thread “" + shown + "” in Threads", Icons.of("cpu"));
+                th.setToolTipText("Its stack in a thread dump of the JVM that writes this log");
+                th.addActionListener(e -> host.showThread(this, thread));
+                menu.add(th);
+                JMenuItem lines = new JMenuItem("Show Only Lines of Thread “" + shown + "”");
+                lines.addActionListener(e -> showThreadLines(thread));
+                menu.add(lines);
+            }
             menu.addSeparator();
         }
         String sel = view.selectionForFind();
@@ -1758,6 +1773,75 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     /** Offers the Threads view when the file has Java thread dumps in it. */
     private final JPanel dumpsBanner = dumpsBanner();
+    private JPanel banners;
+
+    /** Shows the bar naming the log's JVM, above the other banners. */
+    void setJvmBar(javax.swing.JComponent bar) {
+        bar.setAlignmentX(dumpsBanner.getAlignmentX());
+        banners.add(bar, 0);
+        banners.revalidate();
+    }
+
+    /** The thread a line names (its thread column), or null. */
+    String threadOf(long line) {
+        if (line < 0 || logFormat == null || !logFormat.columns().contains("thread")) {
+            return null;
+        }
+        String[] buf = new String[1];
+        doc.readLines(line, 1, buf);
+        String t = buf[0] == null ? null : logFormat.value(buf[0], "thread");
+        return t == null || t.isBlank() ? null : t.strip();
+    }
+
+    /**
+     * Shows only the lines a thread wrote. The log may have cut the name short (Spring Boot
+     * keeps the last 15 characters), so the form it uses is looked up first.
+     */
+    void showThreadLines(String thread) {
+        String logged = loggedThreadName(thread);
+        String q = logged.replaceAll("[\\\\.^$|?*+()\\[\\]{}]", "\\\\$0"); // readable in the filter
+        boolean bracketed = logFormat != null && (logFormat.regex().contains("\\[(?<thread>")
+                || logFormat.regex().contains("\\[\\s*(?<thread>"));
+        String regex = bracketed ? "\\[\\s*" + q + "\\s*\\]" : "(?<![\\w-])" + q + "(?![\\w-])";
+        FilterDef d = filterPanel.addFilter(regex, FilterDef.Action.SHOW);
+        if (d != null) {
+            d.matchCase = true;
+            d.regex = true;
+            filterPanel.refreshRow(d);
+            filtersChanged();
+            bottom.setSelectedComponent(filterPanel);
+        }
+        setMatchingOnly(true);
+    }
+
+    /** How this log writes a thread's name: as it is, or cut short; the name itself if it can't tell. */
+    String loggedThreadName(String thread) {
+        if (logFormat == null || !logFormat.columns().contains("thread")) {
+            return thread;
+        }
+        long n = Math.min(doc.lineCount(), 5_000);
+        String[] buf = new String[(int) Math.min(n, 2048)];
+        String best = null;
+        for (long i = 0; i < n; i += buf.length) {
+            int c = (int) Math.min(buf.length, n - i);
+            doc.readLines(i, c, buf);
+            for (int j = 0; j < c; j++) {
+                String v = buf[j] == null ? null : logFormat.value(buf[j], "thread");
+                if (v == null) {
+                    continue;
+                }
+                v = v.strip();
+                if (v.equals(thread)) {
+                    return thread;
+                }
+                if (v.length() >= 6 && (thread.endsWith(v) || thread.startsWith(v))
+                        && (best == null || v.length() > best.length())) {
+                    best = v;
+                }
+            }
+        }
+        return best != null ? best : thread;
+    }
 
     private JPanel dumpsBanner() {
         JPanel p = new JPanel(new BorderLayout(10, 0));

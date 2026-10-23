@@ -32,12 +32,26 @@ public final class FixtureApp {
 
     /** With {@code memory}: also threads that leak heap and native memory, and one calling {@link #work}. */
     public static Process start(boolean memory) throws Exception {
+        return start(memory, null);
+    }
+
+    /**
+     * Also with {@code jvmArgs} (a JMX port, say), and, with {@code log}, writing a log file in
+     * Spring Boot's layout (its startup line, then lines from named threads) while it runs.
+     */
+    public static Process start(boolean memory, java.nio.file.Path log, String... jvmArgs) throws Exception {
         String exe = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")
                 ? "java.exe" : "java";
         java.nio.file.Path javaExe = java.nio.file.Path.of(System.getProperty("java.home"), "bin", exe);
-        Process p = new ProcessBuilder(javaExe.toString(), "-cp", System.getProperty("java.class.path"),
-                memory ? "-Xmx512m" : "-Xmx64m", FixtureApp.class.getName(), memory ? "memory" : "threads")
-                .redirectErrorStream(true).start();
+        java.util.List<String> cmd = new java.util.ArrayList<>(java.util.List.of(javaExe.toString(), "-cp",
+                System.getProperty("java.class.path"), memory ? "-Xmx512m" : "-Xmx64m"));
+        cmd.addAll(java.util.List.of(jvmArgs));
+        cmd.add(FixtureApp.class.getName());
+        cmd.add(memory ? "memory" : "threads");
+        if (log != null) {
+            cmd.add(log.toString());
+        }
+        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
         java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream(),
                 java.nio.charset.StandardCharsets.UTF_8));
         String line;
@@ -157,6 +171,9 @@ public final class FixtureApp {
                 }
             });
         }
+        if (args.length > 1) {
+            writeLog(java.nio.file.Path.of(args[1]));
+        }
         sleep(400);
         System.out.println("ready");
         System.out.flush();
@@ -165,5 +182,35 @@ public final class FixtureApp {
             // keep going
         }
         System.exit(0);
+    }
+
+    /** Keeps the log open and writes to it from two named threads (as Spring Boot would). */
+    private static void writeLog(java.nio.file.Path file) throws Exception {
+        java.io.PrintWriter out = new java.io.PrintWriter(java.nio.file.Files.newBufferedWriter(file,
+                java.nio.charset.StandardCharsets.UTF_8), true);
+        long pid = ProcessHandle.current().pid();
+        String host = java.net.InetAddress.getLocalHost().getHostName();
+        Object lock = new Object();
+        java.util.function.Consumer<String> line = msg -> {
+            synchronized (lock) {
+                out.printf("%s  INFO %d --- [%15.15s] l.jvm.FixtureApp                         : %s%n",
+                        java.time.OffsetDateTime.now(), pid, lastChars(Thread.currentThread().getName(), 15), msg);
+            }
+        };
+        line.accept("Starting FixtureApp v1.0 using Java " + System.getProperty("java.version") + " on " + host
+                + " with PID " + pid + " (" + System.getProperty("user.dir") + " started by "
+                + System.getProperty("user.name") + " in " + System.getProperty("user.dir") + ")");
+        for (String name : new String[] {"http-nio-8080-exec-10", "scheduler-1"}) {
+            start(name, () -> {
+                while (true) {
+                    line.accept("tick");
+                    sleep(200);
+                }
+            });
+        }
+    }
+
+    private static String lastChars(String s, int n) {
+        return s.length() <= n ? s : s.substring(s.length() - n);
     }
 }

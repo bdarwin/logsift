@@ -70,6 +70,11 @@ final class ThreadsTab extends JPanel {
 
         ThreadDump take() throws Exception;
 
+        /** False once closed, or the JVM has gone. */
+        default boolean isOpen() {
+            return true;
+        }
+
         default void close() {
         }
     }
@@ -96,6 +101,9 @@ final class ThreadsTab extends JPanel {
     private final JButton heapButton = new JButton("Heap…", Icons.of("memory-stick"));
     private Runnable heap;
     private final JButton save = new JButton("Save…", Icons.of("save"));
+    private final JButton inLog = new JButton("Lines in Log", Icons.of("file-text"));
+    private java.util.function.Consumer<String> showInLog;
+    private String logName;
     private final JLabel status = new JLabel(" ");
     private volatile AtomicBoolean recording;
 
@@ -162,7 +170,7 @@ final class ThreadsTab extends JPanel {
         right.setOpaque(false);
         status.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
         right.add(status);
-        for (JButton b : new JButton[] {take, record, stop, profileButton, heapButton, save}) {
+        for (JButton b : new JButton[] {take, record, stop, profileButton, heapButton, inLog, save}) {
             b.putClientProperty("JButton.buttonType", "toolBarButton");
             b.setFocusable(false);
             right.add(b);
@@ -193,6 +201,14 @@ final class ThreadsTab extends JPanel {
             }
         });
         save.addActionListener(e -> saveDialog());
+        inLog.setVisible(false);
+        inLog.setEnabled(false);
+        inLog.addActionListener(e -> {
+            JThread t = selectedThread();
+            if (t != null && showInLog != null) {
+                showInLog.accept(t.name());
+            }
+        });
         take.setVisible(capture != null);
         record.setVisible(capture != null);
         stop.setVisible(false);
@@ -288,6 +304,92 @@ final class ThreadsTab extends JPanel {
         }
         if (capture != null) {
             capture.close();
+        }
+    }
+
+    /** Offers to show a thread's lines in the log {@code name} (the log these threads write). */
+    void setLog(String name, java.util.function.Consumer<String> show) {
+        logName = name;
+        showInLog = show;
+        inLog.setVisible(show != null);
+        inLog.setToolTipText("Show the selected thread's lines in " + name);
+        inLog.setEnabled(selectedThread() != null);
+    }
+
+    String logName() {
+        return logName;
+    }
+
+    String selectedThreadNameForTest() {
+        JThread t = selectedThread();
+        return t == null ? null : t.name();
+    }
+
+    JButton inLogButtonForTest() {
+        return inLog;
+    }
+
+    private JThread selectedThread() {
+        int r = table.getSelectedRow();
+        return r >= 0 && r < rows.size() ? rows.get(r).thread() : null;
+    }
+
+    /**
+     * Selects the thread a log calls {@code logged}: the same name, or a name the log cut short
+     * (Spring Boot keeps the last 15 characters: {@code nio-8080-exec-1}). Looks in the dump shown,
+     * then the newest. False if no thread has that name.
+     */
+    boolean selectThreadNamed(String logged) {
+        String n = logged == null ? "" : logged.strip();
+        if (n.isEmpty() || dumps.isEmpty()) {
+            return false;
+        }
+        List<Integer> order = new ArrayList<>();
+        if (current >= 0) {
+            order.add(current);
+        }
+        for (int i = dumps.size() - 1; i >= 0; i--) {
+            if (i != current) {
+                order.add(i);
+            }
+        }
+        for (int d : order) {
+            JThread t = threadNamed(dumps.get(d), n);
+            if (t != null) {
+                if (d != current) {
+                    setCurrent(d);
+                }
+                views.setSelectedIndex(0);
+                selectKey(t.key());
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True if a dump in the tab has a thread a log names {@code n}. */
+    static boolean threadNamedIn(ThreadsTab tab, String n) {
+        return tab.dumps.stream().anyMatch(d -> threadNamed(d, n.strip()) != null);
+    }
+
+    /** The thread of a dump a log names {@code n} (maybe cut short), or null. */
+    static JThread threadNamed(ThreadDump dump, String n) {
+        JThread cut = null;
+        for (JThread t : dump.threads()) {
+            if (t.name().equals(n)) {
+                return t;
+            }
+            if (cut == null && n.length() >= 6 && (t.name().endsWith(n) || t.name().startsWith(n))) {
+                cut = t;
+            }
+        }
+        return cut;
+    }
+
+    /** Takes one more dump (a live tab). */
+    void takeDumpNow() {
+        if (capture != null && recording == null) {
+            takeDumps(1, 0);
         }
     }
 
@@ -677,11 +779,39 @@ final class ThreadsTab extends JPanel {
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
                 showSelected();
+                inLog.setEnabled(selectedThread() != null);
             }
         });
         table.addMouseListener(new MouseAdapter() {
             @Override
+            public void mouseReleased(MouseEvent e) {
+                popup(e);
+            }
+
+            private void popup(MouseEvent e) {
+                if (!e.isPopupTrigger() || showInLog == null) {
+                    return;
+                }
+                int r = table.rowAtPoint(e.getPoint());
+                if (r < 0 || r >= rows.size() || rows.get(r).thread() == null) {
+                    return;
+                }
+                table.getSelectionModel().setSelectionInterval(r, r);
+                String name = rows.get(r).thread().name();
+                javax.swing.JPopupMenu m = new javax.swing.JPopupMenu();
+                javax.swing.JMenuItem mi = new javax.swing.JMenuItem("Show Lines of “" + name + "” in " + logName,
+                        Icons.of("file-text"));
+                mi.addActionListener(ev -> showInLog.accept(name));
+                m.add(mi);
+                m.show(table, e.getX(), e.getY());
+            }
+
+            @Override
             public void mousePressed(MouseEvent e) {
+                popup(e);
+                if (e.isPopupTrigger()) {
+                    return;
+                }
                 int r = table.rowAtPoint(e.getPoint());
                 if (r >= 0 && r < rows.size() && rows.get(r).thread() == null) {
                     toggle(rows.get(r).group());

@@ -52,6 +52,27 @@ class LogFormatTest {
     }
 
     @Test
+    void springBootsLayout() {
+        String boot3 = "2026-10-22T10:00:00.123+02:00  INFO 4242 --- [orders] [nio-8080-exec-1] c.a.o.Api"
+                + "                                : order 7 placed";
+        LogFormat f = detect(boot3);
+        assertEquals("Spring Boot (time level pid --- [thread] logger : message)", f.name());
+        String[] v = f.split(boot3, null);
+        assertEquals("4242", v[f.columns().indexOf("pid")]);
+        assertEquals("orders", v[f.columns().indexOf("app")]);
+        assertEquals("nio-8080-exec-1", v[f.columns().indexOf("thread")]);
+        assertEquals("c.a.o.Api", v[f.columns().indexOf("logger")]);
+        assertEquals("order 7 placed", v[f.columns().indexOf("message")]);
+        String boot2 = "2021-05-01 10:00:00.000  WARN 77 --- [           main] c.a.Billing                      : slow";
+        f = detect(boot2);
+        v = f.split(boot2, null);
+        assertEquals("main", v[f.columns().indexOf("thread")]);
+        assertNull(v[f.columns().indexOf("app")]);
+        assertEquals("WARN", v[f.columns().indexOf("level")]);
+        assertEquals("slow", v[f.columns().indexOf("message")]);
+    }
+
+    @Test
     void countsColumnValuesLikeNaive() throws Exception {
         Path p = dir.resolve("c.log");
         LogGenerator.generate(p, 4 << 20, 9);

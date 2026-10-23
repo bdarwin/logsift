@@ -97,6 +97,10 @@ final class HeapTab extends JPanel {
         dump.putClientProperty("JButton.buttonType", "toolBarButton");
         dump.setToolTipText("Write every object in the heap to a .hprof file, for a heap analyzer");
         dump.addActionListener(e -> heapDumpDialog());
+        if (target.noHeapDump() != null) {
+            dump.setEnabled(false);
+            dump.setToolTipText(target.noHeapDump());
+        }
         bar.setPreferredSize(new Dimension(140, 12));
         bar.setVisible(false);
         status.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
@@ -190,6 +194,10 @@ final class HeapTab extends JPanel {
 
     boolean isBusy() {
         return busy != null;
+    }
+
+    boolean canHeapDumpForTest() {
+        return dump.isEnabled();
     }
 
     int snapshotCountForTest() {
