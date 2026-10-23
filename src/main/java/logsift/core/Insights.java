@@ -17,7 +17,8 @@ public final class Insights {
 
     public enum Severity { ERROR, WARN, INFO, OK }
 
-    public enum Kind { BURST, ERROR_KIND, NEW_ERROR, EXCEPTION, WARNING_KIND, SILENCE, RESTART, NOISE, CALM }
+    public enum Kind { BURST, ERROR_KIND, NEW_ERROR, EXCEPTION, UNFINISHED, SPIKE, WARNING_KIND, SILENCE, RESTART, NOISE,
+        CALM }
 
     /**
      * One finding. {@code line}: where to go (or -1); {@code from}/{@code to}: a time range to
@@ -48,21 +49,71 @@ public final class Insights {
 
     /** The report, with the most frequent root causes of the log's exceptions (null: none looked for). */
     public static Report analyze(Input in, Exceptions.Result exceptions) {
+        return analyze(in, exceptions, null);
+    }
+
+    /** The report with the exceptions' root causes, and what never ended or got slow (null: not looked for). */
+    public static Report analyze(Input in, Exceptions.Result exceptions, Metrics metrics) {
         Report r = analyze(in);
-        if (exceptions == null || exceptions.groups().isEmpty()) {
+        boolean noEx = exceptions == null || exceptions.groups().isEmpty();
+        if (noEx && (metrics == null || metrics.isEmpty())) {
             return r;
         }
         List<Finding> out = new ArrayList<>(r.findings());
-        out.removeIf(f -> f.kind == Kind.CALM);
         boolean timed = r.firstTime() != TimeFormat.NONE;
         WITH_DATE.set(timed && r.lastTime() - r.firstTime() > 20 * 3_600_000L);
         try {
-            out.addAll(exceptionKinds(in, exceptions, timed));
+            if (!noEx) {
+                out.addAll(exceptionKinds(in, exceptions, timed));
+            }
+            if (metrics != null) {
+                out.addAll(measurements(metrics, timed));
+            }
         } finally {
             WITH_DATE.remove();
         }
+        if (out.stream().anyMatch(f -> f.kind != Kind.CALM && (f.severity == Severity.ERROR || f.severity == Severity.WARN))) {
+            out.removeIf(f -> f.kind == Kind.CALM);
+        }
         out.sort(Comparator.comparingInt((Finding f) -> f.severity.ordinal()).thenComparingInt(f -> order(f.kind)));
         return new Report(r.summary(), r.firstTime(), r.lastTime(), r.lines(), r.errors(), r.warnings(), out);
+    }
+
+    /** Things that started and never ended, and measurements that got far worse for a while. */
+    static List<Finding> measurements(Metrics m, boolean timed) {
+        List<Finding> out = new ArrayList<>();
+        for (Spans.Kind k : m.spans().kinds()) {
+            if (k.unfinishedCount() == 0 || out.size() >= 2) {
+                continue;
+            }
+            Spans.Span first = k.unfinished().get(0);
+            String what = k.name();
+            out.add(new Finding(Kind.UNFINISHED, Severity.WARN,
+                    String.format("%,d %s started and never ended", k.unfinishedCount(), what),
+                    "First: " + (first.key() == null ? "" : first.key() + " ")
+                            + (timed && first.start() != TimeFormat.NONE ? "at " + time(first.start()) : "")
+                            + String.format("   ·   %,d ended, usually after %s", k.count(),
+                                    Numbers.Unit.MILLIS.format(Math.max(0, k.median()))),
+                    first.startLine(), TimeFormat.NONE, TimeFormat.NONE, null));
+        }
+        if (timed) {
+            List<Numbers.Spike> spikes = new ArrayList<>();
+            for (Numbers.Series s : m.numbers()) {
+                spikes.addAll(Numbers.spikes(s));
+            }
+            spikes.sort(Comparator.comparingDouble((Numbers.Spike x) -> x.median() / x.usual()).reversed());
+            for (Numbers.Spike sp : spikes.subList(0, Math.min(2, spikes.size()))) {
+                Numbers.Unit u = sp.series().unit();
+                String name = sp.series().name();
+                out.add(new Finding(Kind.SPIKE, Severity.WARN,
+                        "High: " + (name.length() > 70 ? name.substring(0, 67) + "…" : name) + ", "
+                                + time(sp.from()) + " – " + time(sp.to()),
+                        "Median " + u.format(sp.median()) + " then, usually " + u.format(sp.usual()) + "   ·   max "
+                                + u.format(sp.max()),
+                        sp.line(), sp.from(), sp.to() + 1000, null));
+            }
+        }
+        return out;
     }
 
     /** The exceptions that happen most, by root cause and where it was thrown. */
@@ -135,12 +186,14 @@ public final class Insights {
             case BURST -> 0;
             case NEW_ERROR -> 1;
             case EXCEPTION -> 2;
-            case RESTART -> 3;
-            case SILENCE -> 4;
-            case ERROR_KIND -> 5;
-            case WARNING_KIND -> 6;
-            case NOISE -> 7;
-            case CALM -> 8;
+            case SPIKE -> 3;
+            case UNFINISHED -> 4;
+            case RESTART -> 5;
+            case SILENCE -> 6;
+            case ERROR_KIND -> 7;
+            case WARNING_KIND -> 8;
+            case NOISE -> 9;
+            case CALM -> 10;
         };
     }
 

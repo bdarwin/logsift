@@ -4181,6 +4181,100 @@ class VisualTest {
         }
     }
 
+    @Test
+    @Order(43)
+    void durationsAndNumbers() throws Exception {
+        // a shop: orders placed (slow for two minutes), sync jobs on a pool (one hangs), queue sizes
+        java.util.List<String[]> ev = new java.util.ArrayList<>();
+        long t0 = java.time.LocalDateTime.of(2026, 10, 21, 10, 0, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
+        java.util.Random rnd = new java.util.Random(11);
+        for (int i = 0; i < 1800; i++) {
+            long t = t0 + i * 1000L;
+            boolean slow = i >= 900 && i < 1020;
+            int ms = slow ? 2500 + rnd.nextInt(3000) : 60 + rnd.nextInt(120);
+            ev.add(new String[] {Long.toString(t), "INFO ", "http-nio-8080-exec-" + (i % 8 + 1), "c.a.shop.OrderController",
+                "order " + (5000 + i) + " placed in " + ms + " ms"});
+            if (i % 10 == 0) {
+                ev.add(new String[] {Long.toString(t + 3), "DEBUG", "metrics", "c.a.shop.Queue", "queue size=" + (slow ? 80 + rnd.nextInt(40) : rnd.nextInt(12))});
+            }
+            if (i % 30 == 0) {
+                String job = "sync-" + (i / 30);
+                ev.add(new String[] {Long.toString(t + 5), "INFO ", "jobs-" + (i / 30 % 3), "c.a.shop.SyncJob", "Started job " + job});
+                if (i / 30 != 33) { // sync-33 never ends
+                    long took = i / 30 == 45 ? 21_000 : 800 + rnd.nextInt(1500);
+                    ev.add(new String[] {Long.toString(t + 5 + took), "INFO ", "jobs-" + (i / 30 % 3), "c.a.shop.SyncJob",
+                        "Finished job " + job + " in " + took + " ms"});
+                }
+            }
+        }
+        ev.sort(java.util.Comparator.comparingLong(e -> Long.parseLong(e[0])));
+        StringBuilder sb = new StringBuilder();
+        for (String[] e : ev) {
+            sb.append(TimelineBar.formatFull(Long.parseLong(e[0])).substring(0, 23)).append(' ').append(e[1]).append(" [")
+                    .append(e[2]).append("] ").append(e[3]).append(" - ").append(e[4]).append('\n');
+        }
+        Path log = dir.resolve("shop-metrics.log");
+        Files.writeString(log, sb.toString());
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.openFiles(List.of(log));
+            return null;
+        });
+        LogTab tab = waitForTab("shop-metrics.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.metricsPanel().metrics() != null && tab.insightsPanel().report() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the measurements (with Insights)");
+        MetricsPanel mp = onEdt(tab::metricsPanel);
+        logsift.core.Metrics m = onEdt(mp::metrics);
+        assertEquals(1, m.spans().kinds().size(), "" + m.spans().kinds());
+        logsift.core.Spans.Kind job = m.spans().kinds().get(0);
+        assertEquals("job", job.name());
+        assertEquals(59, job.count());
+        assertEquals(1, job.unfinishedCount());
+        assertEquals("sync-33", job.unfinished().get(0).key());
+        assertEquals("sync-45", job.slowest().get(0).key());
+        assertEquals(21_000, job.max());
+        List<String> names = m.numbers().stream().map(logsift.core.Numbers.Series::name).toList();
+        assertEquals(List.of("order … placed in # ms", "queue size=#"), names, "not the job's own numbers");
+        // Insights: what never ended, and when orders got slow
+        List<logsift.core.Insights.Finding> fs = onEdt(() -> tab.insightsPanel().report().findings());
+        assertTrue(fs.stream().anyMatch(f -> f.kind() == logsift.core.Insights.Kind.UNFINISHED
+                && f.title().equals("1 job started and never ended")), fs.stream().map(logsift.core.Insights.Finding::title).toList().toString());
+        logsift.core.Insights.Finding spike = fs.stream().filter(f -> f.kind() == logsift.core.Insights.Kind.SPIKE
+                && f.title().contains("order … placed in # ms")).findFirst().orElseThrow();
+        assertTrue(spike.title().contains("10:15:"), spike.title());
+        // the chart of order times, and its slowest lines
+        onEdt(() -> {
+            tab.insightsPanel();
+            setBottomFor(tab, mp);
+            int row = names.indexOf("order … placed in # ms") + 1; // after the job
+            mp.itemsForTest().setRowSelectionInterval(row, row);
+            return null;
+        });
+        assertTrue(onEdt(() -> mp.examplesForTest().getRowCount()) > 10);
+        settle();
+        shot("80-metrics-numbers");
+        onEdt(() -> {
+            mp.itemsForTest().setRowSelectionInterval(0, 0);
+            mp.examplesForTest().setRowSelectionInterval(0, 0);
+            return null;
+        });
+        assertEquals("never ended", onEdt(() -> mp.examplesForTest().getValueAt(0, 1)));
+        assertEquals(job.unfinished().get(0).startLine(), onEdt(tab::currentLine), "a click goes to the line");
+        settle();
+        shot("81-metrics-durations");
+    }
+
+    private static void setBottomFor(LogTab tab, java.awt.Component c) {
+        javax.swing.JTabbedPane bottom = (javax.swing.JTabbedPane) javax.swing.SwingUtilities
+                .getAncestorOfClass(javax.swing.JTabbedPane.class, c);
+        bottom.setSelectedComponent(c);
+    }
+
     /** Waits until the current tab is a log titled so. */
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {

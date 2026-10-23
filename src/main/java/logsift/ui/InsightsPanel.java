@@ -51,6 +51,9 @@ final class InsightsPanel extends JPanel {
         /** Shows the exception that starts at this line in the Exceptions tab. */
         default void showException(long line) {}
 
+        /** Shows the measurement with this line in the Metrics tab. */
+        default void showMetric(long line) {}
+
         /** The report changed (for the tab title). */
         void reportChanged(Insights.Report report);
     }
@@ -259,6 +262,9 @@ final class InsightsPanel extends JPanel {
         if (f.template() != null) {
             actions.add(action("Hide", "Hide lines of this message", () -> host.hide(f.template())));
         }
+        if (f.kind() == Insights.Kind.UNFINISHED || f.kind() == Insights.Kind.SPIKE) {
+            actions.add(action("Show in Metrics", "Its chart over time, and the lines", () -> host.showMetric(f.line())));
+        }
         if (f.kind() == Insights.Kind.EXCEPTION) {
             actions.add(action("Show in Exceptions", "Its stack, where it was thrown, and every time it happened",
                     () -> host.showException(f.line())));
@@ -323,6 +329,8 @@ final class InsightsPanel extends JPanel {
             case BURST -> "flame";
             case NEW_ERROR -> "sparkles";
             case EXCEPTION -> "bug";
+            case UNFINISHED -> "timer";
+            case SPIKE -> "activity";
             case ERROR_KIND -> "circle-alert";
             case WARNING_KIND -> "triangle-alert";
             case SILENCE -> "circle-pause";

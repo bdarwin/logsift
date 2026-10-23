@@ -19,6 +19,7 @@
 - **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs and CSV files work too, with a pretty-printed details view.
 - **Your own log formats.** Drop a log file and Logsift works out its layout, or paste your log4j, logback, java.util.logging or Python logging setup (even a whole `logback.xml` or `log4j2.xml`: each layout in it becomes a format). A live preview shows how lines split into columns.
 - **Exceptions by root cause.** Java stack traces and Python tracebacks grouped by what went wrong and where in your own code: "60 × NullPointerException at PriceCalculator.discount", with the stack, what wrapped it, and each time it happened.
+- **Metrics from the messages.** How long things that start and end took ("Started job sync-7" … "Finished job sync-7"), the ones that never ended, and the numbers messages report (`placed in 345 ms`, `queue size=42`) as charts over time, with the slowest lines a click away.
 - **Follow a request.** Right-click a line with a trace or request ID (or select any text) → **Follow**: the request's lines in order, across threads, open logs or a whole folder (zips too), with the time between them and the longest wait marked.
 - **Tree of loggers.** Loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
 - **Zips, .gz files and the web.** Drop a `.zip` and it opens as a tab with its folders and files (zips inside it too); open any of them as a log, with everything a log has, merge them by time, or search them all. A `.gz` opens directly. Open logs from web addresses, or download several and search them together.
@@ -207,6 +208,15 @@ The **Exceptions** tab groups the log's exceptions by their **root cause** (the 
 - The right side shows the root cause's stack with your own frames as links and runs of framework frames folded, then what caught and wrapped it. **◀ ▶** step through every time it happened, and the log goes there.
 - **Open the source:** click one of your frames (or right-click a stack line in the log → **Open … in Editor**) and the file opens at that line. Logsift finds it in your **source folders** (Settings → Source Code; it asks for one the first time): Java and Kotlin files by package (`com/acme/shop/PriceCalculator.java`, inner classes too), Python files by the most folders in common with the path on the server (`/app/orders/payment.py` → `orders/payment.py`). Build output, dependencies and virtual environments are skipped. It opens in IntelliJ IDEA or PyCharm when installed, else Visual Studio Code, or the editor you choose there, or your own command (`{file}` and `{line}` are filled in).
 - It fills in with Insights, which names the two most frequent root causes; **Show in Exceptions** goes to one. Java (`at …`, `Caused by:`, `... 5 more`, `Suppressed:`) and Python (`Traceback (most recent call last):`, chained with "During handling of the above exception…") stacks are read.
+
+## Metrics
+
+The **Metrics** tab shows what the log measures, without any setup:
+
+- **Things that start and end:** message kinds that open and close something (*Started job sync-7* … *Finished job sync-7*, *Processing request r-12* … *Completed request r-12*, *Begin import* … *Import complete*) are found by their words. Their lines are matched by the value they share (the job, the request), or else by thread. For each: how many, the median, 95th percentile and longest time, and the ones that **never ended**, which are often what hung.
+- **Numbers in messages:** a number with a unit after it (`ms`, `s`, `MB`, `%`, `rows`) or a word like *took*, *size*, *latency* or *queue* before it is a measurement: *order … placed in **#** ms*, *queue size=**#***. Order numbers and IDs are not. Durations are in milliseconds and sizes in bytes, whatever unit each line used (`1.5s`, `300ms`).
+- Select one for a **chart over time**: every value as a dot (orange when far above the median), the 95th percentile as a line, and things that never ended as red marks along the top. Hover for a value, click a dot to go to its line. Beside it, the lines that never ended and the slowest or largest ones.
+- **Insights** reports what never ended (*1 job started and never ended*) and when a measurement was far above usual (*High: order … placed in # ms, 10:15:00 – 10:16:59 · median 4.1 s then, usually 125 ms*), with **Show these minutes** and **Show in Metrics**. For files over 512 MB this is worked out when the Metrics tab is opened.
 
 ## Following a request
 

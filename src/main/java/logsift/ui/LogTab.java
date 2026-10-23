@@ -101,6 +101,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final InsightsPanel insights;
     private RequestPanel request; // made the first time a request is followed
     private final ExceptionsPanel exceptions;
+    private final MetricsPanel metrics;
     private int insightsGeneration = -1;
     private final Bookmarks bookmarks;
     private final BookmarksPanel bookmarksPanel;
@@ -303,6 +304,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         messages = new MessagesPanel(messagesHost());
         insights = new InsightsPanel(insightsHost());
         exceptions = new ExceptionsPanel(exceptionsHost());
+        metrics = new MetricsPanel(metricsHost());
         bookmarks = new Bookmarks(this.path, doc::fileSize);
         bookmarkGeneration = doc.generation();
         bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
@@ -315,6 +317,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.addTab("Filters", filterPanel);
         bottom.addTab("Insights", insights);
         bottom.addTab("Exceptions", exceptions);
+        bottom.addTab("Metrics", metrics);
         results = new ResultsPanel(doc, resultsHost());
         bottom.addTab("Find results", results);
         bottom.addTab("Messages", messages);
@@ -333,6 +336,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             if (bottom.getSelectedComponent() == exceptions && exceptions.result() == null
                     && !exceptions.isRunning() && !insights.isRunning()) {
                 exceptions.start();
+            }
+            if (bottom.getSelectedComponent() == metrics && metrics.metrics() == null
+                    && !metrics.isRunning() && !insights.isRunning()) {
+                metrics.start();
             }
         });
         bottom.setPreferredSize(new Dimension(400, 210));
@@ -1360,6 +1367,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.setSelectedComponent(messages);
     }
 
+    /** Insights measure durations and numbers in files up to this size. */
+    private static final long AUTO_METRICS_BYTES = 512L << 20;
+
     /** Files up to this size get their insights by themselves once read. */
     private static final long AUTO_INSIGHTS_BYTES = 2L << 30;
 
@@ -1427,6 +1437,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     return null;
                 }
                 SwingUtilities.invokeLater(() -> exceptions.useResult(ex, n));
+                logsift.core.Metrics me = null;
+                if (doc.fileSize() <= AUTO_METRICS_BYTES) { // bigger: when the Metrics tab is opened
+                    step.accept("Measuring durations and numbers…");
+                    me = measure(m, cancel::get);
+                    if (cancel.get() || me == null) {
+                        return null;
+                    }
+                    logsift.core.Metrics found = me;
+                    SwingUtilities.invokeLater(() -> metrics.useResult(found));
+                }
                 logsift.core.TimeFormat tf = timeFormat;
                 logsift.core.TimeIndex ti = timeIndex;
                 logsift.core.TimeIndex.Samples s = ti == null || tf == null ? null : ti.samples();
@@ -1446,7 +1466,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 return logsift.core.Insights.analyze(new logsift.core.Insights.Input(n,
                         s == null ? new long[0] : s.lines(), s == null ? null : s.times(), s == null ? 0 : s.n(),
                         lastTime, matchingLines(errs), errs.matchCount(), matchingLines(warns), warns.matchCount(),
-                        m, lineTime), ex);
+                        m, lineTime), ex, me);
             }
 
             @Override
@@ -1476,6 +1496,13 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public void showMetric(long line) {
+                setBottomCollapsed(false);
+                bottom.setSelectedComponent(metrics);
+                metrics.select(line);
+            }
+
+            @Override
             public void showException(long line) {
                 showExceptionsTab();
                 exceptions.select(line);
@@ -1488,6 +1515,81 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 bottom.setTitleAt(i, problems == 0 ? "Insights" : "Insights (" + problems + ")");
                 bottom.setIconAt(i, problems == 0 ? null : Icons.of("circle-alert", new java.awt.Color(0xDC2626), 14));
                 bottom.setToolTipTextAt(i, r == null ? null : r.summary());
+            }
+        };
+    }
+
+    // ---------------------------------------------------------------- metrics
+
+    MetricsPanel metricsPanel() {
+        return metrics;
+    }
+
+    /** Durations of things that start and end, and numbers in messages (null if cancelled). */
+    logsift.core.Metrics measure(logsift.core.MessageStats.Result m, java.util.function.BooleanSupplier stop) {
+        java.util.function.BooleanSupplier halt = () -> stop.getAsBoolean() || closed;
+        return logsift.core.Metrics.analyze(m.templates(), (t, c) -> templateLines(t, halt),
+                logsift.core.RequestTrace.reader(doc::line, timeFormat, logFormat), halt);
+    }
+
+    /** The first lines of entries of a message kind (null if cancelled). */
+    private long[] templateLines(logsift.core.MessageStats.Template t, java.util.function.BooleanSupplier stop) {
+        SearchSession s = new SearchSession(doc, new SearchQuery(t.regex(), true, true, false)).start();
+        try {
+            while (!s.awaitIdle(200)) {
+                if (stop.getAsBoolean()) {
+                    return null;
+                }
+            }
+            HitList h = s.hits();
+            logsift.core.EntryFormat ef = entryFormat;
+            long[] out = new long[h.size()];
+            int k = 0;
+            for (int i = 0; i < out.length; i++) {
+                long line = h.get(i);
+                if (ef == null || i > 50_000 || ef.startsEntry(doc.line(line) == null ? "" : doc.line(line))) {
+                    out[k++] = line; // a stack trace line that happens to look the same is not one
+                }
+            }
+            return k == out.length ? out : java.util.Arrays.copyOf(out, k);
+        } finally {
+            s.close();
+        }
+    }
+
+    private MetricsPanel.Host metricsHost() {
+        return new MetricsPanel.Host() {
+            @Override
+            public logsift.core.Metrics analyze(AtomicBoolean cancel, java.util.function.Consumer<String> step) {
+                while (doc.isIndexing() || detectedGeneration != doc.generation()) {
+                    if (cancel.get() || closed) {
+                        return null;
+                    }
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+                step.accept("Grouping messages…");
+                logsift.core.MessageStats.Result m = messages.result() != null ? messages.result()
+                        : logsift.core.MessageStats.analyze(doc, entryFormat, 0, Long.MAX_VALUE, null, cancel::get, null);
+                if (cancel.get()) {
+                    return null;
+                }
+                step.accept("Measuring durations and numbers…");
+                return measure(m, cancel::get);
+            }
+
+            @Override
+            public void goToLine(long line) {
+                showLine(line);
+            }
+
+            @Override
+            public String describeLine(long line) {
+                return messagesHost().describeLine(line);
             }
         };
     }
@@ -2765,6 +2867,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         messages.cancel();
         insights.cancel();
         exceptions.cancel();
+        metrics.cancel();
         if (request != null) {
             request.cancel();
         }
