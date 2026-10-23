@@ -197,6 +197,8 @@ The **Insights** tab (next to Filters) tells you at a glance what is going on in
 - **Silences:** stretches with no lines at all, when the program was stuck, stopped or not running.
 - **Restarts:** the program started more than once.
 - **Noise:** one message that fills a big part of the log; **Hide** it to see the rest.
+- **Known problems:** about 30 problems that look the same in every log, each with **What to Try**: a database connection pool that ran out, a full thread pool, the JVM out of heap, Metaspace or threads, long GC pauses, a crash, too many open files, a full disk, a port in use, an untrusted certificate, DNS failures, timeouts, database deadlocks and lock waits, Kafka consumers thrown out of their group, rate limits, a container killed for memory; and in Python, gunicorn workers killed for taking too long, asyncio errors nobody handled, Celery retries and lost workers, MemoryError and RecursionError.
+- **Exceptions** (their most frequent root causes, see below), **things that never ended**, and **measurements that spiked** (see Metrics).
 
 Each finding has buttons to **Go to** its line, **Find all** of that message, **Show only** it or **Hide** it. **Refresh** looks again after the log grew.
 

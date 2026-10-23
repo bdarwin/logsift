@@ -4122,6 +4122,17 @@ class VisualTest {
         assertTrue(fs.stream().anyMatch(f -> f.kind() == logsift.core.Insights.Kind.EXCEPTION
                 && f.title().equals("NullPointerException at PriceCalculator.discount(PriceCalculator.java:88) (60×)")),
                 fs.stream().map(logsift.core.Insights.Finding::title).toList().toString());
+        // a known problem: the connection pool, with what to try
+        logsift.core.Insights.Finding pool = fs.stream().filter(f -> f.kind() == logsift.core.Insights.Kind.KNOWN)
+                .findFirst().orElseThrow();
+        assertEquals("The database connection pool ran out (19×)", pool.title());
+        assertEquals("db-pool", pool.known().id());
+        onEdt(() -> {
+            setBottomFor(tab, tab.insightsPanel());
+            return null;
+        });
+        settle();
+        shot("82-insights-known-problems");
         // step through the occurrences: the log follows
         onEdt(() -> {
             tab.showExceptionsTab();

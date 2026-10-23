@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Known problems in Insights:** about 30 problems that look the same in every log (a connection pool that ran out, a full thread pool, out of memory, GC pauses, untrusted certificates, timeouts, database deadlocks, Kafka rebalances, a container killed for memory, gunicorn worker timeouts, unhandled asyncio errors, Celery retries…), each with **What to Try**.
 - **Metrics:** a new tab with how long things that start and end took (matched by the job or request they name, or by thread), the ones that **never ended**, and the **numbers in messages** (durations, sizes, counts) as charts over time with their slowest lines. Insights reports what never ended and when a measurement spiked.
 - **Open the source of a stack line:** in the Exceptions tab, or right-click a stack line → **Open … in Editor**. The file is found in your source folders (Settings → Source Code) and opened at the line in IntelliJ IDEA, PyCharm, Visual Studio Code or a command of your own.
 - **Exceptions by root cause:** a new **Exceptions** tab groups Java stack traces and Python tracebacks by their root cause and where it was thrown in your own code (framework and library frames are skipped), with counts, first and last time, the stack with your frames highlighted, what wrapped it, and ◀ ▶ through each time it happened. Insights names the most frequent ones.

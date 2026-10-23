@@ -54,6 +54,9 @@ final class InsightsPanel extends JPanel {
         /** Shows the measurement with this line in the Metrics tab. */
         default void showMetric(long line) {}
 
+        /** Finds all lines matching a regex. */
+        default void findAllRegex(String regex) {}
+
         /** The report changed (for the tab title). */
         void reportChanged(Insights.Report report);
     }
@@ -265,6 +268,12 @@ final class InsightsPanel extends JPanel {
         if (f.kind() == Insights.Kind.UNFINISHED || f.kind() == Insights.Kind.SPIKE) {
             actions.add(action("Show in Metrics", "Its chart over time, and the lines", () -> host.showMetric(f.line())));
         }
+        if (f.known() != null) {
+            actions.add(action("What to Try", "What this usually means, and what to try",
+                    () -> explain(f.known())));
+            actions.add(action("Find all", "Find all lines that show it",
+                    () -> host.findAllRegex(f.known().pattern().pattern())));
+        }
         if (f.kind() == Insights.Kind.EXCEPTION) {
             actions.add(action("Show in Exceptions", "Its stack, where it was thrown, and every time it happened",
                     () -> host.showException(f.line())));
@@ -309,6 +318,22 @@ final class InsightsPanel extends JPanel {
         return p;
     }
 
+    /** What a known problem usually means, and what to try. */
+    private void explain(logsift.core.KnownProblems.Signature k) {
+        javax.swing.JEditorPane text = new javax.swing.JEditorPane("text/html", "<html><body style='width:460px'>"
+                + "<p><b>What it usually means</b></p><p>" + esc(k.why()) + "</p>"
+                + "<p style='margin-top:10px'><b>What to try</b></p><p>" + esc(k.tryThis()) + "</p></body></html>");
+        text.setEditable(false);
+        text.setOpaque(false);
+        text.putClientProperty(javax.swing.JEditorPane.HONOR_DISPLAY_PROPERTIES, true);
+        javax.swing.JOptionPane.showMessageDialog(this, text, k.title(), javax.swing.JOptionPane.INFORMATION_MESSAGE,
+                Icons.of("lightbulb", AMBER, 28));
+    }
+
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;");
+    }
+
     private static JButton action(String text, String tip, Runnable r) {
         JButton b = new JButton(text);
         b.putClientProperty("JButton.buttonType", "toolBarButton");
@@ -329,6 +354,7 @@ final class InsightsPanel extends JPanel {
             case BURST -> "flame";
             case NEW_ERROR -> "sparkles";
             case EXCEPTION -> "bug";
+            case KNOWN -> "lightbulb";
             case UNFINISHED -> "timer";
             case SPIKE -> "activity";
             case ERROR_KIND -> "circle-alert";

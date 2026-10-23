@@ -1496,6 +1496,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public void findAllRegex(String regex) {
+                host.runFindAll(new SearchQuery(regex, true, true, false));
+            }
+
+            @Override
             public void showMetric(long line) {
                 setBottomCollapsed(false);
                 bottom.setSelectedComponent(metrics);

@@ -17,15 +17,20 @@ public final class Insights {
 
     public enum Severity { ERROR, WARN, INFO, OK }
 
-    public enum Kind { BURST, ERROR_KIND, NEW_ERROR, EXCEPTION, UNFINISHED, SPIKE, WARNING_KIND, SILENCE, RESTART, NOISE,
-        CALM }
+    public enum Kind { BURST, ERROR_KIND, NEW_ERROR, KNOWN, EXCEPTION, UNFINISHED, SPIKE, WARNING_KIND, SILENCE, RESTART,
+        NOISE, CALM }
 
     /**
      * One finding. {@code line}: where to go (or -1); {@code from}/{@code to}: a time range to
      * show (or {@link TimeFormat#NONE}); {@code template}: the kind of message (or null).
      */
     public record Finding(Kind kind, Severity severity, String title, String detail, long line,
-                          long from, long to, MessageStats.Template template) {}
+                          long from, long to, MessageStats.Template template, KnownProblems.Signature known) {
+        public Finding(Kind kind, Severity severity, String title, String detail, long line, long from, long to,
+                       MessageStats.Template template) {
+            this(kind, severity, title, detail, line, from, to, template, null);
+        }
+    }
 
     /** The whole picture: a one-line summary and the findings, most important first. */
     public record Report(String summary, long firstTime, long lastTime, long lines, long errors,
@@ -56,9 +61,6 @@ public final class Insights {
     public static Report analyze(Input in, Exceptions.Result exceptions, Metrics metrics) {
         Report r = analyze(in);
         boolean noEx = exceptions == null || exceptions.groups().isEmpty();
-        if (noEx && (metrics == null || metrics.isEmpty())) {
-            return r;
-        }
         List<Finding> out = new ArrayList<>(r.findings());
         boolean timed = r.firstTime() != TimeFormat.NONE;
         WITH_DATE.set(timed && r.lastTime() - r.firstTime() > 20 * 3_600_000L);
@@ -66,6 +68,7 @@ public final class Insights {
             if (!noEx) {
                 out.addAll(exceptionKinds(in, exceptions, timed));
             }
+            out.addAll(known(in, exceptions, timed));
             if (metrics != null) {
                 out.addAll(measurements(metrics, timed));
             }
@@ -77,6 +80,23 @@ public final class Insights {
         }
         out.sort(Comparator.comparingInt((Finding f) -> f.severity.ordinal()).thenComparingInt(f -> order(f.kind)));
         return new Report(r.summary(), r.firstTime(), r.lastTime(), r.lines(), r.errors(), r.warnings(), out);
+    }
+
+    /** Problems known to look like this, with what they mean and what to try. */
+    static List<Finding> known(Input in, Exceptions.Result exceptions, boolean timed) {
+        List<Finding> out = new ArrayList<>();
+        for (KnownProblems.Match m : KnownProblems.find(in.messages == null ? null : in.messages.templates(),
+                exceptions)) {
+            KnownProblems.Signature s = m.signature();
+            String when = timed ? time(exactTime(in, m.firstLine()))
+                    + (m.count() > 1 ? " → " + time(exactTime(in, m.lastLine())) : "") : "";
+            String why = s.why().length() > 110 ? s.why().substring(0, s.why().lastIndexOf(' ', 107)) + " …" : s.why();
+            out.add(new Finding(Kind.KNOWN, s.error() ? Severity.ERROR : Severity.WARN,
+                    s.title() + String.format(" (%,d×)", m.count()),
+                    (when.isEmpty() ? "" : when + "   ·   ") + why,
+                    m.firstLine(), TimeFormat.NONE, TimeFormat.NONE, null, s));
+        }
+        return out;
     }
 
     /** Things that started and never ended, and measurements that got far worse for a while. */
@@ -185,6 +205,7 @@ public final class Insights {
         return switch (k) {
             case BURST -> 0;
             case NEW_ERROR -> 1;
+            case KNOWN -> 1;
             case EXCEPTION -> 2;
             case SPIKE -> 3;
             case UNFINISHED -> 4;
