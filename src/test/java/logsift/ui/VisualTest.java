@@ -3380,6 +3380,194 @@ class VisualTest {
         }
     }
 
+    @Test
+    @Order(39)
+    void aLogKnowsItsJvm() throws Exception {
+        // a running program that writes its log here, with a JMX port too
+        Path log = dir.resolve("fixture-app.log");
+        Files.deleteIfExists(log);
+        int port;
+        try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
+            port = s.getLocalPort();
+        }
+        Process app = logsift.jvm.FixtureApp.start(false, log, "-Dcom.sun.management.jmxremote.port=" + port,
+                "-Dcom.sun.management.jmxremote.rmi.port=" + port, "-Djava.rmi.server.hostname=127.0.0.1",
+                "-Dcom.sun.management.jmxremote.authenticate=false", "-Dcom.sun.management.jmxremote.ssl=false");
+        try {
+            waitFor(() -> {
+                try {
+                    return Files.readAllLines(log).size() > 5;
+                } catch (IOException e) {
+                    return false;
+                }
+            }, 20_000, "the program's log");
+            onEdt(() -> {
+                frame.setColumns(true);
+                frame.openFile(log);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null
+                            && frame.currentTab().path().equals(log.toAbsolutePath().normalize())
+                            && frame.jvmBarForTest(frame.currentTab()) != null
+                            && frame.jvmBarForTest(frame.currentTab()).state() == JvmBar.State.FOUND);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the bar naming the log's JVM");
+            LogTab tab = onEdt(frame::currentTab);
+            JvmBar bar = onEdt(() -> frame.jvmBarForTest(tab));
+            String text = onEdt(bar::textForTest);
+            assertTrue(text.contains("FixtureApp") && text.contains("(" + app.pid() + ")"), text);
+            // Windows can't say who has a file open: there the log's own process id finds it
+            assertTrue(text.contains(isWindows() ? "process id is in the log" : "has this log open"), text);
+            settle();
+            shot("67-log-knows-its-jvm");
+
+            // ---- a log line's thread, in a dump of the JVM (Spring Boot cut its name short)
+            assertEquals("Spring Boot (time level pid --- [thread] logger : message)",
+                    onEdt(() -> tab.logFormat().name()));
+            onEdt(() -> {
+                frame.showThread(tab, "io-8080-exec-10");
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentThreadsTab() != null && frame.currentThreadsTab().isLive()
+                            && "http-nio-8080-exec-10".equals(frame.currentThreadsTab().selectedThreadNameForTest()));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "the line's thread in a dump");
+            ThreadsTab threads = onEdt(frame::currentThreadsTab);
+            assertEquals(tab.title(), onEdt(threads::logName));
+            assertEquals(JvmBar.State.CONNECTED, onEdt(bar::state));
+            settle();
+            shot("68-log-thread-in-dump");
+
+            // ---- and back: the thread's lines in the log
+            onEdt(() -> {
+                assertTrue(threads.selectThreadNamed("scheduler-1"));
+                threads.inLogButtonForTest().doClick();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() == tab && tab.filterResultForTest().isComplete()
+                            && !tab.filterEngineForTest().isRunning() && tab.filterResultForTest().matchCount() > 0);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the thread's lines");
+            long shown = onEdt(() -> tab.filterResultForTest().matchCount());
+            long all = tab.document().lineCount();
+            assertTrue(shown > 2 && shown < all, shown + " of " + all);
+            settle();
+            shot("69-thread-lines-in-log");
+
+            // ---- the link is remembered by program: a rotated log in the same folder finds it again
+            Path rotated = dir.resolve("fixture-app.log.1");
+            Files.writeString(rotated, "2026-10-21 10:00:00.000 INFO  [main] app - an older log, no process id\n");
+            onEdt(() -> {
+                frame.openFile(rotated);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null
+                            && frame.currentTab().path().equals(rotated.toAbsolutePath().normalize())
+                            && frame.jvmBarForTest(frame.currentTab()) != null
+                            && frame.jvmBarForTest(frame.currentTab()).state() == JvmBar.State.FOUND);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the remembered JVM");
+            assertTrue(onEdt(() -> frame.jvmBarForTest(frame.currentTab()).textForTest()).contains("linked before"));
+            onEdt(() -> {
+                frame.closeCurrentTabForTest();
+                return null;
+            });
+
+            // ---- a log copied from a server: it says where it came from
+            Path copied = dir.resolve("orders-from-prod.log");
+            Files.writeString(copied, "2026-10-22T10:00:00.000+02:00  INFO 4242 --- [           main] c.a.o.OrdersApplication"
+                    + "                  : Starting OrdersApplication v1.4.2 using Java 21.0.4 on prod-7 with PID 4242"
+                    + " (/opt/orders/orders-1.4.2.jar started by ops in /opt/orders)\n");
+            onEdt(() -> {
+                frame.openFile(copied);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null
+                            && frame.currentTab().path().equals(copied.toAbsolutePath().normalize())
+                            && frame.jvmBarForTest(frame.currentTab()) != null
+                            && frame.jvmBarForTest(frame.currentTab()).state() == JvmBar.State.SUGGESTED);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "a suggestion");
+            JvmBar sg = onEdt(() -> frame.jvmBarForTest(frame.currentTab()));
+            assertTrue(onEdt(sg::textForTest).contains("orders-1.4.2.jar on prod-7 (PID 4242)"), onEdt(sg::textForTest));
+            settle();
+            shot("70-log-from-a-server");
+            onEdt(() -> {
+                sg.linkButtonForTest().doClick();
+                return null;
+            });
+            JvmDialog link = onEdt(frame::linkDialogForTest);
+            assertNotNull(link);
+            assertEquals(1, onEdt(link::whereForTest), "the SSH tab");
+            assertEquals("prod-7", onEdt(link::sshHostForTest));
+            settle();
+            shotOf(link.getRootPane(), "71-link-dialog");
+
+            // ---- through the JMX port: dumps, but heap dumps stay on that machine
+            onEdt(() -> {
+                link.setJmxForTest("127.0.0.1", port);
+                return null;
+            });
+            settle();
+            shotOf(link.getRootPane(), "72-attach-jmx");
+            onEdt(() -> {
+                link.attachSelected();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentThreadsTab() != null && frame.currentThreadsTab() != threads
+                            && frame.currentThreadsTab().isLive());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "a Threads tab over JMX");
+            ThreadsTab jmx = onEdt(frame::currentThreadsTab);
+            assertTrue(onEdt(jmx::title).contains("127.0.0.1:" + port), onEdt(jmx::title));
+            assertEquals(logsift.jvm.ThreadAnalysis.Kind.DEADLOCK, onEdt(jmx::report).findings().get(0).kind());
+            assertEquals(JvmBar.State.CONNECTED, onEdt(sg::state), "the copied log is now linked to it");
+            onEdt(() -> {
+                jmx.heapButtonForTest().doClick();
+                return null;
+            });
+            HeapTab heap = onEdt(frame::currentHeapTab);
+            assertNotNull(heap);
+            assertTrue(!onEdt(heap::canHeapDumpForTest));
+            onEdt(() -> {
+                while (frame.currentHeapTab() != null || frame.currentThreadsTab() != null) {
+                    frame.closeCurrentTabForTest();
+                }
+                return null;
+            });
+        } finally {
+            logsift.jvm.FixtureApp.stop(app);
+        }
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+    }
+
     /** Runs a profile in the tab and waits for it. */
     private static logsift.jvm.Profile profileRun(ProfileTab prof, logsift.jvm.Profiler.Mode mode, int seconds)
             throws Exception {

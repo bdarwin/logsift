@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -61,7 +62,7 @@ class SshJvmsTest {
         server.setCommandFactory((channel, command) -> new ProcessShellFactory(command, "/bin/sh", "-c",
                 "PATH=" + bin + ":/usr/bin:/bin; export PATH; " + command).createShell(channel));
         server.start();
-        app = LocalJvmsTest.startFixture();
+        app = FixtureApp.start(false, dir.resolve("app.log"));
         ssh = SshJvms.connect(new RemoteMirror.Target("127.0.0.1", server.getPort(), "ops", "", "pw", null, null),
                 null, h -> true);
     }
@@ -100,6 +101,14 @@ class SshJvmsTest {
         Set<Set<String>> deadlocks = ThreadAnalysis.deadlocks(d).stream()
                 .map(c -> c.stream().map(JThread::name).collect(Collectors.toSet())).collect(Collectors.toSet());
         assertEquals(Set.of(Set.of("worker-A", "worker-B"), Set.of("lock-1", "lock-2")), deadlocks);
+    }
+
+    @Test
+    void findsTheJvmThatHasALogOpen() throws Exception {
+        assumeTrue(Files.isDirectory(Path.of("/proc/self/fd")), "Linux servers say which process has a file open");
+        List<Long> pids = ssh.list().stream().map(JvmProcess::pid).toList();
+        assertEquals(Set.of(app.pid()), LogOrigin.openedBy(ssh, dir.resolve("app.log").toString(), pids));
+        assertEquals(Set.of(), LogOrigin.openedBy(ssh, dir.resolve("other.log").toString(), pids));
     }
 
     @Test

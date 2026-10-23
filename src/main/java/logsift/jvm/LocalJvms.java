@@ -112,33 +112,7 @@ public final class LocalJvms {
                 throw new IOException("closed");
             }
             if (mbeans != null) {
-                try {
-                    if (command.equals("GC.heap_dump")) {
-                        // not offered as a diagnostic command over JMX; the HotSpot MBean does it
-                        String file = java.util.Arrays.stream(args).filter(a -> !a.startsWith("-")).findFirst()
-                                .orElseThrow(() -> new IOException("no file for the heap dump"));
-                        boolean all = java.util.Arrays.asList(args).contains("-all");
-                        mbeans.invoke(new ObjectName("com.sun.management:type=HotSpotDiagnostic"), "dumpHeap",
-                                new Object[] {file, !all}, new String[] {String.class.getName(), boolean.class.getName()});
-                        return "Heap dump file created";
-                    }
-                    ObjectName dc = new ObjectName("com.sun.management:type=DiagnosticCommand");
-                    Object r;
-                    try {
-                        r = mbeans.invoke(dc, jmxName(command), new Object[] {args},
-                                new String[] {String[].class.getName()});
-                    } catch (javax.management.ReflectionException e) {
-                        if (args.length > 0) {
-                            throw e;
-                        }
-                        r = mbeans.invoke(dc, jmxName(command), new Object[0], new String[0]); // takes no arguments
-                    }
-                    return String.valueOf(r);
-                } catch (IOException e) {
-                    throw e;
-                } catch (Exception e) {
-                    throw new IOException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
-                }
+                return invoke(mbeans, command, args);
             }
             List<String> cmd = new ArrayList<>();
             cmd.add(jcmd.toString());
@@ -158,6 +132,39 @@ public final class LocalJvms {
                     // gone already
                 }
             }
+        }
+    }
+
+    /**
+     * Runs a diagnostic command through a JVM's MBeans. A heap dump goes through the HotSpot
+     * MBean (it is not offered as a diagnostic command over JMX); the file is written where the
+     * JVM runs.
+     */
+    static String invoke(MBeanServerConnection mbeans, String command, String... args) throws IOException {
+        try {
+            if (command.equals("GC.heap_dump")) {
+                String file = java.util.Arrays.stream(args).filter(a -> !a.startsWith("-")).findFirst()
+                        .orElseThrow(() -> new IOException("no file for the heap dump"));
+                boolean all = java.util.Arrays.asList(args).contains("-all");
+                mbeans.invoke(new ObjectName("com.sun.management:type=HotSpotDiagnostic"), "dumpHeap",
+                        new Object[] {file, !all}, new String[] {String.class.getName(), boolean.class.getName()});
+                return "Heap dump file created";
+            }
+            ObjectName dc = new ObjectName("com.sun.management:type=DiagnosticCommand");
+            Object r;
+            try {
+                r = mbeans.invoke(dc, jmxName(command), new Object[] {args}, new String[] {String[].class.getName()});
+            } catch (javax.management.ReflectionException e) {
+                if (args.length > 0) {
+                    throw e;
+                }
+                r = mbeans.invoke(dc, jmxName(command), new Object[0], new String[0]); // takes no arguments
+            }
+            return String.valueOf(r);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
         }
     }
 

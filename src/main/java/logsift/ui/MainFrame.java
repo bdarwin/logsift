@@ -498,6 +498,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         updateEmptyState();
         SwingUtilities.invokeLater(() -> tab.mainView().focusView());
+        if (tab.remoteLabel() == null) {
+            SwingUtilities.invokeLater(() -> startJvmBar(tab, null)); // after a merged log gets its labels
+        }
     }
 
     private void mergeDialog() {
@@ -601,6 +604,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         mirror.onStatus(st -> SwingUtilities.invokeLater(() -> tab.setRemoteStatus(st)));
                         mirror.follow(1000);
                         addLogTab(tab, mirror.copy());
+                        startJvmBar(tab, target);
                         int i = tabs.indexOfComponent(tab);
                         tabs.setToolTipTextAt(i, "sftp://" + target.user() + "@" + target.host() + ":"
                                 + target.port() + target.path()
@@ -687,16 +691,187 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             jvmDialog.toFront();
             return;
         }
-        Path knownHosts = Boolean.getBoolean("logsift.noKnownHosts") ? null
-                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
-        jvmDialog = new JvmDialog(this, knownHosts, this::trustHost, (source, first, capture, profiling) -> {
-            ThreadsTab tab = openThreads(source, List.of(first), capture);
-            if (profiling != null) {
-                tab.setProfiler(() -> openProfile(source, profiling.target()));
-                tab.setHeap(() -> openHeap(source, profiling.target()));
-            }
-        });
+        Path knownHosts = knownHostsFile();
+        jvmDialog = new JvmDialog(this, knownHosts, this::trustHost,
+                c -> openLiveThreads(c.source(), c.first(), c.capture(), c.target()));
         jvmDialog.setVisible(true);
+    }
+
+    /** A Threads tab of a running JVM, with its Profile and Heap buttons. */
+    private ThreadsTab openLiveThreads(String source, logsift.jvm.ThreadDump first, ThreadsTab.Capture capture,
+                                       logsift.jvm.Profiler.Target target) {
+        ThreadsTab tab = openThreads(source, List.of(first), capture);
+        if (target != null) {
+            tab.setProfiler(() -> openProfile(source, target));
+            tab.setHeap(() -> openHeap(source, target));
+        }
+        return tab;
+    }
+
+    private Path knownHostsFile() {
+        return Boolean.getBoolean("logsift.noKnownHosts") ? null
+                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+    }
+
+    // ---------------------------------------------------------------- a log's JVM
+
+    /** The JVM bar of each log tab. */
+    private final java.util.Map<LogTab, JvmBar> jvmBars = new java.util.IdentityHashMap<>();
+    private JvmDialog linkDialog;
+
+    private final JvmBar.Host jvmBarHost = new JvmBar.Host() {
+        @Override
+        public JvmConnector connector() {
+            return new JvmConnector(MainFrame.this, knownHostsFile(), MainFrame.this::trustHost);
+        }
+
+        @Override
+        public void linkDialog(JvmBar bar, JvmDialog.Suggestion s) {
+            LogTab log = logOf(bar);
+            if (log == null) {
+                return;
+            }
+            if (linkDialog != null && linkDialog.isDisplayable()) {
+                linkDialog.dispose();
+            }
+            linkDialog = new JvmDialog(MainFrame.this, knownHostsFile(), MainFrame.this::trustHost, c -> {
+                if (tabs.indexOfComponent(log) < 0) {
+                    c.capture().close(); // the log was closed meanwhile
+                    return;
+                }
+                bar.linked(c);
+                bar.showThreads(t -> { });
+            }, log.title(), s);
+            linkDialog.setVisible(true);
+        }
+
+        @Override
+        public ThreadsTab openThreads(JvmBar bar, String source, logsift.jvm.ThreadDump first,
+                                      ThreadsTab.Capture capture, logsift.jvm.Profiler.Target target) {
+            ThreadsTab tab = openLiveThreads(source, first, capture, target);
+            LogTab log = logOf(bar);
+            if (log != null) {
+                linkThreadsToLog(tab, log);
+            }
+            return tab;
+        }
+
+        @Override
+        public void openProfile(String source, logsift.jvm.Profiler.Target target) {
+            MainFrame.this.openProfile(source, target);
+        }
+
+        @Override
+        public void openHeap(String source, logsift.jvm.Profiler.Target target) {
+            MainFrame.this.openHeap(source, target);
+        }
+
+        @Override
+        public boolean selectIfOpen(java.awt.Component tab) {
+            if (tabs.indexOfComponent(tab) < 0) {
+                return false;
+            }
+            tabs.setSelectedComponent(tab);
+            return true;
+        }
+
+        @Override
+        public boolean trustHost(String message) {
+            return MainFrame.this.trustHost(message);
+        }
+
+        @Override
+        public Path knownHosts() {
+            return knownHostsFile();
+        }
+    };
+
+    private LogTab logOf(JvmBar bar) {
+        for (var e : jvmBars.entrySet()) {
+            if (e.getValue() == bar) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    JvmBar jvmBarForTest(LogTab t) {
+        return jvmBars.get(t);
+    }
+
+    JvmDialog linkDialogForTest() {
+        return linkDialog;
+    }
+
+    /** Starts looking for the JVM that writes a log ({@code sftp}: the log's server, for one read over SSH). */
+    private void startJvmBar(LogTab tab, logsift.core.RemoteMirror.Target sftp) {
+        if (Boolean.getBoolean("logsift.noJvmBar")) {
+            return;
+        }
+        Path p = tab.path();
+        String tmp = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize().toString();
+        if (sftp == null && (tab.sourceLabels() != null || p.toAbsolutePath().normalize().toString().startsWith(tmp)
+                && p.toString().contains("logsift-"))) {
+            return; // a merged log, or another copy of Logsift's own
+        }
+        JvmBar bar = new JvmBar(jvmBarHost, tab.title(), sftp == null ? p : null, tab.document().path(),
+                tab.document().charset(), sftp);
+        jvmBars.put(tab, bar);
+        tab.setJvmBar(bar);
+        bar.start();
+    }
+
+    /** The log each Threads tab belongs to (dumps in it, or of its JVM). */
+    private final java.util.Map<ThreadsTab, LogTab> threadLogs = new java.util.IdentityHashMap<>();
+
+    /** Lets a Threads tab show its threads' lines in the log they write. */
+    private void linkThreadsToLog(ThreadsTab threads, LogTab log) {
+        threadLogs.put(threads, log);
+        threads.setLog(log.title(), name -> {
+            if (tabs.indexOfComponent(log) < 0) {
+                JOptionPane.showMessageDialog(this, log.title() + " is closed.", "Threads",
+                        JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            tabs.setSelectedComponent(log);
+            log.showThreadLines(name);
+        });
+    }
+
+    private void linkCurrentLog() {
+        LogTab t = currentTab();
+        JvmBar bar = t == null ? null : jvmBars.get(t);
+        if (bar == null) {
+            JOptionPane.showMessageDialog(this, "Open the log first, then link it to the JVM that writes it.",
+                    "Link to a JVM", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        jvmBarHost.linkDialog(bar, bar.suggestion());
+    }
+
+    /** Shows a thread a log line names in a dump of the log's JVM (taking one if needed). */
+    @Override
+    public void showThread(LogTab log, String name) {
+        for (int i = tabs.getTabCount() - 1; i >= 0; i--) {
+            if (tabs.getComponentAt(i) instanceof ThreadsTab th && threadLogs.get(th) == log
+                    && ThreadsTab.threadNamedIn(th, name)) {
+                tabs.setSelectedIndex(i);
+                th.selectThreadNamed(name);
+                return;
+            }
+        }
+        JvmBar bar = jvmBars.get(log);
+        if (bar != null && bar.hasJvm()) {
+            bar.showThreads(th -> {
+                if (!th.selectThreadNamed(name)) {
+                    status.setText("No thread named " + name + " in this dump.");
+                }
+            });
+            return;
+        }
+        JOptionPane.showMessageDialog(this, "<html>There is no thread dump with <b>" + name.replace("<", "&lt;")
+                + "</b> for this log yet.<br>Link the log to its JVM (JVM menu, Link This Log to a JVM…),"
+                + " or analyze the thread dumps in it.</html>", "Threads", JOptionPane.INFORMATION_MESSAGE);
     }
 
     JvmDialog openJvmDialogForTest() {
@@ -820,7 +995,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         JOptionPane.showMessageDialog(this, "There is no Java thread dump in " + t.title() + ".",
                                 "Thread Dumps", JOptionPane.INFORMATION_MESSAGE);
                     } else {
-                        openThreads(t.title(), dumps, null);
+                        linkThreadsToLog(openThreads(t.title(), dumps, null), t);
                     }
                 });
     }
@@ -1410,6 +1585,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         JMenu jvm = menu("JVM");
         jvm.add(item("Attach to a Running JVM…", "cpu", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU | shift),
                 e -> openJvmDialog()));
+        jvm.add(item("Link This Log to a JVM…", "link", null, e -> linkCurrentLog()));
         jvm.addSeparator();
         jvm.add(item("Open Thread Dump…", "file-text", null, e -> openThreadDumpDialog()));
         jvm.add(item("Analyze Thread Dumps in This Log", "activity", null, e -> {
@@ -1577,12 +1753,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         tabs.removeTabAt(index);
         if (c instanceof LogTab t) {
+            JvmBar bar = jvmBars.remove(t);
+            if (bar != null) {
+                bar.close();
+            }
             t.close();
         } else if (c instanceof FolderSearchTab f) {
             f.close();
         } else if (c instanceof CompareTab ct) {
             ct.close();
         } else if (c instanceof ThreadsTab th) {
+            threadLogs.remove(th);
             th.close();
         } else if (c instanceof ProfileTab pt) {
             pt.close();

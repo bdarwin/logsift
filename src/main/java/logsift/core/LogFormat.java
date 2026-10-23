@@ -30,6 +30,8 @@ public final class LogFormat {
                     "^" + SOURCE + "(?<time>" + TS + ")\\s+(?<level>" + LEVEL + ")\\s+\\[(?<thread>[^\\]]*)\\]\\s+(?<logger>\\S+)\\s+-\\s(?<message>.*)$"),
             new LogFormat("log4j (time [thread] level logger - message)",
                     "^" + SOURCE + "(?<time>" + TS + ")\\s+\\[(?<thread>[^\\]]*)\\]\\s+(?<level>" + LEVEL + ")\\s+(?<logger>\\S+)\\s+-\\s(?<message>.*)$"),
+            new LogFormat("Spring Boot (time level pid --- [thread] logger : message)",
+                    "^" + SOURCE + "(?<time>" + TS + ")\\s+(?<level>" + LEVEL + ")\\s+(?<pid>\\d+)\\s+---\\s+(?:\\[(?<app>[^\\]]*)\\]\\s+)?\\[\\s*(?<thread>[^\\]]*?)\\]\\s+(?:\\[(?<correlation>[^\\]]*)\\]\\s+)?(?<logger>\\S+)\\s+:\\s(?<message>.*)$"),
             new LogFormat("Python (time - logger - level - message)",
                     "^" + SOURCE + "(?<time>" + TS + ")\\s+-\\s+(?<logger>\\S+)\\s+-\\s+(?<level>" + LEVEL + ")\\s+-\\s(?<message>.*)$"),
             new LogFormat("syslog (time host process[pid]: message)",

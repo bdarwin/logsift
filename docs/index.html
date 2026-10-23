@@ -68,7 +68,8 @@
     <li><b>Folder search</b>Search whole folders in parallel, including inside .gz and .zip files.</li>
     <li><b>Remote logs</b>Browse a server over SSH/SFTP and follow its logs live.</li>
     <li><b>Analyze</b>See top messages, compare a bad run with a good one, and merge logs by time.</li>
-    <li><b>Java threads</b>Open thread dumps or attach to a running JVM, also over SSH: deadlocks, lock queues and stuck threads, pointed out.</li>
+    <li><b>Java threads</b>Open thread dumps or attach to a running JVM, also over SSH or a JMX port: deadlocks, lock queues and stuck threads, pointed out.</li>
+    <li><b>A log knows its JVM</b>Logsift names the JVM writing a log, with its threads, profile and heap a click away. A line's thread opens its stack; a thread shows its lines.</li>
     <li><b>Profiling and memory</b>Flame graphs of CPU, allocations, memory leaks, locks, native memory and slow method calls; compare runs; what fills the heap and what grows.</li>
   </ul>
 
@@ -82,6 +83,7 @@
     <figure><img src="screenshots/compare.png" alt="Comparing two logs" loading="lazy" width="1400" height="828"><figcaption>Compare a bad run with a good one</figcaption></figure>
     <figure><img src="screenshots/threads.png" alt="Thread dumps with deadlocks and a lock queue pointed out" loading="lazy" width="1400" height="828"><figcaption>Thread dumps, explained</figcaption></figure>
     <figure><img src="screenshots/flame-graph.png" alt="A flame graph of a JVM's CPU use" loading="lazy" width="1400" height="828"><figcaption>Profiling with a flame graph</figcaption></figure>
+    <figure><img src="screenshots/log-jvm.png" alt="A log with a bar naming the JVM that writes it" loading="lazy" width="1400" height="828"><figcaption>A log knows its JVM</figcaption></figure>
     <figure><img src="screenshots/dark-mode.png" alt="Dark mode" loading="lazy" width="1400" height="828"><figcaption>Dark mode</figcaption></figure>
   </div>
 
