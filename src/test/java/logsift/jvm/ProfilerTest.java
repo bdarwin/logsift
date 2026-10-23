@@ -77,6 +77,15 @@ class ProfilerTest {
         assertTrue(fixtureWeight(p.root()) > 0, "the fixture's code: " + p.hottest(5));
     }
 
+    private static boolean cpuWithFixture(List<Profile> views) {
+        return views.get(0).title().startsWith("CPU of") && fixtureWeight(views.get(0).root()) > 0;
+    }
+
+    private static String describe(List<Profile> views) {
+        return views.stream().map(v -> v.title() + "=" + v.total() + " " + v.warnings()
+                + (v.title().startsWith("CPU of") ? " " + v.hottest(5) : "")).toList().toString();
+    }
+
     /** The weight under the fixture's own frames (outermost ones). */
     private static long fixtureWeight(Profile.Node n) {
         long sum = 0;
@@ -221,7 +230,11 @@ class ProfilerTest {
     void findsMemoryLeaks() throws Exception {
         assumeTrue(asyncProfilerHere(), "async-profiler runs here");
         // live objects: the kept byte arrays, allocated by the leaking thread
-        Profile live = run(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.LIVE, 2).get(0);
+        // a short run on a busy machine sometimes keeps no sample: try a few times
+        Profile live = null;
+        for (int i = 0; i < 3 && (live == null || weight(live, "logsift.jvm.FixtureApp.lambda$main$9") == 0); i++) {
+            live = run(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.LIVE, 2).get(0);
+        }
         assertTrue(live.total() > 0, "live objects: " + live.warnings());
         assertTrue(weight(live, "logsift.jvm.FixtureApp.lambda$main$9") > 0, live.hottest(5).toString());
         assertTrue(live.find("byte[]").size() > 0, "the class allocated is the top frame");
@@ -279,18 +292,27 @@ class ProfilerTest {
 
     private void profileWithFlightRecorder(LocalJvms.Session session, Profiler.Target target) throws Exception {
         assertTrue(target.engines().contains(Profiler.Engine.JFR));
-        List<Profile> views = target.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.CPU, 2), null, () -> false);
-        assertTrue(views.get(0).title().startsWith("CPU of"));
+        // a JVM that just started may spend a short recording elsewhere: try a few times
+        List<Profile> views = null;
+        StringBuilder tries = new StringBuilder();
+        for (int i = 0; i < 3 && (views == null || !cpuWithFixture(views)); i++) {
+            views = target.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.CPU, 2), null, () -> false);
+            tries.append("\ntry ").append(i).append(": ").append(describe(views));
+        }
+        assertTrue(views.get(0).title().startsWith("CPU of"), "the CPU view first:" + tries);
         checkFixtureSampled(views.get(0));
         assertTrue(views.stream().anyMatch(v -> v.title().startsWith("Allocations") && v.total() > 0),
                 "the same recording has allocations too: " + views.stream().map(Profile::title).toList());
         // a recording opened from a file: every kind it has
-        Path jfr = dir.resolve("rec.jfr");
-        String name = "t" + System.nanoTime();
-        session.diagnostic("JFR.start", "name=" + name, "settings=profile");
-        Thread.sleep(1500);
-        session.diagnostic("JFR.stop", "name=" + name, "filename=" + jfr);
-        List<Profile> opened = Profiler.open(jfr);
+        List<Profile> opened = null;
+        for (int i = 0; i < 3 && (opened == null || fixtureWeight(opened.get(0).root()) == 0); i++) {
+            Path jfr = dir.resolve("rec" + i + ".jfr");
+            String name = "t" + System.nanoTime();
+            session.diagnostic("JFR.start", "name=" + name, "settings=profile");
+            Thread.sleep(1500);
+            session.diagnostic("JFR.stop", "name=" + name, "filename=" + jfr);
+            opened = Profiler.open(jfr);
+        }
         checkFixtureSampled(opened.get(0));
         assertTrue(opened.size() > 1, "several views: " + opened.stream().map(Profile::title).toList());
     }

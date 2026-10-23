@@ -136,8 +136,13 @@ public final class FixtureApp {
             idle.submit(() -> { });
         }
         start("hot-loop", () -> {
+            // plain Java arithmetic: Flight Recorder samples only threads in Java code (not, say, in nanoTime)
+            long x = 88172645463325252L;
             while (true) {
-                sink += System.nanoTime() % 7;
+                x ^= x << 13;
+                x ^= x >>> 7;
+                x ^= x << 17;
+                sink = x;
             }
         });
         if (args.length > 0 && args[0].equals("memory")) {
