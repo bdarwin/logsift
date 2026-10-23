@@ -419,6 +419,16 @@ Each later feature reuses the same few building blocks: the line index, the byte
 
 **Remote logs** (`core/RemoteMirror.java`). The same idea again: a local copy fed over SFTP with offset reads (`get(path, monitor, offset)`). It only ever appends whole lines, and the remote offset is "bytes read minus the incomplete last line". If the remote file gets smaller, the copy starts over, and the document's usual truncation handling takes care of the rest.
 
+### Debugging helpers: reuse what is already known
+
+The newer analyses avoid reading the file again wherever they can, because Insights has already done the expensive part: the **message kinds** (top messages, with counts and first and last lines) and the **error and warning lines**.
+
+- **Follow a request** is one Find All for the ID as a whole token (`(?<![\w-])r-1042(?![\w-])`). The literal part lets the fast byte search do the work, and the lookarounds stop `r-1042` from matching `r-10421`. Lines of the same threads in between come from reading only the stretch between the request's first and last line. A thread stops counting once it logs another request's ID of the same kind, because then it has moved on. Across a folder, the same search runs through the folder search engine, which also reads zips in zips. Each file's few lines are enough to recognize their times and columns.
+- **Exceptions** start from three quick searches (Java `at …(` frames, Python's `Traceback` line and `File "…", line N` frames), each with a literal part, instead of one slow alternation. Nearby hits become blocks, each block is cut at entry starts, and only those lines are read and parsed. A block is grouped by its *root cause* plus the first two frames of the program's own code. Frameworks are recognized by package (`org.springframework.`, `com.zaxxer.`, `site-packages/`…), so the same bug groups together however it was wrapped and whatever its message said.
+- **Start and end pairs** are found among the message kinds by their words. A kind with a start word (*Started*, *Processing*, *Begin*) is paired with one that has an end word (*Finished*, *Completed*, *complete*) and the same remaining words (*job*). Then only those two kinds' lines are searched. Which variable part ties a start to its end is decided from the data: the part whose values in the ends are mostly found among the starts, and that differs from line to line (a job name, not a thread name). Starts and ends are then matched in line order, with a queue per value; with no such part, they are matched by thread.
+- **Numbers in messages** come from the same message kinds. A variable part followed by a unit (`ms`, `MB`, `%`) or preceded by a telling word (*took*, *size*, *queue*) is a measurement. Its kind's lines are searched, and each value is read through a regex with a capturing group in that place and turned into one unit. A *spike* is a stretch where the median of a time bucket is at least three times the overall median.
+- **Known problems** cost nothing extra: about 30 patterns are matched against the message kinds and the exception groups, not against the lines.
+
 ## 12. Java threads and profiling
 
 This part lives in its own package, `logsift.jvm`, again without UI code.

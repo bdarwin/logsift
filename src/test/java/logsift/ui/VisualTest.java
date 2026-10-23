@@ -3864,14 +3864,15 @@ class VisualTest {
         for (String[] e : events) {
             sb.append(e[1]).append('\n');
         }
-        Path log = dir.resolve("shop.log");
+        Path log = dir.resolve("shop-requests.log");
         Files.writeString(log, sb.toString());
+        System.setProperty("logsift.noJvmBar", "true"); // the test's own JVM is no part of these screenshots
         onEdt(() -> {
             frame.setColumns(true);
             frame.openFiles(List.of(log));
             return null;
         });
-        LogTab tab = waitForTab("shop.log");
+        LogTab tab = waitForTabThenBar("shop-requests.log");
         waitFor(() -> {
             try {
                 return onEdt(() -> tab.logFormat() != null && !tab.document().isIndexing());
@@ -3886,10 +3887,10 @@ class VisualTest {
             }
         }
         long start = line;
-        onEdt(() -> {
+        assertTrue(onEdt(() -> {
             tab.showLine(start);
             return tab.followCurrentRequest();
-        });
+        }), "the line has an ID: " + onEdt(() -> tab.currentLine() + " " + tab.document().line(tab.currentLine())));
         waitFor(() -> {
             try {
                 return onEdt(() -> tab.requestPanel() != null && !tab.requestPanel().isRunning()
@@ -4003,7 +4004,7 @@ class VisualTest {
         }, 30_000, "the request in the open logs");
         tr = onEdt(rp::trace);
         assertEquals("gateway.log", tr.steps().get(0).source());
-        assertEquals("shop.log", tr.steps().get(1).source());
+        assertEquals("shop-requests.log", tr.steps().get(1).source());
         assertEquals(null, tr.steps().get(1).file(), "lines of this log");
         assertEquals("gateway.log", tr.steps().get(5).source());
         // a double-click on another file's line opens it there
@@ -4092,12 +4093,13 @@ class VisualTest {
         }
         Path log = dir.resolve("orders-errors.log");
         Files.writeString(log, sb.toString());
+        System.setProperty("logsift.noJvmBar", "true"); // the test's own JVM is no part of these screenshots
         onEdt(() -> {
             frame.setColumns(false);
             frame.openFiles(List.of(log));
             return null;
         });
-        LogTab tab = waitForTab("orders-errors.log");
+        LogTab tab = waitForTabThenBar("orders-errors.log");
         waitFor(() -> {
             try {
                 return onEdt(() -> tab.exceptionsPanel().result() != null && tab.insightsPanel().report() != null);
@@ -4226,12 +4228,13 @@ class VisualTest {
         }
         Path log = dir.resolve("shop-metrics.log");
         Files.writeString(log, sb.toString());
+        System.setProperty("logsift.noJvmBar", "true"); // the test's own JVM is no part of these screenshots
         onEdt(() -> {
             frame.setColumns(true);
             frame.openFiles(List.of(log));
             return null;
         });
-        LogTab tab = waitForTab("shop-metrics.log");
+        LogTab tab = waitForTabThenBar("shop-metrics.log");
         waitFor(() -> {
             try {
                 return onEdt(() -> tab.metricsPanel().metrics() != null && tab.insightsPanel().report() != null);
@@ -4314,6 +4317,15 @@ class VisualTest {
             frame.closeCurrentTabForTest();
             return null;
         });
+    }
+
+    /** {@link #waitForTab}, then lets later logs get their JVM bar again. */
+    private LogTab waitForTabThenBar(String title) throws Exception {
+        try {
+            return waitForTab(title);
+        } finally {
+            System.clearProperty("logsift.noJvmBar");
+        }
     }
 
     /** Waits until the current tab is a log titled so. */

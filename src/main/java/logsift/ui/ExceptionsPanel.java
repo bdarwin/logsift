@@ -68,6 +68,7 @@ final class ExceptionsPanel extends JPanel {
     private AtomicBoolean running;
     private long analyzedLines = -1;
     private int at; // the occurrence shown of the selected group
+    private boolean quiet; // selecting without going to the line (results just arrived)
 
     ExceptionsPanel(Host host) {
         super(new BorderLayout());
@@ -105,7 +106,7 @@ final class ExceptionsPanel extends JPanel {
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
                 at = 0;
-                showSelected(true);
+                showSelected(!quiet);
             }
         });
 
@@ -250,7 +251,12 @@ final class ExceptionsPanel extends JPanel {
                     r.truncated() ? " (counted the first " + String.format("%,d", r.exceptions()) + ")" : ""));
         }
         if (!r.groups().isEmpty()) {
-            table.setRowSelectionInterval(0, 0);
+            quiet = true; // the log stays where it is (it may be following its end)
+            try {
+                table.setRowSelectionInterval(0, 0);
+            } finally {
+                quiet = false;
+            }
         } else {
             showStack(null);
         }

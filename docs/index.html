@@ -67,9 +67,13 @@
     <li><b>Columns, JSON and CSV</b>Time, level, thread, logger and message are parsed automatically. JSON logs and CSV files work too.</li>
     <li><b>Folder search</b>Search whole folders in parallel, including inside .gz and .zip files (zips inside zips too).</li>
     <li><b>Zips and the web</b>Open a .zip to pick its files or search them all; open logs from web addresses, or download several and search them together.</li>
+    <li><b>Follow a request</b>Right-click a trace or request ID: its lines in order across threads, open logs or a whole folder (zips too), with the longest wait marked.</li>
+    <li><b>Exceptions by root cause</b>Java and Python stacks grouped by what went wrong and where in your code; click a frame to open it in your editor.</li>
+    <li><b>Metrics from messages</b>How long jobs and requests took, which never ended, and the numbers messages report, charted over time.</li>
+    <li><b>Known problems</b>Exhausted connection pools, out of memory, worker timeouts and more, pointed out with what to try.</li>
     <li><b>Remote logs</b>Browse a server over SSH/SFTP and follow its logs live.</li>
     <li><b>Analyze</b>See top messages, compare a bad run with a good one, and merge logs by time.</li>
-    <li><b>Java threads</b>Open thread dumps or attach to a running JVM, also over SSH or a JMX port: deadlocks, lock queues and stuck threads, pointed out.</li>
+    <li><b>Java and Python threads</b>Open thread dumps (also py-spy and faulthandler) or attach to a running JVM, also over SSH or a JMX port: deadlocks, lock queues and stuck threads, pointed out.</li>
     <li><b>A log knows its JVM</b>Logsift names the JVM writing a log, with its threads, profile and heap a click away. A line's thread opens its stack; a thread shows its lines.</li>
     <li><b>Profiling and memory</b>Flame graphs of CPU, allocations, memory leaks, locks, native memory and slow method calls; compare runs; what fills the heap and what grows.</li>
   </ul>
@@ -82,6 +86,9 @@
     <figure><img src="screenshots/folder-search.png" alt="Folder search" loading="lazy" width="1400" height="828"><figcaption>Folder search, including inside .gz and .zip</figcaption></figure>
     <figure><img src="screenshots/json.png" alt="JSON log with details panel" loading="lazy" width="1400" height="828"><figcaption>JSON logs with a details panel</figcaption></figure>
     <figure><img src="screenshots/compare.png" alt="Comparing two logs" loading="lazy" width="1400" height="828"><figcaption>Compare a bad run with a good one</figcaption></figure>
+    <figure><img src="screenshots/request.png" alt="One request followed through a folder of logs and a zip" loading="lazy" width="1400" height="828"><figcaption>Follow a request through a folder of logs</figcaption></figure>
+    <figure><img src="screenshots/exceptions.png" alt="Exceptions grouped by root cause, with the stack" loading="lazy" width="1400" height="828"><figcaption>Exceptions by root cause</figcaption></figure>
+    <figure><img src="screenshots/metrics.png" alt="Order times charted over time with a spike" loading="lazy" width="1400" height="828"><figcaption>Metrics: numbers in messages over time</figcaption></figure>
     <figure><img src="screenshots/threads.png" alt="Thread dumps with deadlocks and a lock queue pointed out" loading="lazy" width="1400" height="828"><figcaption>Thread dumps, explained</figcaption></figure>
     <figure><img src="screenshots/flame-graph.png" alt="A flame graph of a JVM's CPU use" loading="lazy" width="1400" height="828"><figcaption>Profiling with a flame graph</figcaption></figure>
     <figure><img src="screenshots/log-jvm.png" alt="A log with a bar naming the JVM that writes it" loading="lazy" width="1400" height="828"><figcaption>A log knows its JVM</figcaption></figure>
