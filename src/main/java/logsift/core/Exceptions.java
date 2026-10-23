@@ -134,6 +134,23 @@ public final class Exceptions {
         "worker.org.gradle.", "org.testng.", "org.openqa.", "io.restassured.", "graphql.", "org.dataloader.",
         "io.smallrye.", "org.wildfly.", "com.ibm.", "weblogic.", "org.camunda.", "org.flywaydb.", "liquibase."};
 
+    /** The stack frame a line is ({@code at …} or {@code File "…", line …}), or null. */
+    public static Frame frameOf(String line) {
+        if (line == null) {
+            return null;
+        }
+        Matcher f = JAVA_FRAME.matcher(line);
+        if (f.find()) {
+            return javaFrame(line.strip(), f);
+        }
+        Matcher p = PY_FRAME.matcher(line);
+        if (p.find()) {
+            return new Frame(line.strip(), null, p.group(3) == null ? null : p.group(3).strip(), p.group(1),
+                    Integer.parseInt(p.group(2)), isOwnPython(p.group(1)));
+        }
+        return null;
+    }
+
     /** Groups exceptions in a log entry's lines (its head line first). Empty if it has none. */
     public static List<Thrown> parse(List<String> lines) {
         List<Thrown> py = parsePython(lines);

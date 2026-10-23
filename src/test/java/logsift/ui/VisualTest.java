@@ -4142,6 +4142,43 @@ class VisualTest {
         html = onEdt(ep::stackForTest);
         assertTrue(html.contains("1 framework frame"), "the pool's frames folded: " + html);
         assertTrue(html.contains("HikariPool.createTimeoutException"), "the first frame is always shown");
+
+        // a frame opens its source in the editor, at its line
+        Path src = dir.resolve("shop-src/src/main/java/com/acme/shop/PriceCalculator.java");
+        Files.createDirectories(src.getParent());
+        Files.writeString(src, "package com.acme.shop;\n");
+        List<List<String>> launched = new java.util.concurrent.CopyOnWriteArrayList<>();
+        SourceOpener.launchedForTest = launched::add;
+        try {
+            SourceOpener.setRoots(List.of(dir.resolve("shop-src")));
+            SourceOpener.setEditor(SourceOpener.Editor.CUSTOM);
+            SourceOpener.setCommand("\"my editor\" --goto {file}:{line}");
+            onEdt(() -> {
+                ep.tableForTest().setRowSelectionInterval(0, 0);
+                ep.openLinkForTest("frame:2:1"); // the root cause's second frame: PriceCalculator.total
+                return null;
+            });
+            waitFor(() -> !launched.isEmpty(), 10_000, "the editor");
+            assertEquals(List.of("my editor", "--goto", src.toString() + ":42"), launched.get(0));
+            SettingsDialog before = SettingsDialog.lastForTest();
+            javax.swing.SwingUtilities.invokeLater(() -> frame.showSettings(SettingsDialog.SOURCE));
+            waitFor(() -> SettingsDialog.lastForTest() != before && SettingsDialog.lastForTest() != null
+                    && SettingsDialog.lastForTest().isShowing(), 10_000, "Settings");
+            SettingsDialog sd = SettingsDialog.lastForTest();
+            settle();
+            shotOf(sd.getRootPane(), "79-settings-source-code");
+            onEdt(() -> {
+                sd.dispose();
+                return null;
+            });
+            // right-click a stack line in the log: the same
+            assertEquals(List.of("myeditor", "+42", src.toString()),
+                    SourceOpener.custom("myeditor +{line}", src, 42));
+        } finally {
+            SourceOpener.launchedForTest = null;
+            SourceOpener.setEditor(SourceOpener.Editor.AUTO);
+            SourceOpener.setRoots(List.of());
+        }
     }
 
     /** Waits until the current tab is a log titled so. */

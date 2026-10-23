@@ -30,6 +30,7 @@ import javax.swing.SpinnerNumberModel;
  */
 final class SettingsDialog extends JDialog {
     static final String FORMATS = "Log Formats";
+    static final String SOURCE = "Source Code";
 
     private static final Preferences PREFS = AppState.prefs();
     private final MainFrame frame;
@@ -47,6 +48,7 @@ final class SettingsDialog extends JDialog {
         formats = new LogFormatsPanel(sample, sampleName);
         tabs.addTab("General", general());
         tabs.addTab(FORMATS, formats);
+        tabs.addTab(SOURCE, sourceCode());
         JButton close = new JButton("Close");
         close.addActionListener(e -> dispose());
         getRootPane().setDefaultButton(close);
@@ -68,7 +70,8 @@ final class SettingsDialog extends JDialog {
     }
 
     void showTab(String name) {
-        tabs.setSelectedIndex(name != null && name.equals(FORMATS) ? 1 : 0);
+        int i = name == null ? -1 : tabs.indexOfTab(name);
+        tabs.setSelectedIndex(Math.max(0, i));
     }
 
     LogFormatsPanel formats() {
@@ -85,6 +88,100 @@ final class SettingsDialog extends JDialog {
             frame.formatsChanged();
         }
         super.dispose();
+    }
+
+    // ---------------------------------------------------------------- Source code
+
+    /** Where the program's source is, and the editor that opens it at a stack line. */
+    private JComponent sourceCode() {
+        JPanel p = new JPanel(new BorderLayout(0, 8));
+        p.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+        JLabel intro = new JLabel("<html>Click a line of a stack trace (in the Exceptions tab, or right-click → "
+                + "<b>Open … in Editor</b>) and Logsift opens that file at that line. It looks for the file "
+                + "in these folders: your projects' source code.</html>");
+        p.add(intro, BorderLayout.NORTH);
+
+        javax.swing.DefaultListModel<java.nio.file.Path> model = new javax.swing.DefaultListModel<>();
+        SourceOpener.roots().forEach(model::addElement);
+        javax.swing.JList<java.nio.file.Path> list = new javax.swing.JList<>(model);
+        list.setVisibleRowCount(6);
+        JButton add = new JButton("Add Folder…", Icons.of("folder-open"));
+        JButton remove = new JButton("Remove");
+        remove.setEnabled(false);
+        list.addListSelectionListener(e -> remove.setEnabled(list.getSelectedIndex() >= 0));
+        Runnable save = () -> SourceOpener.setRoots(java.util.Collections.list(model.elements()));
+        add.addActionListener(e -> {
+            javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+            fc.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
+            fc.setDialogTitle("The folder of a project's source code");
+            if (fc.showOpenDialog(this) == javax.swing.JFileChooser.APPROVE_OPTION && fc.getSelectedFile() != null) {
+                model.addElement(fc.getSelectedFile().toPath().toAbsolutePath().normalize());
+                save.run();
+            }
+        });
+        remove.addActionListener(e -> {
+            for (java.nio.file.Path q : list.getSelectedValuesList()) {
+                model.removeElement(q);
+            }
+            save.run();
+        });
+        JPanel buttons = new JPanel();
+        buttons.setLayout(new javax.swing.BoxLayout(buttons, javax.swing.BoxLayout.Y_AXIS));
+        buttons.add(add);
+        buttons.add(javax.swing.Box.createVerticalStrut(6));
+        buttons.add(remove);
+        JPanel folders = new JPanel(new BorderLayout(8, 0));
+        folders.add(new javax.swing.JScrollPane(list), BorderLayout.CENTER);
+        folders.add(buttons, BorderLayout.EAST);
+
+        JPanel form = new JPanel(new GridBagLayout());
+        GridBagConstraints l = new GridBagConstraints();
+        l.gridx = 0;
+        l.anchor = GridBagConstraints.WEST;
+        l.insets = new Insets(5, 0, 5, 12);
+        GridBagConstraints f = new GridBagConstraints();
+        f.gridx = 1;
+        f.anchor = GridBagConstraints.WEST;
+        f.fill = GridBagConstraints.HORIZONTAL;
+        f.insets = new Insets(5, 0, 5, 0);
+        f.weightx = 1;
+        JComboBox<SourceOpener.Editor> editor = new JComboBox<>(SourceOpener.Editor.values());
+        editor.setSelectedItem(SourceOpener.editor());
+        javax.swing.JTextField command = new javax.swing.JTextField(SourceOpener.command(), 40);
+        command.putClientProperty("JTextField.placeholderText", "myeditor --goto {file}:{line}");
+        command.setEnabled(SourceOpener.editor() == SourceOpener.Editor.CUSTOM);
+        editor.addActionListener(e -> {
+            SourceOpener.setEditor((SourceOpener.Editor) editor.getSelectedItem());
+            command.setEnabled(editor.getSelectedItem() == SourceOpener.Editor.CUSTOM);
+        });
+        command.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                SourceOpener.setCommand(command.getText());
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                SourceOpener.setCommand(command.getText());
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {}
+        });
+        add(form, l, f, "Open with", editor);
+        add(form, l, f, "Command", command);
+        note(form, l, f, "{file} and {line} are filled in. Use quotes around a path with spaces.");
+        GridBagConstraints end = new GridBagConstraints();
+        end.gridx = 0;
+        end.gridy = GridBagConstraints.RELATIVE;
+        end.weighty = 1;
+        form.add(new JLabel(), end);
+
+        JPanel center = new JPanel(new BorderLayout(0, 12));
+        center.add(folders, BorderLayout.NORTH);
+        center.add(form, BorderLayout.CENTER);
+        p.add(center, BorderLayout.CENTER);
+        return p;
     }
 
     // ---------------------------------------------------------------- General

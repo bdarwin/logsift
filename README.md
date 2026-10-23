@@ -205,6 +205,7 @@ The **Exceptions** tab groups the log's exceptions by their **root cause** (the 
 
 - Each row: how many times, the exception and its message, where, and the first and last time. Wrappers are named after it (*in NestedServletException, IllegalStateException*).
 - The right side shows the root cause's stack with your own frames as links and runs of framework frames folded, then what caught and wrapped it. **◀ ▶** step through every time it happened, and the log goes there.
+- **Open the source:** click one of your frames (or right-click a stack line in the log → **Open … in Editor**) and the file opens at that line. Logsift finds it in your **source folders** (Settings → Source Code; it asks for one the first time): Java and Kotlin files by package (`com/acme/shop/PriceCalculator.java`, inner classes too), Python files by the most folders in common with the path on the server (`/app/orders/payment.py` → `orders/payment.py`). Build output, dependencies and virtual environments are skipped. It opens in IntelliJ IDEA or PyCharm when installed, else Visual Studio Code, or the editor you choose there, or your own command (`{file}` and `{line}` are filled in).
 - It fills in with Insights, which names the two most frequent root causes; **Show in Exceptions** goes to one. Java (`at …`, `Caused by:`, `... 5 more`, `Suppressed:`) and Python (`Traceback (most recent call last):`, chained with "During handling of the above exception…") stacks are read.
 
 ## Following a request

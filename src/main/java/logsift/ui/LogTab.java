@@ -1810,6 +1810,13 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     : "Bookmark This Line");
             bm.addActionListener(e -> toggleBookmark());
             menu.add(bm);
+            logsift.core.Exceptions.Frame frame = cur < 0 ? null : logsift.core.Exceptions.frameOf(doc.line(cur));
+            if (frame != null && frame.file() != null) {
+                JMenuItem src = new JMenuItem("Open " + frame.shortText() + " in Editor", Icons.of("code"));
+                src.setToolTipText("The source file at this line, from your source folders (Settings → Source Code)");
+                src.addActionListener(e -> host.openSource(this, frame));
+                menu.add(src);
+            }
             String sel = view.selectionForFind();
             List<logsift.core.RequestIds.Id> ids = sel != null ? List.of()
                     : logsift.core.RequestIds.find(cur < 0 ? null : doc.line(cur));

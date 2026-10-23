@@ -2424,6 +2424,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     @Override
+    public void openSource(LogTab tab, logsift.core.Exceptions.Frame frame) {
+        SourceOpener.open(this, frame);
+    }
+
+    @Override
     public List<LogTab> openLogs() {
         return allTabs();
     }

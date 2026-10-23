@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Open the source of a stack line:** in the Exceptions tab, or right-click a stack line → **Open … in Editor**. The file is found in your source folders (Settings → Source Code) and opened at the line in IntelliJ IDEA, PyCharm, Visual Studio Code or a command of your own.
 - **Exceptions by root cause:** a new **Exceptions** tab groups Java stack traces and Python tracebacks by their root cause and where it was thrown in your own code (framework and library frames are skipped), with counts, first and last time, the stack with your frames highlighted, what wrapped it, and ◀ ▶ through each time it happened. Insights names the most frequent ones.
 - **Find All from the right-click menu:** select text, right-click → **Find All “…”**, next to Show, Hide and Mark lines with it.
 - **Follow a request:** right-click a line with a trace or request ID (or select any text, or press Ctrl+Shift+R) → **Follow**. The new **Request** tab lists its lines in order, across threads and merged files, with the time since the line before and the longest wait marked. Recognizes `traceId=`, `requestId`, `X-Request-Id`, JSON keys, `[app,traceId,spanId]`, `traceparent` and UUIDs. **Lines of its threads in between** adds the lines its threads wrote while working on it. **In: All open logs** or **Folder** follows it through several files (inside zips and `.gz` too), in one order by time with a File column.
