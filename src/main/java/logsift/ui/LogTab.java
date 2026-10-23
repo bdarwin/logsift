@@ -57,6 +57,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** Shows the thread a line names in a thread dump of the log's JVM. */
         default void showThread(LogTab tab, String thread) {}
+
+        /** Every open log (to follow a request through them). */
+        default List<LogTab> openLogs() {
+            return List.of();
+        }
+
+        /** Opens a file (or selects its tab) at a line, with this search run in it. */
+        default void openAt(Path file, long line, SearchQuery q) {}
     }
 
     private final LogDocument doc;
@@ -1781,36 +1789,130 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return request;
     }
 
+    private volatile boolean lastRequestCut;
+
+    /** The lines of a request in this log (null if cancelled). */
+    List<logsift.core.RequestTrace.Step> requestSteps(String value, boolean withThreads,
+                                                      java.util.function.BooleanSupplier stop) {
+        SearchQuery q = new SearchQuery(logsift.core.RequestIds.regex(value), true, true, false);
+        SearchSession s = new SearchSession(doc, q).start();
+        try {
+            while (!s.awaitIdle(200)) {
+                if (stop.getAsBoolean()) {
+                    return null;
+                }
+            }
+            HitList hits = s.hits();
+            int n = hits.size();
+            long[] lines = new long[Math.min(n, logsift.core.RequestTrace.MAX_STEPS)];
+            for (int i = 0; i < lines.length; i++) {
+                lines[i] = hits.get(i);
+            }
+            lastRequestCut = n > lines.length;
+            List<logsift.core.RequestTrace.Step> steps = logsift.core.RequestTrace.steps(lines, n,
+                    logsift.core.RequestTrace.reader(doc::line, timeFormat, logFormat), withThreads, stop);
+            return stop.getAsBoolean() ? null : steps;
+        } finally {
+            s.close();
+        }
+    }
+
+    /** Reads the lines a folder search kept, with the format and times they show. */
+    private static logsift.core.RequestTrace.Reader linesReader(List<logsift.core.FolderSearch.Hit> hits,
+                                                               List<String> texts) {
+        java.util.Map<Long, String> byLine = new java.util.HashMap<>();
+        for (int i = 0; i < hits.size(); i++) {
+            byLine.put(hits.get(i).line(), texts.get(i));
+        }
+        List<String> sample = new ArrayList<>(texts); // a file may have just one or two lines of the request
+        while (!texts.isEmpty() && sample.size() < 10) {
+            sample.addAll(texts);
+        }
+        logsift.core.TimeFormat tf = logsift.core.TimeFormat.detect(sample, java.time.Year.now().getValue());
+        logsift.core.LogFormat lf = texts.isEmpty() ? null : logsift.core.LogFormat.detect(sample);
+        return logsift.core.RequestTrace.reader(byLine::get, tf, lf);
+    }
+
     private RequestPanel.Host requestHost() {
         return new RequestPanel.Host() {
             @Override
-            public logsift.core.RequestTrace.Trace follow(String value, boolean withThreads, AtomicBoolean cancel) {
-                SearchQuery q = new SearchQuery(logsift.core.RequestIds.regex(value), true, true, false);
-                SearchSession s = new SearchSession(doc, q).start();
-                try {
-                    while (!s.awaitIdle(200)) {
-                        if (cancel.get() || closed) {
+            public logsift.core.RequestTrace.Trace follow(String value, boolean withThreads, RequestPanel.Scope scope,
+                                                          Path folder, boolean archives, AtomicBoolean cancel) {
+                java.util.function.BooleanSupplier stop = () -> cancel.get() || closed;
+                if (scope == RequestPanel.Scope.LOG) {
+                    List<logsift.core.RequestTrace.Step> steps = requestSteps(value, withThreads, stop);
+                    if (steps == null) {
+                        return null;
+                    }
+                    return logsift.core.RequestTrace.combine(List.of(new logsift.core.RequestTrace.Part(
+                            title(), null, steps, lastRequestCut)));
+                }
+                List<logsift.core.RequestTrace.Part> parts = new ArrayList<>();
+                if (scope == RequestPanel.Scope.OPEN) {
+                    List<LogTab> logs = new ArrayList<>(host.openLogs());
+                    if (!logs.contains(LogTab.this)) {
+                        logs.add(0, LogTab.this);
+                    }
+                    for (LogTab t : logs) {
+                        List<logsift.core.RequestTrace.Step> steps = t.requestSteps(value, withThreads, stop);
+                        if (steps == null) {
                             return null;
                         }
+                        parts.add(new logsift.core.RequestTrace.Part(t.title(), t == LogTab.this ? null : t.path(),
+                                steps, t.lastRequestCut));
                     }
-                    HitList hits = s.hits();
-                    int n = hits.size();
-                    long[] lines = new long[Math.min(n, logsift.core.RequestTrace.MAX_STEPS + 1)];
-                    for (int i = 0; i < lines.length; i++) {
-                        lines[i] = hits.get(i);
+                } else {
+                    SearchQuery q = new SearchQuery(logsift.core.RequestIds.regex(value), true, true, false);
+                    try (logsift.core.FolderSearch fs = new logsift.core.FolderSearch(
+                            new logsift.core.FolderSearch.Options(folder, "", true, archives, q)).start()) {
+                        while (!fs.awaitDone(200)) {
+                            if (stop.getAsBoolean()) {
+                                return null;
+                            }
+                        }
+                        for (logsift.core.FolderSearch.FileResult r : fs.results()) {
+                            Path file = r.entry() == null ? r.file() : logsift.core.Archives.pathOf(r.file(), r.entry());
+                            List<String> texts = new ArrayList<>();
+                            for (logsift.core.FolderSearch.Hit h : r.hits()) {
+                                texts.add(h.text() == null ? "" : h.text());
+                            }
+                            logsift.core.RequestTrace.Reader reader = linesReader(r.hits(), texts);
+                            long[] lines = new long[r.hits().size()];
+                            for (int i = 0; i < lines.length; i++) {
+                                lines[i] = r.hits().get(i).line();
+                            }
+                            boolean here = file.toAbsolutePath().normalize().equals(path);
+                            String in = r.file().equals(folder) ? "" : folder.relativize(r.file()).toString();
+                            String label = r.entry() == null ? in
+                                    : (in.isEmpty() ? "" : in + "/") + r.entry().replace(logsift.core.Archives.NESTED, "/");
+                            parts.add(new logsift.core.RequestTrace.Part(label.isEmpty() ? file.getFileName().toString()
+                                    : label, here ? null : file,
+                                    logsift.core.RequestTrace.steps(lines, lines.length, reader, false, stop),
+                                    r.hitCount() > lines.length));
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return null;
                     }
-                    logsift.core.RequestTrace.Trace t = logsift.core.RequestTrace.build(lines, n,
-                            logsift.core.RequestTrace.reader(doc::line, timeFormat, logFormat), withThreads,
-                            () -> cancel.get() || closed);
-                    return cancel.get() ? null : t;
-                } finally {
-                    s.close();
+                }
+                return stop.getAsBoolean() ? null : logsift.core.RequestTrace.combine(parts);
+            }
+
+            @Override
+            public void goTo(logsift.core.RequestTrace.Step step) {
+                if (step.file() == null) {
+                    showLine(step.line());
+                } else {
+                    host.openAt(step.file(), step.line(),
+                            new SearchQuery(logsift.core.RequestIds.regex(request.value()), true, true, false));
                 }
             }
 
             @Override
-            public void goToLine(long line) {
-                showLine(line);
+            public Path defaultFolder() {
+                logsift.core.Archives.Located in = logsift.core.Archives.locate(path);
+                Path p = in != null ? in.zip().getParent() : path.getParent();
+                return p != null && java.nio.file.Files.isDirectory(p) ? p : null;
             }
 
             @Override

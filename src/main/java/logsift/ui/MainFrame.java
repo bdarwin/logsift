@@ -1396,7 +1396,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     /** Opens a file at a line and runs Find All for the query there. */
-    private void openAt(Path file, long line, SearchQuery q) {
+    @Override
+    public void openAt(Path file, long line, SearchQuery q) {
         openFile(file, null, t -> {
             tabs.setSelectedComponent(t);
             findAll(q);
@@ -2420,6 +2421,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         boolean dark = !Theme.isDark();
         PREFS.putBoolean("dark", dark);
         Theme.apply(dark);
+    }
+
+    @Override
+    public List<LogTab> openLogs() {
+        return allTabs();
     }
 
     private List<LogTab> allTabs() {

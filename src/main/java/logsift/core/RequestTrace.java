@@ -20,8 +20,19 @@ public final class RequestTrace {
      * One line of the request. {@code time}: written on the line ({@link TimeFormat#NONE} if
      * none); {@code gap}: milliseconds since the previous line with a time (-1: none).
      * {@code withId}: the line names the ID (false for lines of its threads in between).
+     * {@code source}: the file's name when the request was followed through several (else
+     * null); {@code file}: that file (null: the log it was followed in).
      */
-    public record Step(long line, long time, long gap, String thread, String level, String text, boolean withId) {}
+    public record Step(long line, long time, long gap, String thread, String level, String text, boolean withId,
+                       String source, java.nio.file.Path file) {
+        Step(long line, long time, long gap, String thread, String level, String text, boolean withId) {
+            this(line, time, gap, thread, level, text, withId, null, null);
+        }
+
+        Step in(String source, java.nio.file.Path file) {
+            return new Step(line, time, gap, thread, level, text, withId, source, file);
+        }
+    }
 
     /**
      * The whole request. {@code longest}: the index of the step after the longest wait (-1:
@@ -59,7 +70,13 @@ public final class RequestTrace {
      *                    the request (logs often name the ID on only some lines)
      */
     public static Trace build(long[] idLines, int count, Reader r, boolean withThreads, BooleanSupplier cancelled) {
-        boolean cut = count > MAX_STEPS;
+        List<Step> steps = steps(idLines, count, r, withThreads, cancelled);
+        return finish(steps, count > MAX_STEPS || steps.size() == MAX_STEPS && withThreads);
+    }
+
+    /** The lines of a request in one file, in order (at most {@link #MAX_STEPS}). */
+    public static List<Step> steps(long[] idLines, int count, Reader r, boolean withThreads,
+                                   BooleanSupplier cancelled) {
         int n = Math.min(count, MAX_STEPS);
         List<Step> steps = new ArrayList<>(n);
         for (int i = 0; i < n && !cancelled.getAsBoolean(); i++) {
@@ -70,11 +87,46 @@ public final class RequestTrace {
             if (!more.isEmpty()) {
                 steps.addAll(more);
                 steps.sort((a, b) -> Long.compare(a.line, b.line));
-                if (steps.size() > MAX_STEPS) {
-                    steps = new ArrayList<>(steps.subList(0, MAX_STEPS));
-                    cut = true;
-                }
             }
+        }
+        return steps.size() > MAX_STEPS ? new ArrayList<>(steps.subList(0, MAX_STEPS)) : steps;
+    }
+
+    /** One file's part of a request followed through several. */
+    public record Part(String source, java.nio.file.Path file, List<Step> steps, boolean cut) {}
+
+    /**
+     * A request followed through several files, as one: their lines by time (lines without one
+     * stay after the line before them in their file).
+     */
+    public static Trace combine(List<Part> parts) {
+        record Timed(long time, int part, int index, Step step) {}
+        List<Timed> all = new ArrayList<>();
+        boolean cut = false;
+        boolean several = parts.stream().filter(p -> !p.steps.isEmpty()).count() > 1;
+        for (int p = 0; p < parts.size(); p++) {
+            Part part = parts.get(p);
+            List<Step> steps = part.steps;
+            cut |= part.cut;
+            long known = TimeFormat.NONE;
+            for (int i = 0; i < steps.size(); i++) {
+                Step s = steps.get(i);
+                if (s.time != TimeFormat.NONE) {
+                    known = s.time;
+                }
+                all.add(new Timed(known == TimeFormat.NONE ? Long.MAX_VALUE : known, p, i,
+                        s.in(several ? part.source : null, part.file)));
+            }
+        }
+        all.sort(java.util.Comparator.comparingLong(Timed::time).thenComparingInt(Timed::part)
+                .thenComparingInt(Timed::index));
+        List<Step> steps = new ArrayList<>(Math.min(all.size(), MAX_STEPS));
+        for (Timed t : all) {
+            if (steps.size() == MAX_STEPS) {
+                cut = true;
+                break;
+            }
+            steps.add(t.step);
         }
         return finish(steps, cut);
     }
@@ -201,7 +253,7 @@ public final class RequestTrace {
             if (s.thread != null) {
                 threads.add(s.thread);
             }
-            out.add(new Step(s.line, s.time, gap, s.thread, s.level, s.text, s.withId));
+            out.add(new Step(s.line, s.time, gap, s.thread, s.level, s.text, s.withId, s.source, s.file));
         }
         if (longestGap <= 0) {
             longest = -1;

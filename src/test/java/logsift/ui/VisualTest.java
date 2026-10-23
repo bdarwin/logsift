@@ -3931,6 +3931,116 @@ class VisualTest {
         assertEquals(tr.steps().get(3).line(), onEdt(tab::currentLine), "a click goes to the line");
         settle();
         shot("76-follow-request");
+
+        // through a folder: the gateway's log, and the bank adapter's log in a zip inside a zip
+        Path services = dir.resolve("services");
+        Files.createDirectories(services);
+        Files.writeString(services.resolve("gateway.log"),
+                "2026-10-21 10:02:19.090 INFO  [gw-4] c.a.gw.Route - POST /orders -> shop requestId=r-1042\n"
+                        + "2026-10-21 10:02:19.095 INFO  [gw-2] c.a.gw.Route - GET /health requestId=r-1043\n"
+                        + "2026-10-21 10:02:27.340 WARN  [gw-4] c.a.gw.Route - 402 from shop in 8250 ms requestId=r-1042\n");
+        java.io.ByteArrayOutputStream innerZip = new java.io.ByteArrayOutputStream();
+        try (var z = new java.util.zip.ZipOutputStream(innerZip)) {
+            z.putNextEntry(new java.util.zip.ZipEntry("bank-adapter.log"));
+            z.write(("2026-10-21 10:02:19.130 INFO  [bank-io-1] c.a.bank.Client - calling bank requestId=r-1042\n"
+                    + "2026-10-21 10:02:27.320 ERROR [bank-io-1] c.a.bank.Client - bank timeout after 8190 ms requestId=r-1042\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        try (var z = new java.util.zip.ZipOutputStream(Files.newOutputStream(services.resolve("payments.zip")))) {
+            z.putNextEntry(new java.util.zip.ZipEntry("node1/logs.zip"));
+            z.write(innerZip.toByteArray());
+        }
+        onEdt(() -> {
+            rp.withThreadsForTest().doClick(); // off: lines naming the ID only
+            rp.setScopeForTest(RequestPanel.Scope.FOLDER, services, true);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !rp.isRunning() && rp.trace() != null
+                        && rp.trace().steps().stream().anyMatch(st -> st.source() != null));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the request in the folder");
+        tr = onEdt(rp::trace);
+        assertEquals(List.of("gateway.log", "payments.zip/node1/logs.zip/bank-adapter.log",
+                "payments.zip/node1/logs.zip/bank-adapter.log", "gateway.log"),
+                tr.steps().stream().map(logsift.core.RequestTrace.Step::source).toList(), "by time, across files");
+        assertEquals(services.resolve("payments.zip").resolve("node1").resolve("logs.zip").resolve("bank-adapter.log"),
+                tr.steps().get(1).file(), "named by its place in the zips");
+        assertEquals(List.of("gw-4", "bank-io-1"), tr.threads());
+        assertTrue(onEdt(rp::summaryForTest).contains("2 files"), onEdt(rp::summaryForTest));
+        // without looking inside zips
+        onEdt(() -> {
+            rp.setScopeForTest(RequestPanel.Scope.FOLDER, services, false);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !rp.isRunning() && rp.trace() != null && rp.trace().steps().size() == 2);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the request outside zips");
+        // through the open logs: this one and the gateway's
+        onEdt(() -> {
+            frame.openFiles(List.of(services.resolve("gateway.log")));
+            return null;
+        });
+        waitForTab("gateway.log");
+        onEdt(() -> {
+            frame.tabsForTest().setSelectedComponent(tab);
+            rp.setScopeForTest(RequestPanel.Scope.OPEN, null, true);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !rp.isRunning() && rp.trace() != null && rp.trace().steps().size() == 6);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the request in the open logs");
+        tr = onEdt(rp::trace);
+        assertEquals("gateway.log", tr.steps().get(0).source());
+        assertEquals("shop.log", tr.steps().get(1).source());
+        assertEquals(null, tr.steps().get(1).file(), "lines of this log");
+        assertEquals("gateway.log", tr.steps().get(5).source());
+        // a double-click on another file's line opens it there
+        onEdt(() -> {
+            rp.setScopeForTest(RequestPanel.Scope.FOLDER, services, true);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !rp.isRunning() && rp.trace() != null && rp.trace().steps().size() == 4);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the folder again");
+        onEdt(() -> {
+            rp.tableForTest().setRowSelectionInterval(1, 1);
+            return null;
+        });
+        settle();
+        shot("77-follow-request-in-folder");
+        onEdt(() -> {
+            javax.swing.JTable table = rp.tableForTest();
+            java.awt.Rectangle r = table.getCellRect(2, 2, true);
+            for (int clicks = 1; clicks <= 2; clicks++) {
+                table.dispatchEvent(new java.awt.event.MouseEvent(table, java.awt.event.MouseEvent.MOUSE_CLICKED,
+                        System.currentTimeMillis(), 0, r.x + 5, r.y + 5, clicks, false, java.awt.event.MouseEvent.BUTTON1));
+            }
+            return null;
+        });
+        LogTab bank = waitForTab("bank-adapter.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> bank.currentLine() == 1);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the bank's line");
     }
 
     /** Waits until the current tab is a log titled so. */

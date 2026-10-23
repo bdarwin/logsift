@@ -18,7 +18,7 @@
 - **Timeline and highlight bar.** See error bursts at a glance and drag over a time range to zoom in.
 - **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs and CSV files work too, with a pretty-printed details view.
 - **Your own log formats.** Drop a log file and Logsift works out its layout, or paste your log4j, logback, java.util.logging or Python logging setup (even a whole `logback.xml` or `log4j2.xml`: each layout in it becomes a format). A live preview shows how lines split into columns.
-- **Follow a request.** Right-click a line with a trace or request ID (or select any text) → **Follow**: the request's lines in order, across threads and merged files, with the time between them and the longest wait marked.
+- **Follow a request.** Right-click a line with a trace or request ID (or select any text) → **Follow**: the request's lines in order, across threads, open logs or a whole folder (zips too), with the time between them and the longest wait marked.
 - **Tree of loggers.** Loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
 - **Zips, .gz files and the web.** Drop a `.zip` and it opens as a tab with its folders and files (zips inside it too); open any of them as a log, with everything a log has, merge them by time, or search them all. A `.gz` opens directly. Open logs from web addresses, or download several and search them together.
 - **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files, and zips inside zips.
@@ -204,7 +204,8 @@ Right-click a line → **Follow traceId 4bf92f…** (or press **Ctrl+Shift+R**),
 
 - **IDs it recognizes:** `traceId=…`, `request_id: …`, `X-Request-Id`, `"correlationId":"…"` and any other `…Id` / `…_id` key, the `[app,traceId,spanId]` and `[traceId-spanId]` that tracing libraries add, a W3C `traceparent`, and UUIDs. Process and thread ids (`pid`, `tid`) and span ids are left out. With several IDs on a line, traces come first, then requests. To follow anything else (an order number, a user), select it first.
 - **Lines of its threads in between:** logs often name the ID on only some lines of a request. This adds the lines its threads wrote between its first and last line, until the thread names another request's ID (then it has moved on). These lines are dimmed.
-- **Find All** and **Show Only These Lines** run the same search in the log. It works in merged logs too, so one request can be followed across several services' files.
+- **Across files:** **In: This log / All open logs / Folder** picks where to look. With a folder (the log's own, or any folder or `.zip` you choose), every file in it is searched, also inside zips, zips in zips and `.gz` files unless **Inside zips and .gz** is off. Lines from all files are put in one order by time, with a **File** column; double-click a line of another file to open it there. Merged logs work too.
+- **Find All** and **Show Only These Lines** run the same search in the log.
 
 ## Tree of loggers
 
