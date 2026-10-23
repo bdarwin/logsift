@@ -245,6 +245,14 @@ public record JThread(String name, long id, String nid, boolean daemon, boolean 
                 return true;
             }
         }
+        for (JThread.Frame f : frames) {
+            // waiting in a queue or on a socket for a database, a pool's connection or another
+            // service is waiting while doing work, not waiting for work
+            String m = f.method();
+            if (BUSY.stream().anyMatch(m::contains)) {
+                return false;
+            }
+        }
         for (int k = 0; k < Math.min(frames.size(), 14); k++) {
             String m = frames.get(k).method();
             if (IDLE.stream().anyMatch(m::endsWith)) {
@@ -259,6 +267,15 @@ public record JThread(String name, long id, String nid, boolean daemon, boolean 
                 && frames.stream().limit(6).anyMatch(f -> f.method().contains("Reference")
                 || f.method().contains("Timer") || f.method().contains("CleanerImpl"));
     }
+
+    /** Frames of a call to a database, a connection pool or another service: the thread is at work. */
+    private static final List<String> BUSY = List.of(
+            "HikariPool.getConnection", "ConcurrentBag.borrow", "org.apache.commons.dbcp", "org.apache.tomcat.jdbc.pool.",
+            "com.mchange.v2.c3p0.", "org.postgresql.", "com.mysql.", "org.mariadb.", "oracle.jdbc.",
+            "com.microsoft.sqlserver.", "org.h2.", "com.ibm.db2.", "java.sql.", "org.apache.http.impl.",
+            "org.apache.hc.client5.", "okhttp3.", "sun.net.www.protocol.http.", "jdk.internal.net.http.",
+            "java.net.http.HttpClient", "redis.clients.jedis.", "com.mongodb.", "org.elasticsearch.client.",
+            "co.elastic.clients.", "org.springframework.web.client.", "org.springframework.jdbc.");
 
     /** Frames where a thread is waiting for work rather than doing it. */
     private static final List<String> IDLE = List.of(
