@@ -387,6 +387,7 @@ Searching a folder is different from viewing one file: each file is read once, n
 - **Rotated files count as the log they came from:** `app.log.1`, `app.log.2026-10-21` and `app.log.2.gz` all match `*.log`.
 - Each matching file is a task on a thread pool (one thread per core). A task **streams** the file in 4 MB blocks of whole lines (a block ends at its last newline, and the rest carries over to the next block) through the same `LineMatcher` as Find All. The text of a hit line is cut from the block only when there is a hit.
 - **`.gz`** is unpacked while streaming (`GZIPInputStream`), and **`.zip`** entries are read one after another (`ZipInputStream`) without unpacking to disk. Only when you open a hit is that file unpacked to a temporary file, so the viewer can index it.
+- **A zip inside a zip** is read the same way, from the outer zip's stream (`ZipInputStream` over the entry), up to 5 levels deep; a hit's file is named by its path through each level (`a.zip!/logs/b.log`), which `core/Archives.java` follows to unpack it.
 - **Binary files are skipped**, as grep does: a zero byte in the first 8 KB means binary.
 - Memory is bounded: hit text is kept for up to 10,000 lines per file and 1,000,000 in total; beyond that, hits are only counted.
 
@@ -410,9 +411,11 @@ Each later feature reuses the same few building blocks: the line index, the byte
 
 **Merging logs by time** (`core/LogMerger.java`). This is a k-way merge with a priority queue keyed by each source's next entry time, holding one entry per file in memory. The result is written to a real file with a `<label> ` prefix on each line. That makes every other feature work on it unchanged. Entry and time detection simply skip such a label.
 
-**Columns** (`core/LogFormat.java`). A layout is a regex with named groups, or a JSON field mapping, picked from presets by sampling. Only visible lines are split, at paint time, so columns cost nothing on huge files. *Count values* splits every entry in parallel chunks.
+**Columns** (`core/LogFormat.java`). A layout is a regex with named groups, a JSON field mapping, or CSV (columns named by the header row; `core/Csv.java` splits a row, quotes and all), picked from presets by sampling. CSV wins for files named `.csv`; for other files it needs a header of names and rows with the same number of fields, and only when no log layout fits. Hiding a CSV value in the tree is still a regex, one that skips the fields before the column, quoted or not. Only visible lines are split, at paint time, so columns cost nothing on huge files. *Count values* splits every entry in parallel chunks.
 
 **Encodings** (`core/Encoding.java`, `core/Utf16Mirror.java`). Windows-1252 and other single-byte encodings keep `\n` as the byte 0x0A, so the byte engine works as is: search text is encoded in the file's encoding, and lines are decoded with it. UTF-16 breaks the byte engine (a newline is two bytes), so Logsift reads such logs through a UTF-8 copy that follows the original. The decoder keeps half a character, or half a surrogate pair, until the next bytes arrive.
+
+**Zips and the web** (`core/Archives.java`, `core/UrlFetch.java`). The viewer needs a real file to index, so a zip's entry, a `.gz` or a download is copied to a temporary file once, and the tab remembers where it came from. A zip's file list comes from its central directory; the files of a zip inside it come from reading that zip once as a stream. Downloads use `HttpURLConnection` (in `java.base`, so the bundled runtime needs nothing more), follow redirects themselves, and send a sign-in only to the host it was given for.
 
 **Remote logs** (`core/RemoteMirror.java`). The same idea again: a local copy fed over SFTP with offset reads (`get(path, monitor, offset)`). It only ever appends whole lines, and the remote offset is "bytes read minus the incomplete last line". If the remote file gets smaller, the copy starts over, and the document's usual truncation handling takes care of the rest.
 

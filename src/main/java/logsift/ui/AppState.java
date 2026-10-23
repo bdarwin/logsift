@@ -93,6 +93,13 @@ final class AppState {
         prefs().put("recent", String.join("\n", list.stream().map(Path::toString).toList()));
     }
 
+    static void removeRecent(Path file) {
+        List<Path> list = recentFiles();
+        if (list.remove(file.toAbsolutePath().normalize())) {
+            prefs().put("recent", String.join("\n", list.stream().map(Path::toString).toList()));
+        }
+    }
+
     static void clearRecent() {
         prefs().remove("recent");
     }

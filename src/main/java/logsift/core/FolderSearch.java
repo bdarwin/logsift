@@ -356,9 +356,9 @@ public final class FolderSearch implements AutoCloseable {
     }
 
     /** Separates the levels of a zip inside a zip in {@link FileResult#entry()}. */
-    public static final String NESTED = "!/";
+    public static final String NESTED = Archives.NESTED;
     /** How deep zips inside zips are followed. */
-    static final int MAX_DEPTH = 5;
+    static final int MAX_DEPTH = Archives.MAX_DEPTH;
 
     private void searchZip(Path file) throws IOException {
         try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 1 << 16)) {
@@ -399,33 +399,9 @@ public final class FolderSearch implements AutoCloseable {
         }
     }
 
-    /**
-     * The content of a zip entry as the search read it: {@code entry} may name zips inside the
-     * zip (separated by {@link #NESTED}), and a .gz entry is unpacked.
-     */
+    /** The content of a zip entry as the search read it (see {@link Archives#open}). */
     public static InputStream openEntry(Path zip, String entry) throws IOException {
-        String[] parts = entry.split(java.util.regex.Pattern.quote(NESTED), -1);
-        InputStream in = new BufferedInputStream(Files.newInputStream(zip), 1 << 16);
-        try {
-            for (String part : parts) {
-                ZipInputStream zin = new ZipInputStream(in);
-                in = zin;
-                ZipEntry e;
-                while ((e = zin.getNextEntry()) != null && !e.getName().equals(part)) {
-                    // skip
-                }
-                if (e == null) {
-                    throw new IOException("no " + part + " in " + zip.getFileName());
-                }
-                in = new BufferedInputStream(zin, 1 << 16);
-            }
-            String last = parts[parts.length - 1];
-            return isGzip(Path.of(last.substring(last.lastIndexOf('/') + 1)))
-                    ? new GZIPInputStream(in, 1 << 16) : in;
-        } catch (IOException | RuntimeException ex) {
-            in.close();
-            throw ex;
-        }
+        return Archives.open(zip, entry);
     }
 
     /** Streams the content in blocks of whole lines through the matcher. */

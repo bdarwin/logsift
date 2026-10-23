@@ -63,6 +63,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final Path path;
     private final String encodingLabel;
     private String remoteLabel;          // "user@host:/path" for remote logs
+    private String origin;               // a copy's source: "x.zip › y.log" or a web address
     private volatile String remoteStatus;
     private final Host host;
     private final LogView main = new LogView();
@@ -921,6 +922,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     /** Marks this tab as a remote log (shown by its address, not remembered locally). */
+    /** Where the file came from, when it is a copy (a zip's entry, a web address), or null. */
+    void setOrigin(String label) {
+        this.origin = label;
+        host.tabStatusChanged(this);
+    }
+
+    String origin() {
+        return origin;
+    }
+
     void setRemote(String label) {
         this.remoteLabel = label;
     }

@@ -228,6 +228,15 @@ final class FolderSearchTab extends JPanel {
     }
 
     /** Sets the fields and starts searching (used by tests and the API). */
+    String folderForTest() {
+        return folder.getText();
+    }
+
+    /** Sets which files to search (patterns like *.log; empty: all). */
+    void setFileNames(String fileNames) {
+        names.setText(fileNames);
+    }
+
     void search(Path dir, String fileNames, SearchQuery q) {
         folder.setText(dir.toString());
         names.setText(fileNames);
@@ -246,9 +255,9 @@ final class FolderSearchTab extends JPanel {
         } catch (RuntimeException e) {
             dir = null;
         }
-        if (dir == null || !Files.isDirectory(dir)) {
+        if (dir == null || !(Files.isDirectory(dir) || logsift.core.Archives.isZip(dir) && Files.isRegularFile(dir))) {
             folder.putClientProperty("JComponent.outline", "error");
-            status.setText("Not a folder");
+            status.setText("Not a folder (or a .zip)");
             return;
         }
         folder.putClientProperty("JComponent.outline", null);

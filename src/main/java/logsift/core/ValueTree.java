@@ -241,6 +241,22 @@ public final class ValueTree {
         }
     }
 
+    /** CSV: skips the fields before the column (quoted or not), then looks at its value. */
+    private static String csvLineRegex(LogFormat format, String column, List<Hidden> hidden) {
+        int k = format.columns().indexOf(column);
+        if (k < 0) {
+            return null;
+        }
+        String d = String.format("\\x{%x}", (int) format.delimiter());
+        String field = "(?:\\s*+\"(?:[^\"]|\"\")*+\"[^" + d + "]*+|[^" + d + "]*+)";
+        String end = "(?:\"?\\s*(?:" + d + "|$))";
+        List<String> alts = new ArrayList<>();
+        for (Hidden h : hidden) {
+            alts.add(Pattern.quote(h.path()) + (h.withChildren() ? "(?:" + end + "|[./\\\\])" : end));
+        }
+        return "^\\x{FEFF}?(?:" + field + d + "){" + k + "}\\s*\"?(?:" + String.join("|", alts) + ")";
+    }
+
     /** Lines (in the format) whose column value is hidden: for a filter that hides them. */
     public static String lineRegex(LogFormat format, String column, List<Hidden> hidden) {
         if (hidden.isEmpty()) {
@@ -256,6 +272,9 @@ public final class ValueTree {
                 alts.add(Pattern.quote(h.path()) + (h.withChildren() ? "(?:\"|[./\\\\])" : "\""));
             }
             return "\"" + Pattern.quote(key) + "\"\\s*:\\s*\"(?:" + String.join("|", alts) + ")";
+        }
+        if (format.isCsv()) {
+            return csvLineRegex(format, column, hidden);
         }
         String p = format.regex();
         String open = "(?<" + column + ">";

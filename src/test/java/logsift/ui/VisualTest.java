@@ -3579,6 +3579,241 @@ class VisualTest {
         }
     }
 
+    @Test
+    @Order(40)
+    void zipsGzipsUrlsAndCsv() throws Exception {
+        Path box = dir.resolve("archives");
+        Files.createDirectories(box);
+        StringBuilder csv = new StringBuilder("Timestamp,Level,Host,User,Message\n");
+        for (int i = 0; i < 400; i++) {
+            csv.append(String.format("2026-10-21 10:%02d:%02d,%s,web-%d,u%d,\"%s\"%n", i / 60, i % 60,
+                    i % 25 == 0 ? "ERROR" : i % 7 == 0 ? "WARN" : "INFO", i % 3 + 1, i % 40,
+                    i % 25 == 0 ? "Payment failed, card declined" : "Request " + i + " took " + (i * 7 % 300) + " ms"));
+        }
+        StringBuilder log = new StringBuilder();
+        for (int i = 0; i < 300; i++) {
+            log.append(String.format("2026-10-21 09:%02d:%02d.000 %s [main] c.a.App - step %d%n", i / 60, i % 60,
+                    i % 50 == 0 ? "ERROR" : "INFO ", i));
+        }
+        java.io.ByteArrayOutputStream inner = new java.io.ByteArrayOutputStream();
+        try (var z = new java.util.zip.ZipOutputStream(inner)) {
+            z.putNextEntry(new java.util.zip.ZipEntry("exports/orders.csv"));
+            z.write(csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        Path zip = box.resolve("support-bundle.zip");
+        try (var z = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
+            z.putNextEntry(new java.util.zip.ZipEntry("logs/app.log"));
+            z.write(log.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            z.putNextEntry(new java.util.zip.ZipEntry("logs/old.log.gz"));
+            java.io.ByteArrayOutputStream g = new java.io.ByteArrayOutputStream();
+            try (var gz = new java.util.zip.GZIPOutputStream(g)) {
+                gz.write(log.toString().replace("step", "old step").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            z.write(g.toByteArray());
+            z.putNextEntry(new java.util.zip.ZipEntry("data.zip"));
+            z.write(inner.toByteArray());
+        }
+
+        // a zip: its files (and those of the zip inside), to pick from
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.openFile(zip);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.archiveDialogForTest() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the zip's files");
+        ArchiveDialog ad = onEdt(frame::archiveDialogForTest);
+        assertEquals(List.of("data.zip!/exports/orders.csv", "logs/app.log", "logs/old.log.gz"),
+                onEdt(ad::shownForTest), "files of the zip inside are listed, not the zip itself");
+        assertTrue(AppState.recentFiles().get(0).equals(zip.toAbsolutePath().normalize()), "the zip is a recent file");
+        settle();
+        shotOf(ad.getRootPane(), "73-zip-contents");
+        onEdt(() -> {
+            ad.setFilterForTest("csv");
+            return null;
+        });
+        assertEquals(List.of("data.zip!/exports/orders.csv"), onEdt(ad::shownForTest));
+        onEdt(() -> {
+            ad.selectForTest("data.zip!/exports/orders.csv");
+            ad.openSelected();
+            return null;
+        });
+        LogTab csvTab = waitForTab("orders.csv");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> csvTab.logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the CSV's columns");
+        logsift.core.LogFormat f = onEdt(csvTab::logFormat);
+        assertTrue(f.isCsv(), f.name());
+        assertEquals(List.of("time", "level", "Host", "User", "message"), f.columns());
+        String tip = onEdt(() -> frame.tabsForTest().getToolTipTextAt(frame.tabsForTest().indexOfComponent(csvTab)));
+        assertTrue(tip.endsWith("support-bundle.zip › data.zip › exports/orders.csv"), tip);
+        assertTrue(AppState.recentFiles().stream().noneMatch(p -> p.toString().contains("logsift-unpack-")),
+                "the unpacked copy is not a recent file");
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("Payment failed", true, false, false));
+            return null;
+        });
+        assertEquals(16, waitForSearch(csvTab).hits().size(), "16 failed payments");
+        assertTrue(onEdt(frame::statusTextForTest).contains("support-bundle.zip › data.zip › exports/orders.csv"),
+                "the status bar names where it came from: " + onEdt(frame::statusTextForTest));
+        // the tree has the hosts (the header row is not a host); unchecking one hides its rows
+        ValuesTreePanel hosts = csvTab.valuesTree();
+        waitFor(() -> hosts.isShowing() && hosts.valuesForTest() != null && !hosts.isCountingForTest(), 20_000,
+                "the tree of hosts");
+        assertEquals(400, hosts.valuesForTest().root().total(), "rows, not the header");
+        assertEquals(List.of("web-1", "web-2", "web-3"),
+                hosts.valuesForTest().root().children().stream().map(n -> n.label()).sorted().toList());
+        onEdt(() -> {
+            hosts.toggleForTest("web-1");
+            return null;
+        });
+        waitForFilter(csvTab);
+        assertEquals(401 - 134, onEdt(() -> csvTab.filterResultForTest().matchCount()), "web-1's rows hidden");
+        onEdt(() -> {
+            hosts.toggleForTest("web-1");
+            return null;
+        });
+        waitForFilter(csvTab);
+        settle();
+        shot("74-csv-columns");
+
+        // a .gz opens right away, named without .gz
+        Path gz = box.resolve("worker.log.gz");
+        try (var o = new java.util.zip.GZIPOutputStream(Files.newOutputStream(gz))) {
+            o.write(log.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        onEdt(() -> {
+            frame.openFile(gz);
+            return null;
+        });
+        LogTab gzTab = waitForTab("worker.log");
+        assertEquals(300, onEdt(() -> gzTab.document().lineCount()));
+        assertEquals(gz.toAbsolutePath().normalize(), AppState.recentFiles().get(0), "the .gz is the recent file");
+        // a zip with one file opens it right away
+        Path one = box.resolve("single.zip");
+        try (var z = new java.util.zip.ZipOutputStream(Files.newOutputStream(one))) {
+            z.putNextEntry(new java.util.zip.ZipEntry("only.log"));
+            z.write(log.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        onEdt(() -> {
+            frame.openFile(one);
+            return null;
+        });
+        waitForTab("only.log");
+        // search in a whole zip
+        onEdt(() -> {
+            frame.openFile(zip);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.archiveDialogForTest() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the zip's files again");
+        FolderSearchTab zs = onEdt(() -> {
+            ArchiveDialog d = frame.archiveDialogForTest();
+            d.dispose();
+            FolderSearchTab t = frame.searchInArchiveForTest(zip);
+            t.search(zip, "", new SearchQuery("ERROR", true, false, false));
+            return t;
+        });
+        logsift.core.FolderSearch zsr = onEdt(zs::search);
+        assertTrue(zsr.awaitDone(30_000));
+        java.util.Map<String, Long> hits = new java.util.TreeMap<>();
+        for (var r : zsr.results()) {
+            hits.put(r.entry(), r.hitCount());
+        }
+        assertEquals(java.util.Map.of("data.zip!/exports/orders.csv", 16L, "logs/app.log", 6L, "logs/old.log.gz", 6L),
+                hits, "every file in the zip, the .gz and the zip inside it too");
+
+        // from the web: one file opens, several are searched together
+        com.sun.net.httpserver.HttpServer web = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        byte[] body = log.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        web.createContext("/", x -> {
+            boolean ok = "Basic YWRtaW46czNjcmV0".equals(x.getRequestHeaders().getFirst("Authorization"));
+            x.sendResponseHeaders(ok ? 200 : 401, ok ? body.length : -1);
+            try (var o = x.getResponseBody()) {
+                if (ok) {
+                    o.write(body);
+                }
+            }
+        });
+        web.start();
+        try {
+            String base = "http://127.0.0.1:" + web.getAddress().getPort();
+            UrlDialog ud = onEdt(frame::urlDialogForTest);
+            onEdt(() -> {
+                ud.setForTest("ftp://nope", null, null);
+                ud.submit();
+                return null;
+            });
+            assertTrue(onEdt(ud::errorForTest).contains("Not an http"), onEdt(ud::errorForTest));
+            onEdt(() -> {
+                ud.setForTest(base + "/node1/server.log", "admin", "s3cret");
+                return null;
+            });
+            settle();
+            shotOf(ud.getRootPane(), "75-open-url");
+            onEdt(() -> {
+                ud.submit();
+                return null;
+            });
+            LogTab web1 = waitForTab("server.log");
+            String webTip = onEdt(() -> frame.tabsForTest().getToolTipTextAt(frame.tabsForTest().indexOfComponent(web1)));
+            assertEquals(base + "/node1/server.log", webTip);
+            assertEquals(300, onEdt(() -> web1.document().lineCount()));
+            int tabsBefore = onEdt(() -> frame.tabsForTest().getTabCount());
+            onEdt(() -> {
+                frame.openUrls(List.of(java.net.URI.create(base + "/node1/server.log"),
+                        java.net.URI.create(base + "/node2/server.log")), new logsift.core.UrlFetch.Auth("admin", "s3cret", null));
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.tabsForTest().getTabCount() > tabsBefore
+                            && frame.tabsForTest().getSelectedComponent() instanceof FolderSearchTab);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "a search over the downloads");
+            FolderSearchTab ws = onEdt(() -> (FolderSearchTab) frame.tabsForTest().getSelectedComponent());
+            onEdt(() -> {
+                ws.search(Path.of(ws.folderForTest()), "", new SearchQuery("ERROR", true, false, false));
+                return null;
+            });
+            logsift.core.FolderSearch wsr = onEdt(ws::search);
+            assertTrue(wsr.awaitDone(30_000));
+            assertEquals(2, wsr.results().size(), "both downloads: " + wsr.results());
+            assertEquals(12, wsr.totalHits());
+        } finally {
+            web.stop(0);
+        }
+    }
+
+    /** Waits until the current tab is a log titled so. */
+    private LogTab waitForTab(String title) throws Exception {
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().title().equals(title));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the tab " + title);
+        return onEdt(frame::currentTab);
+    }
+
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }

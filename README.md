@@ -16,10 +16,11 @@
 - **Find All.** Run several searches at once (text, whole word, regex, any case), each in its own color, and search within the results.
 - **Filters.** Show, hide or mark lines and combine filters with AND, OR and NOT. Filter by log level and time range, keep stack traces with their line, and add context lines.
 - **Timeline and highlight bar.** See error bursts at a glance and drag over a time range to zoom in.
-- **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs work too, with a pretty-printed details view.
+- **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs and CSV files work too, with a pretty-printed details view.
 - **Your own log formats.** Drop a log file and Logsift works out its layout, or paste your log4j, logback, java.util.logging or Python logging setup (even a whole `logback.xml` or `log4j2.xml`: each layout in it becomes a format). A live preview shows how lines split into columns.
 - **Tree of loggers.** Loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
-- **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files.
+- **Zips, .gz files and the web.** Open a `.zip` to pick files from it (also from zips inside it) or search them all; a `.gz` opens directly. Open logs from web addresses, or download several and search them together.
+- **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files, and zips inside zips.
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
 - **Java threads.** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log), or attach to a running JVM on your computer, on a server over SSH, or through its JMX port. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
@@ -48,6 +49,8 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 ## Opening logs
 
 - **Files:** File → Open, or drag files onto the window. On Windows, right-click a file or folder → **Open with Logsift** (a folder opens a search in it); Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does. On macOS, use Open With or drop files on the Dock icon. If Logsift is already running, files open in the same window.
+- **Zip and .gz files:** opening a `.zip` (File → Open, drag and drop, Recent files) shows the files in it, also those of zips inside it, with their sizes and a filter. Pick one or more to open (they are unpacked to a temporary copy), or **Search in It…** to search them all. A zip with one file opens it right away. A `.gz` file opens directly. The tab and the status bar say where the copy came from.
+- **Web addresses:** File → Open URL… (Ctrl+Shift+U) takes one or more `http`/`https` addresses, one per line, with an optional user and password or token (sent as a Bearer token). One address opens in a tab; several are downloaded into one temporary folder and searched together. A `.zip` or `.gz` download is unpacked as above. The file is a copy: it doesn't follow the server's file as it grows.
 - **WSL (Windows):** File → Open from WSL… opens your Linux home folder. Windows reaches WSL files directly (`\\wsl.localhost\Ubuntu\…`), so they open and follow like any other file, without SSH.
 - **Command line:** `logsift app.log other.log`. `logsift --version` prints the version.
 - **Another program's output, live:** pipe it in with `-`:
@@ -65,7 +68,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 - **Help → Keyboard Shortcuts** (Ctrl+/ or ⌘/) lists every shortcut. **Help → Report a Bug** opens a GitHub issue with your version and system filled in.
 - **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the toolbar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
 - **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub**. Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).
-- Logsift never sends your logs anywhere. Its only other network connections are to SSH servers you choose.
+- Logsift never sends your logs anywhere. Its only other network connections are to servers you choose: SSH servers, JMX ports, and web addresses you open.
 
 ## Screenshots
 
@@ -74,6 +77,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 | ![Several Find All searches in one window, one nested inside another](docs/screenshots/find-all.png) **Several searches at once**, with a search inside another's results | ![A selected time range on the timeline, with errors filtered and their stack traces kept](docs/screenshots/timeline.png) **Timeline**: select a time range, keep stack traces |
 | ![Parsed columns with top messages below](docs/screenshots/columns-and-messages.png) **Columns** and **top messages** | ![Folder search across .log, .gz and .zip files](docs/screenshots/folder-search.png) **Folder search**, including inside .gz and .zip |
 | ![JSON log shown as columns, with a pretty-printed details panel](docs/screenshots/json.png) **JSON logs** with a details panel | ![Comparing a bad run with a good one: new, more frequent and missing messages](docs/screenshots/compare.png) **Compare** a bad run with a good one |
+| ![A CSV file from inside a zip, shown as columns, with its hosts in the tree](docs/screenshots/csv.png) **CSV files** as columns, here from a zip inside a zip | ![The files of a zip, also of a zip inside it, to open or search](docs/screenshots/zip.png) **Zips**: pick files to open, or search them all |
 | ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained | ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph |
 | ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** | ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |
 
@@ -287,6 +291,10 @@ Two engines:
 
 **Settings** (Ctrl+, or Logsift → Settings on macOS) has the font and its size, tab width, line stripes, the timeline, dark mode, the encoding for text that isn't UTF-8 (for example Shift_JIS or GB18030), how often files are checked for changes, whether the last session reopens at start, update checks, and your log formats.
 
+## CSV files
+
+A `.csv` or `.tsv` file is read as a table: its header row names the columns and each row is split into them, by comma, semicolon, tab or `|` (whichever the file uses), with quoted fields (`"a, b"`, `""` for a quote) handled. Columns named like a time, level, thread, logger or message (`timestamp`, `severity`, `msg`, …) are used as such: the timeline uses the time column, and levels color the rows. Other columns keep their names and appear in the tree beside the log, where unchecking a value hides its rows. Files with other names are read as CSV when they clearly are one (a header of names, then rows with the same number of fields), or choose **CSV** in the status bar's format menu. A quoted field over several lines is shown as continuing its row.
+
 ## JSON logs
 
 Logs with one JSON object per line are recognized. With **Columns** on, the usual fields become columns (`@timestamp`/`ts`/`time` → Time, `level`/`severity` → Level, `thread`, `logger`, `message`/`msg`) and the rest are shown together in a Fields column. The timeline uses ISO times or epoch milliseconds in the JSON. The **Details** tab (next to Filters) shows the current entry in full (a line with its stack trace), or just the text you selected (several lines, or part of one). Its **Text | JSON** switch pretty-prints the JSON in it with colors, also JSON in the middle of a message, and opens up JSON written inside strings. A JSON line or selection is shown pretty-printed by itself; click **Text** to see it as written.
@@ -412,10 +420,11 @@ logsift.core   (no UI code; could later back a VS Code extension or a CLI)
   FilterEngine    one live search per filter; merges their sorted hits by the formula
   FilterResult    the passing lines: a sorted list, or "all lines except a list"
   FolderSearch    parallel search of a folder's files, streaming; .gz and .zip inside
+  Archives        a zip's files (zips inside too), unpacking one; UrlFetch downloads over HTTP(S)
   EntryFormat     how entries start (date, time, level...), to keep stack traces together
   TimeFormat      timestamp formats parsed from bytes; TimeIndex: a time every ~64 lines
   MessageStats    groups lines into message templates; LogCompare compares two logs
-  LogFormat       columns (regex with named groups, or JSON fields); ColumnStats counts values
+  LogFormat       columns (regex with named groups, JSON fields, or CSV); ColumnStats counts values
   LogMerger       merges logs by time; Encoding / Utf16Mirror; RemoteMirror (SFTP)
   LineExporter    copies chosen lines' original bytes to a file
 logsift.jvm     (thread dumps and running JVMs)
@@ -455,6 +464,7 @@ Design choices:
 - **Very long lines:**
   - Lines over 64 KB are cut for display. Search still sees the whole line.
   - A single line over 256 MB is only searched in its first 256 MB.
+- **Logs from zips and the web** are copies made when opened; they don't follow the original.
 - **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
 - **Time zones** are not converted: times are shown as written in each log.
 - **Thread dumps** of HotSpot JVMs (OpenJDK, Oracle, Temurin, Zulu, Corretto and the like) are read. OpenJ9 `javacore` files are not.

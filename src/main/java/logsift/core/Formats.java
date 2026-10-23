@@ -44,14 +44,23 @@ public final class Formats {
         }
         EntryFormat entries = EntryFormat.detect(sample);
         LogFormat columns;
+        boolean csvName = isCsvName(fileName);
         if (PLAIN.equals(chosen)) {
             return new Detected(entries, null, TimeFormat.detect(sample, year));
         } else if (chosen != null && find(chosen, mine, sample) != null) {
             columns = find(chosen, mine, sample);
         } else if (forFile != null) {
             columns = forFile;
+        } else if (csvName && LogFormat.detectCsv(sample, true) != null) {
+            columns = LogFormat.detectCsv(sample, true);
         } else {
             columns = LogFormat.detect(sample, mine);
+            if (columns == null) {
+                columns = LogFormat.detectCsv(sample, false);
+            }
+        }
+        if (columns != null && columns.isCsv()) {
+            entries = null; // a row is a line (a quoted field over several lines continues it)
         }
         TimeFormat times = null;
         if (columns != null && columns.isCustom()) {
@@ -83,8 +92,17 @@ public final class Formats {
                 return f;
             }
         }
+        if (LogFormat.CSV.equals(name)) {
+            return LogFormat.detectCsv(sample, true);
+        }
         LogFormat json = LogFormat.detectJson(sample);
         return json != null && json.name().equals(name) ? json : null;
+    }
+
+    /** A file named like CSV or TSV (also rotated, or a copy with a number). */
+    static boolean isCsvName(String fileName) {
+        return fileName != null && fileName.toLowerCase(java.util.Locale.ROOT)
+                .matches(".*\\.(csv|tsv|psv)(\\.\\d+)?$");
     }
 
     /**

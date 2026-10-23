@@ -18,6 +18,8 @@ public final class LogFormat {
     private final java.util.Map<String, String> jsonKeys; // column -> JSON key (JSON lines only)
     private final boolean custom;           // made by the user (see CustomFormat)
     private final String timePattern;       // how the time column is written (custom only), or null
+    private final char delimiter;           // CSV: the separator; 0 otherwise
+    private final String header;            // CSV: the header row (not a row of values)
 
     static final String TS = "\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?";
     static final String LEVEL = "TRACE|DEBUG|INFO|NOTICE|WARN(?:ING)?|ERROR|SEVERE|FATAL|CRITICAL";
@@ -59,6 +61,8 @@ public final class LogFormat {
         this.jsonKeys = null;
         this.custom = custom;
         this.timePattern = timePattern;
+        this.delimiter = 0;
+        this.header = null;
         if (columns.isEmpty()) {
             throw new IllegalArgumentException("The pattern needs at least one column, like {level}");
         }
@@ -71,6 +75,27 @@ public final class LogFormat {
         this.jsonKeys = jsonKeys;
         this.custom = false;
         this.timePattern = null;
+        this.delimiter = 0;
+        this.header = null;
+    }
+
+    /** CSV: columns named by the header row. */
+    private LogFormat(List<String> columns, char delimiter, String header) {
+        this.name = CSV;
+        this.pattern = null;
+        this.columns = List.copyOf(columns);
+        this.jsonKeys = null;
+        this.custom = false;
+        this.timePattern = null;
+        this.delimiter = delimiter;
+        this.header = header;
+    }
+
+    /** CSV: whether a line is the header row (which names the columns, and has no values). */
+    public boolean isHeader(String line) {
+        return header != null && line != null
+                && (line.equals(header) || line.length() == header.length() + 1 && line.startsWith("\uFEFF")
+                        && line.endsWith(header));
     }
 
     /** The built-in layouts, for choosing one by hand. */
@@ -95,6 +120,9 @@ public final class LogFormat {
 
     /** Whether a line has this layout. */
     public boolean matches(String line) {
+        if (delimiter != 0) {
+            return line != null && !isHeader(line) && Csv.fieldCount(line, delimiter) == columns.size();
+        }
         return jsonKeys != null ? Json.parseObject(line) != null : pattern.matcher(line).matches();
     }
 
@@ -104,7 +132,7 @@ public final class LogFormat {
         if (i < 0) {
             return null;
         }
-        if (jsonKeys != null) {
+        if (jsonKeys != null || delimiter != 0) {
             String[] v = split(line, null);
             return v == null ? null : v[i];
         }
@@ -153,6 +181,108 @@ public final class LogFormat {
         List<String> cols = new ArrayList<>(keys.keySet());
         cols.add(cols.contains("message") ? cols.indexOf("message") : cols.size(), "fields");
         return new LogFormat("JSON lines", cols, keys);
+    }
+
+    /** The name of the CSV format (any separator; columns from the header row). */
+    public static final String CSV = "CSV";
+
+    /**
+     * CSV (or TSV): a header row naming the columns, then rows with as many fields, separated
+     * by a comma, semicolon, tab or bar (whichever fits). With {@code named} (the file is called
+     * .csv or .tsv, or CSV was chosen) two columns are enough; otherwise it takes three, a header
+     * of names, and the other formats having found nothing.
+     */
+    public static LogFormat detectCsv(List<String> sample, boolean named) {
+        String header = null;
+        List<String> rows = new ArrayList<>();
+        for (String s : sample) {
+            if (s == null || s.isBlank()) {
+                continue;
+            }
+            if (header == null) {
+                header = s.startsWith("\uFEFF") ? s.substring(1) : s;
+            } else {
+                rows.add(s);
+            }
+        }
+        if (header == null || (!named && rows.size() < 4)) {
+            return null;
+        }
+        char best = 0;
+        double bestShare = 0;
+        for (char d : new char[] {',', ';', '\t', '|'}) {
+            int n = Csv.fieldCount(header, d);
+            if (n < (named ? 2 : 3)) {
+                continue;
+            }
+            int same = 0;
+            for (String r : rows) {
+                if (Csv.fieldCount(r, d) == n) {
+                    same++;
+                }
+            }
+            double share = rows.isEmpty() ? 1 : (double) same / rows.size();
+            if (share > bestShare) {
+                best = d;
+                bestShare = share;
+            }
+        }
+        if (best == 0 || bestShare < (named ? 0.5 : 0.9)) {
+            return null;
+        }
+        List<String> names = Csv.split(header, best, null);
+        if (!named) {
+            for (String n : names) {
+                if (!n.trim().matches("[\\p{L}_@][\\p{L}\\p{N} _.@/()-]{0,40}")) {
+                    return null; // a header has names, not values
+                }
+            }
+        }
+        return new LogFormat(columnNames(names), best, header);
+    }
+
+    /**
+     * The header's names as columns: the usual ones for time, level, thread, logger and message
+     * are named so (Logsift knows what they hold); empty and repeated names get a number.
+     */
+    static List<String> columnNames(List<String> header) {
+        List<String> out = new ArrayList<>();
+        java.util.Set<String> used = new java.util.HashSet<>();
+        for (int i = 0; i < header.size(); i++) {
+            String h = header.get(i).trim();
+            String name = h.isEmpty() ? "column " + (i + 1) : h;
+            for (String[] aliases : CSV_ALIASES) {
+                if (!used.contains(aliases[0]) && java.util.Arrays.stream(aliases).anyMatch(h::equalsIgnoreCase)) {
+                    name = aliases[0];
+                    used.add(name);
+                    break;
+                }
+            }
+            String unique = name;
+            for (int k = 2; out.contains(unique); k++) {
+                unique = name + " " + k;
+            }
+            out.add(unique);
+        }
+        return out;
+    }
+
+    /** Header names that mean a column Logsift knows (the first of each is its name). */
+    private static final String[][] CSV_ALIASES = {
+        {"time", "timestamp", "@timestamp", "datetime", "date_time", "ts", "date"},
+        {"level", "severity", "loglevel", "log_level", "log.level", "levelname", "lvl"},
+        {"thread", "thread_name", "threadname"},
+        {"logger", "logger_name", "loggername", "category"},
+        {"message", "msg"}};
+
+    /** True for CSV (columns from the header row, not a regex). */
+    public boolean isCsv() {
+        return delimiter != 0;
+    }
+
+    /** The CSV separator, or 0. */
+    public char delimiter() {
+        return delimiter;
     }
 
     /** True for JSON lines (columns come from fields, not a regex). */
@@ -235,6 +365,13 @@ public final class LogFormat {
     public String[] split(String line, int[] starts) {
         if (jsonKeys != null) {
             return splitJson(line, starts);
+        }
+        if (delimiter != 0) {
+            if (isHeader(line)) {
+                return null;
+            }
+            List<String> v = Csv.split(line, delimiter, starts);
+            return v.size() == columns.size() ? v.toArray(new String[0]) : null;
         }
         Matcher m = pattern.matcher(line);
         if (!m.matches()) {
