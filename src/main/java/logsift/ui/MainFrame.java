@@ -1798,6 +1798,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         go.addSeparator();
         go.add(item("Next Error", "circle-alert", KeyStroke.getKeyStroke(KeyEvent.VK_F8, 0), e -> nextError(true)));
         go.add(item("Previous Error", null, KeyStroke.getKeyStroke(KeyEvent.VK_F8, shift), e -> nextError(false)));
+        go.add(item("Follow This Line's Request", "route", KeyStroke.getKeyStroke(KeyEvent.VK_R, MENU | shift),
+                e -> followRequest()));
         go.addSeparator();
         go.add(item("Toggle Bookmark", "bookmark", KeyStroke.getKeyStroke(KeyEvent.VK_F2, MENU), e -> {
             LogTab t = currentTab();
@@ -2036,6 +2038,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         LogTab t = currentTab();
         if (t != null && !t.nextBookmark(forward)) {
             Toolkit.getDefaultToolkit().beep();
+        }
+    }
+
+    /** Follows the trace or request ID on the current line (or the selected text). */
+    private void followRequest() {
+        LogTab t = currentTab();
+        if (t != null && !t.followCurrentRequest()) {
+            JOptionPane.showMessageDialog(this,
+                    "This line has no trace, request or other ID to follow.\n"
+                            + "Select the text to follow (an order number, a user…) and try again.",
+                    "Follow a Request", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 

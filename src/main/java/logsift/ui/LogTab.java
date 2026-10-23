@@ -88,6 +88,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final List<Runnable> closeHooks = new ArrayList<>();
     private final MessagesPanel messages;
     private final InsightsPanel insights;
+    private RequestPanel request; // made the first time a request is followed
     private int insightsGeneration = -1;
     private final Bookmarks bookmarks;
     private final BookmarksPanel bookmarksPanel;
@@ -1684,6 +1685,22 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     : "Bookmark This Line");
             bm.addActionListener(e -> toggleBookmark());
             menu.add(bm);
+            String sel = view.selectionForFind();
+            List<logsift.core.RequestIds.Id> ids = sel != null ? List.of()
+                    : logsift.core.RequestIds.find(cur < 0 ? null : doc.line(cur));
+            for (logsift.core.RequestIds.Id id : ids) {
+                JMenuItem f = new JMenuItem("Follow " + id.label(), Icons.of("route"));
+                f.setToolTipText("Its lines in order, with the time between them, across threads");
+                f.addActionListener(e -> followRequest(id.name(), id.value()));
+                menu.add(f);
+            }
+            if (sel != null && sel.strip().length() >= 3 && sel.length() <= 200 && !sel.contains("\n")) {
+                String shown = sel.strip().length() > 30 ? sel.strip().substring(0, 30) + "…" : sel.strip();
+                JMenuItem f = new JMenuItem("Follow “" + shown + "” Through the Log", Icons.of("route"));
+                f.setToolTipText("Its lines in order, with the time between them, across threads");
+                f.addActionListener(e -> followRequest("", sel.strip()));
+                menu.add(f);
+            }
             String thread = threadOf(cur);
             if (thread != null) {
                 String shown = thread.length() > 40 ? thread.substring(0, 40) + "…" : thread;
@@ -1725,6 +1742,106 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         JCheckBoxMenuItem only = new JCheckBoxMenuItem("Show Matching Lines Only", matchingOnly);
         only.addActionListener(e -> setMatchingOnly(only.isSelected()));
         menu.add(only);
+    }
+
+    // ---------------------------------------------------------------- following a request
+
+    /**
+     * Follows the current line's request: the selected text, else the first trace or request
+     * ID on the line. False when there is none.
+     */
+    boolean followCurrentRequest() {
+        String sel = main.selectionForFind();
+        if (sel != null && !sel.isBlank() && !sel.contains("\n")) {
+            followRequest("", sel.strip());
+            return true;
+        }
+        long cur = currentLine();
+        List<logsift.core.RequestIds.Id> ids = logsift.core.RequestIds.find(cur < 0 ? null : doc.line(cur));
+        if (ids.isEmpty()) {
+            return false;
+        }
+        followRequest(ids.get(0).name(), ids.get(0).value());
+        return true;
+    }
+
+    /** Shows the lines with this ID in order in the Request tab. */
+    void followRequest(String name, String value) {
+        if (request == null) {
+            request = new RequestPanel(requestHost());
+            bottom.insertTab("Request", Icons.of("route"), request, "One request through the log",
+                    bottom.indexOfComponent(results) + 1);
+        }
+        setBottomCollapsed(false);
+        bottom.setSelectedComponent(request);
+        request.follow(name, value);
+    }
+
+    RequestPanel requestPanel() {
+        return request;
+    }
+
+    private RequestPanel.Host requestHost() {
+        return new RequestPanel.Host() {
+            @Override
+            public logsift.core.RequestTrace.Trace follow(String value, boolean withThreads, AtomicBoolean cancel) {
+                SearchQuery q = new SearchQuery(logsift.core.RequestIds.regex(value), true, true, false);
+                SearchSession s = new SearchSession(doc, q).start();
+                try {
+                    while (!s.awaitIdle(200)) {
+                        if (cancel.get() || closed) {
+                            return null;
+                        }
+                    }
+                    HitList hits = s.hits();
+                    int n = hits.size();
+                    long[] lines = new long[Math.min(n, logsift.core.RequestTrace.MAX_STEPS + 1)];
+                    for (int i = 0; i < lines.length; i++) {
+                        lines[i] = hits.get(i);
+                    }
+                    logsift.core.RequestTrace.Trace t = logsift.core.RequestTrace.build(lines, n,
+                            logsift.core.RequestTrace.reader(doc::line, timeFormat, logFormat), withThreads,
+                            () -> cancel.get() || closed);
+                    return cancel.get() ? null : t;
+                } finally {
+                    s.close();
+                }
+            }
+
+            @Override
+            public void goToLine(long line) {
+                showLine(line);
+            }
+
+            @Override
+            public void showOnly(String value) {
+                FilterDef d = filterPanel.addFilter(logsift.core.RequestIds.regex(value), FilterDef.Action.SHOW);
+                if (d != null) {
+                    d.regex = true;
+                    d.matchCase = true;
+                    filterPanel.refreshRow(d);
+                    filtersChanged();
+                    setMatchingOnly(true);
+                }
+            }
+
+            @Override
+            public void findAll(String value) {
+                host.runFindAll(new SearchQuery(logsift.core.RequestIds.regex(value), true, true, false));
+            }
+
+            @Override
+            public String message(String line) {
+                logsift.core.LogFormat f = logFormat;
+                if (f != null && f.columns().contains("message")) {
+                    String m = f.value(line, "message");
+                    if (m != null) {
+                        return m;
+                    }
+                }
+                return line;
+            }
+        };
     }
 
     void showFiltersTab() {
@@ -2417,6 +2534,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         results.closeAllSessions();
         messages.cancel();
         insights.cancel();
+        if (request != null) {
+            request.cancel();
+        }
         engine.close();
         if (timeIndex != null) {
             timeIndex.close();

@@ -3830,6 +3830,109 @@ class VisualTest {
         }
     }
 
+    @Test
+    @Order(41)
+    void followARequest() throws Exception {
+        // requests handled by web threads, paid on a pool thread; one waits 8 s for the payment
+        java.util.List<String[]> events = new java.util.ArrayList<>(); // {time ms, line}
+        long t0 = java.time.LocalDateTime.of(2026, 10, 21, 10, 2, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
+        java.util.Random rnd = new java.util.Random(7);
+        for (int r = 0; r < 400; r++) {
+            long start = t0 + r * 450L + rnd.nextInt(200);
+            String id = "r-" + (1000 + r);
+            String web = "http-nio-8080-exec-" + (r % 40 + 1);
+            String pool = "payments-" + (r % 3 + 1);
+            long pay = r == 42 ? 8_200 : 40 + rnd.nextInt(300);
+            boolean declined = r == 42 || r % 37 == 0;
+            Object[][] steps = {
+                {0L, "INFO ", web, "c.a.shop.OrderController", "POST /orders requestId=" + id},
+                {12L, "DEBUG", web, "c.a.shop.OrderRepository", "select * from orders where customer=?"},
+                {30L, "INFO ", pool, "c.a.shop.PaymentClient", "charging card requestId=" + id},
+                {30 + pay, declined ? "ERROR" : "INFO ", pool, "c.a.shop.PaymentClient",
+                    (declined ? "card declined by bank" : "payment authorized") + " requestId=" + id},
+                {36 + pay, "DEBUG", web, "c.a.shop.OrderRepository", "update orders set state=?"},
+                {40 + pay, declined ? "WARN " : "INFO ", web, "c.a.shop.OrderController",
+                    (declined ? "402 Payment Required" : "201 Created") + " requestId=" + id}};
+            for (Object[] st : steps) {
+                long t = start + (Long) st[0];
+                events.add(new String[] {Long.toString(t), TimelineBar.formatFull(t).substring(0, 23) + " " + st[1]
+                        + " [" + st[2] + "] " + st[3] + " - " + st[4]});
+            }
+        }
+        events.sort(java.util.Comparator.comparingLong(e -> Long.parseLong(e[0])));
+        StringBuilder sb = new StringBuilder();
+        for (String[] e : events) {
+            sb.append(e[1]).append('\n');
+        }
+        Path log = dir.resolve("shop.log");
+        Files.writeString(log, sb.toString());
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.openFiles(List.of(log));
+            return null;
+        });
+        LogTab tab = waitForTab("shop.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null && !tab.document().isIndexing());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the format");
+        long line = -1;
+        for (int i = 0; i < events.size(); i++) {
+            if (events.get(i)[1].endsWith("POST /orders requestId=r-1042")) {
+                line = i;
+            }
+        }
+        long start = line;
+        onEdt(() -> {
+            tab.showLine(start);
+            return tab.followCurrentRequest();
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.requestPanel() != null && !tab.requestPanel().isRunning()
+                        && tab.requestPanel().trace() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the request");
+        RequestPanel rp = onEdt(tab::requestPanel);
+        logsift.core.RequestTrace.Trace tr = onEdt(rp::trace);
+        assertEquals("r-1042", onEdt(rp::value));
+        assertEquals(4, tr.steps().size(), "the lines naming it");
+        assertEquals(List.of("http-nio-8080-exec-3", "payments-1"), tr.threads());
+        assertEquals(1, tr.errors());
+        assertEquals(2, tr.longest(), "the wait for the bank");
+        assertTrue(tr.steps().get(2).gap() >= 8_200 && tr.steps().get(2).gap() < 8_300, "" + tr.steps().get(2).gap());
+        String summary = onEdt(rp::summaryForTest);
+        assertTrue(summary.contains("4 lines") && summary.contains("2 threads") && summary.contains("longest wait 8."),
+                summary);
+        // with the lines its threads wrote in between (the database calls name no ID)
+        onEdt(() -> {
+            rp.withThreadsForTest().doClick();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !rp.isRunning() && rp.trace() != null && rp.trace().steps().size() > 4);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the thread lines");
+        tr = onEdt(rp::trace);
+        assertEquals(6, tr.steps().stream().filter(s -> s.thread() != null).count(), "" + tr.steps());
+        assertEquals(2, tr.steps().stream().filter(s -> !s.withId()).count());
+        onEdt(() -> {
+            rp.tableForTest().setRowSelectionInterval(3, 3);
+            return null;
+        });
+        assertEquals(tr.steps().get(3).line(), onEdt(tab::currentLine), "a click goes to the line");
+        settle();
+        shot("76-follow-request");
+    }
+
     /** Waits until the current tab is a log titled so. */
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {
