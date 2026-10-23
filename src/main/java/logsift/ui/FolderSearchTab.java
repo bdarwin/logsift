@@ -123,7 +123,8 @@ final class FolderSearchTab extends JPanel {
         names.putClientProperty("JTextField.placeholderText", "*.log;*.txt (empty = all files)");
         names.setToolTipText("<html>File name patterns, separated by ; or spaces.<br>"
                 + "Rotated files count too: *.log finds app.log.1 and app.log.2026-10-21,<br>"
-                + "and with archives on also app.log.2.gz and .log files inside any .zip.</html>");
+                + "and with archives on also app.log.2.gz and .log files inside any .zip,<br>"
+                + "including zips and .gz files inside a zip.</html>");
         find.putClientProperty("JTextField.placeholderText", "text to find (Enter = Search)");
         find.putClientProperty("JTextField.showClearButton", true);
         JToolBar inField = new JToolBar();
@@ -347,8 +348,10 @@ final class FolderSearchTab extends JPanel {
         if (s == null) {
             return " ";
         }
+        // files on disk with hits (several entries of one zip count once), of those searched
+        long withHits = s.results().stream().map(FolderSearch.FileResult::file).distinct().count();
         String counts = String.format("%,d matching lines in %,d of %,d files",
-                s.totalHits(), s.results().size(), s.filesFound());
+                s.totalHits(), withHits, s.filesFound());
         StringBuilder sb = new StringBuilder();
         if (s.isRunning()) {
             sb.append(String.format("Searching… %,d of %,d files, %s · ", s.filesDone(),
@@ -394,7 +397,8 @@ final class FolderSearchTab extends JPanel {
         if (path.isEmpty()) {
             path = f.file().getFileName().toString();
         }
-        return f.entry() == null ? path : path + " › " + f.entry();
+        return f.entry() == null ? path
+                : path + " › " + f.entry().replace(logsift.core.FolderSearch.NESTED, " › ");
     }
 
     private final class Rows implements LogView.RowSource {

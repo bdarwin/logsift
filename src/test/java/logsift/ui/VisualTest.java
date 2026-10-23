@@ -592,7 +592,7 @@ class VisualTest {
     @Test
     @Order(12)
     void folderSearch() throws Exception {
-        // A folder like a real log directory: plain, rotated .gz and a .zip of old logs
+        // A folder like a real log directory: plain, rotated .gz and a .zip of old logs (with a zip inside)
         Path folder = dir.resolve("folder");
         if (Files.exists(folder)) {
             try (var walk = Files.walk(folder)) {
@@ -610,11 +610,22 @@ class VisualTest {
         try (var out = new java.util.zip.GZIPOutputStream(Files.newOutputStream(folder.resolve("app.log.1.gz")))) {
             Files.copy(tmp, out);
         }
+        Path older = folder.resolve("older.log");
+        LogGenerator.generate(older, 2L << 20, 5);
+        java.io.ByteArrayOutputStream innerZip = new java.io.ByteArrayOutputStream();
+        try (var z = new java.util.zip.ZipOutputStream(innerZip)) {
+            z.putNextEntry(new java.util.zip.ZipEntry("older.log"));
+            Files.copy(older, z);
+        }
         LogGenerator.generate(tmp, size, 4);
         try (var z = new java.util.zip.ZipOutputStream(Files.newOutputStream(folder.resolve("archive.zip")))) {
             z.putNextEntry(new java.util.zip.ZipEntry("2026-10/old.log"));
             Files.copy(tmp, z);
+            z.putNextEntry(new java.util.zip.ZipEntry("2026-09.zip"));
+            z.write(innerZip.toByteArray());
         }
+        long olderHits = naiveCount(Files.newInputStream(older));
+        Files.delete(older);
         Files.delete(tmp);
         Files.writeString(folder.resolve("notes.txt"), "Payment failed (not a .log file)\n");
 
@@ -640,13 +651,16 @@ class VisualTest {
             expected.put("archive.zip!2026-10/old.log",
                     naiveCount(zip.getInputStream(zip.getEntry("2026-10/old.log"))));
         }
+        expected.put("archive.zip!2026-09.zip!/older.log", olderHits);
         Map<String, Long> actual = new java.util.TreeMap<>();
         for (var r : fs.results()) {
             actual.put(folder.relativize(r.file()).toString().replace('\\', '/')
                     + (r.entry() == null ? "" : "!" + r.entry()), r.hitCount());
         }
         assertEquals(expected, actual, "hits per file");
-        summary.put("Folder search (4 files, 48 MB)", String.format("%,d lines in %d ms",
+        assertTrue(onEdt(tab::statusText).contains(" in 4 of 4 files"), "the zip counts once: "
+                + onEdt(tab::statusText));
+        summary.put("Folder search (5 files, 50 MB)", String.format("%,d lines in %d ms",
                 fs.totalHits(), searchMs));
         shot("14-folder-search");
         onEdt(() -> {
@@ -660,8 +674,9 @@ class VisualTest {
             return null;
         });
 
-        // double-click a hit inside the zip: unpacks it and opens the file at that line
-        var zipResult = fs.results().stream().filter(r -> r.entry() != null).findFirst().orElseThrow();
+        // double-click a hit in the zip inside the zip: unpacks it and opens the file at that line
+        var zipResult = fs.results().stream().filter(r -> "2026-09.zip!/older.log".equals(r.entry()))
+                .findFirst().orElseThrow();
         long zipLine = zipResult.hit(2).line();
         onEdt(() -> {
             LogView v = tab.resultsView();
@@ -669,7 +684,7 @@ class VisualTest {
             String[] buf = new String[n];
             v.source().texts(0, n, buf);
             for (int row = 0; row < n; row++) {
-                if (buf[row] != null && buf[row].contains("archive.zip › 2026-10/old.log")) {
+                if (buf[row] != null && buf[row].contains("archive.zip › 2026-09.zip › older.log")) {
                     v.goToRow(row + 3, true); // the third hit of that file
                     tab.openSelected();
                     return null;
@@ -681,12 +696,12 @@ class VisualTest {
             try {
                 return onEdt(() -> {
                     LogTab t = frame.currentTab();
-                    return t != null && t.title().equals("old.log") && t.currentLine() == zipLine;
+                    return t != null && t.title().equals("older.log") && t.currentLine() == zipLine;
                 });
             } catch (Exception e) {
                 return false;
             }
-        }, 60_000, "opened old.log from the zip at line " + zipLine);
+        }, 60_000, "opened older.log from the zip in the zip at line " + zipLine);
         LogTab opened = onEdt(frame::currentTab);
         assertTrue(opened.search() != null && opened.search().query().equals(q),
                 "Find All runs in the opened file");

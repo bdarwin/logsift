@@ -1125,8 +1125,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             openAt(f.file(), line, q);
             return;
         }
-        String name = f.entry() != null ? f.entry().substring(f.entry().lastIndexOf('/') + 1)
-                : f.file().getFileName().toString().replaceFirst("(?i)\\.gz$", "");
+        String name = (f.entry() != null ? f.entry().substring(f.entry().lastIndexOf('/') + 1)
+                : f.file().getFileName().toString()).replaceFirst("(?i)\\.gz$", "");
         status.setText("Unpacking " + name + "…");
         Thread t = new Thread(() -> {
             try {
@@ -1152,11 +1152,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         dir.toFile().deleteOnExit();
         Path out = dir.resolve(name.isEmpty() ? "entry.log" : name);
         if (f.entry() != null) {
-            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(f.file().toFile())) {
-                java.util.zip.ZipEntry e = zip.getEntry(f.entry());
-                try (var in = zip.getInputStream(e)) {
-                    Files.copy(in, out);
-                }
+            try (var in = logsift.core.FolderSearch.openEntry(f.file(), f.entry())) {
+                Files.copy(in, out);
             }
         } else {
             try (var in = new java.util.zip.GZIPInputStream(Files.newInputStream(f.file()), 1 << 16)) {

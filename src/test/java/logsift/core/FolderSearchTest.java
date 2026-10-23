@@ -1,6 +1,7 @@
 package logsift.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -55,6 +56,18 @@ class FolderSearchTest {
             z.write("error in readme\n".getBytes(StandardCharsets.UTF_8));
         }
         searchable.put("e.zip!logs/x.log", x);
+        // a zip inside a zip inside a zip, a .gz and a rotated log inside a zip
+        String y = TestFiles.randomContent(rnd, 250);
+        String w = TestFiles.randomContent(rnd, 150);
+        String v = TestFiles.randomContent(rnd, 120);
+        byte[] innermost = zip(Map.of("deep/y.log", y.getBytes(StandardCharsets.UTF_8)));
+        byte[] inner = zip(Map.of("more.zip", innermost, "w.log.4.gz", gzip(w),
+                "notes.txt", "error not a log\n".getBytes(StandardCharsets.UTF_8)));
+        Files.write(dir.resolve("f.zip"), zip(Map.of("archive/inner.zip", inner,
+                "v.log.1", v.getBytes(StandardCharsets.UTF_8))));
+        searchable.put("f.zip!archive/inner.zip!/more.zip!/deep/y.log", y);
+        searchable.put("f.zip!archive/inner.zip!/w.log.4.gz", w);
+        searchable.put("f.zip!v.log.1", v);
 
         for (SearchQuery q : List.of(
                 new SearchQuery("error", false, false, false),
@@ -89,6 +102,58 @@ class FolderSearchTest {
                 assertEquals(1, s.filesSkipped(), "binary file skipped");
             }
         }
+    }
+
+    @Test
+    void opensAnEntryOfAZipInsideAZip() throws Exception {
+        byte[] inner = zip(Map.of("a.log", "first\n".getBytes(StandardCharsets.UTF_8),
+                "b.log.gz", gzip("second\n")));
+        Path f = dir.resolve("outer.zip");
+        Files.write(f, zip(Map.of("x/inner.zip", inner, "c.log", "third\n".getBytes(StandardCharsets.UTF_8))));
+        assertEquals("first\n", read(f, "x/inner.zip!/a.log"));
+        assertEquals("second\n", read(f, "x/inner.zip!/b.log.gz"));
+        assertEquals("third\n", read(f, "c.log"));
+        assertThrows(IOException.class, () -> read(f, "x/inner.zip!/none.log"));
+    }
+
+    @Test
+    void stopsFollowingZipsAtSomeDepth() throws Exception {
+        byte[] z = zip(Map.of("a.log", "error deep\n".getBytes(StandardCharsets.UTF_8)));
+        for (int i = 1; i < FolderSearch.MAX_DEPTH; i++) {
+            z = zip(Map.of("n" + i + ".zip", z));
+        }
+        Files.write(dir.resolve("ok.zip"), z);
+        Files.write(dir.resolve("too.zip"), zip(Map.of("n.zip", z)));
+        FolderSearch s = new FolderSearch(new FolderSearch.Options(dir, "*.log", false, true,
+                SearchQuery.literal("error"))).start();
+        assertTrue(s.awaitDone(10_000));
+        assertEquals(1, s.results().size(), "only the one at the deepest level followed");
+        assertEquals("ok.zip", s.results().get(0).file().getFileName().toString());
+    }
+
+    private static String read(Path zip, String entry) throws IOException {
+        try (var in = FolderSearch.openEntry(zip, entry)) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static byte[] zip(Map<String, byte[]> entries) throws IOException {
+        java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+        try (ZipOutputStream z = new ZipOutputStream(b)) {
+            for (Map.Entry<String, byte[]> e : new TreeMap<>(entries).entrySet()) {
+                z.putNextEntry(new ZipEntry(e.getKey()));
+                z.write(e.getValue());
+            }
+        }
+        return b.toByteArray();
+    }
+
+    private static byte[] gzip(String content) throws IOException {
+        java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+        try (OutputStream o = new GZIPOutputStream(b)) {
+            o.write(content.getBytes(StandardCharsets.UTF_8));
+        }
+        return b.toByteArray();
     }
 
     @Test
