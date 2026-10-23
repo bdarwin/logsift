@@ -1,0 +1,42 @@
+Process 311: /usr/local/bin/python3.12 /usr/local/bin/celery -A shop worker -l INFO -c 4
+Python v3.12.7 (/usr/local/bin/python3.12)
+
+Thread 311 (idle): "MainThread"
+    poll (kombu/utils/eventio.py:83)
+    create_loop (kombu/asynchronous/hub.py:306)
+    asynloop (celery/worker/loops.py:97)
+    start (celery/worker/consumer/consumer.py:742)
+    start (celery/bootsteps.py:116)
+    start (celery/worker/consumer/consumer.py:340)
+    start (celery/bootsteps.py:365)
+    start (celery/bootsteps.py:116)
+    start (celery/worker/worker.py:202)
+    run (celery/apps/worker.py:176)
+    main (celery/bin/worker.py:356)
+    <module> (celery:8)
+Thread 318 (active): "ForkPoolWorker-2"
+    readinto (socket.py:720)
+    readline (smtplib.py:391)
+    getreply (smtplib.py:398)
+    data (smtplib.py:579)
+    sendmail (smtplib.py:900)
+    send_message (smtplib.py:986)
+    send_receipt (shop/tasks.py:37)
+        Arguments:
+            self: <@task: shop.tasks.send_receipt of shop at 0x7f0c1a2b3c40>
+            order_id: 1843
+        Locals:
+            to: "c-11042@example.com"
+            attempt: 2
+    __protected_call__ (celery/app/trace.py:736)
+    trace_task (celery/app/trace.py:453)
+    fast_trace_task (celery/app/trace.py:651)
+    workloop (billiard/pool.py:362)
+    run (billiard/pool.py:292)
+    _bootstrap (billiard/process.py:323)
+Thread 319 (idle): "ForkPoolWorker-3"
+    _recv (billiard/connection.py:430)
+    recv (billiard/queues.py:355)
+    workloop (billiard/pool.py:351)
+    run (billiard/pool.py:292)
+    _bootstrap (billiard/process.py:323)

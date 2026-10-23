@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Full pools are found when their threads wait on the database:** threads waiting for a pool's connection or reading a JDBC or HTTP answer count as busy, not idle.
+- **Python thread dumps:** `py-spy dump` output and `faulthandler` dumps (also inside a log) open in the Threads view, with thread names, idle or active (and who holds the GIL), and stacks.
 - **Known problems in Insights:** about 30 problems that look the same in every log (a connection pool that ran out, a full thread pool, out of memory, GC pauses, untrusted certificates, timeouts, database deadlocks, Kafka rebalances, a container killed for memory, gunicorn worker timeouts, unhandled asyncio errors, Celery retries…), each with **What to Try**.
 - **Metrics:** a new tab with how long things that start and end took (matched by the job or request they name, or by thread), the ones that **never ended**, and the **numbers in messages** (durations, sizes, counts) as charts over time with their slowest lines. Insights reports what never ended and when a measurement spiked.
 - **Open the source of a stack line:** in the Exceptions tab, or right-click a stack line → **Open … in Editor**. The file is found in your source folders (Settings → Source Code) and opened at the line in IntelliJ IDEA, PyCharm, Visual Studio Code or a command of your own.

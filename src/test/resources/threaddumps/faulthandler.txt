@@ -1,0 +1,15 @@
+2026-10-21 10:42:13,120 WARNING inventory.api: dumping threads after a slow request
+Thread 0x00007f3a1e7fc700 (most recent call first):
+  File "/usr/local/lib/python3.12/threading.py", line 355 in wait
+  File "/usr/local/lib/python3.12/queue.py", line 171 in get
+  File "/app/inventory/worker.py", line 58 in run_jobs
+  File "/usr/local/lib/python3.12/threading.py", line 1010 in run
+  File "/usr/local/lib/python3.12/threading.py", line 1073 in _bootstrap_inner
+  File "/usr/local/lib/python3.12/threading.py", line 1030 in _bootstrap
+
+Current thread 0x00007f3a2c3f1740 (most recent call first):
+  File "/app/inventory/forecast.py", line 142 in _rolling_mean
+  File "/app/inventory/forecast.py", line 97 in compute_reorder_levels
+  File "/app/inventory/api.py", line 61 in reorder
+  File "<string>", line 1 in <module>
+2026-10-21 10:42:13,410 INFO inventory.api: done

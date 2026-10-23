@@ -59,6 +59,9 @@ public final class DumpParser {
 
     /** All dumps in {@code text} (thread dump text or a JSON thread dump). */
     public static List<ThreadDump> parse(String text) {
+        if (!text.contains(START) && PyDumps.looksLikeDump(text.length() > 4000 ? text.substring(0, 4000) : text)) {
+            return PyDumps.parse(text);
+        }
         String t = text.stripLeading();
         if (t.startsWith("{")) {
             List<ThreadDump> json = parseJson(t);
@@ -87,7 +90,7 @@ public final class DumpParser {
 
     /** True if the text looks like (the start of) a thread dump file. */
     public static boolean looksLikeDump(String head) {
-        if (head.contains(START)) {
+        if (head.contains(START) || PyDumps.looksLikeDump(head)) {
             return true;
         }
         String t = head.stripLeading();
@@ -134,24 +137,34 @@ public final class DumpParser {
             }
         }
         DumpParser p = new DumpParser();
+        PyDumps py = new PyDumps();
         for (long i = 0; i < n && !cancelled.getAsBoolean(); i += buf.length) {
             int c = (int) Math.min(buf.length, n - i);
             doc.readLines(i, c, buf);
             for (int j = 0; j < c; j++) {
                 if (buf[j] != null) {
                     p.line(i + j, buf[j]);
+                    py.line(i + j, buf[j]);
                 }
             }
             if (progress != null) {
                 progress.accept((double) (i + c) / n);
             }
         }
-        return p.finish();
+        List<ThreadDump> jvm = p.finish();
+        List<ThreadDump> python = py.finish();
+        if (python.isEmpty()) {
+            return jvm;
+        }
+        List<ThreadDump> all = new ArrayList<>(jvm);
+        all.addAll(python);
+        all.sort(java.util.Comparator.comparingLong(ThreadDump::line));
+        return List.copyOf(all);
     }
 
     /** True if a line starts a thread dump (cheap; for scanning a log). */
     public static boolean startsDump(String line) {
-        return line.contains(START);
+        return line.contains(START) || PyDumps.startsDump(line);
     }
 
     /** One line of text; {@code no} is its line number (0-based). */

@@ -2236,7 +2236,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return treePanel;
     }
 
-    /** Offers the Threads view when the file has Java thread dumps in it. */
+    /** Offers the Threads view when the file has thread dumps in it. */
     private final JPanel dumpsBanner = dumpsBanner();
     private JPanel banners;
 
@@ -2313,7 +2313,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         p.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                 javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.uiColor("Component.borderColor", java.awt.Color.GRAY)),
                 javax.swing.BorderFactory.createEmptyBorder(5, 10, 5, 8)));
-        JLabel text = new JLabel("This file has Java thread dumps. See deadlocks, threads waiting for locks, and stuck threads.",
+        JLabel text = new JLabel("This file has thread dumps (Java or Python). See deadlocks, threads waiting for locks, and stuck threads.",
                 Icons.of("cpu"), javax.swing.SwingConstants.LEFT);
         text.setIconTextGap(8);
         p.add(text, BorderLayout.CENTER);

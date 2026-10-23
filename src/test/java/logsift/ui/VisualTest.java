@@ -4286,6 +4286,36 @@ class VisualTest {
         bottom.setSelectedComponent(c);
     }
 
+    @Test
+    @Order(44)
+    void pythonThreadDumps() throws Exception {
+        Path f = dir.resolve("celery-py-spy.txt");
+        try (var in = getClass().getResourceAsStream("/threaddumps/py-spy-celery.txt")) {
+            Files.write(f, in.readAllBytes());
+        }
+        ThreadsTab before = onEdt(frame::currentThreadsTab);
+        onEdt(() -> {
+            frame.openThreadDump(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentThreadsTab() != null && frame.currentThreadsTab() != before);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the Python threads");
+        ThreadsTab tt = onEdt(frame::currentThreadsTab);
+        assertEquals(1, onEdt(() -> tt.dumps().size()));
+        assertEquals(3, onEdt(() -> tt.dumps().get(0).threads().size()));
+        settle();
+        shot("83-python-threads");
+        onEdt(() -> {
+            frame.closeCurrentTabForTest();
+            return null;
+        });
+    }
+
     /** Waits until the current tab is a log titled so. */
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {

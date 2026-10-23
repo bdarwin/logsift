@@ -26,7 +26,7 @@
 - **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files, and zips inside zips.
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
-- **Java threads.** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log), or attach to a running JVM on your computer, on a server over SSH, or through its JMX port. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
+- **Java threads (and Python's).** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log; `py-spy dump` and `faulthandler` for Python), or attach to a running JVM on your computer, on a server over SSH, or through its JMX port. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
 - **A log knows its JVM.** Open a log and Logsift names the JVM writing it, with its threads, profile and heap a click away. Right-click a line to see its thread's stack; from a thread, show only its lines.
 - **Profiling and memory.** Flame graphs of a JVM's CPU, wall-clock time, allocations, live objects (memory leaks), locks, native memory and native leaks, calls of a method and slow calls, or hardware events, with async-profiler or the JVM's own Flight Recorder. Compare runs, see who calls a method, and find which classes fill the heap and keep growing.
 - **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
@@ -236,6 +236,8 @@ Logs with a logger column (or class, component, thread, host…) get a tree on t
 ## Thread dumps and running JVMs
 
 **JVM → Open Thread Dump…** reads `jstack` and `jcmd Thread.print` output, the plain and JSON files of `jcmd Thread.dump_to_file` (with virtual threads), and dumps saved by Logsift. A log with `kill -3` dumps in it (a console log, `catalina.out`, even `docker logs --timestamps` output) shows a bar offering **Analyze Threads**; **JVM → Analyze Thread Dumps in This Log** does the same for any open log. Several dumps in one file, taken some seconds apart, are read as a series.
+
+**Python thread dumps** open the same way: `py-spy dump` output (thread names, idle or active, holding the GIL; the arguments and locals under a frame are skipped) and `faulthandler` dumps (`faulthandler.dump_traceback()`, `faulthandler.register(signal.SIGUSR1)`, or what Python writes when it crashes), also in the middle of a log. Idle threads show as waiting and active ones as runnable, so grouping by pool, the stack view, several dumps over time and stuck threads work for them too.
 
 The **Threads** tab starts with what stands out, worst first. Each finding has a **Show threads** button:
 
