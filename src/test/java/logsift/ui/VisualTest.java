@@ -3586,13 +3586,13 @@ class VisualTest {
         Files.createDirectories(box);
         StringBuilder csv = new StringBuilder("Timestamp,Level,Host,User,Message\n");
         for (int i = 0; i < 400; i++) {
-            csv.append(String.format("2026-10-21 10:%02d:%02d,%s,web-%d,u%d,\"%s\"%n", i / 60, i % 60,
+            csv.append(String.format("2026-10-21 10:%02d:%02d,%s,web-%d,u%d,\"%s\"\n", i / 60, i % 60,
                     i % 25 == 0 ? "ERROR" : i % 7 == 0 ? "WARN" : "INFO", i % 3 + 1, i % 40,
                     i % 25 == 0 ? "Payment failed, card declined" : "Request " + i + " took " + (i * 7 % 300) + " ms"));
         }
         StringBuilder log = new StringBuilder();
         for (int i = 0; i < 300; i++) {
-            log.append(String.format("2026-10-21 09:%02d:%02d.000 %s [main] c.a.App - step %d%n", i / 60, i % 60,
+            log.append(String.format("2026-10-21 09:%02d:%02d.000 %s [main] c.a.App - step %d\n", i / 60, i % 60,
                     i % 50 == 0 ? "ERROR" : "INFO ", i));
         }
         java.io.ByteArrayOutputStream inner = new java.io.ByteArrayOutputStream();
