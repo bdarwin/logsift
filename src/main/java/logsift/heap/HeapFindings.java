@@ -124,7 +124,7 @@ public final class HeapFindings {
     }
 
     /** Package names off: "java.util.HashMap (3 entries)" → "HashMap (3 entries)". */
-    static String shorten(String description) {
+    public static String shorten(String description) {
         int sp = description.indexOf(' ');
         String cls = sp < 0 ? description : description.substring(0, sp);
         String rest = sp < 0 ? "" : description.substring(sp);

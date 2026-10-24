@@ -47,7 +47,8 @@ public final class LeakApp {
     public static void main(String[] args) throws Exception {
         Path dump = Path.of(args[0]);
         Path histogram = Path.of(args[1]);
-        for (int i = 0; i < SESSIONS; i++) {
+        int sessions = args.length > 2 ? Integer.parseInt(args[2]) : SESSIONS;
+        for (int i = 0; i < sessions; i++) {
             CACHE.put("session-" + i, new Session("session-" + i, i));
         }
         List<Order> orders = new ArrayList<>();
@@ -73,12 +74,17 @@ public final class LeakApp {
 
     /** Runs this program and waits for its dump; returns the histogram text. */
     public static String run(Path dump, Path histogram) throws Exception {
+        return run(dump, histogram, SESSIONS);
+    }
+
+    /** The same with this many sessions (for an earlier, smaller dump). */
+    public static String run(Path dump, Path histogram, int sessions) throws Exception {
         String exe = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")
                 ? "java.exe" : "java";
         Path javaExe = Path.of(System.getProperty("java.home"), "bin", exe);
         Files.deleteIfExists(dump);
         Process p = new ProcessBuilder(javaExe.toString(), "-Xmx256m", "-cp", System.getProperty("java.class.path"),
-                LeakApp.class.getName(), dump.toString(), histogram.toString())
+                LeakApp.class.getName(), dump.toString(), histogram.toString(), String.valueOf(sessions))
                 .redirectErrorStream(true).start();
         String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         if (p.waitFor() != 0 || !Files.exists(dump)) {

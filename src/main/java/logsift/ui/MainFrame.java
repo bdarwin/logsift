@@ -1019,6 +1019,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 refreshStatus();
             }
         });
+        tab.onCompare(() -> {
+            Path other = chooseHeapDump("Compare with Another Heap Dump of the Same Program",
+                    abs.getParent() == null ? null : abs.getParent().toString());
+            if (other != null) {
+                openHeapCompare(other, abs);
+            }
+        });
         tab.onShowThreads(text -> {
             List<logsift.jvm.ThreadDump> dumps = logsift.jvm.DumpParser.parse(text);
             if (!dumps.isEmpty()) {
@@ -1035,6 +1042,51 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     private void openHeapDumpDialog() {
         openHeapDumpDialog(PREFS.get("lastDir", null));
+    }
+
+    /** Asks for a .hprof file; null if none was chosen. */
+    private Path chooseHeapDump(String title, String folder) {
+        FileDialog fd = new FileDialog(this, title, FileDialog.LOAD);
+        if (folder != null) {
+            fd.setDirectory(folder);
+        }
+        fd.setVisible(true);
+        return fd.getFile() == null ? null : Path.of(fd.getDirectory(), fd.getFile());
+    }
+
+    /** Asks for two heap dumps and compares them. */
+    private void compareHeapDumpsDialog() {
+        Path first = chooseHeapDump("Compare Heap Dumps: the Earlier Dump", PREFS.get("lastDir", null));
+        if (first == null) {
+            return;
+        }
+        Path second = chooseHeapDump("Compare Heap Dumps: the Later Dump", first.getParent().toString());
+        if (second != null) {
+            openHeapCompare(first, second);
+        }
+    }
+
+    /** Compares two heap dumps of the same program (put in order by when they were taken). */
+    HeapCompareTab openHeapCompare(Path before, Path after) {
+        HeapCompareTab tab = new HeapCompareTab(before, after);
+        tabs.addTab(tab.title(), Icons.of("git-compare"), tab);
+        tabs.setToolTipTextAt(tabs.getTabCount() - 1, before + " → " + after);
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tab.onChanged(() -> {
+            int i = tabs.indexOfComponent(tab);
+            if (i >= 0) {
+                tabs.setTitleAt(i, tab.title()); // in order once read
+            }
+            if (tabs.getSelectedComponent() == tab) {
+                refreshStatus();
+            }
+        });
+        updateEmptyState();
+        return tab;
+    }
+
+    HeapCompareTab currentHeapCompareTab() {
+        return tabs.getSelectedComponent() instanceof HeapCompareTab t ? t : null;
     }
 
     private void openHeapDumpDialog(String folder) {
@@ -1930,6 +1982,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }));
         jvm.add(item("Open Profile…", "flame", null, e -> openProfileDialog()));
         jvm.add(item("Open Heap Dump…", "memory-stick", null, e -> openHeapDumpDialog()));
+        jvm.add(item("Compare Two Heap Dumps…", "git-compare", null, e -> compareHeapDumpsDialog()));
         bar.add(jvm);
 
         // ---- Help
@@ -2102,6 +2155,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             ht.close();
         } else if (c instanceof HeapDumpTab hd) {
             hd.close();
+        } else if (c instanceof HeapCompareTab hc) {
+            hc.close();
         }
         updateEmptyState();
     }
@@ -2591,6 +2646,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         if (tabs.getSelectedComponent() instanceof HeapDumpTab hd) {
             setTitle(hd.title() + " — Logsift");
             status.setText(hd.statusText());
+            statusRight.setText(memory());
+            progress.setVisible(false);
+            return;
+        }
+        if (tabs.getSelectedComponent() instanceof HeapCompareTab hc) {
+            setTitle(hc.title() + " — Logsift");
+            status.setText(hc.statusText());
             statusRight.setText(memory());
             progress.setVisible(false);
             return;

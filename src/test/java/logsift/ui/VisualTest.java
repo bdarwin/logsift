@@ -4610,6 +4610,30 @@ class VisualTest {
             return null;
         });
 
+        // an earlier dump of the same program, compared: what grew, and what holds it
+        Path early = dir.resolve("shop-early.hprof");
+        logsift.heap.LeakApp.run(early, dir.resolve("shop-early-histogram.txt"), 5_000);
+        Path later = dir.resolve("shop-later.hprof");
+        logsift.heap.LeakApp.run(later, dir.resolve("shop-later-histogram.txt"));
+        HeapCompareTab cmp = onEdt(() -> frame.openHeapCompare(later, early)); // in either order
+        waitFor(() -> {
+            try {
+                return onEdt(cmp::isLoadedForTest);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 120_000, "the dumps compared");
+        String grew = onEdt(cmp::findingsTextForTest);
+        assertTrue(grew.contains("HashMap in static LeakApp.CACHE grew by"), grew);
+        assertTrue(grew.contains("5,000 entries → 20,000 entries"), grew);
+        assertTrue(grew.contains("Mostly 20,000 × LeakApp.Session"), grew);
+        settle();
+        shot("93-heap-compare");
+        onEdt(() -> {
+            frame.closeCurrentTabForTest();
+            return null;
+        });
+
         // a log where the JVM ran out of memory: its heap dump opens from the line
         Path oomLog = dir.resolve("shop-oom.log");
         Files.writeString(oomLog, "2026-10-24 10:00:00.000 INFO  [main] shop.App - Started\n"

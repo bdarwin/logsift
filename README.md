@@ -88,7 +88,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 | ![Insights with a known problem and what to try](docs/screenshots/insights.png) **Insights** with known problems | ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained |
 | ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph | ![A heap dump explained: one HashMap in a static field holds 85% of the heap, with the chain of references that keeps it alive](docs/screenshots/heap-dump.png) **Heap dumps** explained, and why an object is alive |
 | ![Wasted memory in a heap dump: 20,001 copies of the string ACTIVE and 20,000 empty ArrayLists, each with the field that holds them](docs/screenshots/heap-waste.png) **Wasted memory**: copies of strings, empty collections | ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** |
-| ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** | |
+| ![Two heap dumps compared: a HashMap in a static field grew by 11.8 MB, from 5,000 to 20,000 entries](docs/screenshots/heap-compare.png) **Two heap dumps compared**: what grew, and where | ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |
 
 ## Run from source
 
@@ -339,6 +339,8 @@ Open a `.hprof` file (**File → Open**, **JVM → Open Heap Dump…**, **Open H
 - **Classes:** every class, with how many objects, their size, and what they hold. Select one to see why its biggest object is alive.
 - **Wasted memory:** memory spent for nothing, and the field it sits in. **Copies of the same strings**: each text kept in many String objects, how many copies, the bytes they waste, and where they are kept (*"ACTIVE": 20,001 copies, 469 KB, in LeakApp.Session.status*). **Empty and mostly empty collections**: ArrayLists, HashMaps, HashSets, Hashtables and Vectors with nothing in them, or with less than a quarter of their slots used, grouped by the field that holds them (*Empty ArrayList: 20,000 in LeakApp.Session.tags, 1.53 MB*). Select a row to see why one of them is alive. It is worked out in the background once the dump is open; for the 1.6 GB dump below, in about 3 seconds.
 
+**Compare with Another Dump…** (or **JVM → Compare Two Heap Dumps…**) takes an earlier dump of the same program and says what grew, and where: *"HashMap in static LeakApp.CACHE grew by 11.8 MB (3.92 MB → 15.7 MB). 5,000 entries → 20,000 entries. Mostly 20,000 × LeakApp.Session."* Objects move between dumps, so places are matched by the chain of fields from a GC root that keeps them, not by address; when a place grows mostly because of a place inside it, the inner one is shown. **Classes** lists every class with its objects before and after. The dumps are put in order by when they were taken.
+
 **Threads (N)** at the top opens the dump's threads in the Threads view: names, states and stacks at the moment of the dump (a heap dump doesn't record which locks they hold).
 
 **From a log:** when a JVM started with `-XX:+HeapDumpOnOutOfMemoryError` runs out of memory, it prints `Dumping heap to java_pid4242.hprof ...`. Right-click the `OutOfMemoryError` line (or that one) and choose **Open the Heap Dump**, or click **Open Heap Dump** on the known problem in Insights: Logsift finds where the log says the dump went (as written, or next to the log) and opens it; for a log read over SSH, it is copied from the server first.
@@ -513,6 +515,7 @@ logsift.heap
   HeapDump        reads a .hprof: object graph, dominators (Semi-NCA), retained sizes, paths to GC roots
   HeapFindings    what fills the heap, in sentences
   HeapWaste       copies of the same strings, empty and mostly empty collections
+  HeapDiff        two dumps compared: what grew, matched by where it is kept
   Store           big arrays in memory, or in memory-mapped files on disk for big dumps
 logsift.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
@@ -544,7 +547,7 @@ Design choices:
 - **Logs from zips and the web** are copies made when opened; they don't follow the original.
 - **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
 - **Time zones** are not converted: times are shown as written in each log.
-- **Heap dumps** in HotSpot's `.hprof` format are read (not compressed `.hprof.gz`, and not OpenJ9 `.phd`). Sizes assume compressed pointers unless the dump is over 30 GB. Comparing two dumps is not there yet. Wasted memory counts the JDK's ArrayList, Vector, HashMap (and LinkedHashMap, HashSet), and Hashtable, not other collections.
+- **Heap dumps** in HotSpot's `.hprof` format are read (not compressed `.hprof.gz`, and not OpenJ9 `.phd`). Sizes assume compressed pointers unless the dump is over 30 GB. Wasted memory counts the JDK's ArrayList, Vector, HashMap (and LinkedHashMap, HashSet), and Hashtable, not other collections.
 - **Thread dumps** of HotSpot JVMs (OpenJDK, Oracle, Temurin, Zulu, Corretto and the like) are read. OpenJ9 `javacore` files are not.
 - **async-profiler** runs on Linux (x64, ARM64) and macOS JVMs; for JVMs on Windows, use Flight Recorder.
 - **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows). The downloads are not code-signed yet.

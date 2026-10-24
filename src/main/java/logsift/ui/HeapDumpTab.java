@@ -63,6 +63,8 @@ final class HeapDumpTab extends JPanel {
     private Runnable changed = () -> { };
     private java.util.function.Consumer<String> showThreads = t -> { };
     private final JButton threadsButton = new JButton("Threads", Icons.of("cpu"));
+    private final JButton compareButton = new JButton("Compare with Another Dump…", Icons.of("git-compare"));
+    private Runnable compare = () -> { };
     private volatile HeapDump dump;
     private String status = "Reading…";
 
@@ -111,6 +113,11 @@ final class HeapDumpTab extends JPanel {
 
     void onChanged(Runnable r) {
         changed = r;
+    }
+
+    /** What Compare with Another Dump does (asks for the other dump). */
+    void onCompare(Runnable r) {
+        compare = r;
     }
 
     /** What to do with the dump's threads (as thread dump text) when Threads is clicked. */
@@ -220,6 +227,10 @@ final class HeapDumpTab extends JPanel {
         threadsButton.setToolTipText("The threads in the dump, with their stacks, in the Threads view");
         threadsButton.addActionListener(e -> threads());
         JPanel tb = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 4));
+        compareButton.setToolTipText("What grew between an earlier dump of the same program and this one,"
+                + " and what holds the growth");
+        compareButton.addActionListener(e -> compare.run());
+        tb.add(compareButton);
         tb.add(threadsButton);
         top0.add(tb, BorderLayout.EAST);
         p.add(top0, BorderLayout.NORTH);

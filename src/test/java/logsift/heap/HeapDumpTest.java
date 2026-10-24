@@ -147,6 +147,26 @@ class HeapDumpTest {
     }
 
     @Test
+    void comparedWithAnEarlierDumpTheCacheGrew() throws Exception {
+        Path early = tmp.resolve("early.hprof");
+        LeakApp.run(early, tmp.resolve("early-histogram.txt"), 5_000);
+        try (HeapDump before = HeapDump.open(early, null, null, null)) {
+            HeapDiff.Report r = HeapDiff.of(before, dump, null);
+            HeapDiff.Place top = r.places().get(0);
+            assertEquals("static LeakApp.CACHE", top.where(), r.places().toString());
+            assertEquals("java.util.HashMap (5,000 entries)", top.before());
+            assertEquals("java.util.HashMap (20,000 entries)", top.after());
+            assertTrue(top.growth() > 15_000L * 600, "growth " + top.growth());
+            assertTrue(top.contents().startsWith("Mostly 20,000 × LeakApp.Session"), top.contents());
+            HeapDiff.ClassDelta s = r.classes().stream().filter(c -> c.name().equals("logsift.heap.LeakApp$Session"))
+                    .findFirst().orElseThrow();
+            assertEquals(5_000, s.beforeCount());
+            assertEquals(20_000, s.afterCount());
+            assertTrue(r.places().stream().noneMatch(p -> p.where().contains("EMPTIED")), "what didn't grow");
+        }
+    }
+
+    @Test
     void theIndexOnDiskGivesTheSameAnswers() throws Exception {
         // not in the JUnit temp folder: Windows can't delete files that are still mapped
         Path index = Files.createTempDirectory("logsift-heap-test").resolve("index");
