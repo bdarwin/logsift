@@ -12,8 +12,8 @@ class DominatorsTest {
     /** Builds the successor and predecessor arrays of a graph given as edge lists. */
     private static Dominators.Result run(int n, List<int[]> edges) {
         Store st = Store.inMemory();
-        Store.Longs ss = st.longs("ss").size(n + 1);
-        Store.Longs ps = st.longs("ps").size(n + 1);
+        Store.Rising ss = st.rising("ss").size(n + 1);
+        Store.Rising ps = st.rising("ps").size(n + 1);
         Store.Ints s = st.ints("s").size(Math.max(1, edges.size()));
         Store.Ints p = st.ints("p").size(Math.max(1, edges.size()));
         int[] outDeg = new int[n];

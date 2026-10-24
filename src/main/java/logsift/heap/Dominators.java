@@ -29,8 +29,8 @@ final class Dominators {
      * @param n nodes 0..n-1
      * @param succStart for node v, its successors are {@code succ[succStart[v] .. succStart[v+1])}
      */
-    static Result compute(Store store, int n, int root, Store.Longs succStart, Store.Ints succ,
-                          Store.Longs predStart, Store.Ints pred, Progress progress) {
+    static Result compute(Store store, int n, int root, Store.Rising succStart, Store.Ints succ,
+                          Store.Rising predStart, Store.Ints pred, Progress progress) {
         // 1. depth-first preorder from the root; num is 1-based (0: not reached)
         Store.Ints num = store.ints("dom-num").size(n);
         Store.Ints order = store.ints("dom-order").size(n);

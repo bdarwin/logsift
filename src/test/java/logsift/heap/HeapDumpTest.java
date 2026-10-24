@@ -64,6 +64,54 @@ class HeapDumpTest {
                 "total " + dump.totalBytes() + " vs the JVM's " + jvmTotal);
     }
 
+    /** Object sizes depend on how the JVM lays objects out; the dump doesn't say, so it is worked out. */
+    @Test
+    void sizesMatchTheJvmInEveryObjectLayout() throws Exception {
+        List<List<String>> layouts = new java.util.ArrayList<>(List.of(
+                List.of("-XX:-UseCompressedOops"), // no compressed pointers (as in heaps over 32 GB)
+                List.of("-XX:+UseZGC"))); // ZGC: no compressed pointers either
+        if (Runtime.version().feature() >= 25) {
+            layouts.add(List.of("-XX:+UseCompactObjectHeaders"));
+        }
+        for (List<String> options : layouts) {
+            Path f = tmp.resolve("layout.hprof");
+            Map<String, long[]> jvm = new HashMap<>();
+            for (String line : LeakApp.run(f, tmp.resolve("layout.txt"), 2_000, options).split("\n")) {
+                String[] x = line.trim().split("\\s+");
+                if (x.length >= 4 && x[0].endsWith(":")) {
+                    jvm.put(x[3], new long[] {Long.parseLong(x[1]), Long.parseLong(x[2])});
+                }
+            }
+            try (HeapDump d = HeapDump.open(f, null, null, null)) {
+                for (String c : List.of("logsift.heap.LeakApp$Session", "java.util.HashMap$Node",
+                        "java.util.ArrayList", "java.lang.String")) {
+                    HeapDump.ClassStat s = d.classes().stream().filter(k -> k.name().equals(c)).findFirst()
+                            .orElseThrow();
+                    long[] j = jvm.get(c);
+                    assertEquals(j[1] / j[0], s.shallow() / s.count(), "bytes per " + c + " with " + options);
+                }
+                // arrays: the sessions' tags lists (new ArrayList<>(10): an Object[10] each)
+                int session = d.objectsOf("logsift.heap.LeakApp$Session", 1)[0];
+                long refs = options.get(0).contains("Compact") ? 4 : 8;
+                long header = options.get(0).contains("Compact") ? 12 : 16;
+                boolean found = false;
+                for (int w : d.refs(session)) {
+                    if (d.className(w).equals("java.util.ArrayList")) {
+                        for (int x : d.refs(w)) {
+                            if (d.className(x).equals("java.lang.Object[]")) {
+                                assertEquals((header + 10 * refs + 7) / 8 * 8, d.shallow(x), "Object[10] with " + options);
+                                found = true;
+                            }
+                        }
+                    }
+                }
+                assertTrue(found, "a session's tags array");
+                assertEquals(options.get(0).contains("Compact"), d.compressedPointers(), "compressed with " + options);
+            }
+            Files.delete(f);
+        }
+    }
+
     @Test
     void theCacheHoldsTheSessions() throws Exception {
         int[] maps = dump.objectsOf("java.util.HashMap", 1);

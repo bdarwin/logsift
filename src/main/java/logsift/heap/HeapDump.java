@@ -94,8 +94,14 @@ public final class HeapDump implements AutoCloseable {
     private long timestamp;
     private boolean compressed = true;
     private int header = 12;
-    private int arrayHeader = 16;
+    private int arrayHeader = 16; // before the elements (for 8-byte elements: rounded up to 8)
     private int refSize = 4;
+    // the first objects in dump order, to work out the JVM's object layout: id, and what it is
+    // (an instance: its class id; an array: -(type << 33 | length)); 0: a class in between
+    private long[] sampleIds = new long[1 << 20];
+    private long[] sampleKinds = new long[1 << 20];
+    private int samples;
+    private Layout layout = new Layout(true, 12, 16, 4);
 
     private final Map<Long, String> strings = new HashMap<>();
     private final Map<Long, Long> classNameIds = new HashMap<>();
@@ -114,21 +120,23 @@ public final class HeapDump implements AutoCloseable {
     private final Map<Integer, Root> rootOf = new HashMap<>();
 
     int n; // objects; node n is the made-up root that refers to every GC root
-    private Store.Longs ids;
-    private Store.Longs offsets;
+    private Store.Longs ids; // while loading
+    private Store.Rising offsets;
     private Store.Ints classOf;
     private Store.Ints shallow;
-    private Store.Longs succStart;
+    private Store.Rising succStart;
     private Store.Ints succ;
     private Store.Ints idom;
-    private Store.Longs retained;
+    private Store.Sizes retained;
     private Store.Ints bfsParent; // node + 1; 0: not reached
-    private Store.Longs domStart;
+    private Store.Ints domStart;
     private Store.Ints domKids;
     private long totalBytes;
     private long reachableBytes;
     private int reachableCount;
-    private IdMap idMap;
+    private IdIndex idMap;
+    private long minId = Long.MAX_VALUE;
+    private long maxId;
     private HprofReader random;
 
     private HeapDump(Path file, Store store) throws IOException {
@@ -179,8 +187,47 @@ public final class HeapDump implements AutoCloseable {
         if (Boolean.getBoolean("logsift.heap.onDisk")) {
             return true;
         }
-        // about 4 bytes of index per byte of dump
-        return fileBytes * 4 > Runtime.getRuntime().maxMemory() / 2;
+        // at most about a byte of index per byte of dump
+        return fileBytes > Runtime.getRuntime().maxMemory() / 3;
+    }
+
+    /** Disk space for the index of a dump this big, at the most (12 GB of dump took 11 GB). */
+    public static long diskNeeded(long fileBytes) {
+        return fileBytes + (256L << 20);
+    }
+
+    /**
+     * Null when there is room in {@code dir}'s disk for the indexes of dumps this big; else what to
+     * tell the person.
+     */
+    public static String roomProblem(Path dir, long... fileBytes) {
+        long need = 0;
+        for (long b : fileBytes) {
+            if (needsDisk(b)) {
+                need += diskNeeded(b);
+            }
+        }
+        if (need == 0) {
+            return null;
+        }
+        try {
+            Path p = dir;
+            while (p != null && !Files.exists(p)) {
+                p = p.getParent();
+            }
+            if (p == null) {
+                return null;
+            }
+            long free = Files.getFileStore(p).getUsableSpace();
+            if (free >= need) {
+                return null;
+            }
+            return "Reading this needs about " + HeapFindings.bytes(need) + " of free disk space for its index (in "
+                    + dir + "), and there is only " + HeapFindings.bytes(free) + " free. Free up some space and try"
+                    + " again.";
+        } catch (IOException e) {
+            return null; // can't tell: try
+        }
     }
 
     @Override
@@ -220,14 +267,9 @@ public final class HeapDump implements AutoCloseable {
             header = 8;
             arrayHeader = 12;
             refSize = 4;
-        } else if (size > 30L << 30) { // a heap over 32 GB: no compressed pointers
-            compressed = false;
-            header = 16;
-            arrayHeader = 24;
-            refSize = 8;
         }
         ids = store.longs("ids");
-        offsets = store.longs("offsets");
+        offsets = store.rising("offsets");
 
         // pass 1: names, classes, roots; number the objects
         l.progress("Reading the heap dump", 0);
@@ -296,6 +338,10 @@ public final class HeapDump implements AutoCloseable {
                 classClass = i;
             }
         }
+        if (idSize == 8) {
+            objectLayout();
+        }
+        dropSamples();
         for (ClassInfo ci : classes) {
             layout(ci);
             classByNode.put(ci.node, ci);
@@ -303,15 +349,14 @@ public final class HeapDump implements AutoCloseable {
 
         // id → node
         l.progress("Linking objects", 0);
-        idMap = new IdMap(store, n);
-        for (int v = 0; v < n; v++) {
-            idMap.put(ids.get(v), v);
-        }
+        idMap = IdIndex.of(store, ids, n, cancel);
+        ids.free();
+        ids = null;
 
         // pass 2: the references between objects
         classOf = store.ints("class-of").size(n + 1);
         shallow = store.ints("shallow").size(n + 1);
-        succStart = store.longs("succ-start").size(n + 2);
+        succStart = store.rising("succ-start").size(n + 2);
         succ = store.ints("succ");
         long[] edges = {0};
         int[] node = {0};
@@ -357,28 +402,29 @@ public final class HeapDump implements AutoCloseable {
 
         // predecessors
         l.progress("Finding what holds what", 0);
-        Store.Longs predStart = store.longs("pred-start").size(n + 2);
-        Store.Ints pred = store.ints("pred").size(Math.max(1, edges[0]));
+        Store.Ints count = store.ints("pred-count").size(n + 1);
         for (long e = 0; e < edges[0]; e++) {
-            predStart.add(succ.get(e) + 1, 1);
+            count.add(succ.get(e), 1);
         }
-        for (int v = 1; v <= n + 1; v++) {
-            predStart.add(v, predStart.get(v - 1));
-        }
-        Store.Longs fill = store.longs("pred-fill").size(n + 1);
+        Store.Rising predStart = store.rising("pred-start").size(n + 2);
+        long sum = 0;
         for (int v = 0; v <= n; v++) {
-            fill.set(v, predStart.get(v));
+            predStart.set(v, sum);
+            sum += count.get(v);
+            count.set(v, 0); // from now: how many are filled in
         }
+        predStart.set(n + 1, sum);
+        Store.Ints pred = store.ints("pred").size(Math.max(1, edges[0]));
         for (int v = 0; v <= n; v++) {
             for (long e = succStart.get(v), end = succStart.get(v + 1); e < end; e++) {
                 int w = succ.get(e);
-                long at = fill.get(w);
-                pred.set(at, v);
-                fill.set(w, at + 1);
+                int k = count.get(w);
+                pred.set(predStart.get(w) + k, v);
+                count.set(w, k + 1);
             }
             check(cancel, v);
         }
-        fill.free();
+        count.free();
 
         // dominators and retained sizes
         Dominators.Result dom = Dominators.compute(store, n + 1, root, succStart, succ, predStart, pred,
@@ -387,7 +433,7 @@ public final class HeapDump implements AutoCloseable {
         predStart.free();
         idom = dom.idom;
         reachableCount = dom.reached - 1;
-        retained = store.longs("retained").size(n + 1);
+        retained = store.sizes("retained").size(n + 1);
         for (int i = dom.reached - 1; i > 0; i--) {
             int v = dom.order.get(i);
             long rv = retained.get(v) + shallow.get(v);
@@ -396,7 +442,7 @@ public final class HeapDump implements AutoCloseable {
         }
         reachableBytes = retained.get(root);
         // the dominator tree, as lists of children
-        domStart = store.longs("dom-start").size(n + 2);
+        domStart = store.ints("dom-start").size(n + 2);
         for (int v = 0; v < n; v++) {
             int d = idom.get(v);
             if (d >= 0) {
@@ -407,14 +453,14 @@ public final class HeapDump implements AutoCloseable {
             domStart.add(v, domStart.get(v - 1));
         }
         domKids = store.ints("dom-kids").size(Math.max(1, reachableCount));
-        Store.Longs at = store.longs("dom-fill").size(n + 1);
+        Store.Ints at = store.ints("dom-fill").size(n + 1);
         for (int v = 0; v <= n; v++) {
             at.set(v, domStart.get(v));
         }
         for (int v = 0; v < n; v++) {
             int d = idom.get(v);
             if (d >= 0) {
-                long k = at.get(d);
+                int k = at.get(d);
                 domKids.set(k, v);
                 at.set(d, k + 1);
             }
@@ -498,13 +544,15 @@ public final class HeapDump implements AutoCloseable {
                     ci.node = n;
                     classById.put(ci.id, classes.size());
                     classes.add(ci);
+                    sample(ci.id, 0);
                     object(ci.id, at);
                 }
                 case 0x21 -> {
                     long id = r.id();
                     r.u4();
-                    r.id();
+                    long cid = r.id();
                     r.skip(r.u4u());
+                    sample(id, cid);
                     object(id, at);
                 }
                 case 0x22 -> {
@@ -513,6 +561,7 @@ public final class HeapDump implements AutoCloseable {
                     long len = r.u4u();
                     r.id();
                     r.skip(len * idSize);
+                    sample(id, -((long) T_OBJECT << 33 | len));
                     object(id, at);
                 }
                 case 0x23 -> {
@@ -521,6 +570,7 @@ public final class HeapDump implements AutoCloseable {
                     long len = r.u4u();
                     int type = r.u1();
                     r.skip(len * sizeOf(type, idSize));
+                    sample(id, -((long) type << 33 | len));
                     object(id, at);
                 }
                 default -> throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub)
@@ -530,8 +580,114 @@ public final class HeapDump implements AutoCloseable {
         }
     }
 
+    /** An array's size in the JVM. */
+    long arraySize(int type, long len) {
+        if (idSize == 4) {
+            return align(arrayHeader + len * (type == T_OBJECT ? refSize : sizeOf(type, idSize)));
+        }
+        return layout.array(type, len);
+    }
+
+    private void sample(long id, long kind) {
+        if (sampleIds != null && samples < sampleIds.length) {
+            sampleIds[samples] = id;
+            sampleKinds[samples++] = kind;
+        }
+    }
+
+    /** One way the JVM lays out objects. */
+    private record Layout(boolean compressed, int header, int arrayHeader, int refSize) {
+        long instance(long refs, long prims) {
+            return align(header + refs * refSize + prims);
+        }
+
+        long array(int type, long len) {
+            int each = type == T_OBJECT ? refSize : sizeOf(type, 8);
+            int at = each >= 8 ? (arrayHeader + 7) & ~7 : arrayHeader;
+            return align(at + len * each);
+        }
+    }
+
+    /**
+     * Works out how the JVM laid out objects (compressed pointers or not, the header size) from
+     * the dump itself: objects next to each other in dump order are mostly next to each other in
+     * memory, so the step from one address to the next is an object's size. The layout that gives
+     * those steps most often wins.
+     */
+    private void objectLayout() {
+        Layout[] all = {
+            new Layout(true, 12, 16, 4), // compressed pointers (heaps under 32 GB)
+            new Layout(false, 12, 16, 8), // no compressed pointers (big heaps, ZGC), compressed class pointers (JDK 15+)
+            new Layout(false, 16, 24, 8), // no compressed pointers at all (JDK 8 and 11 big heaps)
+            new Layout(true, 8, 12, 4), // compact object headers (JDK 24+)
+            new Layout(false, 8, 12, 8),
+        };
+        Map<Long, long[]> fields = new HashMap<>(); // class id → {references, other bytes}
+        for (ClassInfo ci : classes) {
+            long refs = 0;
+            long prims = 0;
+            for (ClassInfo c = ci; c != null; c = c.superIdx < 0 ? null : classes.get(c.superIdx)) {
+                for (int t : c.fieldTypes) {
+                    if (t == T_OBJECT) {
+                        refs++;
+                    } else {
+                        prims += sizeOf(t, idSize);
+                    }
+                }
+            }
+            fields.put(ci.id, new long[] {refs, prims});
+        }
+        int[] score = new int[all.length];
+        for (int i = 0; i + 1 < samples; i++) {
+            long kind = sampleKinds[i];
+            long step = sampleIds[i + 1] - sampleIds[i];
+            if (kind == 0 || sampleKinds[i + 1] == 0 || step <= 0 || step > 1 << 20) {
+                continue;
+            }
+            long[] f = kind > 0 ? fields.get(kind) : null;
+            if (kind > 0 && f == null) {
+                continue;
+            }
+            for (int k = 0; k < all.length; k++) {
+                long size = kind > 0 ? all[k].instance(f[0], f[1])
+                        : all[k].array((int) ((-kind) >>> 33), (-kind) & ((1L << 33) - 1));
+                if (size == step) {
+                    score[k]++;
+                }
+            }
+        }
+        int best = 0;
+        for (int k = 1; k < all.length; k++) {
+            if (score[k] > score[best]) {
+                best = k;
+            }
+        }
+        if (score[best] < Math.max(10, samples / 100)) {
+            // too few steps to tell: objects over more than 32 GB of addresses, or far up (ZGC),
+            // can't use compressed pointers
+            best = maxId - minId > 32L << 30 || minId >= 1L << 40 ? 1 : 0;
+        }
+        Layout l = all[best];
+        compressed = l.compressed();
+        header = l.header();
+        arrayHeader = l.arrayHeader();
+        refSize = l.refSize();
+        layout = l;
+    }
+
+    private void dropSamples() {
+        sampleIds = null;
+        sampleKinds = null;
+    }
+
     private void object(long id, long at) {
         ids.set(n, id);
+        if (id < minId) {
+            minId = id;
+        }
+        if (id > maxId) {
+            maxId = id;
+        }
         offsets.set(n, at);
         n++;
         if (n == Integer.MAX_VALUE) {
@@ -622,7 +778,7 @@ public final class HeapDump implements AutoCloseable {
     }
 
     private static int align(long bytes) {
-        return (int) Math.min(Integer.MAX_VALUE - 8, (bytes + 7) & ~7L);
+        return (int) Math.min(Integer.MAX_VALUE & ~7, (bytes + 7) & ~7L);
     }
 
     private interface Prog {
@@ -702,7 +858,7 @@ public final class HeapDump implements AutoCloseable {
                     int v = node[0]++;
                     Integer cix = classById.get(cid);
                     classOf.set(v, cix == null ? primClass(T_OBJECT) : cix);
-                    shallow.set(v, align(arrayHeader + len * refSize));
+                    shallow.set(v, (int) arraySize(T_OBJECT, len));
                     succStart.set(v, edges[0]);
                     for (long i = 0; i < len; i++) {
                         edge(v, r.id(), edges);
@@ -716,7 +872,7 @@ public final class HeapDump implements AutoCloseable {
                     r.skip(len * sizeOf(type, idSize));
                     int v = node[0]++;
                     classOf.set(v, primClass(type));
-                    shallow.set(v, align(arrayHeader + len * sizeOf(type, idSize)));
+                    shallow.set(v, (int) arraySize(type, len));
                     succStart.set(v, edges[0]);
                 }
                 default -> throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub));
@@ -862,7 +1018,18 @@ public final class HeapDump implements AutoCloseable {
     }
 
     public long objectId(int node) {
-        return node == n ? 0 : ids.get(node);
+        if (node == n) {
+            return 0;
+        }
+        try {
+            synchronized (random) {
+                random.seek(offsets.get(node));
+                random.u1(); // the record's kind
+                return random.id();
+            }
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
     }
 
     public String className(int node) {
@@ -948,7 +1115,7 @@ public final class HeapDump implements AutoCloseable {
 
     /** How many objects this one holds directly (dominator tree children). */
     public int heldCount(int node) {
-        return (int) (domStart.get(node + 1) - domStart.get(node));
+        return domStart.get(node + 1) - domStart.get(node);
     }
 
     /** Every class with objects, the most retained first. */
@@ -1165,7 +1332,7 @@ public final class HeapDump implements AutoCloseable {
     private int nodeOf(long id) {
         // ids are in node order only by chance: search the thread objects' roots instead
         for (Map.Entry<Integer, Root> e : rootOf.entrySet()) {
-            if (ids.get(e.getKey()) == id) {
+            if (objectId(e.getKey()) == id) {
                 return e.getKey();
             }
         }
@@ -1179,7 +1346,7 @@ public final class HeapDump implements AutoCloseable {
 
     /** How {@code from} refers to {@code to}: a field name, "[3]", "static NAME". */
     public String via(int from, int to) throws IOException {
-        long target = ids.get(to);
+        long target = objectId(to);
         synchronized (random) {
             random.seek(offsets.get(from));
             int sub = random.u1();
@@ -1337,7 +1504,7 @@ public final class HeapDump implements AutoCloseable {
         // the referenced object is one of this node's successors
         for (long e = succStart.get(node), end = succStart.get(node + 1); e < end; e++) {
             int w = succ.get(e);
-            if (ids.get(w) == target) {
+            if (objectId(w) == target) {
                 return w;
             }
         }

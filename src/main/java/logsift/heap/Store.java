@@ -103,6 +103,130 @@ public final class Store implements AutoCloseable {
         }
     }
 
+    /** Empties and closes files whose arrays are no longer used (the mappings go when collected). */
+    private void release(FileChannel[] chs) {
+        for (FileChannel ch : chs) {
+            if (ch == null) {
+                continue;
+            }
+            try {
+                ch.truncate(0); // the disk space now, not when the mapping is collected
+            } catch (IOException e) {
+                // a file that is mapped can't be shortened on Windows: it goes on close
+            }
+            try {
+                ch.close();
+            } catch (IOException e) {
+                // closing
+            }
+            synchronized (files) {
+                files.remove(ch);
+            }
+        }
+    }
+
+    /**
+     * Non-decreasing longs (file positions, edge starts) in 4 bytes each: the low half stored, and
+     * where each step of the high half starts. Values are set in index order.
+     */
+    final class Rising {
+        private final Ints low;
+        private long[] steps = new long[0]; // steps[h-1]: the first index whose value is >= h << 32
+        private long last = -1;
+        private long top;
+
+        Rising(String name) {
+            low = new Ints(name);
+        }
+
+        long get(long i) {
+            int h = 0;
+            while (h < steps.length && steps[h] <= i) {
+                h++;
+            }
+            return ((long) h << 32) | (low.get(i) & 0xFFFFFFFFL);
+        }
+
+        void set(long i, long v) {
+            if (i < last || v < top) {
+                throw new IllegalArgumentException("not in order: [" + i + "] = " + v);
+            }
+            while ((v >>> 32) > steps.length) {
+                steps = java.util.Arrays.copyOf(steps, steps.length + 1);
+                steps[steps.length - 1] = i;
+            }
+            low.set(i, (int) v);
+            last = i;
+            top = v;
+        }
+
+        Rising size(long n) {
+            low.size(n);
+            return this;
+        }
+
+        void free() {
+            low.free();
+        }
+    }
+
+    Rising rising(String name) {
+        return new Rising(name);
+    }
+
+    /**
+     * Byte counts that are multiples of 8 (object sizes and sums of them), in 4 bytes each: up to
+     * 32 GB each, and the few above that (what holds most of a big heap) kept aside.
+     */
+    final class Sizes {
+        private static final long BIG = 0xFFFFFFFFL;
+        private final Ints units;
+        private final java.util.Map<Long, Long> big = new java.util.concurrent.ConcurrentHashMap<>();
+
+        Sizes(String name) {
+            units = new Ints(name);
+        }
+
+        Sizes size(long n) {
+            units.size(n);
+            return this;
+        }
+
+        long get(long i) {
+            long u = units.get(i) & 0xFFFFFFFFL;
+            return u == BIG ? big.get(i) : u << 3;
+        }
+
+        void set(long i, long bytes) {
+            if ((bytes & 7) != 0 || bytes < 0) {
+                throw new IllegalArgumentException("not a size: " + bytes);
+            }
+            long u = bytes >>> 3;
+            if (u >= BIG) {
+                big.put(i, bytes);
+                units.set(i, (int) BIG);
+            } else {
+                units.set(i, (int) u);
+                if (!big.isEmpty()) {
+                    big.remove(i);
+                }
+            }
+        }
+
+        void add(long i, long bytes) {
+            set(i, get(i) + bytes);
+        }
+
+        void free() {
+            units.free();
+            big.clear();
+        }
+    }
+
+    Sizes sizes(String name) {
+        return new Sizes(name);
+    }
+
     /** A growable array of ints, all 0 at first. */
     final class Ints {
         private final String name;
@@ -182,8 +306,11 @@ public final class Store implements AutoCloseable {
             chunks = a;
         }
 
+        /** Gives the space back (on disk: the files are emptied and removed). */
         void free() {
             chunks = new IntBuffer[0];
+            release(channels);
+            channels = new FileChannel[0];
         }
     }
 
@@ -258,8 +385,11 @@ public final class Store implements AutoCloseable {
             chunks = a;
         }
 
+        /** Gives the space back (on disk: the files are emptied and removed). */
         void free() {
             chunks = new LongBuffer[0];
+            release(channels);
+            channels = new FileChannel[0];
         }
     }
 }

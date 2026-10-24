@@ -182,6 +182,11 @@ final class HeapDumpTab extends JPanel {
         Thread t = new Thread(() -> {
             try {
                 long size = Files.size(file);
+                String room = HeapDump.roomProblem(AppState.home().resolve("heap-index"), size);
+                if (room != null) {
+                    SwingUtilities.invokeLater(() -> failed(room));
+                    return;
+                }
                 Path work = HeapDump.needsDisk(size)
                         ? AppState.home().resolve("heap-index").resolve(java.util.UUID.randomUUID().toString()) : null;
                 HeapDump d = HeapDump.open(file, work, (stage, f) -> SwingUtilities.invokeLater(() -> {
@@ -210,7 +215,9 @@ final class HeapDumpTab extends JPanel {
     }
 
     private void failed(String text) {
-        loadingText.setText(text);
+        // wrapped: a message about disk space names a folder and can be long
+        loadingText.setText("<html><div style='width:420px'>" + text.replace("&", "&amp;").replace("<", "&lt;")
+                + "</div></html>");
         loadingText.setForeground(new Color(0xDC2626));
         bar.setVisible(false);
         status = text;

@@ -132,6 +132,12 @@ final class HeapCompareTab extends JPanel {
             HeapDump x = null;
             HeapDump y = null;
             try {
+                String room = HeapDump.roomProblem(AppState.home().resolve("heap-index"), Files.size(before),
+                        Files.size(after));
+                if (room != null) {
+                    SwingUtilities.invokeLater(() -> failed(room));
+                    return;
+                }
                 x = read(before, 0);
                 y = read(after, 1);
                 if (x.timestamp() > y.timestamp() && y.timestamp() > 0) { // the earlier one first
@@ -176,7 +182,9 @@ final class HeapCompareTab extends JPanel {
     }
 
     private void failed(String text) {
-        loadingText.setText(text);
+        // wrapped: a message about disk space names a folder and can be long
+        loadingText.setText("<html><div style='width:420px'>" + text.replace("&", "&amp;").replace("<", "&lt;")
+                + "</div></html>");
         loadingText.setForeground(new Color(0xDC2626));
         bar.setVisible(false);
         status = text;

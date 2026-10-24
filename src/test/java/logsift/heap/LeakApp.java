@@ -79,13 +79,20 @@ public final class LeakApp {
 
     /** The same with this many sessions (for an earlier, smaller dump). */
     public static String run(Path dump, Path histogram, int sessions) throws Exception {
+        return run(dump, histogram, sessions, List.of());
+    }
+
+    /** The same on a JVM with these options (another object layout, say). */
+    public static String run(Path dump, Path histogram, int sessions, List<String> jvmOptions) throws Exception {
         String exe = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")
                 ? "java.exe" : "java";
         Path javaExe = Path.of(System.getProperty("java.home"), "bin", exe);
         Files.deleteIfExists(dump);
-        Process p = new ProcessBuilder(javaExe.toString(), "-Xmx256m", "-cp", System.getProperty("java.class.path"),
-                LeakApp.class.getName(), dump.toString(), histogram.toString(), String.valueOf(sessions))
-                .redirectErrorStream(true).start();
+        List<String> cmd = new ArrayList<>(List.of(javaExe.toString(), "-Xmx256m"));
+        cmd.addAll(jvmOptions);
+        cmd.addAll(List.of("-cp", System.getProperty("java.class.path"), LeakApp.class.getName(), dump.toString(),
+                histogram.toString(), String.valueOf(sessions)));
+        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
         String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         if (p.waitFor() != 0 || !Files.exists(dump)) {
             throw new IllegalStateException("LeakApp failed:\n" + out);
