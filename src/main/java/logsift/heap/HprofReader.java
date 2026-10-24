@@ -111,6 +111,30 @@ final class HprofReader {
         }
     }
 
+    /** A 64-bit hash of the next {@code n} bytes (for finding equal contents). */
+    long hash(long n) throws IOException {
+        long h = 0x9E3779B97F4A7C15L ^ n;
+        while (n > 0) {
+            need((int) Math.min(n, 8));
+            while (n >= 8 && buf.remaining() >= 8) {
+                h = mix(h ^ buf.getLong());
+                n -= 8;
+            }
+            while (n > 0 && n < 8 && buf.hasRemaining()) {
+                h = mix(h ^ (buf.get() & 0xFF));
+                n--;
+            }
+        }
+        return h;
+    }
+
+    private static long mix(long x) {
+        x *= 0xFF51AFD7ED558CCDL;
+        x ^= x >>> 33;
+        x *= 0xC4CEB9FE1A85EC53L;
+        return x ^ (x >>> 29);
+    }
+
     /** A value of this basic type (as a long: ids, numbers, float and double bits). */
     long value(int type) throws IOException {
         return switch (type) {

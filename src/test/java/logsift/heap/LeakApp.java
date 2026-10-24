@@ -13,17 +13,23 @@ import javax.management.ObjectName;
 /**
  * A program with a known leak, for heap dump tests (run in a JVM of its own): 20,000 sessions in a
  * static map, each holding 512 bytes; 1,000 orders in a local variable of main; 5 MB behind a soft
- * reference. Writes the JVM's class histogram, then a heap dump, and ends.
+ * reference. Waste: each session has its own copy of the text "ACTIVE" and an empty list; a map
+ * once filled and then emptied keeps its big table. Writes the JVM's class histogram, then a heap
+ * dump, and ends.
  */
 public final class LeakApp {
     static final int SESSIONS = 20_000;
     static final int ORDERS = 1_000;
     static final Map<String, Session> CACHE = new HashMap<>();
+    static final Map<Integer, String> EMPTIED = new HashMap<>();
     static SoftReference<byte[]> soft;
 
     static final class Session {
         final String id;
         final byte[] payload = new byte[512];
+        @SuppressWarnings("StringOperationCanBeSimplified")
+        final String status = new String("ACTIVE");
+        final List<String> tags = new ArrayList<>(10);
         final long created;
         int hits;
 
@@ -47,6 +53,12 @@ public final class LeakApp {
         List<Order> orders = new ArrayList<>();
         for (int i = 0; i < ORDERS; i++) {
             orders.add(new Order(i, "customer-" + (i % 50)));
+        }
+        for (int i = 0; i < 1000; i++) {
+            EMPTIED.put(i, "x");
+        }
+        for (int i = 10; i < 1000; i++) {
+            EMPTIED.remove(i);
         }
         soft = new SoftReference<>(new byte[5 << 20]);
         Object hist = ManagementFactory.getPlatformMBeanServer().invoke(

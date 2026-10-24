@@ -56,13 +56,13 @@ public final class Store implements AutoCloseable {
 
     private FileChannel open(String name, int index) {
         try {
-            Path f = dir.resolve(name + "-" + (next++) + "-" + index + ".bin");
-            FileChannel ch = FileChannel.open(f, StandardOpenOption.CREATE, StandardOpenOption.READ,
-                    StandardOpenOption.WRITE, StandardOpenOption.DELETE_ON_CLOSE);
-            synchronized (files) {
+            synchronized (files) { // arrays are made from more than one thread (the UI, the waste report)
+                Path f = dir.resolve(name + "-" + (next++) + "-" + index + ".bin");
+                FileChannel ch = FileChannel.open(f, StandardOpenOption.CREATE, StandardOpenOption.READ,
+                        StandardOpenOption.WRITE, StandardOpenOption.DELETE_ON_CLOSE);
                 files.add(ch);
+                return ch;
             }
-            return ch;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

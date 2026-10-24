@@ -4513,7 +4513,7 @@ class VisualTest {
         HeapDumpTab tab = onEdt(frame::currentHeapDumpTab);
         String found = onEdt(tab::findingsTextForTest);
         assertTrue(found.contains("One HashMap (20,000 entries) in static LeakApp.CACHE holds"), found);
-        assertTrue(found.contains("Mostly 20,000 × LeakApp$Session"), found);
+        assertTrue(found.contains("Mostly 20,000 × LeakApp.Session"), found);
         assertTrue(found.contains("isn't strongly reachable"), found);
         waitFor(() -> {
             try {
@@ -4556,6 +4556,36 @@ class VisualTest {
         assertTrue(onEdt(tab::whyTextForTest).contains("value"), onEdt(tab::whyTextForTest));
         settle();
         shot("90-heap-classes");
+
+        // memory spent for nothing: the copies of "ACTIVE", the empty lists
+        waitFor(() -> {
+            try {
+                return onEdt(tab::isWasteDoneForTest);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the wasted memory");
+        String waste = onEdt(tab::wasteTextForTest);
+        assertTrue(waste.contains("\"ACTIVE\" | 20,001 | LeakApp.Session.status")
+                || waste.contains("\"ACTIVE\" | 20001 | LeakApp.Session.status"), waste);
+        assertTrue(waste.contains("Empty ArrayList | 20000 | LeakApp.Session.tags"), waste);
+        assertTrue(onEdt(tab::findingsTextForTest).contains("is spent on copies of the same strings and empty"),
+                onEdt(tab::findingsTextForTest));
+        onEdt(() -> {
+            tab.showTabForTest(3);
+            JTable t = tab.wasteTableForTest(0);
+            t.setRowSelectionInterval(0, 0);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(tab::whyTextForTest).contains("status");
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "why a copy of ACTIVE is alive");
+        settle();
+        shot("91-heap-waste");
         onEdt(() -> {
             frame.closeCurrentTabForTest();
             return null;

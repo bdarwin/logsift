@@ -47,11 +47,13 @@ import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 import logsift.heap.HeapDump;
 import logsift.heap.HeapFindings;
+import logsift.heap.HeapWaste;
 
 /**
  * A heap dump (.hprof), explained: what holds most of the memory and where it is kept (in
- * sentences first), the biggest objects and what they hold, the classes, and for any object the
- * chain of references that keeps it alive.
+ * sentences first), the biggest objects and what they hold, the classes, memory spent for nothing
+ * (copies of strings, empty collections), and for any object the chain of references that keeps
+ * it alive.
  */
 final class HeapDumpTab extends JPanel {
     private static final int KIDS = 200; // children shown per tree level
@@ -74,6 +76,17 @@ final class HeapDumpTab extends JPanel {
     private final JTable classTable = new JTable(classModel);
     private final JTextField classFilter = new JTextField();
     private final JEditorPane why = new JEditorPane("text/html", "");
+    private final JPanel wasteSlot = new JPanel();
+    private final CardLayout wasteCards = new CardLayout();
+    private final JPanel wastePanel = new JPanel(wasteCards);
+    private final JLabel wasteWorking = new JLabel("Looking for wasted memory…");
+    private final JProgressBar wasteBar = new JProgressBar(0, 1000);
+    private final JLabel wasteSummary = new JLabel();
+    private final RowsModel dupModel = new RowsModel("Text", "Copies", "Wasted", "Kept in");
+    private final RowsModel collModel = new RowsModel("Collections", "How many", "Wasted", "Kept in");
+    private final JTable dupTable = new JTable(dupModel);
+    private final JTable collTable = new JTable(collModel);
+    private volatile HeapWaste.Report waste;
     private int selected = -1;
 
     HeapDumpTab(Path file) {
@@ -237,20 +250,8 @@ final class HeapDumpTab extends JPanel {
         TableRowSorter<ClassModel> sorter = new TableRowSorter<>(classModel);
         classTable.setRowSorter(sorter);
         classTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        DefaultTableCellRenderer right = new DefaultTableCellRenderer() {
-            @Override
-            protected void setValue(Object v) {
-                setHorizontalAlignment(SwingConstants.RIGHT);
-                setText(v instanceof Long l ? HeapFindings.bytes(l) : String.valueOf(v));
-            }
-        };
-        DefaultTableCellRenderer count = new DefaultTableCellRenderer() {
-            @Override
-            protected void setValue(Object v) {
-                setHorizontalAlignment(SwingConstants.RIGHT);
-                setText(String.format("%,d", (Long) v));
-            }
-        };
+        DefaultTableCellRenderer right = bytesRenderer();
+        DefaultTableCellRenderer count = countRenderer();
         classTable.getColumnModel().getColumn(1).setCellRenderer(count);
         classTable.getColumnModel().getColumn(2).setCellRenderer(right);
         classTable.getColumnModel().getColumn(3).setCellRenderer(right);
@@ -299,6 +300,7 @@ final class HeapDumpTab extends JPanel {
         classes.add(cf, BorderLayout.NORTH);
         classes.add(new JScrollPane(classTable), BorderLayout.CENTER);
         views.addTab("Classes", classes);
+        views.addTab("Wasted memory", wastePanel());
 
         why.setEditable(false);
         why.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true);
@@ -353,6 +355,11 @@ final class HeapDumpTab extends JPanel {
             findings.add(Box.createVerticalStrut(10));
             first = false;
         }
+        wasteSlot.removeAll();
+        wasteSlot.setLayout(new BoxLayout(wasteSlot, BoxLayout.Y_AXIS));
+        wasteSlot.setAlignmentX(LEFT_ALIGNMENT);
+        wasteSlot.setOpaque(false);
+        findings.add(wasteSlot);
         findings.add(Box.createVerticalStrut(6));
         findings.add(topClasses());
 
@@ -365,6 +372,7 @@ final class HeapDumpTab extends JPanel {
 
         cards.show(this, "main");
         changed.run();
+        startWaste(d);
         if (!found.isEmpty() && found.get(0).node() >= 0) {
             select(found.get(0).node());
         } else {
@@ -375,7 +383,11 @@ final class HeapDumpTab extends JPanel {
 
     private JPanel card(HeapFindings.Finding f, boolean first) {
         JPanel c = new JPanel(new BorderLayout(0, 6));
-        Color line = f.kind() == HeapFindings.Kind.HOLDER ? new Color(0xDC2626) : new Color(0x9CA3AF);
+        Color line = switch (f.kind()) {
+            case HOLDER -> new Color(0xDC2626);
+            case WASTE -> new Color(0xD97706);
+            default -> new Color(0x9CA3AF);
+        };
         c.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 4, 0, 0, line),
                 BorderFactory.createEmptyBorder(6, 12, 6, 6)));
@@ -383,7 +395,13 @@ final class HeapDumpTab extends JPanel {
         JLabel t = new JLabel("<html><div style='width:560px'><b style='font-size:1.15em'>" + esc(f.title())
                 + "</b><br><span style='color:#6b7280'>" + esc(f.detail()) + "</span></div></html>");
         c.add(t, BorderLayout.CENTER);
-        if (f.node() >= 0) {
+        if (f.kind() == HeapFindings.Kind.WASTE) {
+            JPanel b = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+            JButton w = new JButton("Show the waste");
+            w.addActionListener(e -> views.setSelectedIndex(3));
+            b.add(w);
+            c.add(b, BorderLayout.SOUTH);
+        } else if (f.node() >= 0) {
             JPanel b = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             JButton w = new JButton("Why is it alive?");
             w.addActionListener(e -> select(f.node()));
@@ -439,6 +457,190 @@ final class HeapDumpTab extends JPanel {
             p.add(row);
         }
         return p;
+    }
+
+    // ---------------------------------------------------------------- wasted memory
+
+    private JPanel wastePanel() {
+        JPanel working = new JPanel(new java.awt.GridBagLayout());
+        JPanel col = new JPanel();
+        col.setLayout(new BoxLayout(col, BoxLayout.Y_AXIS));
+        wasteWorking.setAlignmentX(LEFT_ALIGNMENT);
+        wasteBar.setAlignmentX(LEFT_ALIGNMENT);
+        wasteBar.setPreferredSize(new Dimension(320, 8));
+        wasteBar.setMaximumSize(new Dimension(320, 8));
+        col.add(wasteWorking);
+        col.add(Box.createVerticalStrut(8));
+        col.add(wasteBar);
+        working.add(col);
+        wastePanel.add(working, "working");
+
+        JPanel done = new JPanel(new BorderLayout());
+        wasteSummary.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
+        wasteSummary.setVerticalAlignment(SwingConstants.TOP);
+        done.add(wasteSummary, BorderLayout.NORTH);
+        JSplitPane tables = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
+                titled("Copies of the same strings", dupTable, dupModel),
+                titled("Empty and mostly empty collections", collTable, collModel));
+        tables.setResizeWeight(0.5);
+        tables.setBorder(null);
+        done.add(tables, BorderLayout.CENTER);
+        wastePanel.add(done, "done");
+        wasteCards.show(wastePanel, "working");
+        return wastePanel;
+    }
+
+    private JPanel titled(String title, JTable table, RowsModel model) {
+        table.setAutoCreateRowSorter(true);
+        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        table.getColumnModel().getColumn(1).setCellRenderer(countRenderer());
+        table.getColumnModel().getColumn(2).setCellRenderer(bytesRenderer());
+        table.getColumnModel().getColumn(0).setPreferredWidth(260);
+        table.getColumnModel().getColumn(1).setPreferredWidth(70);
+        table.getColumnModel().getColumn(2).setPreferredWidth(70);
+        table.getColumnModel().getColumn(3).setPreferredWidth(300);
+        table.getSelectionModel().addListSelectionListener(e -> {
+            int row = table.getSelectedRow();
+            if (!e.getValueIsAdjusting() && row >= 0) {
+                select(model.samples.get(table.convertRowIndexToModel(row)));
+            }
+        });
+        JPanel p = new JPanel(new BorderLayout());
+        JLabel t = new JLabel(title);
+        t.setFont(t.getFont().deriveFont(Font.BOLD));
+        t.setBorder(BorderFactory.createEmptyBorder(6, 10, 4, 10));
+        p.add(t, BorderLayout.NORTH);
+        p.add(new JScrollPane(table), BorderLayout.CENTER);
+        return p;
+    }
+
+    /** Works out the wasted memory in the background, then fills its tab (and a finding when it is a lot). */
+    private void startWaste(HeapDump d) {
+        Thread t = new Thread(() -> {
+            try {
+                HeapWaste.Report r = HeapWaste.of(d, (stage, f) -> SwingUtilities.invokeLater(() -> {
+                    wasteWorking.setText(stage + "…");
+                    wasteBar.setValue((int) Math.round(f * 1000));
+                }), () -> cancel.get() || dump != d);
+                SwingUtilities.invokeLater(() -> {
+                    if (dump == d) {
+                        showWaste(d, r);
+                    }
+                });
+            } catch (CancellationException e) {
+                // closed
+            } catch (Exception | OutOfMemoryError e) {
+                SwingUtilities.invokeLater(() -> wasteWorking.setText("Could not work it out: " + e.getMessage()));
+            }
+        }, "logsift-heap-waste");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void showWaste(HeapDump d, HeapWaste.Report r) {
+        waste = r;
+        long heap = Math.max(1, d.reachableBytes());
+        StringBuilder sb = new StringBuilder("<html><div style='width:640px'>");
+        if (r.total() == 0) {
+            sb.append("<b>No memory is spent on copies of strings or on empty collections.</b>");
+        } else {
+            sb.append("<b style='font-size:1.15em'>").append(HeapFindings.bytes(r.total())).append(" (")
+                    .append(pct(r.total(), heap)).append(" of the heap) is spent for nothing</b><br>");
+            sb.append("<b>").append(HeapFindings.bytes(r.stringBytes())).append("</b> on copies of the same strings (")
+                    .append(String.format("%,d", r.duplicatedTexts()))
+                    .append(" texts kept more than once). <span style='color:#6b7280'>Keep one copy (a constant, an enum,"
+                            + " or String.intern()); with the G1 collector, -XX:+UseStringDeduplication does it for"
+                            + " you.</span><br>");
+            sb.append("<b>").append(HeapFindings.bytes(r.collectionBytes()))
+                    .append("</b> on empty or mostly empty collections. <span style='color:#6b7280'>Create them when"
+                            + " first needed, or give them a smaller starting size.</span>");
+        }
+        sb.append("</div></html>");
+        wasteSummary.setText(sb.toString());
+        List<Object[]> rows = new ArrayList<>();
+        List<Integer> samples = new ArrayList<>();
+        for (HeapWaste.Duplicate x : r.strings()) {
+            rows.add(new Object[] {"\"" + x.text() + "\"", x.copies(), x.wasted(), x.where()});
+            samples.add(x.sample());
+        }
+        dupModel.set(rows, samples);
+        rows = new ArrayList<>();
+        samples = new ArrayList<>();
+        for (HeapWaste.Collections x : r.collections()) {
+            rows.add(new Object[] {x.what(), x.count(), x.wasted(), x.where()});
+            samples.add(x.sample());
+        }
+        collModel.set(rows, samples);
+        wasteCards.show(wastePanel, "done");
+        HeapFindings.Finding f = HeapFindings.waste(r, d.reachableBytes());
+        if (f != null) {
+            wasteSlot.add(card(f, false));
+            wasteSlot.add(Box.createVerticalStrut(10));
+            findings.revalidate();
+            findings.repaint();
+        }
+    }
+
+    /** Rows of values, each with an object to show when picked. */
+    private static final class RowsModel extends AbstractTableModel {
+        private final String[] names;
+        List<Object[]> rows = List.of();
+        List<Integer> samples = List.of();
+
+        RowsModel(String... names) {
+            this.names = names;
+        }
+
+        void set(List<Object[]> r, List<Integer> s) {
+            rows = r;
+            samples = s;
+            fireTableDataChanged();
+        }
+
+        @Override
+        public int getRowCount() {
+            return rows.size();
+        }
+
+        @Override
+        public int getColumnCount() {
+            return names.length;
+        }
+
+        @Override
+        public String getColumnName(int c) {
+            return names[c];
+        }
+
+        @Override
+        public Class<?> getColumnClass(int c) {
+            return c == 1 || c == 2 ? Long.class : String.class;
+        }
+
+        @Override
+        public Object getValueAt(int r, int c) {
+            return rows.get(r)[c];
+        }
+    }
+
+    private static DefaultTableCellRenderer bytesRenderer() {
+        return new DefaultTableCellRenderer() {
+            @Override
+            protected void setValue(Object v) {
+                setHorizontalAlignment(SwingConstants.RIGHT);
+                setText(v instanceof Long l ? HeapFindings.bytes(l) : String.valueOf(v));
+            }
+        };
+    }
+
+    private static DefaultTableCellRenderer countRenderer() {
+        return new DefaultTableCellRenderer() {
+            @Override
+            protected void setValue(Object v) {
+                setHorizontalAlignment(SwingConstants.RIGHT);
+                setText(String.format("%,d", (Long) v));
+            }
+        };
     }
 
     // ---------------------------------------------------------------- the tree of what holds what
@@ -669,7 +871,9 @@ final class HeapDumpTab extends JPanel {
 
     String findingsTextForTest() {
         StringBuilder sb = new StringBuilder();
-        for (Component c : findings.getComponents()) {
+        List<Component> all = new ArrayList<>(List.of(findings.getComponents()));
+        all.addAll(List.of(wasteSlot.getComponents()));
+        for (Component c : all) {
             if (c instanceof JPanel p) {
                 for (Component k : p.getComponents()) {
                     if (k instanceof JLabel l) {
@@ -700,5 +904,25 @@ final class HeapDumpTab extends JPanel {
 
     JTable classTableForTest() {
         return classTable;
+    }
+
+    boolean isWasteDoneForTest() {
+        return waste != null;
+    }
+
+    /** The waste summary and rows, as text. */
+    String wasteTextForTest() {
+        StringBuilder sb = new StringBuilder(wasteSummary.getText().replaceAll("<[^>]+>", " ")
+                .replaceAll("\\s+", " ").trim()).append('\n');
+        for (RowsModel m : List.of(dupModel, collModel)) {
+            for (Object[] r : m.rows) {
+                sb.append(r[0]).append(" | ").append(r[1]).append(" | ").append(r[3]).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    JTable wasteTableForTest(int which) {
+        return which == 0 ? dupTable : collTable;
     }
 }

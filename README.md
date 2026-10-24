@@ -87,7 +87,8 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 | ![Exceptions grouped by root cause with the stack and links to the source](docs/screenshots/exceptions.png) **Exceptions** by root cause | ![Order times charted over time, with a spike](docs/screenshots/metrics.png) **Metrics** from the messages |
 | ![Insights with a known problem and what to try](docs/screenshots/insights.png) **Insights** with known problems | ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained |
 | ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph | ![A heap dump explained: one HashMap in a static field holds 85% of the heap, with the chain of references that keeps it alive](docs/screenshots/heap-dump.png) **Heap dumps** explained, and why an object is alive |
-| ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** | ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |
+| ![Wasted memory in a heap dump: 20,001 copies of the string ACTIVE and 20,000 empty ArrayLists, each with the field that holds them](docs/screenshots/heap-waste.png) **Wasted memory**: copies of strings, empty collections | ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** |
+| ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** | |
 
 ## Run from source
 
@@ -332,10 +333,11 @@ Two engines:
 
 Open a `.hprof` file (**File → Open**, **JVM → Open Heap Dump…**, **Open Heap Dump…** on the start page, or drop it on the window). Logsift reads every object, works out which object holds which, and starts with what matters:
 
-- **What fills the heap:** each object that holds 10% of the heap or more, in a sentence: what it is, where it is kept, how much it holds, and what is in it. *"One HashMap (20,000 entries) in static LeakApp.CACHE holds 13.6 MB (85% of the heap). Mostly 20,000 × LeakApp$Session, 616 bytes each with what they hold."* Below: what the memory is made of, by class.
+- **What fills the heap:** each object that holds 10% of the heap or more, in a sentence: what it is, where it is kept, how much it holds, and what is in it. *"One HashMap (20,000 entries) in static LeakApp.CACHE holds 13.6 MB (85% of the heap). Mostly 20,000 × LeakApp.Session, 616 bytes each with what they hold."* When a lot of memory is spent for nothing, that is a finding too. Below: what the memory is made of, by class.
 - **Why is it alive?** For any object: the shortest chain of references from a GC root to it, with field names (`class LeakApp` → `static CACHE` → `HashMap` → `table` → `[1440]` → `value` → `Session`). A GC root is a loaded class's static fields, a local variable in a running thread (named, with its method), a running thread, native code, or a lock in use. To free the object, one link in that chain has to go.
 - **Biggest objects:** each object with what it holds (what would be freed with it), biggest first; open one to see what is inside.
 - **Classes:** every class, with how many objects, their size, and what they hold. Select one to see why its biggest object is alive.
+- **Wasted memory:** memory spent for nothing, and the field it sits in. **Copies of the same strings**: each text kept in many String objects, how many copies, the bytes they waste, and where they are kept (*"ACTIVE": 20,001 copies, 469 KB, in LeakApp.Session.status*). **Empty and mostly empty collections**: ArrayLists, HashMaps, HashSets, Hashtables and Vectors with nothing in them, or with less than a quarter of their slots used, grouped by the field that holds them (*Empty ArrayList: 20,000 in LeakApp.Session.tags, 1.53 MB*). Select a row to see why one of them is alive. It is worked out in the background once the dump is open; for the 1.6 GB dump below, in about 3 seconds.
 
 Weak, soft and phantom references don't keep anything alive here (as in the JVM when memory runs low): what only they reach is shown apart, since it isn't a leak. Sizes are the JVM's own (12-byte headers, 4-byte references with compressed pointers, objects aligned to 8 bytes); the tests check them against the JVM's class histogram.
 
@@ -506,6 +508,7 @@ logsift.jvm     (thread dumps and running JVMs)
 logsift.heap
   HeapDump        reads a .hprof: object graph, dominators (Semi-NCA), retained sizes, paths to GC roots
   HeapFindings    what fills the heap, in sentences
+  HeapWaste       copies of the same strings, empty and mostly empty collections
   Store           big arrays in memory, or in memory-mapped files on disk for big dumps
 logsift.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
@@ -537,7 +540,7 @@ Design choices:
 - **Logs from zips and the web** are copies made when opened; they don't follow the original.
 - **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
 - **Time zones** are not converted: times are shown as written in each log.
-- **Heap dumps** in HotSpot's `.hprof` format are read (not compressed `.hprof.gz`, and not OpenJ9 `.phd`). Sizes assume compressed pointers unless the dump is over 30 GB. Comparing two dumps is not there yet.
+- **Heap dumps** in HotSpot's `.hprof` format are read (not compressed `.hprof.gz`, and not OpenJ9 `.phd`). Sizes assume compressed pointers unless the dump is over 30 GB. Comparing two dumps is not there yet. Wasted memory counts the JDK's ArrayList, Vector, HashMap (and LinkedHashMap, HashSet), and Hashtable, not other collections.
 - **Thread dumps** of HotSpot JVMs (OpenJDK, Oracle, Temurin, Zulu, Corretto and the like) are read. OpenJ9 `javacore` files are not.
 - **async-profiler** runs on Linux (x64, ARM64) and macOS JVMs; for JVMs on Windows, use Flight Recorder.
 - **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows). The downloads are not code-signed yet.

@@ -110,6 +110,28 @@ class HeapDumpTest {
     }
 
     @Test
+    void wasteIsFoundAndPlaced() throws Exception {
+        HeapWaste.Report w = HeapWaste.of(dump, null, null);
+        HeapWaste.Duplicate active = w.strings().stream().filter(x -> x.text().equals("ACTIVE")).findFirst()
+                .orElseThrow(() -> new AssertionError(w.strings().toString()));
+        assertTrue(active.copies() >= LeakApp.SESSIONS, "copies: " + active.copies());
+        assertEquals("LeakApp.Session.status", active.where());
+        assertEquals(active.wasted(), w.strings().get(0).wasted(), "the biggest waste of strings");
+        assertTrue(w.strings().stream().anyMatch(x -> x.text().startsWith("customer-") && x.copies() == 20
+                && x.where().equals("LeakApp.Order.customer")), "the orders' customers: 1,000 strings, 50 texts");
+        HeapWaste.Collections tags = w.collections().stream()
+                .filter(c -> c.what().equals("Empty ArrayList") && c.where().equals("LeakApp.Session.tags")).findFirst()
+                .orElseThrow(() -> new AssertionError(w.collections().toString()));
+        assertEquals(LeakApp.SESSIONS, tags.count());
+        HeapWaste.Collections emptied = w.collections().stream()
+                .filter(c -> c.where().equals("LeakApp.EMPTIED (static)")).findFirst()
+                .orElseThrow(() -> new AssertionError(w.collections().toString()));
+        assertEquals("HashMap mostly empty (under a quarter used)", emptied.what());
+        assertEquals((2048 - 10) * 4, emptied.wasted());
+        assertTrue(w.total() > LeakApp.SESSIONS * 24L * 2, "total " + w.total());
+    }
+
+    @Test
     void theIndexOnDiskGivesTheSameAnswers() throws Exception {
         // not in the JUnit temp folder: Windows can't delete files that are still mapped
         Path index = Files.createTempDirectory("logsift-heap-test").resolve("index");
@@ -119,6 +141,7 @@ class HeapDumpTest {
             int map = disk.objectsOf("java.util.HashMap", 1)[0];
             assertEquals(dump.retained(dump.objectsOf("java.util.HashMap", 1)[0]), disk.retained(map));
             assertEquals(dump.describe(dump.objectsOf("java.util.HashMap", 1)[0]), disk.describe(map));
+            assertEquals(HeapWaste.of(dump, null, null), HeapWaste.of(disk, null, null));
         }
         if (!System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {
             assertTrue(!Files.exists(index), "the index files are removed");

@@ -1302,6 +1302,161 @@ public final class HeapDump implements AutoCloseable {
         }
     }
 
+    // ---------------------------------------------------------------- for reports in this package
+
+    Store store() {
+        return store;
+    }
+
+    int arrayHeader() {
+        return arrayHeader;
+    }
+
+    int refSize() {
+        return refSize;
+    }
+
+    /** The index of a node's class in {@link #classes}. */
+    int classIndex(int node) {
+        return classOf.get(node);
+    }
+
+    /** The index of the class with this name, or -1. */
+    int classIndex(String name) {
+        for (int i = 0; i < classes.size(); i++) {
+            if (name.equals(classes.get(i).name)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** True when the class (by index) is this class or extends it. */
+    boolean extendsClass(int classIdx, String name) {
+        for (int c = classIdx; c >= 0; c = classes.get(c).superIdx) {
+            if (name.equals(classes.get(c).name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The objects this one refers to (strongly). */
+    int[] refs(int node) {
+        long a = succStart.get(node);
+        long b = succStart.get(node + 1);
+        int[] out = new int[(int) (b - a)];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = succ.get(a + i);
+        }
+        return out;
+    }
+
+    /** The object through which the shortest path from a GC root reaches this one; root() for a root, -1 when unreachable. */
+    int parent(int node) {
+        return node == n ? -1 : bfsParent.get(node) - 1;
+    }
+
+    /** Where a field of this type is in an instance's data (as in the dump), or -1. */
+    int fieldPos(int classIdx, String field, int type) {
+        int at = 0;
+        for (int c = classIdx; c >= 0; c = classes.get(c).superIdx) {
+            ClassInfo ci = classes.get(c);
+            for (int i = 0; i < ci.fieldNames.length; i++) {
+                if (ci.fieldTypes[i] == type && name(ci.fieldNames[i]).equals(field)) {
+                    return at;
+                }
+                at += sizeOf(ci.fieldTypes[i], idSize);
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Called for each wanted object in a pass over the dump, with the reader at the object's data:
+     * an instance's field values ({@code length} bytes), or an array's elements ({@code length} of them).
+     */
+    interface Visitor {
+        void visit(int node, int record, HprofReader r, long length) throws IOException;
+    }
+
+    /** One pass over the dump's objects, front to back, for the nodes in {@code wanted}. */
+    void scan(BitSet wanted, Visitor visitor, Listener l, BooleanSupplier cancel) throws IOException {
+        Listener listener = throttled(l);
+        HprofReader r = new HprofReader(channel, 0);
+        r.idSize = idSize;
+        int v = 0;
+        long all = 0;
+        long done = 0;
+        for (long[] seg : segments) {
+            all += seg[1];
+        }
+        for (long[] seg : segments) {
+            r.seek(seg[0]);
+            long end = seg[0] + seg[1];
+            while (r.position() < end) {
+                int sub = r.u1();
+                switch (sub) {
+                    case 0xFF, 0x05, 0x07 -> r.id();
+                    case 0x01 -> r.skip(2L * idSize);
+                    case 0x02, 0x03, 0x08 -> r.skip(idSize + 8L);
+                    case 0x04, 0x06 -> r.skip(idSize + 4L);
+                    case 0x20 -> {
+                        readClass(r);
+                        v++;
+                    }
+                    case 0x21 -> {
+                        r.id();
+                        r.u4();
+                        r.id();
+                        long len = r.u4u();
+                        long next = r.position() + len;
+                        if (wanted.get(v)) {
+                            visitor.visit(v, sub, r, len);
+                        }
+                        r.seek(next);
+                        v++;
+                    }
+                    case 0x22 -> {
+                        r.id();
+                        r.u4();
+                        long len = r.u4u();
+                        r.id();
+                        long next = r.position() + len * idSize;
+                        if (wanted.get(v)) {
+                            visitor.visit(v, sub, r, len);
+                        }
+                        r.seek(next);
+                        v++;
+                    }
+                    case 0x23 -> {
+                        r.id();
+                        r.u4();
+                        long len = r.u4u();
+                        int type = r.u1();
+                        long next = r.position() + len * sizeOf(type, idSize);
+                        if (wanted.get(v)) {
+                            visitor.visit(v, sub, r, len * sizeOf(type, idSize));
+                        }
+                        r.seek(next);
+                        v++;
+                    }
+                    default -> throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub));
+                }
+                check(cancel, v);
+                if ((v & 0xFFFF) == 0) {
+                    listener.progress("", (double) (done + r.position() - seg[0]) / all);
+                }
+            }
+            done += seg[1];
+        }
+    }
+
+    /** Reads an int (4 bytes, big-endian) at {@code p} of an instance's data. */
+    static int intAt(byte[] b, int p) {
+        return (b[p] & 0xFF) << 24 | (b[p + 1] & 0xFF) << 16 | (b[p + 2] & 0xFF) << 8 | (b[p + 3] & 0xFF);
+    }
+
     /** Deletes index folders left by earlier runs (a crash, or Windows keeping mapped files). */
     public static void cleanUp(Path parent) {
         if (!Files.isDirectory(parent)) {

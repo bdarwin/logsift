@@ -17,7 +17,7 @@ public final class HeapFindings {
     /** One finding: a sentence, the object it is about (or -1), and the bytes involved. */
     public record Finding(Kind kind, String title, String detail, int node, long bytes) {}
 
-    public enum Kind { HOLDER, NOT_STRONG, SUMMARY }
+    public enum Kind { HOLDER, NOT_STRONG, WASTE, SUMMARY }
 
     /** A holder must keep at least this share of the heap to be a finding. */
     static final double BIG = 0.10;
@@ -45,6 +45,45 @@ public final class HeapFindings {
                             + " It is freed when memory runs low, so it isn't a leak.", -1, notStrong));
         }
         return out;
+    }
+
+    /** Waste is a finding from this share of the heap. */
+    static final double WASTE = 0.03;
+
+    /** A finding about memory spent for nothing (copies of strings, empty collections), or null when there is little. */
+    public static Finding waste(HeapWaste.Report w, long heap) {
+        if (heap == 0 || w.total() < heap * WASTE) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        if (w.stringBytes() >= heap * WASTE / 3) {
+            parts.add("copies of the same strings");
+        }
+        if (w.collectionBytes() >= heap * WASTE / 3) {
+            parts.add("empty or mostly empty collections");
+        }
+        String title = bytes(w.total()) + " (" + pct(w.total(), heap) + " of the heap) is spent on "
+                + String.join(" and ", parts);
+        HeapWaste.Duplicate s = w.strings().isEmpty() ? null : w.strings().get(0);
+        HeapWaste.Collections c = w.collections().isEmpty() ? null : w.collections().get(0);
+        String detail;
+        int node;
+        if (s != null && (c == null || s.wasted() >= c.wasted())) {
+            detail = String.format("%,d", s.copies()) + " copies of \"" + cut(s.text(), 40) + "\" ("
+                    + s.where() + ") alone waste " + bytes(s.wasted()) + ".";
+            node = s.sample();
+        } else if (c != null) {
+            detail = String.format("%,d", c.count()) + " × " + c.what().substring(0, 1).toLowerCase(java.util.Locale.ROOT)
+                    + c.what().substring(1) + " in " + c.where() + " waste " + bytes(c.wasted()) + ".";
+            node = c.sample();
+        } else {
+            return null;
+        }
+        return new Finding(Kind.WASTE, title, detail + " See Wasted memory.", node, w.total());
+    }
+
+    private static String cut(String s, int max) {
+        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
     /**
@@ -92,7 +131,7 @@ public final class HeapFindings {
         if (cls.equals("class")) {
             return description;
         }
-        return HeapDump.shortClass(cls.replace("[]", "\u0000")).replace("\u0000", "[]") + rest;
+        return HeapWaste.simple(cls.replace("[]", "\u0000")).replace("\u0000", "[]") + rest;
     }
 
     /** Where an object is kept: "in static LeakApp.CACHE", "in a local variable in Foo.bar() of thread "main"". */
@@ -106,7 +145,7 @@ public final class HeapFindings {
         int i = 1;
         if (d.isClassObject(first.node()) && path.size() > 1 && path.get(1).via().startsWith("static ")) {
             String cls = d.describe(first.node()).substring("class ".length());
-            sb.append("in static ").append(HeapDump.shortClass(cls)).append('.')
+            sb.append("in static ").append(HeapWaste.simple(cls)).append('.')
                     .append(path.get(1).via().substring("static ".length()));
             i = 2;
         } else if (d.isClassObject(first.node())) {
