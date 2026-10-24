@@ -79,7 +79,7 @@ public final class HeapDump implements AutoCloseable {
         }
     }
 
-    record Frame(String method, String className, int line) {}
+    record Frame(String method, String className, String file, int line) {}
 
     /** One class: its objects and their sizes. */
     public record ClassStat(String name, long count, long shallow, long retained) {}
@@ -254,11 +254,12 @@ public final class HeapDump implements AutoCloseable {
                     long frameId = r.id();
                     long method = r.id();
                     r.id(); // signature
-                    r.id(); // source file
+                    long source = r.id();
                     int classSerial = r.u4();
                     int line = r.u4();
                     Long cid = classSerials.get(classSerial);
-                    frameById.put(frameId, new Frame(name(method), cid == null ? "?" : javaName(cid), line));
+                    frameById.put(frameId, new Frame(name(method), cid == null ? "?" : javaName(cid),
+                            source == 0 ? null : strings.get(source), line));
                 }
                 case 0x05 -> {
                     int serial = r.u4();
@@ -1074,6 +1075,91 @@ public final class HeapDump implements AutoCloseable {
         } catch (IOException e) {
             return "#" + serial;
         }
+    }
+
+    /** How many threads the dump has (with their stacks). */
+    public int threadCount() {
+        return threads.size();
+    }
+
+    /**
+     * The dump's threads as a thread dump (jstack's format): names, states and stacks. A heap dump
+     * doesn't say which locks threads hold, so there are none.
+     */
+    public String threadDumpText() throws IOException {
+        StringBuilder sb = new StringBuilder();
+        if (timestamp > 0) {
+            sb.append(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                    .format(java.time.Instant.ofEpochMilli(timestamp).atZone(java.time.ZoneId.systemDefault())))
+                    .append('\n');
+        }
+        sb.append("Full thread dump (the threads in ").append(file.getFileName()).append("):\n\n");
+        List<Integer> serials = new ArrayList<>(threads.keySet());
+        java.util.Collections.sort(serials);
+        for (int serial : serials) {
+            long[] t = threads.get(serial);
+            int v = nodeOf(t[0]);
+            Map<String, Long> f = v < 0 ? Map.of() : primitiveFields(v);
+            Map<String, Long> h = f;
+            if (v >= 0 && !f.containsKey("threadStatus")) { // JDK 19 and later: in Thread.holder
+                int holderNode = refField(v, "holder");
+                if (holderNode >= 0) {
+                    h = primitiveFields(holderNode);
+                }
+            }
+            String name = v < 0 ? null : stringField(v, "name");
+            long tid = f.getOrDefault("tid", (long) serial);
+            sb.append('"').append(name == null ? "Thread-" + serial : name).append("\" #").append(tid);
+            if (h.getOrDefault("daemon", 0L) != 0) {
+                sb.append(" daemon");
+            }
+            sb.append(" prio=").append(h.getOrDefault("priority", 5L)).append(" tid=0x0 nid=0x0\n");
+            sb.append("   java.lang.Thread.State: ").append(state(h.getOrDefault("threadStatus", 5L))).append('\n');
+            long[] frames = traces.get((int) t[1]);
+            if (frames != null) {
+                for (long fid : frames) {
+                    Frame fr = frameById.get(fid);
+                    if (fr == null) {
+                        continue;
+                    }
+                    sb.append("\tat ").append(fr.className()).append('.').append(fr.method()).append('(');
+                    if (fr.line() == -3) {
+                        sb.append("Native Method");
+                    } else if (fr.file() == null || fr.file().isEmpty()) {
+                        sb.append("Unknown Source");
+                    } else {
+                        sb.append(fr.file());
+                        if (fr.line() > 0) {
+                            sb.append(':').append(fr.line());
+                        }
+                    }
+                    sb.append(")\n");
+                }
+            }
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** A thread's state from its threadStatus (JVMTI flags), as Thread.State names it. */
+    static String state(long status) {
+        if ((status & 0x4) != 0) {
+            return "RUNNABLE";
+        }
+        if ((status & 0x400) != 0) {
+            return "BLOCKED (on object monitor)";
+        }
+        if ((status & 0x10) != 0) {
+            return (status & 0x200) != 0 ? "WAITING (parking)" : "WAITING (on object monitor)";
+        }
+        if ((status & 0x20) != 0) {
+            return (status & 0x40) != 0 ? "TIMED_WAITING (sleeping)"
+                    : (status & 0x200) != 0 ? "TIMED_WAITING (parking)" : "TIMED_WAITING (on object monitor)";
+        }
+        if ((status & 0x2) != 0) {
+            return "TERMINATED";
+        }
+        return (status & 0x1) == 0 ? "NEW" : "RUNNABLE";
     }
 
     private int nodeOf(long id) {

@@ -132,6 +132,21 @@ class HeapDumpTest {
     }
 
     @Test
+    void theThreadsReadAsAThreadDump() throws Exception {
+        List<logsift.jvm.ThreadDump> dumps = logsift.jvm.DumpParser.parse(dump.threadDumpText());
+        assertEquals(1, dumps.size());
+        logsift.jvm.JThread main = dumps.get(0).threads().stream().filter(t -> t.name().equals("main")).findFirst()
+                .orElseThrow();
+        assertEquals(logsift.jvm.JThread.State.RUNNABLE, main.state());
+        assertTrue(main.frames().stream().anyMatch(f -> f.text().contains("logsift.heap.LeakApp.main(LeakApp.java:")),
+                main.frames().toString());
+        logsift.jvm.JThread ref = dumps.get(0).threads().stream().filter(t -> t.name().equals("Reference Handler"))
+                .findFirst().orElseThrow();
+        assertTrue(ref.daemon());
+        assertEquals(dump.threadCount(), dumps.get(0).threads().size());
+    }
+
+    @Test
     void theIndexOnDiskGivesTheSameAnswers() throws Exception {
         // not in the JUnit temp folder: Windows can't delete files that are still mapped
         Path index = Files.createTempDirectory("logsift-heap-test").resolve("index");

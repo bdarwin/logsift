@@ -1019,6 +1019,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 refreshStatus();
             }
         });
+        tab.onShowThreads(text -> {
+            List<logsift.jvm.ThreadDump> dumps = logsift.jvm.DumpParser.parse(text);
+            if (!dumps.isEmpty()) {
+                openThreads(abs.getFileName().toString(), dumps, null);
+            }
+        });
         if (abs.getParent() != null) {
             PREFS.put("lastDir", abs.getParent().toString());
         }

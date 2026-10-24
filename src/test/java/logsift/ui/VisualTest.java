@@ -4586,6 +4586,25 @@ class VisualTest {
         }, 20_000, "why a copy of ACTIVE is alive");
         settle();
         shot("91-heap-waste");
+
+        // the dump's threads, in the Threads view
+        onEdt(() -> {
+            tab.threads();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentThreadsTab() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the dump's threads");
+        settle();
+        shot("92-heap-threads");
+        onEdt(() -> {
+            frame.closeCurrentTabForTest();
+            return null;
+        });
         onEdt(() -> {
             frame.closeCurrentTabForTest();
             return null;

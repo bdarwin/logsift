@@ -61,6 +61,8 @@ final class HeapDumpTab extends JPanel {
     private final Path file;
     private final AtomicBoolean cancel = new AtomicBoolean();
     private Runnable changed = () -> { };
+    private java.util.function.Consumer<String> showThreads = t -> { };
+    private final JButton threadsButton = new JButton("Threads", Icons.of("cpu"));
     private volatile HeapDump dump;
     private String status = "Reading…";
 
@@ -109,6 +111,11 @@ final class HeapDumpTab extends JPanel {
 
     void onChanged(Runnable r) {
         changed = r;
+    }
+
+    /** What to do with the dump's threads (as thread dump text) when Threads is clicked. */
+    void onShowThreads(java.util.function.Consumer<String> c) {
+        showThreads = c;
     }
 
     /** Removes heap dump indexes left on disk by earlier runs (in the background). */
@@ -208,7 +215,14 @@ final class HeapDumpTab extends JPanel {
     private JPanel mainPanel() {
         JPanel p = new JPanel(new BorderLayout());
         header.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-        p.add(header, BorderLayout.NORTH);
+        JPanel top0 = new JPanel(new BorderLayout());
+        top0.add(header, BorderLayout.CENTER);
+        threadsButton.setToolTipText("The threads in the dump, with their stacks, in the Threads view");
+        threadsButton.addActionListener(e -> threads());
+        JPanel tb = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 4));
+        tb.add(threadsButton);
+        top0.add(tb, BorderLayout.EAST);
+        p.add(top0, BorderLayout.NORTH);
 
         findings.setLayout(new BoxLayout(findings, BoxLayout.Y_AXIS));
         findings.setBorder(BorderFactory.createEmptyBorder(10, 12, 12, 12));
@@ -340,6 +354,8 @@ final class HeapDumpTab extends JPanel {
                 + String.format("%,d", d.objectCount()) + " objects · <b>" + HeapFindings.bytes(d.reachableBytes())
                 + "</b> in use" + (d.compressedPointers() ? "" : " · sizes without compressed pointers")
                 + "</span></html>");
+        threadsButton.setText("Threads (" + d.threadCount() + ")");
+        threadsButton.setEnabled(d.threadCount() > 0);
         status = HeapFindings.bytes(d.reachableBytes()) + " in use in " + String.format("%,d", d.reachableCount())
                 + " objects" + (d.isOnDisk() ? " · index on disk" : "");
 
@@ -457,6 +473,19 @@ final class HeapDumpTab extends JPanel {
             p.add(row);
         }
         return p;
+    }
+
+    /** Opens the dump's threads in the Threads view. */
+    void threads() {
+        HeapDump d = dump;
+        if (d == null) {
+            return;
+        }
+        try {
+            showThreads.accept(d.threadDumpText());
+        } catch (java.io.IOException e) {
+            javax.swing.JOptionPane.showMessageDialog(this, "Could not read the threads: " + e.getMessage());
+        }
     }
 
     // ---------------------------------------------------------------- wasted memory
