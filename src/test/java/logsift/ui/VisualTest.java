@@ -2107,6 +2107,11 @@ class VisualTest {
             server.stop(0);
             System.setProperty("logsift.updateUrl", "none");
             System.clearProperty("logsift.version");
+            onEdt(() -> {
+                frame.hideUpdateForTest(); // not in the screenshots that follow
+                return null;
+            });
+            AppState.prefs().remove("updates.latest");
         }
 
         // an unexpected error: a window with the details, Logsift keeps running
@@ -4419,6 +4424,71 @@ class VisualTest {
             frame.closeCurrentTabForTest();
             return null;
         });
+    }
+
+    @Test
+    @Order(46)
+    void startPageWhenNothingIsOpen() throws Exception {
+        // a second window with nothing open shows the ways to start, not a toolbar
+        MainFrame empty = onEdt(() -> {
+            MainFrame f = new MainFrame();
+            f.setSize(1400, 860);
+            f.setLocation(60, 60);
+            f.setVisible(true);
+            return f;
+        });
+        try {
+            settle();
+            assertTrue(onEdt(() -> empty.startPageForTest().isShowing()), "the start page is shown");
+            assertEquals(List.of("Open Log…", "Open Folder…", "Open Remote…", "Attach to a JVM…",
+                    "Open Thread Dump…", "Open Profile…"), onEdt(() -> empty.startPageForTest().actionsForTest()));
+            assertTrue(onEdt(() -> empty.startPageForTest().actionForTest("Open Log…").isShowing()));
+            shotOf(empty.getRootPane(), "86-start-page");
+
+            // with a log open, + after the tabs shows the start page in a tab; opening
+            // something from it replaces it
+            Path log = dir.resolve("start-tab.log");
+            Files.writeString(log, "2026-10-24 10:00:00.000 INFO  [main] c.a.App - started\n");
+            onEdt(() -> {
+                empty.openFiles(List.of(log));
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> empty.currentTab() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the log");
+            onEdt(() -> {
+                empty.openStartTab();
+                return null;
+            });
+            settle();
+            assertTrue(onEdt(() -> empty.tabsForTest().getSelectedComponent() instanceof StartPage),
+                    "+ opens the start page in a tab");
+            assertEquals(2, (int) onEdt(() -> empty.tabsForTest().getTabCount()));
+            shotOf(empty.getRootPane(), "87-start-tab");
+            Path other = dir.resolve("start-tab-2.log");
+            Files.writeString(other, "2026-10-24 10:00:01.000 INFO  [main] c.a.App - ready\n");
+            onEdt(() -> {
+                empty.openFiles(List.of(other));
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> empty.tabsForTest().getTabCount() == 2
+                            && empty.currentTab() != null && empty.currentTab().title().equals("start-tab-2.log"));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the start tab replaced by the log");
+        } finally {
+            onEdt(() -> {
+                empty.dispose();
+                return null;
+            });
+        }
     }
 
     /** Waits until the current tab is a log titled so. */

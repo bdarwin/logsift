@@ -48,7 +48,7 @@ public final class SplashGenerator {
             g.drawString("Logsift", x, HEIGHT / 2 - 2);
             g.setColor(new Color(0x94A3B8));
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 16));
-            g.drawString("Viewer for very large log files", x + 2, HEIGHT / 2 + 26);
+            g.drawString("Logs, threads and profiles", x + 2, HEIGHT / 2 + 26);
             g.setColor(new Color(0x64748B));
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
             g.drawString("Starting…", 40, HEIGHT - 24);

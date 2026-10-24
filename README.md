@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-**Find out what happened, even in gigabytes of logs.** Logsift opens huge log files instantly, tails them live and points out errors, bursts and restarts. Filters, Find All, a timeline and parsed columns narrow it down. For Java, it explains thread dumps and profiles running JVMs, on your computer or on a server. Windows, macOS and Linux.
+**Find out what your app did, from its logs to its threads.** Logsift opens gigabytes of logs instantly, tails them live and points out errors, bursts and restarts. Follow one request through every log, even inside zips; see exceptions grouped by cause; chart how long things take. Then go deeper: it explains Java and Python thread dumps, and attaches to running JVMs to profile them and look at their heap, on your computer or on a server. Windows, macOS and Linux.
 
 ![Logsift with four filters combined as (A OR B) AND NOT C, the timeline on top and the highlight bar on the right](docs/screenshots/filters.png)
 
@@ -69,7 +69,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 ## Help, updates and privacy
 
 - **Help → Keyboard Shortcuts** (Ctrl+/ or ⌘/) lists every shortcut. **Help → Report a Bug** opens a GitHub issue with your version and system filled in.
-- **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the toolbar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
+- **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the status bar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
 - **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub**. Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).
 - Logsift never sends your logs anywhere. Its only other network connections are to servers you choose: SSH servers, JMX ports, and web addresses you open.
 
@@ -77,15 +77,16 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 
 | | |
 |---|---|
-| ![The find bar at the top of a log: matches lit up, 1 of 31](docs/screenshots/find-bar.png) **Find** (Ctrl+F): matches light up as you type | ![A search turned into a filter, shown as a chip above the log with the chosen levels](docs/screenshots/filter-chips.png) **Filters** as chips above the log: click one to turn it off |
-| ![Several Find All searches in one window, one nested inside another](docs/screenshots/find-all.png) **Several searches at once**, with a search inside another's results | ![A selected time range on the timeline, with errors filtered and their stack traces kept](docs/screenshots/timeline.png) **Timeline**: select a time range, keep stack traces |
-| ![Parsed columns with top messages below](docs/screenshots/columns-and-messages.png) **Columns** and **top messages** | ![Folder search across .log, .gz and .zip files](docs/screenshots/folder-search.png) **Folder search**, including inside .gz and .zip |
-| ![JSON log shown as columns, with a pretty-printed details panel](docs/screenshots/json.png) **JSON logs** with a details panel | ![Comparing a bad run with a good one: new, more frequent and missing messages](docs/screenshots/compare.png) **Compare** a bad run with a good one |
-| ![A CSV file from inside a zip, shown as columns, with its hosts in the tree](docs/screenshots/csv.png) **CSV files** as columns, here from a zip inside a zip | ![The files of a zip, also of a zip inside it, to open or search](docs/screenshots/zip.png) **Zips** open as a tab: open files as logs, merge or search them |
-| ![One request followed through a folder of logs and a zip, in order by time](docs/screenshots/request.png) **Follow a request** through a folder of logs | ![Exceptions grouped by root cause with the stack and links to the source](docs/screenshots/exceptions.png) **Exceptions** by root cause |
-| ![Order times charted over time, with a spike](docs/screenshots/metrics.png) **Metrics** from the messages | ![Insights with a known problem and what to try](docs/screenshots/insights.png) **Insights** with known problems |
-| ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained | ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph |
-| ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** | ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |
+| ![The start page: Open Log, Open Folder, Open Remote, Attach to a JVM, Open Thread Dump, Open Profile, and recent files](docs/screenshots/start-page.png) **Start page**: the ways to begin, and recent files | ![The find bar at the top of a log: matches lit up, 1 of 31](docs/screenshots/find-bar.png) **Find** (Ctrl+F): matches light up as you type |
+| ![A search turned into a filter, shown as a chip above the log with the chosen levels](docs/screenshots/filter-chips.png) **Filters** as chips above the log: click one to turn it off | ![Several Find All searches in one window, one nested inside another](docs/screenshots/find-all.png) **Several searches at once**, with a search inside another's results |
+| ![A selected time range on the timeline, with errors filtered and their stack traces kept](docs/screenshots/timeline.png) **Timeline**: select a time range, keep stack traces | ![Parsed columns with top messages below](docs/screenshots/columns-and-messages.png) **Columns** and **top messages** |
+| ![Folder search across .log, .gz and .zip files](docs/screenshots/folder-search.png) **Folder search**, including inside .gz and .zip | ![JSON log shown as columns, with a pretty-printed details panel](docs/screenshots/json.png) **JSON logs** with a details panel |
+| ![Comparing a bad run with a good one: new, more frequent and missing messages](docs/screenshots/compare.png) **Compare** a bad run with a good one | ![A CSV file from inside a zip, shown as columns, with its hosts in the tree](docs/screenshots/csv.png) **CSV files** as columns, here from a zip inside a zip |
+| ![The files of a zip, also of a zip inside it, to open or search](docs/screenshots/zip.png) **Zips** open as a tab: open files as logs, merge or search them | ![One request followed through a folder of logs and a zip, in order by time](docs/screenshots/request.png) **Follow a request** through a folder of logs |
+| ![Exceptions grouped by root cause with the stack and links to the source](docs/screenshots/exceptions.png) **Exceptions** by root cause | ![Order times charted over time, with a spike](docs/screenshots/metrics.png) **Metrics** from the messages |
+| ![Insights with a known problem and what to try](docs/screenshots/insights.png) **Insights** with known problems | ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained |
+| ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph | ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** |
+| ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |   |
 
 ## Run from source
 
@@ -130,7 +131,7 @@ Make a test log:
 | Matching lines only / all lines | Ctrl+Shift+H (⇧⌘H on macOS) |
 | Fold / open the bottom panel | Ctrl+J, the ▾ button, or double-click a tab |
 | Follow the end of the file (tail -f) | Ctrl+T, **Follow** in the log's bar, or End |
-| Load changes to the file | F5 or the log's **Reload** (it lights up when the file changed); **Auto reload** in the toolbar loads them as they happen, for every log |
+| Load changes to the file | F5 or the log's **Reload** (it lights up when the file changed); **Reload ▾ → Reload Automatically** loads them as they happen |
 | Select text | drag; double-click = word, triple-click or click the line number = whole line; Shift+click extends |
 | Copy | Ctrl+C (with nothing selected, copies the current line) · Select all: Ctrl+A |
 | Font size | Ctrl+= / Ctrl+- |
@@ -340,7 +341,7 @@ Logs with one JSON object per line are recognized. With **Columns** on, the usua
 
 ## Remote logs (SSH / SFTP)
 
-**File → Open Remote (SFTP)…** (Ctrl+Shift+O, or the server button in the toolbar): enter the host, user, and a password or private key (`~/.ssh/id_ed25519` or `id_rsa` is suggested), then **Connect**. Pick the log in the file browser: type a folder in the address bar (`/var/log`, `~/logs`, or a name relative to the folder shown) and press Enter, or double-click folders (`..` goes up, Backspace too); double-click a file or press **Open**. Load the whole file or just the last N MB. LogSift keeps a local copy up to date while the remote log grows (new bytes are fetched every second), starts over when it is truncated or rotated, and reconnects by itself if the connection drops (the status bar says so). Host keys are checked against `~/.ssh/known_hosts`; for a new server you are asked first. It remembers the server, user, key and last folder per server, never passwords. Every feature works on remote logs.
+**File → Open Remote (SFTP)…** (Ctrl+Shift+O): enter the host, user, and a password or private key (`~/.ssh/id_ed25519` or `id_rsa` is suggested), then **Connect**. Pick the log in the file browser: type a folder in the address bar (`/var/log`, `~/logs`, or a name relative to the folder shown) and press Enter, or double-click folders (`..` goes up, Backspace too); double-click a file or press **Open**. Load the whole file or just the last N MB. LogSift keeps a local copy up to date while the remote log grows (new bytes are fetched every second), starts over when it is truncated or rotated, and reconnects by itself if the connection drops (the status bar says so). Host keys are checked against `~/.ssh/known_hosts`; for a new server you are asked first. It remembers the server, user, key and last folder per server, never passwords. Every feature works on remote logs.
 
 ## Merge logs by time
 
@@ -372,7 +373,7 @@ A narrow bar beside the scrollbar shows the whole file at a glance. It has red m
 - **Filter ▾** turns the search into a filter: show only the matching lines, hide them, or color them.
 - The folder button searches for it in a whole folder, zips included (Ctrl+Shift+F).
 
-Each log has its own bar for what belongs to it: **Find**, **Filters**, the filters that are on, **Follow** and **Reload**. The window's toolbar holds what applies to every log: open, folder search, wrap, columns, the tree, the timeline and auto reload.
+Each log has its own bar: **Find**, **Filters** and the filters that are on on the left; **Wrap**, **Columns**, **Tree**, **Timeline**, **Follow** and **Reload** on the right. Each log keeps its own view settings, and your last choice is the default for the next log you open. There is no toolbar on top: opening files, remote logs, Search in Folder and Settings are in the menus (with their shortcuts), so a profile, a heap dump or a folder search gets the whole window. With nothing open, the start page has big buttons for the ways to begin (a log, a folder, a remote log, a JVM, a thread dump, a profile) and your recent files; with logs open, **+** after the tabs shows it again.
 
 ## Filters
 
@@ -496,7 +497,7 @@ logsift.ui
   FolderSearchTab folder search form and results grouped by file
   TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
   ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, JvmDialog, JvmBar
-  MainFrame       window, toolbar, menus, status bar, drag & drop
+  MainFrame       window, menus, status bar, drag & drop
 logsift.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
 ```

@@ -82,7 +82,7 @@ final class HelpSupport {
         JEditorPane text = new JEditorPane("text/html", "<html><body style='font-family:sans-serif'>"
                 + "<div style='font-size:20pt;font-weight:bold'>Logsift</div>"
                 + "<div style='font-size:12pt'>Version " + Version.current() + "</div><br>"
-                + "A fast viewer for very large log files.<br><br>"
+                + "Find out what your app did, from its logs to its threads.<br><br>"
                 + osText() + "<br>" + javaText() + "<br><br>"
                 + "<a href='" + REPO + "'>" + REPO.replace("https://", "") + "</a><br>"
                 + "Free and open source under the MIT license.</body></html>");

@@ -40,7 +40,6 @@ import javax.swing.JProgressBar;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
-import javax.swing.JToolBar;
 import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -58,19 +57,57 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     private final JTabbedPane tabs = new JTabbedPane();
     private final JPanel center = new JPanel(new CardLayout());
-    private final JToggleButton wrapButton = new JToggleButton("Wrap");
-    private final JToggleButton columnsButton = new JToggleButton("Columns");
-    private final JToggleButton treeButton = new JToggleButton("Tree");
-    private final JToggleButton timelineButton = new JToggleButton("Timeline");
-    private final JToggleButton autoReloadButton = new JToggleButton("Auto reload");
-    private boolean autoReload = PREFS.getBoolean("autoReload", false);
-    private boolean columns = PREFS.getBoolean("columns", false);
-    private boolean wrap = PREFS.getBoolean("wrap", false);
     private final JLabel status = new JLabel(" ");
     private final JLabel statusRight = new JLabel(" ");
     private final javax.swing.JButton formatButton = new javax.swing.JButton();
     private javax.swing.JPopupMenu formatPopup;
     private final JButton updateButton = new JButton();
+    /** What the window shows with nothing open. */
+    private final StartPage.Host startHost = new StartPage.Host() {
+        @Override
+        public void openLogs() {
+            openDialog();
+        }
+
+        @Override
+        public void openFolder() {
+            Path dir = FolderSearchTab.chooseFolder(MainFrame.this, PREFS.get("lastDir", null));
+            if (dir != null) {
+                openFolderSearch(dir, null);
+            }
+        }
+
+        @Override
+        public void openRemote() {
+            openRemoteDialog();
+        }
+
+        @Override
+        public void attachJvm() {
+            openJvmDialog();
+        }
+
+        @Override
+        public void openThreadDump() {
+            openThreadDumpDialog();
+        }
+
+        @Override
+        public void openProfile() {
+            openProfileDialog();
+        }
+
+        @Override
+        public void openRecent(Path file) {
+            openFile(file);
+        }
+
+        @Override
+        public void reopenSession() {
+            restoreSession();
+        }
+    };
+    private final StartPage startPage = new StartPage(startHost);
     private String updateUrl = HelpSupport.REPO + "/releases/latest";
     private final JProgressBar progress = new JProgressBar(0, 1000);
     private float fontSize = PREFS.getFloat("fontSize", 13f);
@@ -91,6 +128,31 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 (java.util.function.IntConsumer) this::closeTab);
         tabs.putClientProperty("JTabbedPane.scrollButtonsPolicy", "asNeeded");
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        // + after the tabs: the start page in a tab (open a log, a folder, a JVM...)
+        JButton plus = new JButton(Icons.of("plus"));
+        plus.setToolTipText("Open something: a log, a folder, a remote log, a JVM…");
+        plus.putClientProperty("JButton.buttonType", "toolBarButton");
+        plus.setFocusable(false);
+        plus.addActionListener(e -> openStartTab());
+        JPanel trailing = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 2, 0));
+        trailing.setOpaque(false);
+        trailing.add(plus);
+        tabs.putClientProperty("JTabbedPane.trailingComponent", trailing);
+        // a start tab goes away once something is opened from it (or anywhere)
+        tabs.addContainerListener(new java.awt.event.ContainerAdapter() {
+            @Override
+            public void componentAdded(java.awt.event.ContainerEvent e) {
+                if (!(e.getChild() instanceof StartPage)) {
+                    SwingUtilities.invokeLater(() -> {
+                        for (int i = tabs.getTabCount() - 1; i >= 0; i--) {
+                            if (tabs.getComponentAt(i) instanceof StartPage) {
+                                tabs.removeTabAt(i);
+                            }
+                        }
+                    });
+                }
+            }
+        });
         tabs.addChangeListener(e -> {
             LogTab t = currentTab();
             if (t != null && t.getClientProperty("alerts") != null) {
@@ -103,16 +165,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             tabStatusChanged(t);
         });
 
-        JLabel empty = new JLabel("<html><div style='text-align:center'>"
-                + "<span style='font-size:16pt'>Drop log files here</span><br><br>"
-                + "or use File → Open (" + (isMac() ? "⌘O" : "Ctrl+O") + ")</div></html>",
-                SwingConstants.CENTER);
-        empty.setForeground(Color.GRAY);
-        center.add(empty, "empty");
+        center.add(startPage, "empty");
         center.add(tabs, "tabs");
 
         JPanel root = new JPanel(new BorderLayout());
-        root.add(buildToolbar(), BorderLayout.NORTH);
         root.add(center, BorderLayout.CENTER);
         root.add(buildStatusBar(), BorderLayout.SOUTH);
         setContentPane(root);
@@ -192,7 +248,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /**
      * Asks GitHub for the latest release (in the background). A newer one shows a button in the
-     * toolbar; when {@code manual}, the answer is also shown in a dialog.
+     * status bar; when {@code manual}, the answer is also shown in a dialog.
      */
     void checkForUpdates(boolean manual) {
         String url = logsift.core.UpdateChecker.url();
@@ -258,6 +314,28 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         updateButton.setText("Logsift " + version + " is available");
         updateButton.setToolTipText("Open the download page for version " + version);
         updateButton.setVisible(true);
+    }
+
+    /** Shows the start page in a tab (the + after the tabs). */
+    void openStartTab() {
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof StartPage) {
+                tabs.setSelectedIndex(i);
+                return;
+            }
+        }
+        StartPage p = new StartPage(startHost);
+        tabs.addTab("Start", p);
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        updateEmptyState();
+    }
+
+    StartPage startPageForTest() {
+        return startPage;
+    }
+
+    void hideUpdateForTest() {
+        updateButton.setVisible(false);
     }
 
     String updateButtonTextForTest() {
@@ -479,13 +557,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void addLogTab(LogTab tab, Path abs) {
         tab.mainView().setFontSize(fontSize);
         tab.resultsView().setFontSize(fontSize);
-        tab.mainView().setWrap(wrap);
-        tab.resultsView().setWrap(wrap);
+        // each log has its own view settings; a new one starts from the last choice
+        tab.setWrap(PREFS.getBoolean("wrap", false));
         tab.mainView().setStripes(PREFS.getBoolean("stripes", true));
         tab.resultsView().setStripes(PREFS.getBoolean("stripes", true));
         tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
-        tab.setColumnsVisible(columns);
-        tab.setAutoReload(autoReload);
+        tab.setColumnsVisible(PREFS.getBoolean("columns", false));
+        tab.setAutoReload(PREFS.getBoolean("autoReload", false));
         tabs.addTab(tab.title(), tab);
         int idx = tabs.getTabCount() - 1;
         tabs.setToolTipTextAt(idx, abs.toString());
@@ -1483,72 +1561,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    // ---------------------------------------------------------------- toolbar & menus
-
-    private JComponent buildToolbar() {
-        JToolBar tb = new JToolBar();
-        tb.setFloatable(false);
-        tb.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
-
-        JButton open = new JButton(Icons.open());
-        open.setToolTipText("Open log files (" + (isMac() ? "⌘O" : "Ctrl+O") + ")");
-        open.addActionListener(e -> openDialog());
-        JButton remote = new JButton(Icons.remote());
-        remote.setToolTipText("Open a log on another machine over SSH (" + (isMac() ? "⇧⌘O" : "Ctrl+Shift+O") + ")");
-        remote.addActionListener(e -> openRemoteDialog());
-        JButton folderSearch = new JButton(Icons.of("folder-search"));
-        folderSearch.setToolTipText("Search in a folder: every log in it, and in its zips ("
-                + (isMac() ? "⇧⌘F" : "Ctrl+Shift+F") + ")");
-        folderSearch.addActionListener(e -> openFolderSearch(null));
-        wrapButton.setIcon(Icons.wrap());
-        columnsButton.setIcon(Icons.columns());
-        autoReloadButton.setIcon(Icons.autoReload());
-        autoReloadButton.setSelected(autoReload);
-        autoReloadButton.setToolTipText("<html>Load changes to files as they happen, in every log.<br>"
-                + "Off: changes wait until you click a log's Reload (it lights up). Follow turns it on.</html>");
-        autoReloadButton.addActionListener(e -> setAutoReload(autoReloadButton.isSelected()));
-
-        wrapButton.setToolTipText("Wrap long lines (" + (isMac() ? "⌥Z" : "Alt+Z") + ")");
-        wrapButton.setSelected(wrap);
-        wrapButton.addActionListener(e -> setWrap(wrapButton.isSelected()));
-        columnsButton.setToolTipText("Show lines as columns: time, level, thread, logger, message");
-        columnsButton.setSelected(columns);
-        columnsButton.addActionListener(e -> setColumns(columnsButton.isSelected()));
-        treeButton.setIcon(Icons.of("list-tree"));
-        treeButton.setToolTipText("Tree of loggers (threads, components…) on the left: hide or show their lines ("
-                + (isMac() ? "⇧⌘B" : "Ctrl+Shift+B") + ")");
-        treeButton.setSelected(PREFS.getBoolean("valuesTree", true));
-        treeButton.addActionListener(e -> setValuesTree(treeButton.isSelected()));
-        timelineButton.setIcon(Icons.of("chart-column"));
-        timelineButton.setToolTipText("Timeline: lines over time, errors in red; click it to jump to a time");
-        timelineButton.setSelected(PREFS.getBoolean("timeline", true));
-        timelineButton.addActionListener(e -> setTimeline(timelineButton.isSelected()));
-        JButton settings = new JButton(Icons.of("settings"));
-        settings.setToolTipText("Settings: font, log formats, encoding… (" + (isMac() ? "⌘," : "Ctrl+,") + ")");
-        settings.addActionListener(e -> showSettings(null));
-
-        // the toolbar: what applies to every log (each log's own bar has Find, filters, Follow, Reload)
-        tb.add(open);
-        tb.add(remote);
-        tb.add(folderSearch);
-        tb.addSeparator();
-        tb.add(wrapButton);
-        tb.add(columnsButton);
-        tb.add(treeButton);
-        tb.add(timelineButton);
-        tb.addSeparator();
-        tb.add(autoReloadButton);
-        tb.add(Box.createHorizontalGlue());
-        updateButton.putClientProperty("JButton.buttonType", "toolBarButton");
-        updateButton.setFont(updateButton.getFont().deriveFont(Font.BOLD));
-        updateButton.setForeground(new Color(0x2563EB));
-        updateButton.setFocusable(false);
-        updateButton.setVisible(false);
-        updateButton.addActionListener(e -> HelpSupport.browse(this, updateUrl));
-        tb.add(updateButton);
-        tb.add(settings);
-        return tb;
-    }
+    // ---------------------------------------------------------------- menus & status bar
 
     static JToggleButton toggle(String text, String tip) {
         JToggleButton b = new JToggleButton(text);
@@ -1581,7 +1594,18 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             popup.show(formatButton, 0, -popup.getPreferredSize().height);
         });
         right.add(formatButton, BorderLayout.WEST);
-        p.add(status, BorderLayout.CENTER);
+        updateButton.putClientProperty("JButton.buttonType", "borderless");
+        updateButton.setFont(updateButton.getFont().deriveFont(Font.BOLD));
+        updateButton.setForeground(new Color(0x2563EB));
+        updateButton.setFocusable(false);
+        updateButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
+        updateButton.setVisible(false);
+        updateButton.addActionListener(e -> HelpSupport.browse(this, updateUrl));
+        JPanel left = new JPanel(new BorderLayout(10, 0));
+        left.setOpaque(false);
+        left.add(updateButton, BorderLayout.WEST);
+        left.add(status, BorderLayout.CENTER);
+        p.add(left, BorderLayout.CENTER);
         p.add(right, BorderLayout.EAST);
         return p;
     }
@@ -1682,12 +1706,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 () -> currentTab() != null && currentTab().mainView().isFollow(),
                 e -> setFollow(currentTab() == null || !currentTab().mainView().isFollow())));
         view.add(item("Reload", "refresh-cw", KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), e -> reload()));
-        view.add(check("Auto Reload", "refresh-ccw-dot", null, () -> autoReload, e -> setAutoReload(!autoReload)));
+        view.add(check("Auto Reload", "refresh-ccw-dot", null, () -> viewState("autoReload", false),
+                e -> setAutoReload(!viewState("autoReload", false))));
         view.addSeparator();
         view.add(check("Columns", "columns-3", KeyStroke.getKeyStroke(KeyEvent.VK_K, MENU | shift),
-                () -> columns, e -> setColumns(!columns)));
+                () -> viewState("columns", false), e -> setColumns(!viewState("columns", false))));
         view.add(check("Word Wrap", "wrap-text", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.ALT_DOWN_MASK),
-                () -> wrap, e -> setWrap(!wrap)));
+                () -> viewState("wrap", false), e -> setWrap(!viewState("wrap", false))));
         view.add(check("Matching Lines Only", "list-filter", KeyStroke.getKeyStroke(KeyEvent.VK_H, MENU | shift),
                 () -> currentTab() != null && currentTab().isMatchingOnly(), e -> {
                     LogTab t = currentTab();
@@ -1697,9 +1722,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 }));
         view.addSeparator();
         view.add(check("Tree of Loggers", "list-tree", KeyStroke.getKeyStroke(KeyEvent.VK_B, MENU | shift),
-                () -> PREFS.getBoolean("valuesTree", true), e -> setValuesTree(!PREFS.getBoolean("valuesTree", true))));
+                () -> viewState("valuesTree", true), e -> setValuesTree(!viewState("valuesTree", true))));
         view.add(check("Timeline", "chart-column", null,
-                () -> PREFS.getBoolean("timeline", true), e -> setTimeline(!PREFS.getBoolean("timeline", true))));
+                () -> viewState("timeline", true), e -> setTimeline(!viewState("timeline", true))));
         view.add(check("Bottom Panel", "panel-bottom", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU),
                 () -> currentTab() != null && !currentTab().isBottomCollapsed(), e -> {
                     LogTab t = currentTab();
@@ -2228,12 +2253,32 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         applyFontSize(); // lays the lines out again
     }
 
-    /** Shows the tree of loggers (threads, components...) beside logs that have columns. */
+    /*
+     * Wrap, columns, tree, timeline and auto reload belong to each log (its bar has them): these
+     * change the current log, and the choice becomes the default for logs opened next.
+     */
+
+    /** This view setting of the current log (or the default for new logs, when none is open). */
+    private boolean viewState(String pref, boolean def) {
+        LogTab t = currentTab();
+        if (t == null) {
+            return PREFS.getBoolean(pref, def);
+        }
+        return switch (pref) {
+            case "wrap" -> t.isWrap();
+            case "columns" -> t.isColumnsWanted();
+            case "valuesTree" -> t.isTreeWanted();
+            case "timeline" -> t.isTimelineWanted();
+            default -> t.isAutoReload();
+        };
+    }
+
+    /** Shows the tree of loggers (threads, components...) beside the current log. */
     @Override
     public void setValuesTree(boolean on) {
         PREFS.putBoolean("valuesTree", on);
-        treeButton.setSelected(on);
-        for (LogTab t : allTabs()) {
+        LogTab t = currentTab();
+        if (t != null) {
             t.setValuesTreeVisible(on);
         }
     }
@@ -2248,7 +2293,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     void setTimeline(boolean on) {
         PREFS.putBoolean("timeline", on);
-        timelineButton.setSelected(on);
+        LogTab t = currentTab();
+        if (t != null) {
+            t.setTimelineVisible(on);
+        }
+    }
+
+    /** The timeline in every open log (from Settings), and for logs opened next. */
+    void setTimelineEverywhere(boolean on) {
+        PREFS.putBoolean("timeline", on);
         for (LogTab t : allTabs()) {
             t.setTimelineVisible(on);
         }
@@ -2305,12 +2358,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         openFile(p, cs);
     }
 
-    /** Loads changes on disk as they happen (otherwise Reload does it). For every log. */
+    /** Loads changes on disk as they happen (otherwise Reload does it), in the current log. */
     public void setAutoReload(boolean on) {
-        autoReload = on;
         PREFS.putBoolean("autoReload", on);
-        autoReloadButton.setSelected(on);
-        for (LogTab t : allTabs()) {
+        LogTab t = currentTab();
+        if (t != null) {
             t.setAutoReload(on);
         }
         refreshStatus();
@@ -2331,24 +2383,21 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    /** Shows lines as columns (time, level, thread, ...) in every log view. */
+    /** Shows the current log's lines as columns (time, level, thread, ...). */
     public void setColumns(boolean on) {
-        columns = on;
         PREFS.putBoolean("columns", on);
-        columnsButton.setSelected(on);
-        for (LogTab t : allTabs()) {
+        LogTab t = currentTab();
+        if (t != null) {
             t.setColumnsVisible(on);
         }
     }
 
-    /** Wraps long lines in every log view. */
+    /** Wraps long lines in the current log. */
     public void setWrap(boolean on) {
-        wrap = on;
         PREFS.putBoolean("wrap", on);
-        wrapButton.setSelected(on);
-        for (LogTab t : allTabs()) {
-            t.mainView().setWrap(on);
-            t.resultsView().setWrap(on);
+        LogTab t = currentTab();
+        if (t != null) {
+            t.setWrap(on);
         }
     }
 
@@ -2379,7 +2428,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     private void updateEmptyState() {
-        ((CardLayout) center.getLayout()).show(center, tabs.getTabCount() == 0 ? "empty" : "tabs");
+        boolean empty = tabs.getTabCount() == 0;
+        if (empty) {
+            startPage.refresh();
+        }
+        ((CardLayout) center.getLayout()).show(center, empty ? "empty" : "tabs");
         refreshStatus();
     }
 

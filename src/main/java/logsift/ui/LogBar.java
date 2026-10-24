@@ -26,9 +26,9 @@ import javax.swing.UIManager;
 import logsift.core.LogDocument;
 
 /**
- * The bar at the top of each log, for what belongs to this log only: Find, the filters that are
- * on (as chips: click one to turn it off, ✕ to remove it), and Follow and Reload. What applies to
- * every log (wrap, columns, …) is in the window's toolbar.
+ * The bar at the top of each log: Find, the filters that are on (as chips: click one to turn it
+ * off, ✕ to remove it), how the log is shown (wrap, columns, tree, timeline), and Follow and
+ * Reload. Each log keeps its own; the last choice is the default for logs opened next.
  */
 final class LogBar extends JPanel {
 
@@ -49,6 +49,11 @@ final class LogBar extends JPanel {
     private final JToggleButton matchingOnly = new JToggleButton("Matching only");
     private final JLabel result = new JLabel();
     private final JToggleButton follow = new JToggleButton("Follow", Icons.follow());
+    private final JToggleButton wrap = new JToggleButton(Icons.wrap());
+    private final JToggleButton columns = new JToggleButton(Icons.columns());
+    private final JToggleButton tree = new JToggleButton(Icons.of("list-tree"));
+    private final JToggleButton timeline = new JToggleButton(Icons.of("chart-column"));
+    private final JCheckBoxMenuItem autoReload = new JCheckBoxMenuItem("Reload Automatically", Icons.autoReload());
     private boolean stale;
     private String shown; // what the chips show now
     /** Reload: an amber pill while the file on disk has changes that aren't loaded. */
@@ -101,6 +106,28 @@ final class LogBar extends JPanel {
         flat(reload);
         reload.setToolTipText("Load what changed in the file on disk (F5)");
         reload.addActionListener(e -> tab.reload());
+        JButton reloadMenu = flat(new JButton("▾"));
+        reloadMenu.setToolTipText("Reload options");
+        reloadMenu.setMargin(new java.awt.Insets(0, 1, 0, 1));
+        autoReload.setToolTipText("<html>Load changes to the file as they happen.<br>"
+                + "Off: changes wait until you click Reload (it lights up). Follow turns it on.</html>");
+        autoReload.addActionListener(e -> {
+            tab.setAutoReload(autoReload.isSelected());
+            remember("autoReload", autoReload.isSelected());
+        });
+        reloadMenu.addActionListener(e -> {
+            JPopupMenu m = new JPopupMenu();
+            m.add(autoReload);
+            m.show(reloadMenu, reloadMenu.getWidth() - m.getPreferredSize().width, reloadMenu.getHeight());
+        });
+
+        view(wrap, "Wrap long lines (" + (MainFrame.isMac() ? "⌥Z" : "Alt+Z") + ")", "wrap", tab::setWrap);
+        view(columns, "Show lines as columns: time, level, thread, logger, message ("
+                + (MainFrame.isMac() ? "⇧⌘K" : "Ctrl+Shift+K") + ")", "columns", tab::setColumnsVisible);
+        view(tree, "Tree of loggers (threads, components…) on the left: hide or show their lines ("
+                + (MainFrame.isMac() ? "⇧⌘B" : "Ctrl+Shift+B") + ")", "valuesTree", tab::setValuesTreeVisible);
+        view(timeline, "Timeline: lines over time, errors in red; click it to jump to a time", "timeline",
+                tab::setTimelineVisible);
 
         add(find);
         add(Box.createHorizontalStrut(4));
@@ -109,9 +136,55 @@ final class LogBar extends JPanel {
         add(matchingOnly);
         add(Box.createHorizontalGlue());
         add(result);
+        add(wrap);
+        add(columns);
+        add(tree);
+        add(timeline);
+        add(separator());
         add(follow);
         add(reload);
+        add(reloadMenu);
         update();
+        syncView();
+    }
+
+    /** A view toggle: for this log, and remembered as the default for logs opened next. */
+    private void view(JToggleButton b, String tip, String pref, java.util.function.Consumer<Boolean> apply) {
+        flat(b);
+        b.setToolTipText(tip);
+        b.addActionListener(e -> {
+            apply.accept(b.isSelected());
+            remember(pref, b.isSelected());
+        });
+    }
+
+    private static void remember(String pref, boolean on) {
+        AppState.prefs().putBoolean(pref, on);
+    }
+
+    private static JComponent separator() {
+        javax.swing.JSeparator s = new javax.swing.JSeparator(javax.swing.SwingConstants.VERTICAL);
+        s.setMaximumSize(new Dimension(9, 18));
+        s.setPreferredSize(new Dimension(9, 18));
+        s.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 4));
+        return s;
+    }
+
+    /** Shows this log's view settings (after a menu, shortcut or new format changed them). */
+    void syncView() {
+        wrap.setSelected(tab.isWrap());
+        columns.setSelected(tab.isColumnsWanted());
+        tree.setSelected(tab.isTreeWanted());
+        tree.setEnabled(tab.hasTree());
+        timeline.setSelected(tab.isTimelineWanted());
+        timeline.setEnabled(tab.hasTimes());
+        autoReload.setSelected(tab.isAutoReload());
+    }
+
+    /** The view toggles' states, for tests: wrap, columns, tree, timeline, auto reload. */
+    List<Boolean> viewForTest() {
+        return List.of(wrap.isSelected(), columns.isSelected(), tree.isSelected(), timeline.isSelected(),
+                autoReload.isSelected());
     }
 
     private static <T extends javax.swing.AbstractButton> T flat(T b) {

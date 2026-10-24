@@ -564,6 +564,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         timeline.setVisible(timeFormat != null && timelineWanted);
         timeline.refresh();
         revalidate();
+        syncLogBar(); // Tree and Timeline need a format with such columns and times
         tryPendingLine();
         updateFilterStatus();
         host.tabStatusChanged(this);
@@ -591,6 +592,38 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         timelineWanted = on;
         timeline.setVisible(on && timeFormat != null);
         revalidate();
+        syncLogBar();
+    }
+
+    boolean isTimelineWanted() {
+        return timelineWanted;
+    }
+
+    /** True when the log has timestamps (so a timeline). */
+    boolean hasTimes() {
+        return timeFormat != null;
+    }
+
+    /** True when the log has columns a tree can be built from (loggers, threads...). */
+    boolean hasTree() {
+        return !ValuesTreePanel.treeColumns(logFormat).isEmpty();
+    }
+
+    /** Wraps long lines in this log (and in its results below). */
+    void setWrap(boolean on) {
+        main.setWrap(on);
+        results.view().setWrap(on);
+        syncLogBar();
+    }
+
+    boolean isWrap() {
+        return main.isWrap();
+    }
+
+    private void syncLogBar() {
+        if (logBar != null) {
+            logBar.syncView();
+        }
     }
 
     /** First line with a timestamp at or after {@code t} (logs are mostly in time order). */
@@ -1244,6 +1277,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     void setAutoReload(boolean on) {
         autoReload = on;
         applyAutoReload();
+        syncLogBar();
+    }
+
+    boolean isAutoReload() {
+        return autoReload;
     }
 
     private void applyAutoReload() {
@@ -2215,6 +2253,15 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     void setColumnsVisible(boolean on) {
         columnsWanted = on;
         applyColumns();
+        syncLogBar();
+    }
+
+    boolean isColumnsWanted() {
+        return columnsWanted;
+    }
+
+    boolean isTreeWanted() {
+        return treeWanted;
     }
 
     // ---------------------------------------------------------------- tree of loggers
@@ -2228,6 +2275,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     void setValuesTreeVisible(boolean on) {
         treeWanted = on;
         updateTreeVisible();
+        syncLogBar();
     }
 
     private void updateTreeVisible() {

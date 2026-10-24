@@ -224,7 +224,7 @@ final class SettingsDialog extends JDialog {
 
         JCheckBox stripes = check("Stripe every other line", PREFS.getBoolean("stripes", true), frame::setStripes);
         add(p, l, f, "", stripes);
-        JCheckBox timeline = check("Show the timeline", PREFS.getBoolean("timeline", true), frame::setTimeline);
+        JCheckBox timeline = check("Show the timeline", PREFS.getBoolean("timeline", true), frame::setTimelineEverywhere);
         add(p, l, f, "", timeline);
         JCheckBox dark = check("Dark mode", Theme.isDark(), frame::setDark);
         add(p, l, f, "", dark);

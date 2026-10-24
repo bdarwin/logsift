@@ -188,23 +188,26 @@ final class FolderSearchTab extends JPanel {
     }
 
     private void browse() {
+        Path p = chooseFolder(this, folder.getText());
+        if (p != null) {
+            folder.setText(p.toString());
+        }
+    }
+
+    /** Asks for a folder (null: cancelled). */
+    static Path chooseFolder(java.awt.Component parent, String start) {
         if (MainFrame.isMac()) {
             System.setProperty("apple.awt.fileDialogForDirectories", "true");
-            FileDialog fd = new FileDialog((Frame) SwingUtilities.getWindowAncestor(this),
-                    "Choose Folder", FileDialog.LOAD);
-            fd.setDirectory(folder.getText());
+            FileDialog fd = new FileDialog(parent instanceof Frame f ? f
+                    : (Frame) SwingUtilities.getWindowAncestor(parent), "Choose Folder", FileDialog.LOAD);
+            fd.setDirectory(start);
             fd.setVisible(true);
             System.setProperty("apple.awt.fileDialogForDirectories", "false");
-            if (fd.getFile() != null) {
-                folder.setText(Path.of(fd.getDirectory(), fd.getFile()).toString());
-            }
-        } else {
-            JFileChooser ch = new JFileChooser(folder.getText());
-            ch.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            if (ch.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                folder.setText(ch.getSelectedFile().toString());
-            }
+            return fd.getFile() == null ? null : Path.of(fd.getDirectory(), fd.getFile());
         }
+        JFileChooser ch = new JFileChooser(start);
+        ch.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        return ch.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION ? ch.getSelectedFile().toPath() : null;
     }
 
     // ---------------------------------------------------------------- searching
