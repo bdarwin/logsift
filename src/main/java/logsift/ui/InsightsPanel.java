@@ -57,6 +57,9 @@ final class InsightsPanel extends JPanel {
         /** Finds all lines matching a regex. */
         default void findAllRegex(String regex) {}
 
+        /** Opens the heap dump written when the JVM ran out of memory at this line. */
+        default void openHeapDump(long line) {}
+
         /** The report changed (for the tab title). */
         void reportChanged(Insights.Report report);
     }
@@ -273,6 +276,10 @@ final class InsightsPanel extends JPanel {
                     () -> explain(f.known())));
             actions.add(action("Find all", "Find all lines that show it",
                     () -> host.findAllRegex(f.known().pattern().pattern())));
+            if (f.known().id().equals("oom-heap")) {
+                actions.add(action("Open Heap Dump", "The heap dump the JVM wrote when it ran out of memory:"
+                        + " what filled it", () -> host.openHeapDump(f.line())));
+            }
         }
         if (f.kind() == Insights.Kind.EXCEPTION) {
             actions.add(action("Show in Exceptions", "Its stack, where it was thrown, and every time it happened",

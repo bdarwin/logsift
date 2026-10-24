@@ -71,12 +71,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** Opens Search in Folder for this text. */
         default void searchInFolder(String text) {}
+
+        /** Opens the heap dump the JVM wrote when it ran out of memory (the log says where, near this line). */
+        default void openHeapDumpOf(LogTab tab, long line) {}
     }
 
     private final LogDocument doc;
     private final Path path;
     private final String encodingLabel;
     private String remoteLabel;          // "user@host:/path" for remote logs
+    private logsift.core.RemoteMirror.Target sshTarget; // the server of a log read over SSH
     private String origin;               // a download's web address
     private volatile String remoteStatus;
     private final Host host;
@@ -1020,6 +1024,49 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return remoteLabel;
     }
 
+    void setSshTarget(logsift.core.RemoteMirror.Target t) {
+        this.sshTarget = t;
+    }
+
+    /** The server of a log read over SSH, or null. */
+    logsift.core.RemoteMirror.Target sshTarget() {
+        return sshTarget;
+    }
+
+    /**
+     * Where the JVM said it wrote a heap dump ("Dumping heap to …"): the mention nearest after
+     * {@code near}, else before it, else anywhere in the log; null when the log doesn't say.
+     */
+    String heapDumpMentioned(long near, java.util.function.BooleanSupplier cancel) {
+        long n = doc.lineCount();
+        long from = Math.max(0, near);
+        for (long l = from; l < Math.min(n, from + 2000); l++) {
+            String p = logsift.core.HeapDumpMentions.pathIn(doc.line(l));
+            if (p != null) {
+                return p;
+            }
+        }
+        for (long l = from - 1; l >= Math.max(0, from - 2000); l--) {
+            String p = logsift.core.HeapDumpMentions.pathIn(doc.line(l));
+            if (p != null) {
+                return p;
+            }
+        }
+        for (long l = n - 1; l >= 0; l--) { // the latest one
+            if ((l & 0xFFFF) == 0 && cancel.getAsBoolean()) {
+                return null;
+            }
+            String text = doc.line(l);
+            if (text != null && text.contains("Dumping heap to ")) {
+                String p = logsift.core.HeapDumpMentions.pathIn(text);
+                if (p != null) {
+                    return p;
+                }
+            }
+        }
+        return null;
+    }
+
     void setRemoteStatus(String status) {
         this.remoteStatus = status;
         host.tabStatusChanged(this);
@@ -1563,6 +1610,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public void openHeapDump(long line) {
+                host.openHeapDumpOf(LogTab.this, line);
+            }
+
+            @Override
             public void showMetric(long line) {
                 setBottomCollapsed(false);
                 bottom.setSelectedComponent(metrics);
@@ -1994,6 +2046,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 f.setToolTipText("Its lines in order, with the time between them, across threads");
                 f.addActionListener(e -> followRequest("", sel.strip()));
                 menu.add(f);
+            }
+            if (cur >= 0 && logsift.core.HeapDumpMentions.isAbout(doc.line(cur))) {
+                JMenuItem hd = new JMenuItem("Open the Heap Dump", Icons.of("memory-stick"));
+                hd.setToolTipText("The heap dump the JVM wrote when it ran out of memory: what filled it");
+                hd.addActionListener(e -> host.openHeapDumpOf(this, cur));
+                menu.add(hd);
             }
             String thread = threadOf(cur);
             if (thread != null) {

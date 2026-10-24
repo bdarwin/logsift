@@ -4590,6 +4590,42 @@ class VisualTest {
             frame.closeCurrentTabForTest();
             return null;
         });
+
+        // a log where the JVM ran out of memory: its heap dump opens from the line
+        Path oomLog = dir.resolve("shop-oom.log");
+        Files.writeString(oomLog, "2026-10-24 10:00:00.000 INFO  [main] shop.App - Started\n"
+                + "java.lang.OutOfMemoryError: Java heap space\n"
+                + "Dumping heap to shop-leak.hprof ...\n"
+                + "Heap dump file created [31000000 bytes in 0.3 secs]\n");
+        onEdt(() -> {
+            frame.openFiles(List.of(oomLog));
+            return null;
+        });
+        LogTab log = waitForTab("shop-oom.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> log.heapDumpMentioned(1, () -> false) != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the log read");
+        onEdt(() -> {
+            frame.openHeapDumpOf(log, 1);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentHeapDumpTab() != null
+                        && frame.currentHeapDumpTab().file().equals(hprof.toAbsolutePath().normalize()));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the heap dump opened from the log");
+        onEdt(() -> {
+            frame.closeCurrentTabForTest();
+            frame.closeCurrentTabForTest();
+            return null;
+        });
     }
 
     /** Waits until the current tab is a log titled so. */

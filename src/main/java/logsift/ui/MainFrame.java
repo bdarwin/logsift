@@ -692,6 +692,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         LogTab tab = new LogTab(mirror.copy(), mirror.copy(),
                                 java.nio.charset.StandardCharsets.UTF_8, null, this);
                         tab.setRemote(target.label());
+                        tab.setSshTarget(target);
                         tab.addCloseHook(() -> {
                             mirror.close();
                             try {
@@ -1027,15 +1028,83 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     private void openHeapDumpDialog() {
+        openHeapDumpDialog(PREFS.get("lastDir", null));
+    }
+
+    private void openHeapDumpDialog(String folder) {
         FileDialog fd = new FileDialog(this, "Open Heap Dump (.hprof)", FileDialog.LOAD);
-        String last = PREFS.get("lastDir", null);
-        if (last != null) {
-            fd.setDirectory(last);
+        if (folder != null) {
+            fd.setDirectory(folder);
         }
         fd.setVisible(true);
         if (fd.getFile() != null) {
             openHeapDump(Path.of(fd.getDirectory(), fd.getFile()));
         }
+    }
+
+    /** Opens the heap dump a log says the JVM wrote ("Dumping heap to …"), copied over SSH for a remote log. */
+    @Override
+    public void openHeapDumpOf(LogTab tab, long line) {
+        logsift.core.RemoteMirror.Target ssh = tab.sshTarget();
+        ProgressDialog.run(this, "Looking for the heap dump…", (progress, cancelled) -> {
+            String said = tab.heapDumpMentioned(line, cancelled);
+            if (said == null) {
+                return new String[] {null, null};
+            }
+            if (ssh == null) {
+                Path dir = tab.path().toAbsolutePath().getParent();
+                for (String c : logsift.core.HeapDumpMentions.candidates(said,
+                        dir == null ? null : dir.toString().replace('\\', '/'))) {
+                    try {
+                        if (Files.isRegularFile(Path.of(c))) {
+                            return new String[] {said, c};
+                        }
+                    } catch (java.nio.file.InvalidPathException e) {
+                        // a path from another system
+                    }
+                }
+                return new String[] {said, null};
+            }
+            String dir = ssh.path().contains("/") ? ssh.path().substring(0, ssh.path().lastIndexOf('/')) : ".";
+            Path knownHosts = Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+            try (logsift.jvm.SshJvms con = logsift.jvm.SshJvms.connect(ssh,
+                    Boolean.getBoolean("logsift.noKnownHosts") ? null : knownHosts, this::trustHost)) {
+                for (String c : logsift.core.HeapDumpMentions.candidates(said, dir)) {
+                    Path local = Files.createTempDirectory("logsift-heap-")
+                            .resolve(logsift.core.HeapDumpMentions.fileName(c));
+                    try {
+                        con.download(c, local, progress);
+                        local.toFile().deleteOnExit();
+                        local.getParent().toFile().deleteOnExit();
+                        return new String[] {said, local.toString()};
+                    } catch (IOException e) {
+                        Files.deleteIfExists(local);
+                        Files.deleteIfExists(local.getParent()); // not there: the next place
+                    }
+                }
+            }
+            return new String[] {said, null};
+        }, found -> {
+            if (found[1] != null) {
+                openHeapDump(Path.of(found[1]));
+                return;
+            }
+            Path logDir = tab.path().toAbsolutePath().getParent();
+            String msg = found[0] == null
+                    ? "<html><b>The log doesn't say where a heap dump was written.</b><br><br>"
+                            + "A JVM started with -XX:+HeapDumpOnOutOfMemoryError writes java_pid&lt;pid&gt;.hprof in its"
+                            + " working folder,<br>or where -XX:HeapDumpPath says, and prints \"Dumping heap to …\""
+                            + " on its console.</html>"
+                    : "<html><b>The log says the heap dump went to</b><br>" + found[0].replace("&", "&amp;")
+                            .replace("<", "&lt;") + "<br><br>but it isn't there" + (ssh == null ? " on this computer"
+                            : " on " + ssh.host()) + " (or next to the log). It may have been moved or deleted.</html>";
+            Object[] options = ssh == null ? new Object[] {"Choose the File…", "Close"} : new Object[] {"Close"};
+            int r = JOptionPane.showOptionDialog(this, msg, "Heap Dump", JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
+            if (ssh == null && r == 0) {
+                openHeapDumpDialog(logDir == null ? null : logDir.toString());
+            }
+        });
     }
 
     HeapDumpTab currentHeapDumpTab() {
