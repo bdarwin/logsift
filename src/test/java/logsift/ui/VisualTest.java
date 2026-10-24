@@ -31,6 +31,7 @@ import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import javax.swing.JComponent;
 import javax.swing.JTabbedPane;
+import javax.swing.JTable;
 import javax.swing.SwingUtilities;
 import logsift.core.FilterResult;
 import logsift.core.LogDocument;
@@ -4440,8 +4441,9 @@ class VisualTest {
         try {
             settle();
             assertTrue(onEdt(() -> empty.startPageForTest().isShowing()), "the start page is shown");
-            assertEquals(List.of("Open Log…", "Open Folder…", "Open Remote…", "Attach to a JVM…",
-                    "Open Thread Dump…", "Open Profile…"), onEdt(() -> empty.startPageForTest().actionsForTest()));
+            assertEquals(List.of("Open Log…", "Open Folder…", "Open Remote…", "Open URL…", "Attach to a JVM…",
+                    "Open Heap Dump…", "Open Thread Dump…", "Open Profile…"),
+                    onEdt(() -> empty.startPageForTest().actionsForTest()));
             assertTrue(onEdt(() -> empty.startPageForTest().actionForTest("Open Log…").isShowing()));
             shotOf(empty.getRootPane(), "86-start-page");
 
@@ -4489,6 +4491,75 @@ class VisualTest {
                 return null;
             });
         }
+    }
+
+    @Test
+    @Order(47)
+    void heapDumpExplained() throws Exception {
+        // a program with a known leak dumps its heap; opening the .hprof explains it
+        Path hprof = dir.resolve("shop-leak.hprof");
+        logsift.heap.LeakApp.run(hprof, dir.resolve("shop-leak-histogram.txt"));
+        onEdt(() -> {
+            frame.openFiles(List.of(hprof));
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentHeapDumpTab() != null && frame.currentHeapDumpTab().isLoadedForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 120_000, "the heap dump read");
+        HeapDumpTab tab = onEdt(frame::currentHeapDumpTab);
+        String found = onEdt(tab::findingsTextForTest);
+        assertTrue(found.contains("One HashMap (20,000 entries) in static LeakApp.CACHE holds"), found);
+        assertTrue(found.contains("Mostly 20,000 × LeakApp$Session"), found);
+        assertTrue(found.contains("isn't strongly reachable"), found);
+        waitFor(() -> {
+            try {
+                return onEdt(tab::whyTextForTest).contains("static CACHE");
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "why the map is alive");
+        String why = onEdt(tab::whyTextForTest);
+        assertTrue(why.contains("GC root: a loaded class") && why.contains("class logsift.heap.LeakApp"), why);
+        settle();
+        shot("88-heap-dump");
+
+        // what the map holds, in the tree
+        onEdt(() -> {
+            tab.showInTree(tab.dumpForTest().objectsOf("java.util.HashMap", 1)[0]);
+            return null;
+        });
+        settle();
+        shot("89-heap-biggest-objects");
+
+        // the classes; selecting one shows why its biggest object is alive
+        onEdt(() -> {
+            tab.showTabForTest(2);
+            JTable t = tab.classTableForTest();
+            for (int r = 0; r < t.getRowCount(); r++) {
+                if ("logsift.heap.LeakApp$Session".equals(t.getValueAt(r, 0))) {
+                    t.setRowSelectionInterval(r, r);
+                }
+            }
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(tab::whyTextForTest).trim().startsWith("logsift.heap.LeakApp$Session");
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "why a session is alive");
+        assertTrue(onEdt(tab::whyTextForTest).contains("value"), onEdt(tab::whyTextForTest));
+        settle();
+        shot("90-heap-classes");
+        onEdt(() -> {
+            frame.closeCurrentTabForTest();
+            return null;
+        });
     }
 
     /** Waits until the current tab is a log titled so. */

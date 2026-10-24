@@ -98,6 +98,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
 
         @Override
+        public void openHeapDump() {
+            openHeapDumpDialog();
+        }
+
+        @Override
+        public void openUrl() {
+            openUrlDialog();
+        }
+
+        @Override
         public void openRecent(Path file) {
             openFile(file);
         }
@@ -175,6 +185,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         setJMenuBar(buildMenus());
         setTransferHandler(new FileDropHandler());
         updateEmptyState();
+        HeapDumpTab.cleanUpIndexes(); // left by a crash, or kept by Windows while mapped
 
         new Timer(250, e -> refreshStatus()).start();
         Timer updates = new Timer(4000, e -> autoCheckForUpdates());
@@ -395,6 +406,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         if (logsift.core.Archives.isZip(abs)) {
             openArchive(abs, then);
+            return;
+        }
+        if (abs.getFileName() != null && abs.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".hprof")) {
+            openHeapDump(abs);
             return;
         }
         logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
@@ -973,6 +988,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** Opens a Heap tab for a running JVM. */
     HeapTab openHeap(String source, logsift.jvm.Profiler.Target target) {
         HeapTab tab = new HeapTab(source, target);
+        tab.onDumpSaved(this::openHeapDump); // a dump just saved is opened to look at
         tabs.addTab(tab.title(), Icons.of("memory-stick"), tab);
         tabs.setSelectedIndex(tabs.getTabCount() - 1);
         tab.onChanged(() -> {
@@ -982,6 +998,48 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
         updateEmptyState();
         return tab;
+    }
+
+    /** Opens a heap dump (.hprof) in a tab of its own; it is read in the background. */
+    HeapDumpTab openHeapDump(Path file) {
+        Path abs = file.toAbsolutePath().normalize();
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof HeapDumpTab h && h.file().equals(abs)) {
+                tabs.setSelectedIndex(i);
+                return h;
+            }
+        }
+        HeapDumpTab tab = new HeapDumpTab(abs);
+        tabs.addTab(tab.title(), Icons.of("memory-stick"), tab);
+        tabs.setToolTipTextAt(tabs.getTabCount() - 1, abs.toString());
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tab.onChanged(() -> {
+            if (tabs.getSelectedComponent() == tab) {
+                refreshStatus();
+            }
+        });
+        if (abs.getParent() != null) {
+            PREFS.put("lastDir", abs.getParent().toString());
+        }
+        AppState.addRecent(abs);
+        updateEmptyState();
+        return tab;
+    }
+
+    private void openHeapDumpDialog() {
+        FileDialog fd = new FileDialog(this, "Open Heap Dump (.hprof)", FileDialog.LOAD);
+        String last = PREFS.get("lastDir", null);
+        if (last != null) {
+            fd.setDirectory(last);
+        }
+        fd.setVisible(true);
+        if (fd.getFile() != null) {
+            openHeapDump(Path.of(fd.getDirectory(), fd.getFile()));
+        }
+    }
+
+    HeapDumpTab currentHeapDumpTab() {
+        return tabs.getSelectedComponent() instanceof HeapDumpTab t ? t : null;
     }
 
     HeapTab currentHeapTab() {
@@ -1796,6 +1854,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
         }));
         jvm.add(item("Open Profile…", "flame", null, e -> openProfileDialog()));
+        jvm.add(item("Open Heap Dump…", "memory-stick", null, e -> openHeapDumpDialog()));
         bar.add(jvm);
 
         // ---- Help
@@ -1966,6 +2025,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             pt.close();
         } else if (c instanceof HeapTab ht) {
             ht.close();
+        } else if (c instanceof HeapDumpTab hd) {
+            hd.close();
         }
         updateEmptyState();
     }
@@ -2452,6 +2513,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         formatButton.setToolTipText(t != null && t.formatChoice() != null
                 ? "Lines are read as \u201c" + fmt + "\u201d (chosen for this file). Click to change."
                 : "Lines are read as \u201c" + fmt + "\u201d (detected). Click if that is wrong.");
+        if (tabs.getSelectedComponent() instanceof HeapDumpTab hd) {
+            setTitle(hd.title() + " — Logsift");
+            status.setText(hd.statusText());
+            statusRight.setText(memory());
+            progress.setVisible(false);
+            return;
+        }
         if (tabs.getSelectedComponent() instanceof HeapTab ht) {
             setTitle(ht.title() + " — Logsift");
             status.setText(ht.statusText());

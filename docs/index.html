@@ -76,6 +76,7 @@
     <li><b>Java and Python threads</b>Open thread dumps (also py-spy and faulthandler) or attach to a running JVM, also over SSH or a JMX port: deadlocks, lock queues and stuck threads, pointed out.</li>
     <li><b>A log knows its JVM</b>Logsift names the JVM writing a log, with its threads, profile and heap a click away. A line's thread opens its stack; a thread shows its lines.</li>
     <li><b>Profiling and memory</b>Flame graphs of CPU, allocations, memory leaks, locks, native memory and slow method calls; compare runs; what fills the heap and what grows.</li>
+    <li><b>Heap dumps, explained</b>Open a .hprof and read what fills the memory in plain sentences, and the chain of references that keeps any object alive. Multi-GB dumps open with an index on disk.</li>
   </ul>
 
   <h2>Screenshots</h2>
@@ -93,6 +94,7 @@
     <figure><img src="screenshots/metrics.png" alt="Order times charted over time with a spike" loading="lazy" width="1400" height="828"><figcaption>Metrics: numbers in messages over time</figcaption></figure>
     <figure><img src="screenshots/threads.png" alt="Thread dumps with deadlocks and a lock queue pointed out" loading="lazy" width="1400" height="828"><figcaption>Thread dumps, explained</figcaption></figure>
     <figure><img src="screenshots/flame-graph.png" alt="A flame graph of a JVM's CPU use" loading="lazy" width="1400" height="828"><figcaption>Profiling with a flame graph</figcaption></figure>
+    <figure><img src="screenshots/heap-dump.png" alt="A heap dump explained, with why an object is alive" loading="lazy" width="1400" height="828"><figcaption>Heap dumps explained: what fills the memory, and why it is alive</figcaption></figure>
     <figure><img src="screenshots/log-jvm.png" alt="A log with a bar naming the JVM that writes it" loading="lazy" width="1400" height="828"><figcaption>A log knows its JVM</figcaption></figure>
     <figure><img src="screenshots/dark-mode.png" alt="Dark mode" loading="lazy" width="1400" height="828"><figcaption>Dark mode</figcaption></figure>
   </div>

@@ -116,8 +116,8 @@ class DemoRecording {
         say("With nothing open, the window shows the ways to start, and your recent files");
         StartPage start = onEdt(frame::startPageForTest);
         hold(1200);
-        for (String a : new String[] {"Open Log…", "Open Folder…", "Open Remote…", "Attach to a JVM…",
-                "Open Thread Dump…", "Open Profile…"}) {
+        for (String a : new String[] {"Open Log…", "Open Folder…", "Open Remote…", "Open URL…",
+                "Attach to a JVM…", "Open Heap Dump…", "Open Thread Dump…", "Open Profile…"}) {
             moveTo(onEdt(() -> start.actionForTest(a)), 450);
             hold(350);
         }

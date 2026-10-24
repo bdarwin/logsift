@@ -51,6 +51,7 @@ final class HeapTab extends JPanel {
     private final Profiler.Target target;
     private final String source;
     private Runnable changed = () -> { };
+    private java.util.function.Consumer<Path> dumpSaved = p -> { };
 
     private final JButton take = new JButton("Take Histogram", Icons.of("memory-stick"));
     private final JCheckBox liveOnly = new JCheckBox("Only live objects (a full GC first)",
@@ -281,6 +282,11 @@ final class HeapTab extends JPanel {
         changed.run();
     }
 
+    /** Called with a heap dump once it is saved (on this computer). */
+    void onDumpSaved(java.util.function.Consumer<Path> c) {
+        dumpSaved = c;
+    }
+
     private void heapDumpDialog() {
         JFileChooser ch = new JFileChooser();
         ch.setSelectedFile(new java.io.File("heap-" + source.replaceAll("[^A-Za-z0-9._-]+", "-") + "-"
@@ -310,7 +316,10 @@ final class HeapTab extends JPanel {
                 status.setText("Copying the heap dump… " + Math.round(f * 100) + "%");
             }), cancel::get);
             long size = java.nio.file.Files.size(file);
-            SwingUtilities.invokeLater(() -> setWorking(false, "Saved " + file.getFileName() + " (" + bytes(size) + ")"));
+            SwingUtilities.invokeLater(() -> {
+                setWorking(false, "Saved " + file.getFileName() + " (" + bytes(size) + ")");
+                dumpSaved.accept(file); // on this computer (a remote dump is copied here)
+            });
         }, error -> setWorking(false, "Could not save a heap dump: " + error));
     }
 

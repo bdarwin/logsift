@@ -40,6 +40,10 @@ final class StartPage extends JPanel {
 
         void openProfile();
 
+        void openHeapDump();
+
+        void openUrl();
+
         void openRecent(Path file);
 
         void reopenSession();
@@ -71,17 +75,20 @@ final class StartPage extends JPanel {
 
         String m = MainFrame.isMac() ? "⌘" : "Ctrl+";
         String sm = MainFrame.isMac() ? "⇧⌘" : "Ctrl+Shift+";
-        JPanel grid = new JPanel(new GridLayout(2, 3, 12, 12));
+        JPanel grid = new JPanel(new GridLayout(2, 4, 12, 12));
         grid.setOpaque(false);
         grid.add(action("folder-open", "Open Log…", m + "O", "Files, zips, .gz", host::openLogs));
         grid.add(action("folder-search", "Open Folder…", sm + "F", "Search every log in it, zips too",
                 host::openFolder));
         grid.add(action("server", "Open Remote…", sm + "O", "A log on another machine (SSH)", host::openRemote));
+        grid.add(action("globe", "Open URL…", sm + "U", "A log on a web server", host::openUrl));
         grid.add(action("cpu", "Attach to a JVM…", sm + "J", "Threads, profiles, heap, its logs",
                 host::attachJvm));
+        grid.add(action("memory-stick", "Open Heap Dump…", null, "What fills the memory, and why",
+                host::openHeapDump));
         grid.add(action("activity", "Open Thread Dump…", null, "jstack, jcmd or kill -3 output",
                 host::openThreadDump));
-        grid.add(action("flame", "Open Profile…", null, "A JFR recording or a saved profile", host::openProfile));
+        grid.add(action("flame", "Open Profile…", null, "A JFR recording, or saved stacks", host::openProfile));
         col.add(left(grid));
         col.add(Box.createVerticalStrut(26));
 
@@ -107,7 +114,7 @@ final class StartPage extends JPanel {
         b.setIconTextGap(14);
         b.setFocusable(false);
         b.putClientProperty("FlatLaf.style", "arc: 14; margin: 14,16,14,18");
-        b.setPreferredSize(new Dimension(300, 72));
+        b.setPreferredSize(new Dimension(268, 72));
         b.addActionListener(e -> r.run());
         actions.add(b);
         return b;

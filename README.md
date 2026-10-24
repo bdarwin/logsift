@@ -28,6 +28,7 @@
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
 - **Java threads (and Python's).** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log; `py-spy dump` and `faulthandler` for Python), or attach to a running JVM on your computer, on a server over SSH, or through its JMX port. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
 - **A log knows its JVM.** Open a log and Logsift names the JVM writing it, with its threads, profile and heap a click away. Right-click a line to see its thread's stack; from a thread, show only its lines.
+- **Heap dumps, explained.** Open a `.hprof` file and Logsift says what fills the memory in plain sentences ("one HashMap in static SessionCache.CACHE holds 1.2 GB: mostly 20,000 sessions"), and for any object, the chain of references that keeps it alive. Multi-GB dumps open without needing that much memory.
 - **Profiling and memory.** Flame graphs of a JVM's CPU, wall-clock time, allocations, live objects (memory leaks), locks, native memory and native leaks, calls of a method and slow calls, or hardware events, with async-profiler or the JVM's own Flight Recorder. Compare runs, see who calls a method, and find which classes fill the heap and keep growing.
 - **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
 
@@ -85,8 +86,8 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 | ![The files of a zip, also of a zip inside it, to open or search](docs/screenshots/zip.png) **Zips** open as a tab: open files as logs, merge or search them | ![One request followed through a folder of logs and a zip, in order by time](docs/screenshots/request.png) **Follow a request** through a folder of logs |
 | ![Exceptions grouped by root cause with the stack and links to the source](docs/screenshots/exceptions.png) **Exceptions** by root cause | ![Order times charted over time, with a spike](docs/screenshots/metrics.png) **Metrics** from the messages |
 | ![Insights with a known problem and what to try](docs/screenshots/insights.png) **Insights** with known problems | ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained |
-| ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph | ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** |
-| ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |   |
+| ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph | ![A heap dump explained: one HashMap in a static field holds 85% of the heap, with the chain of references that keeps it alive](docs/screenshots/heap-dump.png) **Heap dumps** explained, and why an object is alive |
+| ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** | ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |
 
 ## Run from source
 
@@ -325,7 +326,20 @@ Two engines:
 
 - **Take Histogram** now, and again a little later. The **Size change** and **Objects change** columns show what grew; the classes that keep growing are where memory leaks.
 - **Only live objects** runs a full garbage collection first, so only objects still in use are counted. That pauses the JVM, longer for big heaps. Turn it off to count without the pause, garbage included. Compare histograms of the same kind.
-- **Save Heap Dump…** writes every object to a `.hprof` file for a heap analyzer. It pauses the JVM while it is written, and the file is about as big as the heap. From a server, it is copied over SSH.
+- **Save Heap Dump…** writes every object to a `.hprof` file and opens it (see below). It pauses the JVM while it is written, and the file is about as big as the heap. From a server, it is copied over SSH.
+
+## Heap dumps
+
+Open a `.hprof` file (**File → Open**, **JVM → Open Heap Dump…**, **Open Heap Dump…** on the start page, or drop it on the window). Logsift reads every object, works out which object holds which, and starts with what matters:
+
+- **What fills the heap:** each object that holds 10% of the heap or more, in a sentence: what it is, where it is kept, how much it holds, and what is in it. *"One HashMap (20,000 entries) in static LeakApp.CACHE holds 13.6 MB (85% of the heap). Mostly 20,000 × LeakApp$Session, 616 bytes each with what they hold."* Below: what the memory is made of, by class.
+- **Why is it alive?** For any object: the shortest chain of references from a GC root to it, with field names (`class LeakApp` → `static CACHE` → `HashMap` → `table` → `[1440]` → `value` → `Session`). A GC root is a loaded class's static fields, a local variable in a running thread (named, with its method), a running thread, native code, or a lock in use. To free the object, one link in that chain has to go.
+- **Biggest objects:** each object with what it holds (what would be freed with it), biggest first; open one to see what is inside.
+- **Classes:** every class, with how many objects, their size, and what they hold. Select one to see why its biggest object is alive.
+
+Weak, soft and phantom references don't keep anything alive here (as in the JVM when memory runs low): what only they reach is shown apart, since it isn't a leak. Sizes are the JVM's own (12-byte headers, 4-byte references with compressed pointers, objects aligned to 8 bytes); the tests check them against the JVM's class histogram.
+
+**Big dumps:** when a dump is too big to index in memory, the index goes to files on disk (in Logsift's folder, removed when the tab closes). A 1.6 GB dump with 41 million objects opens in about 20 seconds with 2 GB of memory; the index on disk is a few times the size of the dump.
 
 ## Settings
 
@@ -373,7 +387,7 @@ A narrow bar beside the scrollbar shows the whole file at a glance. It has red m
 - **Filter ▾** turns the search into a filter: show only the matching lines, hide them, or color them.
 - The folder button searches for it in a whole folder, zips included (Ctrl+Shift+F).
 
-Each log has its own bar: **Find**, **Filters** and the filters that are on on the left; **Wrap**, **Columns**, **Tree**, **Timeline**, **Follow** and **Reload** on the right. Each log keeps its own view settings, and your last choice is the default for the next log you open. There is no toolbar on top: opening files, remote logs, Search in Folder and Settings are in the menus (with their shortcuts), so a profile, a heap dump or a folder search gets the whole window. With nothing open, the start page has big buttons for the ways to begin (a log, a folder, a remote log, a JVM, a thread dump, a profile) and your recent files; with logs open, **+** after the tabs shows it again.
+Each log has its own bar: **Find**, **Filters** and the filters that are on on the left; **Wrap**, **Columns**, **Tree**, **Timeline**, **Follow** and **Reload** on the right. Each log keeps its own view settings, and your last choice is the default for the next log you open. There is no toolbar on top: opening files, remote logs, Search in Folder and Settings are in the menus (with their shortcuts), so a profile, a heap dump or a folder search gets the whole window. With nothing open, the start page has big buttons for the ways to begin (a log, a folder, a remote log, a web address, a JVM, a heap dump, a thread dump, a profile) and your recent files; with logs open, **+** after the tabs shows it again.
 
 ## Filters
 
@@ -489,6 +503,10 @@ logsift.jvm     (thread dumps and running JVMs)
   JvmLink         a log's JVM, remembered by program
   Profiler        async-profiler (every mode) or Flight Recorder → Profiles (trees of stacks)
   HeapHistogram   GC.class_histogram, and what grew between two
+logsift.heap
+  HeapDump        reads a .hprof: object graph, dominators (Semi-NCA), retained sizes, paths to GC roots
+  HeapFindings    what fills the heap, in sentences
+  Store           big arrays in memory, or in memory-mapped files on disk for big dumps
 logsift.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
   LogTab          log view + Filters and Find results panels for one file
@@ -496,7 +514,7 @@ logsift.ui
   OverviewBar     highlight bar beside the scrollbar (errors, warnings, filters, hits)
   FolderSearchTab folder search form and results grouped by file
   TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
-  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, JvmDialog, JvmBar
+  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, HeapDumpTab, JvmDialog, JvmBar
   MainFrame       window, menus, status bar, drag & drop
 logsift.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
@@ -504,7 +522,7 @@ logsift.tools
 
 Design choices:
 
-- **No memory mapping.** On Windows, a memory-mapped file can't be renamed or deleted, which breaks log rotation for the app that writes it. Mappings are also limited to 2 GB each. Positional reads through the OS cache are nearly as fast.
+- **No memory mapping of logs.** (Only a heap dump's index, in Logsift's own files, is memory-mapped.) On Windows, a memory-mapped file can't be renamed or deleted, which breaks log rotation for the app that writes it. Mappings are also limited to 2 GB each. Positional reads through the OS cache are nearly as fast.
 - **Sparse index.** It stores the position of every 64th line per 4 MB chunk. Chunks are scanned in parallel and published in order, so the top of the file shows up immediately. When following a growing file, a short last chunk is re-scanned together with the new data.
 - **Custom view instead of JList/JTable.** Swing's own lists measure in pixels and overflow at around 100M rows. LogView's scrollbar counts rows, which supports up to about 2.1 billion lines.
 - **Search never decodes lines unless it must.** Plain text is matched on raw UTF-8 bytes. A regex runs only on lines that contain its required text, when there is one.
@@ -519,6 +537,7 @@ Design choices:
 - **Logs from zips and the web** are copies made when opened; they don't follow the original.
 - **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
 - **Time zones** are not converted: times are shown as written in each log.
+- **Heap dumps** in HotSpot's `.hprof` format are read (not compressed `.hprof.gz`, and not OpenJ9 `.phd`). Sizes assume compressed pointers unless the dump is over 30 GB. Comparing two dumps is not there yet.
 - **Thread dumps** of HotSpot JVMs (OpenJDK, Oracle, Temurin, Zulu, Corretto and the like) are read. OpenJ9 `javacore` files are not.
 - **async-profiler** runs on Linux (x64, ARM64) and macOS JVMs; for JVMs on Windows, use Flight Recorder.
 - **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows). The downloads are not code-signed yet.
