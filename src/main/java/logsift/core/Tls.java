@@ -62,7 +62,9 @@ final class Tls {
                 try {
                     KeyStore ks = KeyStore.getInstance(type);
                     ks.load(null, null);
-                    all.add(managerOf(ks));
+                    if (ks.size() > 0) { // an empty store can't check anything (and its manager throws)
+                        all.add(managerOf(ks));
+                    }
                 } catch (Exception e) {
                     // not on this system
                 }
@@ -86,7 +88,7 @@ final class Tls {
         return List.of(); // Linux: Java already uses the system's CA bundle
     }
 
-    private static X509TrustManager managerOf(KeyStore ks) throws java.security.GeneralSecurityException {
+    static X509TrustManager managerOf(KeyStore ks) throws java.security.GeneralSecurityException {
         TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
         tmf.init(ks);
         for (TrustManager tm : tmf.getTrustManagers()) {
@@ -122,7 +124,7 @@ final class Tls {
     }
 
     /** Trusts what any of its managers trusts. */
-    private static final class AnyOf implements X509TrustManager {
+    static final class AnyOf implements X509TrustManager {
         private final List<X509TrustManager> all;
 
         AnyOf(List<X509TrustManager> all) {
@@ -144,6 +146,10 @@ final class Tls {
                 } catch (CertificateException e) {
                     if (first == null) {
                         first = e;
+                    }
+                } catch (RuntimeException e) { // a store that can't check: not trusted by it
+                    if (first == null) {
+                        first = new CertificateException(e.getMessage(), e);
                     }
                 }
             }

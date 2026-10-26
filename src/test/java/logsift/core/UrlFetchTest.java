@@ -150,6 +150,13 @@ class UrlFetchTest {
             assertEquals("127.0.0.1", e.host());
             Path f = UrlFetch.download(u, null, dir, null, () -> false, true);
             assertEquals("over https\n", java.nio.file.Files.readString(f));
+            // a trust store with nothing in it (as Windows' personal one often is) says "not trusted"
+            java.security.KeyStore empty = java.security.KeyStore.getInstance("PKCS12");
+            empty.load(null, null);
+            java.security.cert.X509Certificate cert = (java.security.cert.X509Certificate) store.getCertificate("s");
+            Tls.AnyOf any = new Tls.AnyOf(List.of(Tls.managerOf(empty)));
+            assertThrows(java.security.cert.CertificateException.class,
+                    () -> any.checkServerTrusted(new java.security.cert.X509Certificate[] {cert}, "RSA"));
         } finally {
             https.stop(0);
         }
