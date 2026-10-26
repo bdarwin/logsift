@@ -15,7 +15,67 @@ public final class HeapFindings {
     }
 
     /** One finding: a sentence, the object it is about (or -1), and the bytes involved. */
-    public record Finding(Kind kind, String title, String detail, int node, long bytes) {}
+    public static final class Finding {
+        private final Kind kind;
+        private final String title;
+        private final String detail;
+        private final int node;
+        private final long bytes;
+
+        public Finding(Kind kind, String title, String detail, int node, long bytes) {
+            this.kind = kind;
+            this.title = title;
+            this.detail = detail;
+            this.node = node;
+            this.bytes = bytes;
+        }
+
+        public Kind kind() {
+            return kind;
+        }
+
+        public String title() {
+            return title;
+        }
+
+        public String detail() {
+            return detail;
+        }
+
+        public int node() {
+            return node;
+        }
+
+        public long bytes() {
+            return bytes;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Finding)) {
+                return false;
+            }
+            Finding x = (Finding) o;
+            return java.util.Objects.equals(kind, x.kind)
+                    && java.util.Objects.equals(title, x.title)
+                    && java.util.Objects.equals(detail, x.detail)
+                    && node == x.node
+                    && bytes == x.bytes;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(kind, title, detail, node, bytes);
+        }
+
+        @Override
+        public String toString() {
+            return "Finding[" + "kind=" + kind + ", " + "title=" + title + ", " + "detail=" + detail + ", " + "node=" + node + ", " + "bytes=" + bytes + "]";
+        }
+    }
 
     public enum Kind { HOLDER, NOT_STRONG, WASTE, SUMMARY }
 

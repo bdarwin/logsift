@@ -89,6 +89,27 @@ tasks.withType<JavaCompile>().configureEach {
     options.compilerArgs.addAll(listOf("-Xlint:all,-serial", "-Werror"))
 }
 
+// The heap dump reader is compiled for Java 8 into a jar of its own: the app uses it, and it is
+// copied to a server to index a dump there with whatever Java the server has.
+val heap: SourceSet by sourceSets.creating {
+    java.srcDir("src/heap/java")
+}
+tasks.named<JavaCompile>("compileHeapJava") {
+    options.release = 8
+    options.compilerArgs.add("-Xlint:-options") // "source value 8 is obsolete": on purpose
+}
+val heapJar by tasks.registering(Jar::class) {
+    description = "The heap dump reader and its server, for Java 8 and later."
+    archiveBaseName = "logsift-heap"
+    from(heap.output)
+    manifest {
+        attributes("Implementation-Title" to "Logsift heap", "Implementation-Version" to project.version)
+    }
+}
+dependencies {
+    implementation(files(heapJar))
+}
+
 application {
     mainClass = "logsift.ui.LogsiftApp"
     applicationDefaultJvmArgs = listOf("-Xmx2g", "-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED")

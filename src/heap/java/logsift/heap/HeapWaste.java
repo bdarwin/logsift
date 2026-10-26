@@ -16,14 +16,193 @@ import java.util.function.BooleanSupplier;
  */
 public final class HeapWaste {
     /** One text, kept in many String objects. */
-    public record Duplicate(String text, long copies, long wasted, int sample, String where) {}
+    public static final class Duplicate {
+        private final String text;
+        private final long copies;
+        private final long wasted;
+        private final int sample;
+        private final String where;
+
+        public Duplicate(String text, long copies, long wasted, int sample, String where) {
+            this.text = text;
+            this.copies = copies;
+            this.wasted = wasted;
+            this.sample = sample;
+            this.where = where;
+        }
+
+        public String text() {
+            return text;
+        }
+
+        public long copies() {
+            return copies;
+        }
+
+        public long wasted() {
+            return wasted;
+        }
+
+        public int sample() {
+            return sample;
+        }
+
+        public String where() {
+            return where;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Duplicate)) {
+                return false;
+            }
+            Duplicate x = (Duplicate) o;
+            return java.util.Objects.equals(text, x.text)
+                    && copies == x.copies
+                    && wasted == x.wasted
+                    && sample == x.sample
+                    && java.util.Objects.equals(where, x.where);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(text, copies, wasted, sample, where);
+        }
+
+        @Override
+        public String toString() {
+            return "Duplicate[" + "text=" + text + ", " + "copies=" + copies + ", " + "wasted=" + wasted + ", " + "sample=" + sample + ", " + "where=" + where + "]";
+        }
+    }
 
     /** Collections of one kind in one place: "empty ArrayList" in "Session.tags". */
-    public record Collections(String what, String where, long count, long wasted, int sample) {}
+    public static final class Collections {
+        private final String what;
+        private final String where;
+        private final long count;
+        private final long wasted;
+        private final int sample;
+
+        public Collections(String what, String where, long count, long wasted, int sample) {
+            this.what = what;
+            this.where = where;
+            this.count = count;
+            this.wasted = wasted;
+            this.sample = sample;
+        }
+
+        public String what() {
+            return what;
+        }
+
+        public String where() {
+            return where;
+        }
+
+        public long count() {
+            return count;
+        }
+
+        public long wasted() {
+            return wasted;
+        }
+
+        public int sample() {
+            return sample;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Collections)) {
+                return false;
+            }
+            Collections x = (Collections) o;
+            return java.util.Objects.equals(what, x.what)
+                    && java.util.Objects.equals(where, x.where)
+                    && count == x.count
+                    && wasted == x.wasted
+                    && sample == x.sample;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(what, where, count, wasted, sample);
+        }
+
+        @Override
+        public String toString() {
+            return "Collections[" + "what=" + what + ", " + "where=" + where + ", " + "count=" + count + ", " + "wasted=" + wasted + ", " + "sample=" + sample + "]";
+        }
+    }
 
     /** What can be saved, and where. */
-    public record Report(long stringBytes, long duplicatedTexts, List<Duplicate> strings, long collectionBytes,
-                         List<Collections> collections) {
+    public static final class Report {
+        private final long stringBytes;
+        private final long duplicatedTexts;
+        private final List<Duplicate> strings;
+        private final long collectionBytes;
+        private final List<Collections> collections;
+
+        public Report(long stringBytes, long duplicatedTexts, List<Duplicate> strings, long collectionBytes, List<Collections> collections) {
+            this.stringBytes = stringBytes;
+            this.duplicatedTexts = duplicatedTexts;
+            this.strings = strings;
+            this.collectionBytes = collectionBytes;
+            this.collections = collections;
+        }
+
+        public long stringBytes() {
+            return stringBytes;
+        }
+
+        public long duplicatedTexts() {
+            return duplicatedTexts;
+        }
+
+        public List<Duplicate> strings() {
+            return strings;
+        }
+
+        public long collectionBytes() {
+            return collectionBytes;
+        }
+
+        public List<Collections> collections() {
+            return collections;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Report)) {
+                return false;
+            }
+            Report x = (Report) o;
+            return stringBytes == x.stringBytes
+                    && duplicatedTexts == x.duplicatedTexts
+                    && java.util.Objects.equals(strings, x.strings)
+                    && collectionBytes == x.collectionBytes
+                    && java.util.Objects.equals(collections, x.collections);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(stringBytes, duplicatedTexts, strings, collectionBytes, collections);
+        }
+
+        @Override
+        public String toString() {
+            return "Report[" + "stringBytes=" + stringBytes + ", " + "duplicatedTexts=" + duplicatedTexts + ", " + "strings=" + strings + ", " + "collectionBytes=" + collectionBytes + ", " + "collections=" + collections + "]";
+        }
+
         public long total() {
             return stringBytes + collectionBytes;
         }
@@ -108,7 +287,7 @@ public final class HeapWaste {
         l.progress("Looking for duplicate strings", 0);
         int stringClass = d.classIndex("java.lang.String");
         if (stringClass < 0) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
         // the arrays of the strings in use, and how many strings share each
         BitSet values = new BitSet(d.n);
@@ -132,7 +311,7 @@ public final class HeapWaste {
             check(v);
         }
         if (strings == 0) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
         int arrays = values.cardinality();
         Table t = new Table(d.store(), arrays);
@@ -199,7 +378,7 @@ public final class HeapWaste {
         arrHash.free();
         List<Duplicate> out = new ArrayList<>();
         for (Map.Entry<Long, long[]> e : byHash.entrySet()) {
-            List<Integer> list = samples.getOrDefault(e.getKey(), List.of());
+            List<Integer> list = samples.getOrDefault(e.getKey(), java.util.Collections.emptyList());
             if (list.isEmpty()) {
                 continue;
             }

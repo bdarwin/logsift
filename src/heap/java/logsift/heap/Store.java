@@ -92,8 +92,8 @@ public final class Store implements AutoCloseable {
             files.clear();
         }
         if (dir != null) {
-            try (var s = Files.list(dir)) {
-                for (Path p : s.toList()) {
+            try (java.util.stream.Stream<Path> s = Files.list(dir)) {
+                for (Path p : s.collect(java.util.stream.Collectors.toList())) {
                     Files.deleteIfExists(p);
                 }
                 Files.deleteIfExists(dir);
@@ -298,7 +298,7 @@ public final class Store implements AutoCloseable {
                 } else {
                     int[] arr = new int[cap];
                     if (old != null) {
-                        old.get(0, arr, 0, old.capacity());
+                        old.duplicate().get(arr, 0, old.capacity()); // a duplicate: from 0, this one's place kept
                     }
                     a[j] = IntBuffer.wrap(arr);
                 }
@@ -377,7 +377,7 @@ public final class Store implements AutoCloseable {
                 } else {
                     long[] arr = new long[cap];
                     if (old != null) {
-                        old.get(0, arr, 0, old.capacity());
+                        old.duplicate().get(arr, 0, old.capacity()); // a duplicate: from 0, this one's place kept
                     }
                     a[j] = LongBuffer.wrap(arr);
                 }

@@ -49,7 +49,53 @@ public final class HeapDump implements AutoCloseable {
     enum RootKind { UNKNOWN, JNI_GLOBAL, JNI_LOCAL, JAVA_FRAME, NATIVE_STACK, STICKY_CLASS, THREAD_BLOCK,
         MONITOR, THREAD_OBJECT }
 
-    record Root(RootKind kind, int threadSerial, int frame) {}
+    static final class Root {
+        private final RootKind kind;
+        private final int threadSerial;
+        private final int frame;
+
+        Root(RootKind kind, int threadSerial, int frame) {
+            this.kind = kind;
+            this.threadSerial = threadSerial;
+            this.frame = frame;
+        }
+
+        public RootKind kind() {
+            return kind;
+        }
+
+        public int threadSerial() {
+            return threadSerial;
+        }
+
+        public int frame() {
+            return frame;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Root)) {
+                return false;
+            }
+            Root x = (Root) o;
+            return java.util.Objects.equals(kind, x.kind)
+                    && threadSerial == x.threadSerial
+                    && frame == x.frame;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(kind, threadSerial, frame);
+        }
+
+        @Override
+        public String toString() {
+            return "Root[" + "kind=" + kind + ", " + "threadSerial=" + threadSerial + ", " + "frame=" + frame + "]";
+        }
+    }
 
     /** A class in the dump (or a made-up one for primitive arrays). */
     static final class ClassInfo {
@@ -79,13 +125,158 @@ public final class HeapDump implements AutoCloseable {
         }
     }
 
-    record Frame(String method, String className, String file, int line) {}
+    static final class Frame {
+        private final String method;
+        private final String className;
+        private final String file;
+        private final int line;
+
+        Frame(String method, String className, String file, int line) {
+            this.method = method;
+            this.className = className;
+            this.file = file;
+            this.line = line;
+        }
+
+        public String method() {
+            return method;
+        }
+
+        public String className() {
+            return className;
+        }
+
+        public String file() {
+            return file;
+        }
+
+        public int line() {
+            return line;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Frame)) {
+                return false;
+            }
+            Frame x = (Frame) o;
+            return java.util.Objects.equals(method, x.method)
+                    && java.util.Objects.equals(className, x.className)
+                    && java.util.Objects.equals(file, x.file)
+                    && line == x.line;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(method, className, file, line);
+        }
+
+        @Override
+        public String toString() {
+            return "Frame[" + "method=" + method + ", " + "className=" + className + ", " + "file=" + file + ", " + "line=" + line + "]";
+        }
+    }
 
     /** One class: its objects and their sizes. */
-    public record ClassStat(String name, long count, long shallow, long retained) {}
+    public static final class ClassStat {
+        private final String name;
+        private final long count;
+        private final long shallow;
+        private final long retained;
+
+        public ClassStat(String name, long count, long shallow, long retained) {
+            this.name = name;
+            this.count = count;
+            this.shallow = shallow;
+            this.retained = retained;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        public long count() {
+            return count;
+        }
+
+        public long shallow() {
+            return shallow;
+        }
+
+        public long retained() {
+            return retained;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof ClassStat)) {
+                return false;
+            }
+            ClassStat x = (ClassStat) o;
+            return java.util.Objects.equals(name, x.name)
+                    && count == x.count
+                    && shallow == x.shallow
+                    && retained == x.retained;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(name, count, shallow, retained);
+        }
+
+        @Override
+        public String toString() {
+            return "ClassStat[" + "name=" + name + ", " + "count=" + count + ", " + "shallow=" + shallow + ", " + "retained=" + retained + "]";
+        }
+    }
 
     /** One link in a chain of references: an object and how the previous one refers to it. */
-    public record Step(int node, String via) {}
+    public static final class Step {
+        private final int node;
+        private final String via;
+
+        public Step(int node, String via) {
+            this.node = node;
+            this.via = via;
+        }
+
+        public int node() {
+            return node;
+        }
+
+        public String via() {
+            return via;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Step)) {
+                return false;
+            }
+            Step x = (Step) o;
+            return node == x.node
+                    && java.util.Objects.equals(via, x.via);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(node, via);
+        }
+
+        @Override
+        public String toString() {
+            return "Step[" + "node=" + node + ", " + "via=" + via + "]";
+        }
+    }
 
     private final Path file;
     private final Store store;
@@ -279,45 +470,57 @@ public final class HeapDump implements AutoCloseable {
             long len = r.u4u();
             long start = r.position();
             switch (tag) {
-                case 0x01 -> {
-                    long id = r.id();
-                    byte[] b = new byte[(int) (len - idSize)];
-                    r.bytes(b, 0, b.length);
-                    strings.put(id, new String(b, StandardCharsets.UTF_8));
-                }
-                case 0x02 -> {
-                    int serial = r.u4();
-                    long classId = r.id();
-                    r.u4();
-                    classNameIds.put(classId, r.id());
-                    classSerials.put(serial, classId);
-                }
-                case 0x04 -> {
-                    long frameId = r.id();
-                    long method = r.id();
-                    r.id(); // signature
-                    long source = r.id();
-                    int classSerial = r.u4();
-                    int line = r.u4();
-                    Long cid = classSerials.get(classSerial);
-                    frameById.put(frameId, new Frame(name(method), cid == null ? "?" : javaName(cid),
-                            source == 0 ? null : strings.get(source), line));
-                }
-                case 0x05 -> {
-                    int serial = r.u4();
-                    r.u4(); // thread serial
-                    int k = r.u4();
-                    long[] frames = new long[k];
-                    for (int i = 0; i < k; i++) {
-                        frames[i] = r.id();
+                case 0x01:
+                    {
+                        long id = r.id();
+                        byte[] b = new byte[(int) (len - idSize)];
+                        r.bytes(b, 0, b.length);
+                        strings.put(id, new String(b, StandardCharsets.UTF_8));
                     }
-                    traces.put(serial, frames);
-                }
-                case 0x0C, 0x1C -> {
-                    segments.add(new long[] {start, len});
-                    scanSegment(r, start + len, cancel);
-                }
-                default -> r.skip(len);
+                    break;
+                case 0x02:
+                    {
+                        int serial = r.u4();
+                        long classId = r.id();
+                        r.u4();
+                        classNameIds.put(classId, r.id());
+                        classSerials.put(serial, classId);
+                    }
+                    break;
+                case 0x04:
+                    {
+                        long frameId = r.id();
+                        long method = r.id();
+                        r.id(); // signature
+                        long source = r.id();
+                        int classSerial = r.u4();
+                        int line = r.u4();
+                        Long cid = classSerials.get(classSerial);
+                        frameById.put(frameId, new Frame(name(method), cid == null ? "?" : javaName(cid),
+                                source == 0 ? null : strings.get(source), line));
+                    }
+                    break;
+                case 0x05:
+                    {
+                        int serial = r.u4();
+                        r.u4(); // thread serial
+                        int k = r.u4();
+                        long[] frames = new long[k];
+                        for (int i = 0; i < k; i++) {
+                            frames[i] = r.id();
+                        }
+                        traces.put(serial, frames);
+                    }
+                    break;
+                case 0x0C: case 0x1C:
+                    {
+                        segments.add(new long[] {start, len});
+                        scanSegment(r, start + len, cancel);
+                    }
+                    break;
+                default:
+                    r.skip(len);
+                    break;
             }
             r.seek(start + len);
             l.progress("Reading the heap dump", (double) r.position() / size);
@@ -521,59 +724,86 @@ public final class HeapDump implements AutoCloseable {
             long at = r.position();
             int sub = r.u1();
             switch (sub) {
-                case 0xFF -> root(r.id(), RootKind.UNKNOWN, 0, 0);
-                case 0x01 -> {
-                    root(r.id(), RootKind.JNI_GLOBAL, 0, 0);
-                    r.id();
-                }
-                case 0x02 -> root(r.id(), RootKind.JNI_LOCAL, r.u4(), r.u4());
-                case 0x03 -> root(r.id(), RootKind.JAVA_FRAME, r.u4(), r.u4());
-                case 0x04 -> root(r.id(), RootKind.NATIVE_STACK, r.u4(), -1);
-                case 0x05 -> root(r.id(), RootKind.STICKY_CLASS, 0, 0);
-                case 0x06 -> root(r.id(), RootKind.THREAD_BLOCK, r.u4(), -1);
-                case 0x07 -> root(r.id(), RootKind.MONITOR, 0, 0);
-                case 0x08 -> {
-                    long id = r.id();
-                    int serial = r.u4();
-                    int stack = r.u4();
-                    threads.put(serial, new long[] {id, stack});
-                    root(id, RootKind.THREAD_OBJECT, serial, -1);
-                }
-                case 0x20 -> {
-                    ClassInfo ci = readClass(r);
-                    ci.node = n;
-                    classById.put(ci.id, classes.size());
-                    classes.add(ci);
-                    sample(ci.id, 0);
-                    object(ci.id, at);
-                }
-                case 0x21 -> {
-                    long id = r.id();
-                    r.u4();
-                    long cid = r.id();
-                    r.skip(r.u4u());
-                    sample(id, cid);
-                    object(id, at);
-                }
-                case 0x22 -> {
-                    long id = r.id();
-                    r.u4();
-                    long len = r.u4u();
-                    r.id();
-                    r.skip(len * idSize);
-                    sample(id, -((long) T_OBJECT << 33 | len));
-                    object(id, at);
-                }
-                case 0x23 -> {
-                    long id = r.id();
-                    r.u4();
-                    long len = r.u4u();
-                    int type = r.u1();
-                    r.skip(len * sizeOf(type, idSize));
-                    sample(id, -((long) type << 33 | len));
-                    object(id, at);
-                }
-                default -> throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub)
+                case 0xFF:
+                    root(r.id(), RootKind.UNKNOWN, 0, 0);
+                    break;
+                case 0x01:
+                    {
+                        root(r.id(), RootKind.JNI_GLOBAL, 0, 0);
+                        r.id();
+                    }
+                    break;
+                case 0x02:
+                    root(r.id(), RootKind.JNI_LOCAL, r.u4(), r.u4());
+                    break;
+                case 0x03:
+                    root(r.id(), RootKind.JAVA_FRAME, r.u4(), r.u4());
+                    break;
+                case 0x04:
+                    root(r.id(), RootKind.NATIVE_STACK, r.u4(), -1);
+                    break;
+                case 0x05:
+                    root(r.id(), RootKind.STICKY_CLASS, 0, 0);
+                    break;
+                case 0x06:
+                    root(r.id(), RootKind.THREAD_BLOCK, r.u4(), -1);
+                    break;
+                case 0x07:
+                    root(r.id(), RootKind.MONITOR, 0, 0);
+                    break;
+                case 0x08:
+                    {
+                        long id = r.id();
+                        int serial = r.u4();
+                        int stack = r.u4();
+                        threads.put(serial, new long[] {id, stack});
+                        root(id, RootKind.THREAD_OBJECT, serial, -1);
+                    }
+                    break;
+                case 0x20:
+                    {
+                        ClassInfo ci = readClass(r);
+                        ci.node = n;
+                        classById.put(ci.id, classes.size());
+                        classes.add(ci);
+                        sample(ci.id, 0);
+                        object(ci.id, at);
+                    }
+                    break;
+                case 0x21:
+                    {
+                        long id = r.id();
+                        r.u4();
+                        long cid = r.id();
+                        r.skip(r.u4u());
+                        sample(id, cid);
+                        object(id, at);
+                    }
+                    break;
+                case 0x22:
+                    {
+                        long id = r.id();
+                        r.u4();
+                        long len = r.u4u();
+                        r.id();
+                        r.skip(len * idSize);
+                        sample(id, -((long) T_OBJECT << 33 | len));
+                        object(id, at);
+                    }
+                    break;
+                case 0x23:
+                    {
+                        long id = r.id();
+                        r.u4();
+                        long len = r.u4u();
+                        int type = r.u1();
+                        r.skip(len * sizeOf(type, idSize));
+                        sample(id, -((long) type << 33 | len));
+                        object(id, at);
+                    }
+                    break;
+                default:
+                    throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub)
                         + " at byte " + at);
             }
             check(cancel, n);
@@ -596,7 +826,60 @@ public final class HeapDump implements AutoCloseable {
     }
 
     /** One way the JVM lays out objects. */
-    private record Layout(boolean compressed, int header, int arrayHeader, int refSize) {
+    private static final class Layout {
+        private final boolean compressed;
+        private final int header;
+        private final int arrayHeader;
+        private final int refSize;
+
+        Layout(boolean compressed, int header, int arrayHeader, int refSize) {
+            this.compressed = compressed;
+            this.header = header;
+            this.arrayHeader = arrayHeader;
+            this.refSize = refSize;
+        }
+
+        public boolean compressed() {
+            return compressed;
+        }
+
+        public int header() {
+            return header;
+        }
+
+        public int arrayHeader() {
+            return arrayHeader;
+        }
+
+        public int refSize() {
+            return refSize;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Layout)) {
+                return false;
+            }
+            Layout x = (Layout) o;
+            return compressed == x.compressed
+                    && header == x.header
+                    && arrayHeader == x.arrayHeader
+                    && refSize == x.refSize;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(compressed, header, arrayHeader, refSize);
+        }
+
+        @Override
+        public String toString() {
+            return "Layout[" + "compressed=" + compressed + ", " + "header=" + header + ", " + "arrayHeader=" + arrayHeader + ", " + "refSize=" + refSize + "]";
+        }
+
         long instance(long refs, long prims) {
             return align(header + refs * refSize + prims);
         }
@@ -792,90 +1075,109 @@ public final class HeapDump implements AutoCloseable {
         while (r.position() < end) {
             int sub = r.u1();
             switch (sub) {
-                case 0xFF, 0x05, 0x07 -> r.id();
-                case 0x01 -> {
+                case 0xFF: case 0x05: case 0x07:
                     r.id();
-                    r.id();
-                }
-                case 0x02, 0x03 -> {
-                    r.id();
-                    r.u4();
-                    r.u4();
-                }
-                case 0x04, 0x06 -> {
-                    r.id();
-                    r.u4();
-                }
-                case 0x08 -> {
-                    r.id();
-                    r.u4();
-                    r.u4();
-                }
-                case 0x20 -> {
-                    ClassInfo ci = readClass(r);
-                    int v = node[0]++;
-                    classOf.set(v, classClass >= 0 ? classClass : classById.get(ci.id));
-                    ClassInfo me = classes.get(classById.get(ci.id));
-                    shallow.set(v, classObjectSize(me));
-                    succStart.set(v, edges[0]);
-                    for (int i = 0; i < ci.staticTypes.length; i++) {
-                        if (ci.staticTypes[i] == T_OBJECT) {
-                            edge(v, ci.staticValues[i], edges);
+                    break;
+                case 0x01:
+                    {
+                        r.id();
+                        r.id();
+                    }
+                    break;
+                case 0x02: case 0x03:
+                    {
+                        r.id();
+                        r.u4();
+                        r.u4();
+                    }
+                    break;
+                case 0x04: case 0x06:
+                    {
+                        r.id();
+                        r.u4();
+                    }
+                    break;
+                case 0x08:
+                    {
+                        r.id();
+                        r.u4();
+                        r.u4();
+                    }
+                    break;
+                case 0x20:
+                    {
+                        ClassInfo ci = readClass(r);
+                        int v = node[0]++;
+                        classOf.set(v, classClass >= 0 ? classClass : classById.get(ci.id));
+                        ClassInfo me = classes.get(classById.get(ci.id));
+                        shallow.set(v, classObjectSize(me));
+                        succStart.set(v, edges[0]);
+                        for (int i = 0; i < ci.staticTypes.length; i++) {
+                            if (ci.staticTypes[i] == T_OBJECT) {
+                                edge(v, ci.staticValues[i], edges);
+                            }
+                        }
+                        edge(v, ci.superId, edges);
+                        edge(v, ci.loaderId, edges);
+                    }
+                    break;
+                case 0x21:
+                    {
+                        r.id();
+                        r.u4();
+                        long cid = r.id();
+                        int len = (int) r.u4u();
+                        if (len > data.length) {
+                            data = new byte[Math.max(len, data.length * 2)];
+                        }
+                        r.bytes(data, 0, len);
+                        int v = node[0]++;
+                        Integer cix = classById.get(cid);
+                        if (cix == null) {
+                            throw new IOException("an object of a class that isn't in the dump (0x" + Long.toHexString(cid) + ")");
+                        }
+                        ClassInfo ci = classes.get(cix);
+                        classOf.set(v, cix);
+                        shallow.set(v, ci.shallow);
+                        succStart.set(v, edges[0]);
+                        for (int p0 : ci.refPos) {
+                            if (p0 + idSize <= len) {
+                                edge(v, idAt(data, p0), edges);
+                            }
                         }
                     }
-                    edge(v, ci.superId, edges);
-                    edge(v, ci.loaderId, edges);
-                }
-                case 0x21 -> {
-                    r.id();
-                    r.u4();
-                    long cid = r.id();
-                    int len = (int) r.u4u();
-                    if (len > data.length) {
-                        data = new byte[Math.max(len, data.length * 2)];
-                    }
-                    r.bytes(data, 0, len);
-                    int v = node[0]++;
-                    Integer cix = classById.get(cid);
-                    if (cix == null) {
-                        throw new IOException("an object of a class that isn't in the dump (0x" + Long.toHexString(cid) + ")");
-                    }
-                    ClassInfo ci = classes.get(cix);
-                    classOf.set(v, cix);
-                    shallow.set(v, ci.shallow);
-                    succStart.set(v, edges[0]);
-                    for (int p0 : ci.refPos) {
-                        if (p0 + idSize <= len) {
-                            edge(v, idAt(data, p0), edges);
+                    break;
+                case 0x22:
+                    {
+                        r.id();
+                        r.u4();
+                        long len = r.u4u();
+                        long cid = r.id();
+                        int v = node[0]++;
+                        Integer cix = classById.get(cid);
+                        classOf.set(v, cix == null ? primClass(T_OBJECT) : cix);
+                        shallow.set(v, (int) arraySize(T_OBJECT, len));
+                        succStart.set(v, edges[0]);
+                        for (long i = 0; i < len; i++) {
+                            edge(v, r.id(), edges);
                         }
                     }
-                }
-                case 0x22 -> {
-                    r.id();
-                    r.u4();
-                    long len = r.u4u();
-                    long cid = r.id();
-                    int v = node[0]++;
-                    Integer cix = classById.get(cid);
-                    classOf.set(v, cix == null ? primClass(T_OBJECT) : cix);
-                    shallow.set(v, (int) arraySize(T_OBJECT, len));
-                    succStart.set(v, edges[0]);
-                    for (long i = 0; i < len; i++) {
-                        edge(v, r.id(), edges);
+                    break;
+                case 0x23:
+                    {
+                        r.id();
+                        r.u4();
+                        long len = r.u4u();
+                        int type = r.u1();
+                        r.skip(len * sizeOf(type, idSize));
+                        int v = node[0]++;
+                        classOf.set(v, primClass(type));
+                        shallow.set(v, (int) arraySize(type, len));
+                        succStart.set(v, edges[0]);
                     }
-                }
-                case 0x23 -> {
-                    r.id();
-                    r.u4();
-                    long len = r.u4u();
-                    int type = r.u1();
-                    r.skip(len * sizeOf(type, idSize));
-                    int v = node[0]++;
-                    classOf.set(v, primClass(type));
-                    shallow.set(v, (int) arraySize(type, len));
-                    succStart.set(v, edges[0]);
-                }
-                default -> throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub));
+                    break;
+                default:
+                    throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub));
             }
             check(cancel, node[0]);
         }
@@ -914,14 +1216,20 @@ public final class HeapDump implements AutoCloseable {
     }
 
     static int sizeOf(int type, int idSize) {
-        return switch (type) {
-            case T_OBJECT -> idSize;
-            case T_BOOLEAN, T_BYTE -> 1;
-            case T_CHAR, T_SHORT -> 2;
-            case T_FLOAT, T_INT -> 4;
-            case T_DOUBLE, T_LONG -> 8;
-            default -> throw new IllegalArgumentException("unknown value type " + type);
-        };
+        switch (type) {
+            case T_OBJECT:
+                return idSize;
+            case T_BOOLEAN: case T_BYTE:
+                return 1;
+            case T_CHAR: case T_SHORT:
+                return 2;
+            case T_FLOAT: case T_INT:
+                return 4;
+            case T_DOUBLE: case T_LONG:
+                return 8;
+            default:
+                throw new IllegalArgumentException("unknown value type " + type);
+        }
     }
 
     private String name(long id) {
@@ -942,19 +1250,41 @@ public final class HeapDump implements AutoCloseable {
         }
         String base = internal.substring(dims);
         if (dims > 0) {
-            base = switch (base) {
-                case "Z" -> "boolean";
-                case "C" -> "char";
-                case "F" -> "float";
-                case "D" -> "double";
-                case "B" -> "byte";
-                case "S" -> "short";
-                case "I" -> "int";
-                case "J" -> "long";
-                default -> base.startsWith("L") && base.endsWith(";") ? base.substring(1, base.length() - 1) : base;
-            };
+            switch (base) {
+                case "Z":
+                    base = "boolean";
+                    break;
+                case "C":
+                    base = "char";
+                    break;
+                case "F":
+                    base = "float";
+                    break;
+                case "D":
+                    base = "double";
+                    break;
+                case "B":
+                    base = "byte";
+                    break;
+                case "S":
+                    base = "short";
+                    break;
+                case "I":
+                    base = "int";
+                    break;
+                case "J":
+                    base = "long";
+                    break;
+                default:
+                    base = base.startsWith("L") && base.endsWith(";") ? base.substring(1, base.length() - 1) : base;
+                    break;
+            }
         }
-        return base.replace('/', '.') + "[]".repeat(dims);
+        StringBuilder dimsText = new StringBuilder();
+        for (int i = 0; i < dims; i++) {
+            dimsText.append("[]");
+        }
+        return base.replace('/', '.') + dimsText;
     }
 
     // ---------------------------------------------------------------- what the UI asks
@@ -1180,7 +1510,7 @@ public final class HeapDump implements AutoCloseable {
         List<Integer> chain = new ArrayList<>();
         int v = node;
         if (bfsParent.get(v) == 0) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
         while (v != n) {
             chain.add(v);
@@ -1208,21 +1538,30 @@ public final class HeapDump implements AutoCloseable {
         if (r == null) {
             return "a GC root";
         }
-        return switch (r.kind()) {
-            case JAVA_FRAME -> {
-                Frame f = frame(r.threadSerial(), r.frame());
-                yield "a local variable" + (f == null ? "" : " in " + shortClass(f.className()) + "." + f.method() + "()")
-                        + " of thread " + threadName(r.threadSerial());
-            }
-            case THREAD_OBJECT -> "a running thread";
-            case JNI_GLOBAL -> "a JNI global reference (native code)";
-            case JNI_LOCAL -> "a JNI local reference in thread " + threadName(r.threadSerial());
-            case NATIVE_STACK -> "native code in thread " + threadName(r.threadSerial());
-            case THREAD_BLOCK -> "thread " + threadName(r.threadSerial());
-            case MONITOR -> "a lock in use (synchronized)";
-            case STICKY_CLASS -> "a class the JVM keeps";
-            default -> "the JVM";
-        };
+        switch (r.kind()) {
+            case JAVA_FRAME:
+                {
+                    Frame f = frame(r.threadSerial(), r.frame());
+                    return "a local variable" + (f == null ? "" : " in " + shortClass(f.className()) + "." + f.method() + "()")
+                            + " of thread " + threadName(r.threadSerial());
+                }
+            case THREAD_OBJECT:
+                return "a running thread";
+            case JNI_GLOBAL:
+                return "a JNI global reference (native code)";
+            case JNI_LOCAL:
+                return "a JNI local reference in thread " + threadName(r.threadSerial());
+            case NATIVE_STACK:
+                return "native code in thread " + threadName(r.threadSerial());
+            case THREAD_BLOCK:
+                return "thread " + threadName(r.threadSerial());
+            case MONITOR:
+                return "a lock in use (synchronized)";
+            case STICKY_CLASS:
+                return "a class the JVM keeps";
+            default:
+                return "the JVM";
+        }
     }
 
     private Frame frame(int threadSerial, int frameNo) {
@@ -1273,7 +1612,7 @@ public final class HeapDump implements AutoCloseable {
         for (int serial : serials) {
             long[] t = threads.get(serial);
             int v = nodeOf(t[0]);
-            Map<String, Long> f = v < 0 ? Map.of() : primitiveFields(v);
+            Map<String, Long> f = v < 0 ? java.util.Collections.emptyMap() : primitiveFields(v);
             Map<String, Long> h = f;
             if (v >= 0 && !f.containsKey("threadStatus")) { // JDK 19 and later: in Thread.holder
                 int holderNode = refField(v, "holder");
@@ -1358,48 +1697,52 @@ public final class HeapDump implements AutoCloseable {
             random.seek(offsets.get(from));
             int sub = random.u1();
             switch (sub) {
-                case 0x20 -> {
-                    ClassInfo ci = readClass(random);
-                    for (int i = 0; i < ci.staticNames.length; i++) {
-                        if (ci.staticTypes[i] == T_OBJECT && ci.staticValues[i] == target) {
-                            return "static " + name(ci.staticNames[i]);
+                case 0x20:
+                    {
+                        ClassInfo ci = readClass(random);
+                        for (int i = 0; i < ci.staticNames.length; i++) {
+                            if (ci.staticTypes[i] == T_OBJECT && ci.staticValues[i] == target) {
+                                return "static " + name(ci.staticNames[i]);
+                            }
                         }
-                    }
-                    if (ci.superId == target) {
-                        return "super class";
-                    }
-                    return "class loader";
-                }
-                case 0x21 -> {
-                    random.id();
-                    random.u4();
-                    long cid = random.id();
-                    int len = (int) random.u4u();
-                    byte[] data = new byte[len];
-                    random.bytes(data, 0, len);
-                    ClassInfo ci = classes.get(classById.get(cid));
-                    for (int i = 0; i < ci.refPos.length; i++) {
-                        if (idAt(data, ci.refPos[i]) == target) {
-                            return ci.refNames[i];
+                        if (ci.superId == target) {
+                            return "super class";
                         }
+                        return "class loader";
                     }
-                    return "?";
-                }
-                case 0x22 -> {
-                    random.id();
-                    random.u4();
-                    long len = random.u4u();
-                    random.id();
-                    for (long i = 0; i < len; i++) {
-                        if (random.id() == target) {
-                            return "[" + i + "]";
+                case 0x21:
+                    {
+                        random.id();
+                        random.u4();
+                        long cid = random.id();
+                        int len = (int) random.u4u();
+                        byte[] data = new byte[len];
+                        random.bytes(data, 0, len);
+                        ClassInfo ci = classes.get(classById.get(cid));
+                        for (int i = 0; i < ci.refPos.length; i++) {
+                            if (idAt(data, ci.refPos[i]) == target) {
+                                return ci.refNames[i];
+                            }
                         }
+                        return "?";
                     }
-                    return "[?]";
-                }
-                default -> {
-                    return "?";
-                }
+                case 0x22:
+                    {
+                        random.id();
+                        random.u4();
+                        long len = random.u4u();
+                        random.id();
+                        for (long i = 0; i < len; i++) {
+                            if (random.id() == target) {
+                                return "[" + i + "]";
+                            }
+                        }
+                        return "[?]";
+                    }
+                default:
+                    {
+                        return "?";
+                    }
             }
         }
     }
@@ -1657,51 +2000,68 @@ public final class HeapDump implements AutoCloseable {
             while (r.position() < end) {
                 int sub = r.u1();
                 switch (sub) {
-                    case 0xFF, 0x05, 0x07 -> r.id();
-                    case 0x01 -> r.skip(2L * idSize);
-                    case 0x02, 0x03, 0x08 -> r.skip(idSize + 8L);
-                    case 0x04, 0x06 -> r.skip(idSize + 4L);
-                    case 0x20 -> {
-                        readClass(r);
-                        v++;
-                    }
-                    case 0x21 -> {
+                    case 0xFF: case 0x05: case 0x07:
                         r.id();
-                        r.u4();
-                        r.id();
-                        long len = r.u4u();
-                        long next = r.position() + len;
-                        if (wanted.get(v)) {
-                            visitor.visit(v, sub, r, len);
+                        break;
+                    case 0x01:
+                        r.skip(2L * idSize);
+                        break;
+                    case 0x02: case 0x03: case 0x08:
+                        r.skip(idSize + 8L);
+                        break;
+                    case 0x04: case 0x06:
+                        r.skip(idSize + 4L);
+                        break;
+                    case 0x20:
+                        {
+                            readClass(r);
+                            v++;
                         }
-                        r.seek(next);
-                        v++;
-                    }
-                    case 0x22 -> {
-                        r.id();
-                        r.u4();
-                        long len = r.u4u();
-                        r.id();
-                        long next = r.position() + len * idSize;
-                        if (wanted.get(v)) {
-                            visitor.visit(v, sub, r, len);
+                        break;
+                    case 0x21:
+                        {
+                            r.id();
+                            r.u4();
+                            r.id();
+                            long len = r.u4u();
+                            long next = r.position() + len;
+                            if (wanted.get(v)) {
+                                visitor.visit(v, sub, r, len);
+                            }
+                            r.seek(next);
+                            v++;
                         }
-                        r.seek(next);
-                        v++;
-                    }
-                    case 0x23 -> {
-                        r.id();
-                        r.u4();
-                        long len = r.u4u();
-                        int type = r.u1();
-                        long next = r.position() + len * sizeOf(type, idSize);
-                        if (wanted.get(v)) {
-                            visitor.visit(v, sub, r, len * sizeOf(type, idSize));
+                        break;
+                    case 0x22:
+                        {
+                            r.id();
+                            r.u4();
+                            long len = r.u4u();
+                            r.id();
+                            long next = r.position() + len * idSize;
+                            if (wanted.get(v)) {
+                                visitor.visit(v, sub, r, len);
+                            }
+                            r.seek(next);
+                            v++;
                         }
-                        r.seek(next);
-                        v++;
-                    }
-                    default -> throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub));
+                        break;
+                    case 0x23:
+                        {
+                            r.id();
+                            r.u4();
+                            long len = r.u4u();
+                            int type = r.u1();
+                            long next = r.position() + len * sizeOf(type, idSize);
+                            if (wanted.get(v)) {
+                                visitor.visit(v, sub, r, len * sizeOf(type, idSize));
+                            }
+                            r.seek(next);
+                            v++;
+                        }
+                        break;
+                    default:
+                        throw new IOException("unsupported heap dump record 0x" + Integer.toHexString(sub));
                 }
                 check(cancel, v);
                 if ((v & 0xFFFF) == 0) {
@@ -1722,10 +2082,10 @@ public final class HeapDump implements AutoCloseable {
         if (!Files.isDirectory(parent)) {
             return;
         }
-        try (var s = Files.list(parent)) {
-            for (Path d : s.toList()) {
-                try (var w = Files.walk(d)) {
-                    for (Path p : w.sorted(java.util.Comparator.reverseOrder()).toList()) {
+        try (java.util.stream.Stream<Path> s = Files.list(parent)) {
+            for (Path d : s.collect(java.util.stream.Collectors.toList())) {
+                try (java.util.stream.Stream<Path> w = Files.walk(d)) {
+                    for (Path p : w.sorted(java.util.Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList())) {
                         Files.deleteIfExists(p);
                     }
                 } catch (IOException e) {

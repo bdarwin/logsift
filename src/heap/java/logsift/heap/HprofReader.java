@@ -137,14 +137,20 @@ final class HprofReader {
 
     /** A value of this basic type (as a long: ids, numbers, float and double bits). */
     long value(int type) throws IOException {
-        return switch (type) {
-            case HeapDump.T_OBJECT -> id();
-            case HeapDump.T_BOOLEAN, HeapDump.T_BYTE -> u1();
-            case HeapDump.T_CHAR, HeapDump.T_SHORT -> u2();
-            case HeapDump.T_FLOAT, HeapDump.T_INT -> u4();
-            case HeapDump.T_DOUBLE, HeapDump.T_LONG -> u8();
-            default -> throw new IOException("unknown value type " + type + " at byte " + position());
-        };
+        switch (type) {
+            case HeapDump.T_OBJECT:
+                return id();
+            case HeapDump.T_BOOLEAN: case HeapDump.T_BYTE:
+                return u1();
+            case HeapDump.T_CHAR: case HeapDump.T_SHORT:
+                return u2();
+            case HeapDump.T_FLOAT: case HeapDump.T_INT:
+                return u4();
+            case HeapDump.T_DOUBLE: case HeapDump.T_LONG:
+                return u8();
+            default:
+                throw new IOException("unknown value type " + type + " at byte " + position());
+        }
     }
 
     int sizeOf(int type) {
