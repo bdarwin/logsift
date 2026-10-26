@@ -282,6 +282,16 @@ final class HeapTab extends JPanel {
         changed.run();
     }
 
+    private java.util.function.BiConsumer<logsift.jvm.JmxJvms.DumpOnServer, Path> dumpOnServer = (d, p) -> { };
+
+    /**
+     * Called when the dump was written on the JVM's own machine (over a JMX port), with where it
+     * is and where it was to go here: to copy it over SSH.
+     */
+    void onDumpOnServer(java.util.function.BiConsumer<logsift.jvm.JmxJvms.DumpOnServer, Path> c) {
+        dumpOnServer = c;
+    }
+
     /** Called with a heap dump once it is saved (on this computer). */
     void onDumpSaved(java.util.function.Consumer<Path> c) {
         dumpSaved = c;
@@ -311,10 +321,18 @@ final class HeapTab extends JPanel {
         setWorking(true, "Writing the heap dump…");
         background(() -> {
             java.nio.file.Files.deleteIfExists(file);
-            target.heapDump(file, f -> SwingUtilities.invokeLater(() -> {
-                bar.setValue((int) Math.round(f * 1000));
-                status.setText("Copying the heap dump… " + Math.round(f * 100) + "%");
-            }), cancel::get);
+            try {
+                target.heapDump(file, f -> SwingUtilities.invokeLater(() -> {
+                    bar.setValue((int) Math.round(f * 1000));
+                    status.setText("Copying the heap dump… " + Math.round(f * 100) + "%");
+                }), cancel::get);
+            } catch (logsift.jvm.JmxJvms.DumpOnServer there) {
+                SwingUtilities.invokeLater(() -> {
+                    setWorking(false, "Saved on " + there.host() + ": " + there.path());
+                    dumpOnServer.accept(there, file);
+                });
+                return;
+            }
             long size = java.nio.file.Files.size(file);
             SwingUtilities.invokeLater(() -> {
                 setWorking(false, "Saved " + file.getFileName() + " (" + bytes(size) + ")");

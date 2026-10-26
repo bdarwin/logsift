@@ -25,7 +25,8 @@ import jdk.management.jfr.FlightRecorderMXBean;
  * A JVM reached through its JMX port ({@code -Dcom.sun.management.jmxremote.port=9010}), from
  * anywhere: no SSH and no JDK tools needed. Takes thread dumps and class histograms (the JVM's
  * diagnostic commands), and records with Flight Recorder, the recording streamed back over the
- * same connection. Heap dumps would stay on the JVM's machine, so they are not offered.
+ * same connection. Heap dumps are written on the JVM's machine (they can't come back over JMX), to
+ * be copied over SSH.
  */
 public final class JmxJvms {
     private JmxJvms() {
@@ -120,6 +121,8 @@ public final class JmxJvms {
         private final JMXConnector jmx;
         private final MBeanServerConnection mbeans;
         private final JvmProcess process;
+        private final String tmpDir;
+        private final String separator;
         private volatile boolean closed;
 
         private Session(Address address, JMXConnector jmx) throws IOException {
@@ -133,6 +136,44 @@ public final class JmxJvms {
             String name = command.isBlank() ? rt.getName() : JvmProcess.describe("java " + command);
             this.process = new JvmProcess(rt.getPid(), name, command, props.getOrDefault("user.name", ""),
                     ThreadAnalysis.duration(rt.getUptime()), false);
+            this.tmpDir = props.getOrDefault("java.io.tmpdir", "/tmp");
+            this.separator = props.getOrDefault("file.separator", "/");
+        }
+
+        /** Whether the JVM runs on this computer (its JMX port is on this machine). */
+        public boolean isLocal() {
+            String h = machine();
+            return h != null && isThisMachine(h);
+        }
+
+        /** The name or address of the JVM's machine (also from a service:jmx: URL), or null. */
+        public String machine() {
+            return machineOf(address.host());
+        }
+
+        /**
+         * Writes a heap dump on the JVM's machine, in its temporary folder (it can't come back over
+         * JMX), and says where.
+         *
+         * @param live only objects in use (a full GC runs first)
+         */
+        public String heapDumpThere(boolean live) throws IOException {
+            String dir = tmpDir.endsWith(separator) ? tmpDir : tmpDir + separator;
+            String path = dir + "logsift-heap-" + process.pid() + "-" + System.currentTimeMillis() + ".hprof";
+            dumpTo(path, live);
+            return path;
+        }
+
+        /** Writes a heap dump to a path on the JVM's machine. */
+        public void dumpTo(String path, boolean live) throws IOException {
+            if (closed) {
+                throw new IOException("closed");
+            }
+            String out = live ? LocalJvms.invoke(mbeans, "GC.heap_dump", path)
+                    : LocalJvms.invoke(mbeans, "GC.heap_dump", "-all", path);
+            if (out != null && (out.contains("rror") || out.contains("xception")) && !out.contains("Heap dump file created")) {
+                throw new IOException("the JVM could not write the heap dump: " + LocalJvms.first(out));
+            }
         }
 
         public Address address() {
@@ -251,6 +292,55 @@ public final class JmxJvms {
         }
     }
 
-    static final String HEAP_DUMP = "Over a JMX port the heap dump would be written on the JVM's own machine;"
-            + " connect over SSH (or on that computer) to save one here.";
+    /** The machine of a host or {@code service:jmx:} URL (the last host named in it), or null. */
+    static String machineOf(String host) {
+        if (!host.startsWith("service:jmx:")) {
+            return host;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("//([^:/\\[\\]]+|\\[[^\\]]+\\])[:/]").matcher(host);
+        String last = null;
+        while (m.find()) {
+            last = m.group(1);
+        }
+        return last == null ? null : last.replace("[", "").replace("]", "");
+    }
+
+    /** Whether a host name or address is this computer. */
+    static boolean isThisMachine(String host) {
+        try {
+            if (host.isEmpty() || host.equalsIgnoreCase("localhost")) {
+                return true;
+            }
+            java.net.InetAddress a = java.net.InetAddress.getByName(host);
+            return a.isLoopbackAddress() || a.isAnyLocalAddress() || java.net.NetworkInterface.getByInetAddress(a) != null;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * A heap dump written on the JVM's own machine (over JMX it can't be sent back): where it is,
+     * so it can be copied over SSH.
+     */
+    public static final class DumpOnServer extends IOException {
+        private final String host;
+        private final String path;
+
+        public DumpOnServer(String host, String path) {
+            super("The heap dump is on " + host + " at " + path);
+            this.host = host;
+            this.path = path;
+        }
+
+        public String host() {
+            return host;
+        }
+
+        public String path() {
+            return path;
+        }
+    }
+
+    static final String HEAP_DUMP = "Use Save Heap Dump: over a JMX port the JVM writes the dump on its own machine,"
+            + " and Logsift copies it here over SSH.";
 }

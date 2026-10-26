@@ -3585,7 +3585,7 @@ class VisualTest {
             });
             HeapTab heap = onEdt(frame::currentHeapTab);
             assertNotNull(heap);
-            assertTrue(!onEdt(heap::canHeapDumpForTest));
+            assertTrue(onEdt(heap::canHeapDumpForTest), "over JMX too (written on the JVM's machine, copied over SSH)");
             onEdt(() -> {
                 while (frame.currentHeapTab() != null || frame.currentThreadsTab() != null) {
                     frame.closeCurrentTabForTest();
@@ -4847,6 +4847,58 @@ class VisualTest {
                 return false;
             }
         }, 60_000, "a second GC tab");
+    }
+
+    @Test
+    @Order(49)
+    void heapDumpOverJmxIsCopiedFromTheServer() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "the test SSH server runs commands with /bin/sh");
+        // over a JMX port the JVM writes the dump on its own machine; Logsift copies it over SSH and removes it there
+        Path hprof = dir.resolve("shop-leak.hprof");
+        if (!Files.exists(hprof)) {
+            logsift.heap.LeakApp.run(hprof, dir.resolve("shop-leak-histogram.txt"));
+        }
+        Path serverTmp = Files.createDirectories(dir.resolve("server-tmp"));
+        Path there = serverTmp.resolve("logsift-heap-4242-1.hprof");
+        Files.copy(hprof, there, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        var server = org.apache.sshd.server.SshServer.setUpDefaultServer();
+        server.setHost("127.0.0.1");
+        server.setPort(0);
+        server.setKeyPairProvider(new org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider(
+                dir.resolve("dump-hostkey.ser")));
+        server.setPasswordAuthenticator((u, pw, sess) -> u.equals("ops") && pw.equals("secret"));
+        server.setSubsystemFactories(List.of(new org.apache.sshd.sftp.server.SftpSubsystemFactory()));
+        server.setCommandFactory((channel, command) -> new org.apache.sshd.server.shell.ProcessShellFactory(
+                command, "/bin/sh", "-c", command).createShell(channel));
+        server.start();
+        System.setProperty("logsift.noKnownHosts", "true");
+        Path here = dir.resolve("copied-over-ssh.hprof");
+        Files.deleteIfExists(here);
+        try {
+            onEdt(() -> {
+                frame.sshForDumpForTest = d -> new logsift.core.RemoteMirror.Target("127.0.0.1", server.getPort(), "ops",
+                        "", "secret", null, null);
+                frame.copyDumpFromServer(new logsift.jvm.JmxJvms.DumpOnServer("db1", there.toString()), here);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentHeapDumpTab() != null
+                            && frame.currentHeapDumpTab().file().equals(here.toAbsolutePath().normalize()));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "the copied dump opened");
+            assertEquals(Files.size(hprof), Files.size(here), "copied whole");
+            assertTrue(!Files.exists(there), "removed on the server");
+        } finally {
+            onEdt(() -> {
+                frame.sshForDumpForTest = null;
+                return null;
+            });
+            System.clearProperty("logsift.noKnownHosts");
+            server.stop(true);
+        }
     }
 
     private LogTab waitForTab(String title) throws Exception {

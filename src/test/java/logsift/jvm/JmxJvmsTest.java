@@ -71,11 +71,38 @@ class JmxJvmsTest {
     }
 
     @Test
+    void heapDumpsHereOrOnTheJvmsMachine(@TempDir Path dir) throws Exception {
+        try (JmxJvms.Session s = connect()) {
+            assertTrue(s.isLocal(), "127.0.0.1 is this computer");
+            Path here = dir.resolve("here.hprof");
+            Profiler.jmx(s).heapDump(here, null, () -> false);
+            assertTrue(new String(Files.readAllBytes(here), 0, 12, java.nio.charset.StandardCharsets.ISO_8859_1)
+                    .startsWith("JAVA PROFILE"), "a heap dump");
+            String there = s.heapDumpThere(false);
+            try {
+                assertTrue(there.contains("logsift-heap-" + app.pid() + "-") && there.endsWith(".hprof"), there);
+                assertTrue(Files.size(Path.of(there)) > 1000, "in the JVM's temporary folder");
+            } finally {
+                Files.deleteIfExists(Path.of(there));
+            }
+        }
+        assertTrue(JmxJvms.isThisMachine("localhost"));
+        assertTrue(JmxJvms.isThisMachine("127.0.0.1"));
+        assertFalse(JmxJvms.isThisMachine("no-such-host.invalid"));
+        assertEquals("10.1.2.3", JmxJvms.machineOf("service:jmx:rmi:///jndi/rmi://10.1.2.3:9010/jmxrmi"));
+        assertEquals("db1", JmxJvms.machineOf("service:jmx:rmi://db1:9011/jndi/rmi://db1:9010/jmxrmi"));
+        assertEquals("fe80::1", JmxJvms.machineOf("service:jmx:rmi:///jndi/rmi://[fe80::1]:9010/jmxrmi"));
+        assertEquals("server", JmxJvms.machineOf("server"));
+        JmxJvms.DumpOnServer d = new JmxJvms.DumpOnServer("db1", "/tmp/x.hprof");
+        assertTrue(d.getMessage().contains("db1") && d.getMessage().contains("/tmp/x.hprof"));
+    }
+
+    @Test
     void profilesWithFlightRecorderStreamedBack() throws Exception {
         try (JmxJvms.Session s = connect()) {
             Profiler.Target t = Profiler.jmx(s);
             assertEquals(List.of(Profiler.Engine.JFR), t.engines());
-            assertNotNull(t.noHeapDump());
+            assertEquals(null, t.noHeapDump(), "heap dumps are offered (written on the JVM's machine)");
             assertThrows(IOException.class, () -> t.run(Profiler.Request.of(Profiler.Engine.ASYNC_PROFILER,
                     Profiler.Mode.CPU, 1), null, () -> false));
             List<Profile> views = t.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.ALL, 3), null, () -> false);

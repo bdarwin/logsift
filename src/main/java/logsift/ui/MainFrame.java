@@ -986,10 +986,104 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return tab;
     }
 
+    /** Test hook: what to answer instead of the SSH question (null: ask). */
+    java.util.function.Function<logsift.jvm.JmxJvms.DumpOnServer, logsift.core.RemoteMirror.Target> sshForDumpForTest;
+
+    /**
+     * A heap dump the JVM wrote on its own machine (asked over its JMX port): offers to copy it
+     * here over SSH (then removes it there) and opens it; else says where it is.
+     */
+    void copyDumpFromServer(logsift.jvm.JmxJvms.DumpOnServer there, Path local) {
+        logsift.core.RemoteMirror.Target login = sshForDumpForTest != null ? sshForDumpForTest.apply(there)
+                : askSshForDump(there);
+        if (login == null) {
+            javax.swing.JTextField where = new javax.swing.JTextField(there.path());
+            where.setEditable(false);
+            JOptionPane.showMessageDialog(this, new Object[] {"The heap dump stays on " + there.host() + ":", where,
+                    "Copy it here yourself and open it (JVM → Open Heap Dump…), or remove it there when done."},
+                    "Heap Dump", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        Path knownHosts = Boolean.getBoolean("logsift.noKnownHosts") ? null
+                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        ProgressDialog.run(this, "Copying the heap dump from " + there.host() + "…", (progress, cancelled) -> {
+            try (logsift.jvm.SshJvms ssh = logsift.jvm.SshJvms.connect(login, knownHosts, this::trustHost)) {
+                try {
+                    ssh.download(there.path(), local, progress::accept);
+                } catch (IOException e) {
+                    Files.deleteIfExists(local);
+                    throw e;
+                }
+                ssh.exec("rm -f '" + there.path().replace("'", "'\\''") + "'", null, 30); // ours, in its temp folder
+            }
+            return local;
+        }, this::openHeapDump, e -> JOptionPane.showMessageDialog(this, "Could not copy the heap dump: "
+                + e.getMessage() + "\nIt stays on " + there.host() + " at " + there.path(), "Heap Dump",
+                JOptionPane.WARNING_MESSAGE), () -> { });
+    }
+
+    /** Asks how to sign in to the JVM's machine over SSH; null: leave the dump there. */
+    private logsift.core.RemoteMirror.Target askSshForDump(logsift.jvm.JmxJvms.DumpOnServer there) {
+        java.util.prefs.Preferences p = PREFS;
+        javax.swing.JTextField host = new javax.swing.JTextField(there.host(), 20);
+        javax.swing.JTextField port = new javax.swing.JTextField("22", 4);
+        javax.swing.JTextField user = new javax.swing.JTextField(p.get("remote.user", System.getProperty("user.name")), 12);
+        javax.swing.JRadioButton usePw = new javax.swing.JRadioButton("Password");
+        javax.swing.JRadioButton useKey = new javax.swing.JRadioButton("Private key");
+        javax.swing.ButtonGroup g = new javax.swing.ButtonGroup();
+        g.add(usePw);
+        g.add(useKey);
+        javax.swing.JPasswordField pw = new javax.swing.JPasswordField(16);
+        Path defKey = java.util.stream.Stream.of("id_ed25519", "id_ecdsa", "id_rsa")
+                .map(n -> Path.of(System.getProperty("user.home"), ".ssh", n)).filter(Files::isRegularFile)
+                .findFirst().orElse(null);
+        javax.swing.JTextField key = new javax.swing.JTextField(p.get("remote.key", defKey == null ? "" : defKey.toString()), 24);
+        javax.swing.JPasswordField phrase = new javax.swing.JPasswordField(12);
+        phrase.putClientProperty("JTextField.placeholderText", "key passphrase, if any");
+        (key.getText().isEmpty() ? usePw : useKey).setSelected(true);
+        JPanel form = new JPanel(new java.awt.GridBagLayout());
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.insets = new java.awt.Insets(3, 4, 3, 4);
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        Object[][] rows = {{"Host", host}, {"Port", port}, {"User", user}, {usePw, pw}, {useKey, key}, {"", phrase}};
+        for (int r = 0; r < rows.length; r++) {
+            c.gridy = r;
+            c.gridx = 0;
+            form.add(rows[r][0] instanceof String s0 ? new JLabel(s0) : (java.awt.Component) rows[r][0], c);
+            c.gridx = 1;
+            form.add((java.awt.Component) rows[r][1], c);
+        }
+        javax.swing.JTextField where = new javax.swing.JTextField(there.path());
+        where.setEditable(false);
+        Object[] msg = {"<html>Over a JMX port, the JVM writes the heap dump on its own machine. It is saved there:</html>",
+                where, "<html><br>Copy it here over SSH and open it? It is removed there once copied.</html>", form};
+        Object[] options = {"Copy Here", "Leave It There"};
+        int answer = JOptionPane.showOptionDialog(this, msg, "Heap Dump on " + there.host(), JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+        if (answer != 0) {
+            return null;
+        }
+        p.put("remote.user", user.getText().trim());
+        if (useKey.isSelected()) {
+            p.put("remote.key", key.getText().trim());
+        }
+        int portNo;
+        try {
+            portNo = Integer.parseInt(port.getText().trim());
+        } catch (NumberFormatException e) {
+            portNo = 22;
+        }
+        return new logsift.core.RemoteMirror.Target(host.getText().trim(), portNo, user.getText().trim(), "",
+                usePw.isSelected() ? new String(pw.getPassword()) : null,
+                useKey.isSelected() && !key.getText().isBlank() ? Path.of(key.getText().trim()) : null,
+                useKey.isSelected() ? new String(phrase.getPassword()) : null);
+    }
+
     /** Opens a Heap tab for a running JVM. */
     HeapTab openHeap(String source, logsift.jvm.Profiler.Target target) {
         HeapTab tab = new HeapTab(source, target);
         tab.onDumpSaved(this::openHeapDump); // a dump just saved is opened to look at
+        tab.onDumpOnServer(this::copyDumpFromServer);
         tabs.addTab(tab.title(), Icons.of("memory-stick"), tab);
         tabs.setSelectedIndex(tabs.getTabCount() - 1);
         tab.onChanged(() -> {

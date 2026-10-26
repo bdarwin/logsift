@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Heap dumps over a JMX port:** **Save Heap Dump…** works for a JVM reached through its JMX port. The JVM writes the dump on its own machine; Logsift offers to copy it here over SSH (the host filled in), opens it and removes it there, or says where it is. A JVM on this computer writes it straight to the file you chose.
 - **GC logs explained:** open a Java GC log (Java 8 to 25; G1, Parallel, Serial, CMS, ZGC, Shenandoah) and **Analyze GC** says how much of the time the program stood still, the longest pauses and why, whether the memory left after GC keeps growing, and what went wrong (full collections, evacuation failures, concurrent mode failures, allocation stalls, System.gc() calls, pauses that waited for the machine), each with what to try. Charts of the heap, pauses, allocation and time in GC zoom together; a click shows the line in the log. Also **JVM → Open GC Log…**.
 - **Find in a zip:** a zip's tab has a **Find in all files** box (Ctrl+F goes there) that searches every file in the zip, whatever it is called (a `.csv` too, not only `*.log`). Search in Folder from a zip's tab searches that zip.
 - **Folder search results:** **Filter results by file name**, and **Expand All** / **Collapse All**, above the results.

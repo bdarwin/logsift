@@ -387,14 +387,18 @@ public final class Profiler {
                 return session.diagnostic(command, args);
             }
 
+            /**
+             * On this computer: straight to {@code local}. On another: in the JVM's temporary
+             * folder there, then {@link JmxJvms.DumpOnServer} says where (to copy it over SSH).
+             */
             @Override
             public void heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
-                throw new IOException(JmxJvms.HEAP_DUMP);
-            }
-
-            @Override
-            public String noHeapDump() {
-                return JmxJvms.HEAP_DUMP;
+                if (session.isLocal()) {
+                    session.dumpTo(local.toAbsolutePath().toString(), true);
+                    return;
+                }
+                String host = session.machine() == null ? session.address().label() : session.machine();
+                throw new JmxJvms.DumpOnServer(host, session.heapDumpThere(true));
             }
         };
     }
