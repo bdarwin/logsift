@@ -475,18 +475,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         // reading the sample can be slow on a network drive: do it off the UI thread
         detectingGeneration = gen;
         DETECT.execute(() -> {
-            String[] sample = new String[(int) Math.min(n, 2000)];
-            doc.readLines(0, sample.length, sample);
-            List<String> lines = java.util.Arrays.asList(sample);
-            int year = java.time.Year.now().getValue();
-            try {
-                year = java.time.Instant.ofEpochMilli(java.nio.file.Files.getLastModifiedTime(doc.path())
-                        .toMillis()).atZone(java.time.ZoneId.systemDefault()).getYear();
-            } catch (IOException e) {
-                // keep this year
-            }
-            logsift.core.Formats.Detected d = logsift.core.Formats.detect(lines, AppState.customFormats(),
-                    path.getFileName() == null ? "" : path.getFileName().toString(), formatChoice, year);
+            logsift.core.Formats.Detected d = logsift.core.LogAnalysis.detect(doc, n, AppState.customFormats(),
+                    path.getFileName() == null ? "" : path.getFileName().toString(), formatChoice);
             SwingUtilities.invokeLater(() -> applyDetected(gen, d.entries(), d.columns(), d.times()));
         });
     }
@@ -802,33 +792,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return e;
     }
 
-    /** The usual words of each level, like ERROR, FATAL, SEVERE and CRITICAL for errors. */
-    private static List<String> levelWords(String level) {
-        int i = java.util.Arrays.asList("ERROR", "WARN", "INFO", "DEBUG", "TRACE").indexOf(level);
-        return i < 0 ? List.of() : List.of(FilterPanel.LEVEL_WORDS[i]);
-    }
-
-    /**
-     * Searches for lines of these levels: with the user's format, by its level column (so "E" or
-     * "error" count too); otherwise by the usual words (whole word, exact case).
-     */
+    /** Searches for lines of these levels (see {@link logsift.core.LogAnalysis#configureLevelSearch}). */
     private static void configureLevelSearch(FilterEngine e, List<String> levels, logsift.core.LogFormat format) {
-        List<FilterEngine.Spec> specs = new ArrayList<>();
-        List<Character> ids = new ArrayList<>();
-        String regex = logsift.core.Levels.lineRegex(format, levels);
-        if (regex != null) {
-            specs.add(new FilterEngine.Spec('A', new SearchQuery(regex, true, true, false)));
-            ids.add('A');
-        } else {
-            for (String level : levels) {
-                for (String w : levelWords(level)) {
-                    char id = (char) ('A' + ids.size());
-                    specs.add(new FilterEngine.Spec(id, new SearchQuery(w, true, false, true)));
-                    ids.add(id);
-                }
-            }
-        }
-        e.configure(specs, Formula.auto(ids, List.of()));
+        logsift.core.LogAnalysis.configureLevelSearch(e, levels, format);
     }
 
     private OverviewBar.Model overviewModel() {
@@ -1631,26 +1597,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     logsift.core.Metrics found = me;
                     SwingUtilities.invokeLater(() -> metrics.useResult(found));
                 }
-                logsift.core.TimeFormat tf = timeFormat;
-                logsift.core.TimeIndex ti = timeIndex;
-                logsift.core.TimeIndex.Samples s = ti == null || tf == null ? null : ti.samples();
-                long lastTime = logsift.core.TimeFormat.NONE;
-                if (tf != null) {
-                    for (long l = n - 1; l >= 0 && l > n - 200 && lastTime == logsift.core.TimeFormat.NONE; l--) {
-                        String text = doc.line(l);
-                        lastTime = text == null ? logsift.core.TimeFormat.NONE : tf.parse(text);
-                    }
-                }
-                FilterResult errs = errorLines.result();
-                FilterResult warns = warningLines.result();
-                java.util.function.LongUnaryOperator lineTime = tf == null ? null : line -> {
-                    String text = doc.line(line);
-                    return text == null ? logsift.core.TimeFormat.NONE : tf.parse(text);
-                };
-                return logsift.core.Insights.analyze(new logsift.core.Insights.Input(n,
-                        s == null ? new long[0] : s.lines(), s == null ? null : s.times(), s == null ? 0 : s.n(),
-                        lastTime, matchingLines(errs), errs.matchCount(), matchingLines(warns), warns.matchCount(),
-                        m, lineTime), ex, me);
+                return logsift.core.Insights.analyze(logsift.core.LogAnalysis.insightsInput(doc, n, timeFormat,
+                        timeIndex, errorLines.result(), warningLines.result(), m), ex, me);
             }
 
             @Override
@@ -1802,39 +1750,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
      */
     logsift.core.Metrics measure(logsift.core.MessageStats.Result m, java.util.function.BooleanSupplier stop) {
         java.util.function.BooleanSupplier halt = () -> stop.getAsBoolean() || closed;
-        logsift.core.Metrics me = logsift.core.Metrics.analyze(m.templates(), (t, c) -> templateLines(t, halt),
-                logsift.core.RequestTrace.reader(doc::line, timeFormat, logFormat), halt);
-        if (me == null || halt.getAsBoolean()) {
-            return null;
-        }
-        List<logsift.core.Numbers.Series> cols = logsift.core.ColumnMetrics.analyze(logFormat, doc.lineCount(),
-                doc::line, timeFormat, halt);
-        return halt.getAsBoolean() ? null : me.withColumns(cols);
-    }
-
-    /** The first lines of entries of a message kind (null if cancelled). */
-    private long[] templateLines(logsift.core.MessageStats.Template t, java.util.function.BooleanSupplier stop) {
-        SearchSession s = new SearchSession(doc, new SearchQuery(t.regex(), true, true, false)).start();
-        try {
-            while (!s.awaitIdle(200)) {
-                if (stop.getAsBoolean()) {
-                    return null;
-                }
-            }
-            HitList h = s.hits();
-            logsift.core.EntryFormat ef = entryFormat;
-            long[] out = new long[h.size()];
-            int k = 0;
-            for (int i = 0; i < out.length; i++) {
-                long line = h.get(i);
-                if (ef == null || i > 50_000 || ef.startsEntry(doc.line(line) == null ? "" : doc.line(line))) {
-                    out[k++] = line; // a stack trace line that happens to look the same is not one
-                }
-            }
-            return k == out.length ? out : java.util.Arrays.copyOf(out, k);
-        } finally {
-            s.close();
-        }
+        return logsift.core.LogAnalysis.metrics(doc, () -> entryFormat, timeFormat, logFormat, m, halt);
     }
 
     private MetricsPanel.Host metricsHost() {
@@ -1889,37 +1805,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     /** Finds and groups the log's exceptions (null if cancelled). */
     logsift.core.Exceptions.Result analyzeExceptions(java.util.function.BooleanSupplier stop,
                                                      java.util.function.DoubleConsumer progress) {
-        List<SearchSession> sessions = new ArrayList<>();
-        try {
-            for (String re : logsift.core.Exceptions.STACK_SEARCHES) {
-                sessions.add(new SearchSession(doc, new SearchQuery(re, true, true, false)).start());
-            }
-            for (SearchSession s : sessions) {
-                while (!s.awaitIdle(200)) {
-                    if (stop.getAsBoolean() || closed) {
-                        return null;
-                    }
-                }
-            }
-            int total = 0;
-            for (SearchSession s : sessions) {
-                total += s.hits().size();
-            }
-            long[] lines = new long[Math.min(total, 20_000_000)];
-            int k = 0;
-            for (SearchSession s : sessions) {
-                HitList h = s.hits();
-                for (int i = 0; i < h.size() && k < lines.length; i++) {
-                    lines[k++] = h.get(i);
-                }
-            }
-            java.util.Arrays.sort(lines, 0, k);
-            logsift.core.EntryFormat ef = entryFormat;
-            return logsift.core.Exceptions.analyze(lines, k, doc::line, ef == null ? null : ef::startsEntry,
-                    () -> stop.getAsBoolean() || closed, progress);
-        } finally {
-            sessions.forEach(SearchSession::close);
-        }
+        return logsift.core.LogAnalysis.exceptions(doc, entryFormat, () -> stop.getAsBoolean() || closed, progress);
     }
 
     private ExceptionsPanel.Host exceptionsHost() {
@@ -1968,20 +1854,6 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 bottom.setTitleAt(i, kinds == 0 ? "Exceptions" : "Exceptions (" + kinds + ")");
             }
         };
-    }
-
-    /** The lines that match (sorted), at most five million. */
-    private static long[] matchingLines(FilterResult r) {
-        long n = Math.min(r.count(), 5_000_000);
-        long[] out = new long[(int) n];
-        int k = 0;
-        for (long row = 0; row < n; row++) {
-            long line = r.lineAt(row);
-            if (r.isMatch(line)) {
-                out[k++] = line;
-            }
-        }
-        return k == out.length ? out : java.util.Arrays.copyOf(out, k);
     }
 
     private MessagesPanel.Host messagesHost() {

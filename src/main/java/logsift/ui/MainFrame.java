@@ -1787,17 +1787,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 }
                 Thread.sleep(50);
             }
-            logsift.jvm.GcLog log = logsift.jvm.GcLog.parse(new logsift.jvm.GcLog.Lines() {
-                @Override
-                public long count() {
-                    return doc.lineCount();
-                }
-
-                @Override
-                public void read(long first, int n, String[] out) {
-                    doc.readLines(first, n, out);
-                }
-            }, progress::accept, cancelled::getAsBoolean);
+            logsift.jvm.GcLog log = logsift.jvm.GcLog.parse(logsift.jvm.GcLog.of(doc), progress::accept,
+                    cancelled::getAsBoolean);
             return logsift.jvm.GcReport.of(log);
         }, report -> {
             if (report.log().events().isEmpty()) {

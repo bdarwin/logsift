@@ -20,6 +20,16 @@ public final class Levels {
     public static final String DEBUG = "DEBUG";
     public static final String TRACE = "TRACE";
 
+    /** The usual words of each level in plain text, ERROR first: like FATAL, SEVERE and CRITICAL for errors. */
+    public static final String[][] WORDS = {{"ERROR", "FATAL", "SEVERE", "CRITICAL"},
+        {"WARN", "WARNING"}, {"INFO", "NOTICE"}, {"DEBUG"}, {"TRACE"}};
+
+    /** The usual words of a level (ERROR, WARN, INFO, DEBUG or TRACE); none for another one. */
+    public static List<String> words(String level) {
+        int i = java.util.Arrays.asList(ERROR, WARN, INFO, DEBUG, TRACE).indexOf(level);
+        return i < 0 ? List.of() : List.of(WORDS[i]);
+    }
+
     private static final Map<String, List<String>> SPELLINGS = Map.of(
             ERROR, List.of("ERROR", "ERR", "E", "FATAL", "FTL", "F", "SEVERE", "CRITICAL", "CRIT", "ALERT",
                     "EMERGENCY", "EMERG"),
