@@ -184,6 +184,11 @@ final class JvmConnector {
         }
 
         @Override
+        public void setDumpFolder(String folder) {
+            t().setDumpFolder(folder);
+        }
+
+        @Override
         public String noHeapDump() {
             return t().noHeapDump();
         }

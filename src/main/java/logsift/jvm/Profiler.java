@@ -140,6 +140,10 @@ public final class Profiler {
          */
         String heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException;
 
+        /** The folder on the JVM's machine to write heap dumps to (null: its temporary folder). */
+        default void setDumpFolder(String folder) {
+        }
+
         /** Why heap dumps can't be saved here, or null if they can. */
         default String noHeapDump() {
             return null;
@@ -170,6 +174,16 @@ public final class Profiler {
 
         /** Removes a temporary file Logsift made here (on this computer only: never on a server). */
         void remove(String file);
+
+        /** {free bytes, 1 if in memory (tmpfs)} of the disk of a folder there; {-1, 0} if unknown. */
+        default long[] room(String folder) throws IOException {
+            return new long[] {-1, 0};
+        }
+
+        /** The separator of paths there. */
+        default String separator() {
+            return "/";
+        }
 
         /** Where a temporary file stays (on a server, where nothing is removed), or null when it is removed. */
         default String keptAt(String file) {
@@ -262,6 +276,17 @@ public final class Profiler {
                     // a temp file
                 }
             }
+
+            @Override
+            public long[] room(String folder) throws IOException {
+                java.nio.file.FileStore fs = Files.getFileStore(Path.of(folder));
+                return new long[] {fs.getUsableSpace(), fs.type().equals("tmpfs") || fs.type().equals("ramfs") ? 1 : 0};
+            }
+
+            @Override
+            public String separator() {
+                return java.io.File.separator;
+            }
         });
     }
 
@@ -350,6 +375,11 @@ public final class Profiler {
             }
 
             @Override
+            public long[] room(String folder) throws IOException {
+                return ssh.room(folder);
+            }
+
+            @Override
             public String keptAt(String file) {
                 return file + " on " + ssh.label().substring(ssh.label().indexOf('@') + 1);
             }
@@ -433,6 +463,12 @@ public final class Profiler {
     private static final class ShellTarget implements Target {
         private final Shell sh;
         private List<String> hardware;
+        private volatile String dumpFolder;
+
+        @Override
+        public void setDumpFolder(String folder) {
+            dumpFolder = folder == null || folder.isBlank() ? null : folder.trim();
+        }
 
         ShellTarget(Shell sh) {
             this.sh = sh;
@@ -599,7 +635,24 @@ public final class Profiler {
 
         @Override
         public String heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
-            String file = sh.tempFile(".hprof");
+            String sep = sh.separator();
+            String file = dumpFolder == null ? sh.tempFile(".hprof")
+                    : (dumpFolder.endsWith(sep) ? dumpFolder : dumpFolder + sep) + "logsift-"
+                    + Long.toHexString(System.nanoTime()) + ".hprof";
+            // room first: the file is about as big as the heap in use, and a full disk (or memory, for a
+            // /tmp in memory) hurts the service
+            String folder = file.substring(0, Math.max(1, file.lastIndexOf(sep)));
+            long used;
+            try {
+                used = HeapHistogram.heapUsed(sh.diagnostic("GC.heap_info"));
+            } catch (IOException e) {
+                used = -1;
+            }
+            long[] room = sh.room(folder);
+            long need = used < 0 ? -1 : used + (256L << 20);
+            if (room[1] == 1 || need > 0 && room[0] >= 0 && room[0] < need) {
+                throw new NoRoom(folder, room[0], need, room[1] == 1);
+            }
             try {
                 String out = sh.diagnostic("GC.heap_dump", file);
                 if (out.toLowerCase(Locale.ROOT).contains("error") || out.toLowerCase(Locale.ROOT).contains("failed")) {
@@ -615,6 +668,41 @@ public final class Profiler {
             String kept = sh.keptAt(file);
             return kept == null ? null : "The dump also stays at " + kept + " (Logsift doesn't remove files on a"
                     + " server): remove it there when you are done.";
+        }
+    }
+
+    /** There isn't room on the JVM's machine for a heap dump where it would be written. */
+    public static final class NoRoom extends IOException {
+        private final String folder;
+        private final long free;
+        private final long need;
+        private final boolean inMemory;
+
+        NoRoom(String folder, long free, long need, boolean inMemory) {
+            super(inMemory ? folder + " is in memory (tmpfs): a heap dump there would take memory from the service"
+                    : "not enough room in " + folder + " for a heap dump: " + (free >> 20) + " MB free, it needs about "
+                    + (need >> 20) + " MB");
+            this.folder = folder;
+            this.free = free;
+            this.need = need;
+            this.inMemory = inMemory;
+        }
+
+        public String folder() {
+            return folder;
+        }
+
+        public long free() {
+            return free;
+        }
+
+        /** Bytes the dump may take (the heap in use, and a margin), or -1. */
+        public long need() {
+            return need;
+        }
+
+        public boolean inMemory() {
+            return inMemory;
         }
     }
 

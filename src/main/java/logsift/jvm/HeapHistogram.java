@@ -114,4 +114,34 @@ public record HeapHistogram(long time, List<Row> rows, long instances, long byte
         };
         return base + "[]".repeat(dims);
     }
+
+    /**
+     * The heap in use, in bytes, from {@code GC.heap_info} (every collector words it its own way:
+     * "garbage-first heap total 262144K, used 123456K", "PSYoungGen … used 1310K" and "ParOldGen …
+     * used 0K", "ZHeap used 34M", Shenandoah's "34M used"); metaspace left out. -1 if not found.
+     */
+    public static long heapUsed(String heapInfo) {
+        if (heapInfo == null) {
+            return -1;
+        }
+        java.util.regex.Pattern after = java.util.regex.Pattern.compile("used (\\d+)([KMG])\\b");
+        java.util.regex.Pattern before = java.util.regex.Pattern.compile("(\\d+)([KMG]) used\\b");
+        long sum = 0;
+        boolean any = false;
+        for (String line : heapInfo.split("\n")) {
+            String l = line.strip();
+            if (l.startsWith("Metaspace") || l.startsWith("class space") || l.startsWith("Shenandoah Metaspace")) {
+                continue;
+            }
+            for (java.util.regex.Pattern p : new java.util.regex.Pattern[] {after, before}) {
+                java.util.regex.Matcher m = p.matcher(l);
+                while (m.find()) {
+                    long n = Long.parseLong(m.group(1));
+                    sum += n << (m.group(2).equals("K") ? 10 : m.group(2).equals("M") ? 20 : 30);
+                    any = true;
+                }
+            }
+        }
+        return any ? sum : -1;
+    }
 }

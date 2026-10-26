@@ -119,7 +119,7 @@ public final class LocalJvms {
             cmd.add(String.valueOf(pid));
             cmd.add(command);
             cmd.addAll(List.of(args));
-            return run(cmd, 60);
+            return run(cmd, SshJvms.timeoutOf(command, 60));
         }
 
         @Override

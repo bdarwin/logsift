@@ -321,6 +321,33 @@ final class HeapTab extends JPanel {
         heapDump(ch.getSelectedFile().toPath());
     }
 
+    /**
+     * Where to write the dump instead when there is no room where it would go (a folder on the JVM's
+     * machine), or null to leave it. Tests replace it.
+     */
+    java.util.function.Function<logsift.jvm.Profiler.NoRoom, String> noRoomAnswer = this::askDumpFolder;
+
+    private String askDumpFolder(logsift.jvm.Profiler.NoRoom n) {
+        String why = n.inMemory()
+                ? n.folder() + " on that machine is in memory (tmpfs): a heap dump there would take memory the service"
+                + " may need."
+                : "There isn't room in " + n.folder() + " on that machine: " + bytes(Math.max(0, n.free())) + " free, and"
+                + " the dump takes about " + bytes(n.need()) + " (the heap in use). Filling that disk would hurt the"
+                + " service too.";
+        javax.swing.JTextField folder = new javax.swing.JTextField(AppState.prefs().get("heap.dumpFolder", ""), 30);
+        folder.putClientProperty("JTextField.placeholderText", "a folder on that machine with room, e.g. /data/tmp");
+        Object[] msg = {"<html><div style='width:420px'>" + why + "<br><br>Nothing was written. Write it to another"
+                + " folder on that machine? (The JVM's user must be able to write there.)</div></html>", folder};
+        Object[] options = {"Write It There", "Cancel"};
+        int r = JOptionPane.showOptionDialog(this, msg, "No Room for the Heap Dump", JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE, null, options, options[0]);
+        if (r != 0 || folder.getText().isBlank()) {
+            return null;
+        }
+        AppState.prefs().put("heap.dumpFolder", folder.getText().trim());
+        return folder.getText().trim();
+    }
+
     /** Off in tests: the note about a copy left on the server is only in the status then. */
     static boolean showNotes = !Boolean.getBoolean("logsift.visual.noNotes");
 
@@ -339,6 +366,16 @@ final class HeapTab extends JPanel {
                     bar.setValue((int) Math.round(f * 1000));
                     status.setText("Copying the heap dump… " + Math.round(f * 100) + "%");
                 }), cancel::get);
+            } catch (logsift.jvm.Profiler.NoRoom noRoom) {
+                SwingUtilities.invokeLater(() -> {
+                    setWorking(false, "Not saved: " + noRoom.getMessage());
+                    String folder = noRoomAnswer.apply(noRoom);
+                    if (folder != null) {
+                        target.setDumpFolder(folder);
+                        heapDump(file);
+                    }
+                });
+                return;
             } catch (logsift.jvm.JmxJvms.DumpOnServer there) {
                 SwingUtilities.invokeLater(() -> {
                     setWorking(false, "Saved on " + there.host() + ": " + there.path());

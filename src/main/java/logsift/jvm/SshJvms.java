@@ -252,8 +252,9 @@ public final class SshJvms implements AutoCloseable {
     public String diagnostic(JvmProcess p, Options o, String... command) throws IOException {
         List<String> problems = new ArrayList<>();
         String jcmd = jcmd(p, o);
+        int timeout = timeoutOf(command.length == 0 ? "" : command[0], 120);
         if (jcmd != null) {
-            Result r = run(p, o, false, q(jcmd) + " " + p.pid() + " " + words(command), 120);
+            Result r = run(p, o, false, q(jcmd) + " " + p.pid() + " " + words(command), timeout);
             if (r.exit() == 0 && !r.out().isBlank()) {
                 return r.out();
             }
@@ -261,7 +262,7 @@ public final class SshJvms implements AutoCloseable {
         }
         String asprof = asprof();
         if (asprof != null) {
-            Result r = run(p, o, true, q(asprof) + " jcmd " + p.pid() + " " + words(command), 120);
+            Result r = run(p, o, true, q(asprof) + " jcmd " + p.pid() + " " + words(command), timeout);
             if (r.exit() == 0 && !r.out().isBlank()) {
                 return r.out();
             }
@@ -274,6 +275,32 @@ public final class SshJvms implements AutoCloseable {
                     : "no jcmd in " + o.jdkHome());
         }
         throw new IOException(String.join("; ", problems));
+    }
+
+    /**
+     * How long to wait for a diagnostic command: a heap dump of a big heap takes minutes (giving up
+     * early would say it failed while the JVM still writes it), a histogram walks the whole heap.
+     */
+    public static int timeoutOf(String command, int usual) {
+        return switch (command) {
+            case "GC.heap_dump" -> 3600;
+            case "GC.class_histogram" -> 900;
+            default -> usual;
+        };
+    }
+
+    /**
+     * Free bytes on the disk of a folder on the server, and whether that disk is in memory
+     * (tmpfs): {free, 1 if in memory}. {-1, 0} if unknown.
+     */
+    public long[] room(String folder) throws IOException {
+        Result r = exec("df -Pk " + q(folder) + " 2>/dev/null | awk 'NR==2 {print $1, $4 * 1024}'", null, 30);
+        String[] w = r.out().trim().split("\\s+");
+        try {
+            return new long[] {Long.parseLong(w[1]), w[0].equals("tmpfs") || w[0].equals("ramfs") ? 1 : 0};
+        } catch (RuntimeException e) {
+            return new long[] {-1, 0};
+        }
     }
 
     private static String words(String... command) {

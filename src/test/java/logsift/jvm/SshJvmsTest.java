@@ -182,17 +182,55 @@ class SshJvmsTest {
             List<Profile> all = t.run(Profiler.Request.of(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.ALL, 2),
                     null, () -> false);
             assertTrue(all.size() > 1, "several views: " + all.stream().map(Profile::title).toList());
+            cleanUpLeft(all.get(0).warnings());
         }
-        // Flight Recorder: recorded on the server, copied back over SFTP
-        ProfilerTest.checkFixtureSampled(t.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.CPU, 2), null,
-                () -> false).get(0));
+        // Flight Recorder: recorded on the server, copied back over SFTP (and left there, as it says)
+        Profile jfr = t.run(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.CPU, 2), null, () -> false).get(0);
+        ProfilerTest.checkFixtureSampled(jfr);
+        assertTrue(jfr.warnings().stream().anyMatch(w -> w.contains("stays at /tmp/logsift-")), jfr.warnings().toString());
+        cleanUpLeft(jfr.warnings());
         // the heap: a histogram, and a heap dump copied back
         assertTrue(HeapHistogram.parse(t.diagnostic("GC.class_histogram"), 0).rows().size() > 100);
         Path hprof = dir.resolve("remote.hprof");
         double[] progress = {0};
-        t.heapDump(hprof, f -> progress[0] = f, () -> false);
+        String note = t.heapDump(hprof, f -> progress[0] = f, () -> false);
         assertTrue(Files.size(hprof) > 1_000_000);
         assertEquals(1.0, progress[0], 0.001);
+        assertTrue(note != null && note.contains("stays at /tmp/logsift-"), "the dump stays on the server: " + note);
+        cleanUpLeft(List.of(note));
+        // no room, or a folder in memory: refused before anything is written
+        Path full = Files.createDirectories(dir.resolve("full"));
+        Path mem = Files.createDirectories(dir.resolve("memdisk"));
+        Path df = dir.resolve("bin/df");
+        Files.writeString(df, "#!/bin/sh\ncase \"$*\" in\n"
+                + "  *full*) printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\n/dev/x 100 99 1 99%% /x\\n' ;;\n"
+                + "  *memdisk*) printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\ntmpfs 9999999 1 9999998 1%% /m\\n' ;;\n"
+                + "  *) exec /bin/df \"$@\" ;;\nesac\n");
+        df.toFile().setExecutable(true);
+        try {
+            t.setDumpFolder(full.toString());
+            Profiler.NoRoom noRoom = org.junit.jupiter.api.Assertions.assertThrows(Profiler.NoRoom.class,
+                    () -> t.heapDump(dir.resolve("x.hprof"), null, () -> false));
+            assertTrue(noRoom.need() > 0 && noRoom.free() == 1024 && !noRoom.inMemory(), noRoom.getMessage());
+            try (var left = Files.list(full)) {
+                assertEquals(0, left.count(), "nothing written");
+            }
+            t.setDumpFolder(mem.toString());
+            assertTrue(org.junit.jupiter.api.Assertions.assertThrows(Profiler.NoRoom.class,
+                    () -> t.heapDump(dir.resolve("y.hprof"), null, () -> false)).inMemory());
+            t.setDumpFolder(null);
+        } finally {
+            Files.delete(df);
+        }
+    }
+
+    /** The "server" of these tests is this computer: the test removes what Logsift left there (Logsift doesn't). */
+    private static void cleanUpLeft(List<String> notes) throws java.io.IOException {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(/tmp/logsift-[0-9a-f]+\\.(?:hprof|jfr))").matcher(
+                String.join(" ", notes));
+        while (m.find()) {
+            Files.deleteIfExists(Path.of(m.group(1)));
+        }
     }
 
     @Test
