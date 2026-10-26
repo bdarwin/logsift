@@ -46,6 +46,7 @@ import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 import logsift.heap.HeapDump;
+import logsift.heap.HeapModel;
 import logsift.heap.HeapFindings;
 import logsift.heap.HeapWaste;
 
@@ -58,6 +59,51 @@ import logsift.heap.HeapWaste;
 final class HeapDumpTab extends JPanel {
     private static final int KIDS = 200; // children shown per tree level
 
+    /** Where a dump comes from: a file here, or one read on a server. */
+    interface Source {
+        /** The name in the tab's title. */
+        String name();
+
+        /** The file, for one on this computer; else null. */
+        Path file();
+
+        HeapModel open(HeapDump.Listener progress, java.util.function.BooleanSupplier cancel) throws Exception;
+
+        /** When the tab closes. */
+        default void closed(HeapModel m) {
+            m.close();
+        }
+    }
+
+    /** A dump on this computer (its index on disk when it is big). */
+    static Source local(Path file) {
+        return new Source() {
+            @Override
+            public String name() {
+                return file.getFileName().toString();
+            }
+
+            @Override
+            public Path file() {
+                return file;
+            }
+
+            @Override
+            public HeapModel open(HeapDump.Listener progress, java.util.function.BooleanSupplier cancel)
+                    throws Exception {
+                long size = Files.size(file);
+                String room = HeapDump.roomProblem(AppState.home().resolve("heap-index"), size);
+                if (room != null) {
+                    throw new java.io.IOException(room);
+                }
+                Path work = HeapDump.needsDisk(size)
+                        ? AppState.home().resolve("heap-index").resolve(java.util.UUID.randomUUID().toString()) : null;
+                return HeapDump.open(file, work, progress, cancel);
+            }
+        };
+    }
+
+    private final Source source;
     private final Path file;
     private final AtomicBoolean cancel = new AtomicBoolean();
     private Runnable changed = () -> { };
@@ -65,7 +111,7 @@ final class HeapDumpTab extends JPanel {
     private final JButton threadsButton = new JButton("Threads", Icons.of("cpu"));
     private final JButton compareButton = new JButton("Compare with Another Dump…", Icons.of("git-compare"));
     private Runnable compare = () -> { };
-    private volatile HeapDump dump;
+    private volatile HeapModel dump;
     private String status = "Reading…";
 
     private final CardLayout cards = new CardLayout();
@@ -99,8 +145,13 @@ final class HeapDumpTab extends JPanel {
     private int selected = -1;
 
     HeapDumpTab(Path file) {
+        this(local(file));
+    }
+
+    HeapDumpTab(Source source) {
         super(new BorderLayout());
-        this.file = file;
+        this.source = source;
+        this.file = source.file();
         setLayout(cards);
         add(loadingPanel(), "loading");
         add(mainPanel(), "main");
@@ -109,7 +160,7 @@ final class HeapDumpTab extends JPanel {
     }
 
     String title() {
-        return "Heap: " + file.getFileName();
+        return "Heap: " + source.name();
     }
 
     String statusText() {
@@ -141,16 +192,16 @@ final class HeapDumpTab extends JPanel {
         return file;
     }
 
-    HeapDump dumpForTest() {
+    HeapModel dumpForTest() {
         return dump;
     }
 
     void close() {
         cancel.set(true);
-        HeapDump d = dump;
+        HeapModel d = dump;
         dump = null;
         if (d != null) {
-            d.close();
+            source.closed(d);
         }
     }
 
@@ -186,24 +237,16 @@ final class HeapDumpTab extends JPanel {
     private void start() {
         Thread t = new Thread(() -> {
             try {
-                long size = Files.size(file);
-                String room = HeapDump.roomProblem(AppState.home().resolve("heap-index"), size);
-                if (room != null) {
-                    SwingUtilities.invokeLater(() -> failed(room));
-                    return;
-                }
-                Path work = HeapDump.needsDisk(size)
-                        ? AppState.home().resolve("heap-index").resolve(java.util.UUID.randomUUID().toString()) : null;
-                HeapDump d = HeapDump.open(file, work, (stage, f) -> SwingUtilities.invokeLater(() -> {
+                HeapModel d = source.open((stage, f) -> SwingUtilities.invokeLater(() -> {
                     loadingText.setText(stage + "…");
                     bar.setValue((int) Math.round(f * 1000));
                     status = stage + "… " + Math.round(f * 100) + "%";
                     changed.run();
                 }), cancel::get);
-                List<HeapFindings.Finding> found = HeapFindings.of(d);
+                List<HeapFindings.Finding> found = d.findings();
                 SwingUtilities.invokeLater(() -> {
                     if (cancel.get()) {
-                        d.close();
+                        source.closed(d);
                         return;
                     }
                     dump = d;
@@ -364,26 +407,25 @@ final class HeapDumpTab extends JPanel {
     }
 
     private void show(List<HeapFindings.Finding> found) {
-        HeapDump d = dump;
+        HeapModel d = dump;
         map = new HeapTreemap(d, this::select);
         mapSlot.add(map, BorderLayout.CENTER);
         String when = d.timestamp() > 0 ? " · taken " + DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
                 .format(Instant.ofEpochMilli(d.timestamp()).atZone(ZoneId.systemDefault())) : "";
-        long size = 0;
-        try {
-            size = Files.size(file);
-        } catch (java.io.IOException e) {
-            // shown without
-        }
-        header.setText("<html><span style='font-size:1.15em'><b>" + esc(file.getFileName().toString()) + "</b></span>"
+        long size = d.fileBytes();
+        header.setText("<html><span style='font-size:1.15em'><b>" + esc(source.name()) + "</b></span>"
                 + "&nbsp;&nbsp;<span style='color:#858b94'>" + HeapFindings.bytes(size) + " file" + when + " · "
                 + String.format("%,d", d.objectCount()) + " objects · <b>" + HeapFindings.bytes(d.reachableBytes())
                 + "</b> in use" + (d.compressedPointers() ? "" : " · sizes without compressed pointers")
                 + "</span></html>");
+        if (file == null) {
+            compareButton.setEnabled(false);
+            compareButton.setToolTipText("Comparing works with two dumps on this computer for now");
+        }
         threadsButton.setText("Threads (" + d.threadCount() + ")");
         threadsButton.setEnabled(d.threadCount() > 0);
         status = HeapFindings.bytes(d.reachableBytes()) + " in use in " + String.format("%,d", d.reachableCount())
-                + " objects" + (d.isOnDisk() ? " · index on disk" : "");
+                + " objects" + (file == null ? " · read on the server" : d.isOnDisk() ? " · index on disk" : "");
 
         findings.removeAll();
         if (found.isEmpty()) {
@@ -460,7 +502,7 @@ final class HeapDumpTab extends JPanel {
 
     /** The classes with the most memory, as bars. */
     private JPanel topClasses() {
-        HeapDump d = dump;
+        HeapModel d = dump;
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setAlignmentX(LEFT_ALIGNMENT);
@@ -503,7 +545,7 @@ final class HeapDumpTab extends JPanel {
 
     /** Opens the dump's threads in the Threads view. */
     void threads() {
-        HeapDump d = dump;
+        HeapModel d = dump;
         if (d == null) {
             return;
         }
@@ -570,10 +612,10 @@ final class HeapDumpTab extends JPanel {
     }
 
     /** Works out the wasted memory in the background, then fills its tab (and a finding when it is a lot). */
-    private void startWaste(HeapDump d) {
+    private void startWaste(HeapModel d) {
         Thread t = new Thread(() -> {
             try {
-                HeapWaste.Report r = HeapWaste.of(d, (stage, f) -> SwingUtilities.invokeLater(() -> {
+                HeapWaste.Report r = d.waste((stage, f) -> SwingUtilities.invokeLater(() -> {
                     wasteWorking.setText(stage + "…");
                     wasteBar.setValue((int) Math.round(f * 1000));
                 }), () -> cancel.get() || dump != d);
@@ -592,7 +634,7 @@ final class HeapDumpTab extends JPanel {
         t.start();
     }
 
-    private void showWaste(HeapDump d, HeapWaste.Report r) {
+    private void showWaste(HeapModel d, HeapWaste.Report r) {
         waste = r;
         long heap = Math.max(1, d.reachableBytes());
         StringBuilder sb = new StringBuilder("<html><div style='width:640px'>");
@@ -709,7 +751,7 @@ final class HeapDumpTab extends JPanel {
 
     /** Fills a tree node's children (the objects it holds), once. */
     private void load(DefaultMutableTreeNode t) {
-        HeapDump d = dump;
+        HeapModel d = dump;
         if (d == null || !(t.getUserObject() instanceof Item it) || it.node < 0) {
             return;
         }
@@ -729,7 +771,7 @@ final class HeapDumpTab extends JPanel {
     }
 
     private DefaultMutableTreeNode treeNode(int v) {
-        HeapDump d = dump;
+        HeapModel d = dump;
         DefaultMutableTreeNode n = new DefaultMutableTreeNode(new Item(v, d.describe(v)));
         if (d.heldCount(v) > 0) {
             n.add(new DefaultMutableTreeNode("…"));
@@ -739,7 +781,7 @@ final class HeapDumpTab extends JPanel {
 
     /** Opens the tree down to this object and selects it. */
     void showInTree(int v) {
-        HeapDump d = dump;
+        HeapModel d = dump;
         if (d == null) {
             return;
         }
@@ -778,7 +820,7 @@ final class HeapDumpTab extends JPanel {
                                                       int row, boolean focus) {
             super.getTreeCellRendererComponent(t, value, sel, exp, leaf, row, focus);
             setIcon(null);
-            HeapDump d = dump;
+            HeapModel d = dump;
             if (d != null && value instanceof DefaultMutableTreeNode n && n.getUserObject() instanceof Item it
                     && it.node >= 0) {
                 long r = d.retained(it.node);
@@ -799,7 +841,7 @@ final class HeapDumpTab extends JPanel {
 
     /** Shows why this object is alive (the chain of references from a GC root). */
     void select(int v) {
-        HeapDump d = dump;
+        HeapModel d = dump;
         if (d == null) {
             return;
         }
@@ -824,7 +866,7 @@ final class HeapDumpTab extends JPanel {
         t.start();
     }
 
-    private static String whyHtml(HeapDump d, int v) throws java.io.IOException {
+    private static String whyHtml(HeapModel d, int v) throws java.io.IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("<p style='font-size:1.1em'><b>").append(esc(d.describe(v))).append("</b><br>")
                 .append("<span style='color:#858b94'>holds ").append(HeapFindings.bytes(d.retained(v)))
@@ -858,7 +900,7 @@ final class HeapDumpTab extends JPanel {
 
     /** Shows why the biggest object of a class is alive. */
     private void selectBiggestOf(String className) {
-        HeapDump d = dump;
+        HeapModel d = dump;
         if (d == null) {
             return;
         }

@@ -1098,7 +1098,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     HeapDumpTab openHeapDump(Path file) {
         Path abs = file.toAbsolutePath().normalize();
         for (int i = 0; i < tabs.getTabCount(); i++) {
-            if (tabs.getComponentAt(i) instanceof HeapDumpTab h && h.file().equals(abs)) {
+            if (tabs.getComponentAt(i) instanceof HeapDumpTab h && abs.equals(h.file())) {
                 tabs.setSelectedIndex(i);
                 return h;
             }
@@ -1135,6 +1135,210 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     private void openHeapDumpDialog() {
         openHeapDumpDialog(PREFS.get("lastDir", null));
+    }
+
+    // ---------------------------------------------------------------- heap dumps on servers
+
+    private RemoteDialog heapServerDialog;
+
+    /** Chooses a heap dump on a server, to read it there. */
+    private void openHeapDumpOnServerDialog() {
+        if (heapServerDialog != null && heapServerDialog.isDisplayable()) {
+            heapServerDialog.toFront();
+            return;
+        }
+        Path knownHosts = Boolean.getBoolean("logsift.noKnownHosts") ? null
+                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        heapServerDialog = new RemoteDialog(this, knownHosts, this::trustHost,
+                c -> openHeapDumpOnServer(c.target(), null), true);
+        heapServerDialog.setVisible(true);
+    }
+
+    RemoteDialog openHeapDumpOnServerDialogForTest() {
+        openHeapDumpOnServerDialog();
+        return heapServerDialog;
+    }
+
+    /**
+     * Reads a heap dump on its server: looks at what it takes, says so, and starts it when the
+     * person agrees ({@code workFolder}: where the index goes there, null for the usual place).
+     */
+    void openHeapDumpOnServer(logsift.core.RemoteMirror.Target target, String workFolder) {
+        Path knownHosts = Boolean.getBoolean("logsift.noKnownHosts") ? null
+                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        ProgressDialog.run(this, "Looking at the dump on " + target.host() + "…", (progress, cancelled) -> {
+            logsift.jvm.SshJvms ssh = logsift.jvm.SshJvms.connect(target, knownHosts, this::trustHost);
+            try {
+                return new Object[] {ssh, logsift.jvm.RemoteHeaps.plan(ssh, target.path(), workFolder)};
+            } catch (IOException | RuntimeException e) {
+                ssh.close();
+                throw e;
+            }
+        }, found -> {
+            logsift.jvm.SshJvms ssh = (logsift.jvm.SshJvms) found[0];
+            logsift.jvm.RemoteHeaps.Plan plan = (logsift.jvm.RemoteHeaps.Plan) found[1];
+            if (plan.running() == null) {
+                int choice = heapServerConfirm.applyAsInt(plan);
+                if (choice == 1) { // another folder
+                    ssh.close();
+                    String folder = JOptionPane.showInputDialog(this, "A folder on " + plan.host()
+                            + " for the index (on a disk with room):", workFolder == null ? "/tmp" : workFolder);
+                    if (folder != null && !folder.isBlank()) {
+                        openHeapDumpOnServer(target, folder.trim());
+                    }
+                    return;
+                }
+                if (choice != 0) {
+                    ssh.close();
+                    return;
+                }
+            }
+            openHeapDumpTab(new RemoteHeapSource(ssh, plan), target.label());
+        });
+    }
+
+    /** Asks before reading a dump on a server: 0 read it there, 1 another folder, else cancel (tests replace it). */
+    java.util.function.ToIntFunction<logsift.jvm.RemoteHeaps.Plan> heapServerConfirm = this::confirmHeapServer;
+
+    private int confirmHeapServer(logsift.jvm.RemoteHeaps.Plan plan) {
+        JOptionPane pane = heapServerPane(plan);
+        pane.createDialog(this, "Heap Dump on " + plan.host()).setVisible(true);
+        Object v = pane.getValue();
+        Object[] options = pane.getOptions();
+        int r = -1;
+        for (int i = 0; i < options.length; i++) {
+            if (options[i].equals(v)) {
+                r = i;
+            }
+        }
+        if (plan.problem() != null) {
+            return r == 0 ? 1 : 2;
+        }
+        return r;
+    }
+
+    /** What reading a dump on a server takes, as a question. */
+    JOptionPane heapServerPane(logsift.jvm.RemoteHeaps.Plan plan) {
+        String name = plan.dump().substring(plan.dump().lastIndexOf('/') + 1);
+        String problem = plan.problem();
+        StringBuilder sb = new StringBuilder("<html><div style='width:460px'>");
+        if (problem != null) {
+            sb.append("<b>").append(esc(name)).append(" can't be read on ").append(esc(plan.host()))
+                    .append(".</b><br><br>").append(esc(problem));
+        } else {
+            long gb = Math.max(1, plan.dumpBytes() >> 30);
+            long minutes = Math.max(1, Math.round(gb * 0.25));
+            sb.append("<b>Read ").append(esc(name)).append(" (").append(logsift.heap.HeapFindings.bytes(plan.dumpBytes()))
+                    .append(") on ").append(esc(plan.host())).append("?</b><br><br>")
+                    .append("Logsift's heap reader runs there at low priority, with Java ").append(plan.javaVersion())
+                    .append(" (").append(esc(plan.java())).append("). On that machine it takes:<ul>")
+                    .append("<li><b>Disk:</b> up to ").append(logsift.heap.HeapFindings.bytes(plan.diskNeeded()))
+                    .append(" for its index, in ").append(esc(plan.workDir()));
+            if (plan.freeBytes() >= 0) {
+                sb.append(" (").append(logsift.heap.HeapFindings.bytes(plan.freeBytes())).append(" free)");
+            }
+            sb.append("</li><li><b>Memory:</b> 2 GB");
+            if (plan.memoryBytes() >= 0) {
+                sb.append(" (").append(logsift.heap.HeapFindings.bytes(plan.memoryBytes())).append(" available");
+                if (plan.memoryBytes() < 3L << 30) {
+                    sb.append(": <b>little to spare</b>");
+                }
+                sb.append(")");
+            }
+            sb.append("</li><li><b>Time:</b> about ").append(minutes).append(minutes == 1 ? " minute" : " minutes")
+                    .append(" of one CPU core (more on a busy machine)</li>")
+                    .append("<li><b>Disk reads:</b> the whole dump, once</li></ul>")
+                    .append("It keeps going if you disconnect, and ends, removing its index, when you close the tab or ")
+                    .append("after ").append(logsift.jvm.RemoteHeaps.IDLE_MINUTES)
+                    .append(" minutes with no one connected.<br><br>")
+                    .append("<span style='color:#858b94'>On a production server, consider copying the dump to another")
+                    .append(" machine and reading it there.</span>");
+        }
+        sb.append("</div></html>");
+        Object[] options = problem != null ? new Object[] {"Use Another Folder…", "Cancel"}
+                : new Object[] {"Read It There", "Use Another Folder…", "Cancel"};
+        return new JOptionPane(sb.toString(), problem != null ? JOptionPane.WARNING_MESSAGE
+                : JOptionPane.QUESTION_MESSAGE, JOptionPane.DEFAULT_OPTION, null, options, options[0]);
+    }
+
+    private static String esc(String s) {
+        return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    /** A dump read on a server: started (or found running) there, and stopped when the tab closes. */
+    private static final class RemoteHeapSource implements HeapDumpTab.Source {
+        private final logsift.jvm.SshJvms ssh;
+        private final logsift.jvm.RemoteHeaps.Plan plan;
+
+        RemoteHeapSource(logsift.jvm.SshJvms ssh, logsift.jvm.RemoteHeaps.Plan plan) {
+            this.ssh = ssh;
+            this.plan = plan;
+        }
+
+        @Override
+        public String name() {
+            return plan.dump().substring(plan.dump().lastIndexOf('/') + 1) + " on " + plan.host();
+        }
+
+        @Override
+        public Path file() {
+            return null;
+        }
+
+        @Override
+        public logsift.heap.HeapModel open(logsift.heap.HeapDump.Listener progress,
+                                           java.util.function.BooleanSupplier cancel) throws Exception {
+            progress.progress(plan.running() != null ? "Connecting to the reader on " + plan.host()
+                    : "Starting the reader on " + plan.host(), 0);
+            logsift.heap.RemoteHeap r = logsift.jvm.RemoteHeaps.open(ssh, plan, cancel);
+            try {
+                r.awaitReady((stage, f) -> progress.progress(stage + " on " + plan.host(), f), cancel);
+            } catch (java.util.concurrent.CancellationException e) {
+                r.stopServer(); // not wanted after all: nothing left running there
+                r.close();
+                ssh.close();
+                throw e;
+            } catch (IOException e) {
+                r.close();
+                ssh.close();
+                throw e;
+            }
+            return r;
+        }
+
+        @Override
+        public void closed(logsift.heap.HeapModel m) {
+            Thread t = new Thread(() -> {
+                if (m instanceof logsift.heap.RemoteHeap r) {
+                    r.stopServer();
+                }
+                m.close();
+                ssh.close();
+            }, "logsift-heap-server-stop");
+            t.setDaemon(true);
+            t.start();
+        }
+    }
+
+    /** Adds a heap dump tab (for a dump on this computer or on a server). */
+    private HeapDumpTab openHeapDumpTab(HeapDumpTab.Source source, String tooltip) {
+        HeapDumpTab tab = new HeapDumpTab(source);
+        tabs.addTab(tab.title(), Icons.of("memory-stick"), tab);
+        tabs.setToolTipTextAt(tabs.getTabCount() - 1, tooltip);
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tab.onChanged(() -> {
+            if (tabs.getSelectedComponent() == tab) {
+                refreshStatus();
+            }
+        });
+        tab.onShowThreads(text -> {
+            List<logsift.jvm.ThreadDump> dumps = logsift.jvm.DumpParser.parse(text);
+            if (!dumps.isEmpty()) {
+                openThreads(source.name(), dumps, null);
+            }
+        });
+        updateEmptyState();
+        return tab;
     }
 
     /** Asks for a .hprof file; null if none was chosen. */
@@ -2205,6 +2409,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }));
         jvm.add(item("Open Profile…", "flame", null, e -> openProfileDialog()));
         jvm.add(item("Open Heap Dump…", "memory-stick", null, e -> openHeapDumpDialog()));
+        jvm.add(item("Open Heap Dump on a Server…", "server", null, e -> openHeapDumpOnServerDialog()));
         jvm.add(item("Compare Two Heap Dumps…", "git-compare", null, e -> compareHeapDumpsDialog()));
         bar.add(jvm);
 

@@ -442,6 +442,58 @@ public final class SshJvms implements AutoCloseable {
         return stopped[0] || (cancel != null && cancel.getAsBoolean());
     }
 
+    /** Copies a local file to the server (made readable by its owner only). */
+    public void upload(Path local, String remote) throws IOException {
+        ChannelSftp sftp = null;
+        try {
+            sftp = (ChannelSftp) session.openChannel("sftp");
+            sftp.connect(15_000);
+            try (InputStream in = java.nio.file.Files.newInputStream(local)) {
+                sftp.put(in, remote + ".part", ChannelSftp.OVERWRITE);
+            }
+            sftp.chmod(0600, remote + ".part");
+            sftp.rename(remote + ".part", remote);
+        } catch (JSchException | SftpException e) {
+            throw new IOException("cannot copy " + local.getFileName() + " to the server: " + RemoteMirror.describe(e),
+                    e);
+        } finally {
+            if (sftp != null) {
+                sftp.disconnect();
+            }
+        }
+    }
+
+    /** A connection to a port on the server's own 127.0.0.1, through SSH. */
+    public logsift.heap.RemoteHeap.Link tunnel(int port) throws IOException {
+        try {
+            com.jcraft.jsch.ChannelDirectTCPIP ch = (com.jcraft.jsch.ChannelDirectTCPIP) session.openChannel("direct-tcpip");
+            ch.setHost("127.0.0.1");
+            ch.setPort(port);
+            InputStream in = ch.getInputStream();
+            OutputStream out = ch.getOutputStream();
+            ch.connect(15_000);
+            return new logsift.heap.RemoteHeap.Link() {
+                @Override
+                public InputStream in() {
+                    return in;
+                }
+
+                @Override
+                public OutputStream out() {
+                    return out;
+                }
+
+                @Override
+                public void close() {
+                    ch.disconnect();
+                }
+            };
+        } catch (JSchException e) {
+            throw new IOException("cannot reach port " + port + " on the server through SSH: "
+                    + RemoteMirror.describe(e), e);
+        }
+    }
+
     private void upload(String p, String dir) throws IOException {
         Result mk = exec("mkdir -p " + q(dir + "/bin") + " " + q(dir + "/lib") + " && chmod 755 "
                 + q(dir.substring(0, dir.lastIndexOf('/'))) + " " + q(dir) + " " + q(dir + "/bin") + " "

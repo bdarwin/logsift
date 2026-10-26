@@ -4643,7 +4643,7 @@ class VisualTest {
         List<String> boxes = onEdt(() -> tab.mapForTest().boxesForTest());
         assertTrue(boxes.get(0).startsWith("class LeakApp "), boxes.toString());
         int leakApp = onEdt(() -> {
-            logsift.heap.HeapDump d = tab.dumpForTest();
+            logsift.heap.HeapModel d = tab.dumpForTest();
             return d.held(d.root(), 1)[0];
         });
         onEdt(() -> {
@@ -4802,6 +4802,94 @@ class VisualTest {
             frame.closeCurrentTabForTest();
             return null;
         });
+    }
+
+    @Test
+    @Order(48)
+    void heapDumpOnAServer() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(
+                System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win"), "needs a Unix shell");
+        // a "server": an SSH server in the test running commands here, with a home of its own
+        Path hprof = dir.resolve("shop-leak.hprof");
+        if (!Files.exists(hprof)) {
+            logsift.heap.LeakApp.run(hprof, dir.resolve("shop-leak-histogram.txt"));
+        }
+        Path home = Files.createDirectories(dir.resolve("server-home"));
+        var server = org.apache.sshd.server.SshServer.setUpDefaultServer();
+        server.setHost("127.0.0.1");
+        server.setPort(0);
+        server.setKeyPairProvider(new org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider(
+                dir.resolve("heap-hostkey.ser")));
+        server.setPasswordAuthenticator((u, pw, sess) -> u.equals("ops") && pw.equals("secret"));
+        server.setSubsystemFactories(List.of(new org.apache.sshd.sftp.server.SftpSubsystemFactory()));
+        server.setForwardingFilter(org.apache.sshd.server.forward.AcceptAllForwardingFilter.INSTANCE);
+        String java = Path.of(System.getProperty("java.home"), "bin").toString();
+        server.setCommandFactory((channel, command) -> new org.apache.sshd.server.shell.ProcessShellFactory(
+                command, "/bin/sh", "-c", "HOME=" + home + "; PATH=" + java + ":/usr/bin:/bin; export HOME PATH; "
+                + command).createShell(channel));
+        server.start();
+        System.setProperty("logsift.noKnownHosts", "true");
+        try {
+            logsift.core.RemoteMirror.Target target = new logsift.core.RemoteMirror.Target("127.0.0.1",
+                    server.getPort(), "ops", hprof.toString(), "secret", null, null);
+            List<logsift.jvm.RemoteHeaps.Plan> asked = new java.util.ArrayList<>();
+            onEdt(() -> {
+                frame.heapServerConfirm = plan -> {
+                    asked.add(plan);
+                    return 0; // read it there
+                };
+                frame.openHeapDumpOnServer(target, null);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentHeapDumpTab() != null
+                            && frame.currentHeapDumpTab().isLoadedForTest());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 120_000, "the dump read on the server");
+            HeapDumpTab tab = onEdt(frame::currentHeapDumpTab);
+            assertEquals(1, asked.size(), "asked once before starting");
+            assertTrue(onEdt(tab::title).equals("Heap: shop-leak.hprof on ops@127.0.0.1"), onEdt(tab::title));
+            String found = onEdt(tab::findingsTextForTest);
+            assertTrue(found.contains("One HashMap (20,000 entries) in static LeakApp.CACHE holds"), found);
+            waitFor(() -> {
+                try {
+                    return onEdt(tab::whyTextForTest).contains("static CACHE");
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "why the map is alive (asked on the server)");
+            assertTrue(Files.exists(home.resolve(".logsift/heap")), "the reader's files on the server");
+            settle();
+            shot("94-heap-on-a-server");
+
+            // the question asked first, as it looks
+            javax.swing.JDialog question = onEdt(() -> {
+                javax.swing.JDialog d = frame.heapServerPane(asked.get(0)).createDialog(frame, "Heap Dump on a server");
+                d.setModal(false);
+                d.setVisible(true);
+                return d;
+            });
+            settle();
+            shotOf(question.getRootPane(), "95-heap-on-a-server-question");
+            onEdt(() -> {
+                question.dispose();
+                return null;
+            });
+
+            // closing the tab ends the reader there, and its index goes
+            String work = asked.get(0).workDir();
+            onEdt(() -> {
+                frame.closeCurrentTabForTest();
+                return null;
+            });
+            waitFor(() -> !Files.exists(Path.of(work)), 30_000, "the index on the server removed");
+        } finally {
+            System.clearProperty("logsift.noKnownHosts");
+            server.stop(true);
+        }
     }
 
     /** Waits until the current tab is a log titled so. */

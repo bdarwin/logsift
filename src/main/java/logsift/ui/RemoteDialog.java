@@ -81,12 +81,20 @@ final class RemoteDialog extends JDialog {
     private final JSpinner mb = new JSpinner(new SpinnerNumberModel(p.getInt("remote.lastMb", 50), 1, 100_000, 10));
     private final JButton open = new JButton("Open");
 
+    private final boolean heapDump;
     private RemoteBrowser browser;
     private RemoteMirror.Target connected;
     private String currentDir;
 
     RemoteDialog(Window owner, Path knownHosts, Predicate<String> trustHost, Consumer<Choice> onChosen) {
-        super(owner, "Open Remote Log (SFTP)", ModalityType.MODELESS);
+        this(owner, knownHosts, trustHost, onChosen, false);
+    }
+
+    /** {@code heapDump}: for choosing a heap dump to read on the server (nothing is loaded here). */
+    RemoteDialog(Window owner, Path knownHosts, Predicate<String> trustHost, Consumer<Choice> onChosen,
+                 boolean heapDump) {
+        super(owner, heapDump ? "Open Heap Dump on a Server (SSH)" : "Open Remote Log (SFTP)", ModalityType.MODELESS);
+        this.heapDump = heapDump;
         this.knownHosts = knownHosts;
         this.trustHost = trustHost;
         this.onChosen = onChosen;
@@ -183,7 +191,14 @@ final class RemoteDialog extends JDialog {
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         buttons.add(cancel);
         buttons.add(open);
-        south.add(load, BorderLayout.WEST);
+        if (heapDump) {
+            open.setText("Read It There…");
+            JLabel hint = new JLabel("The dump is read on the server; you see the answers here.");
+            hint.setForeground(Theme.uiColor("Label.disabledForeground", java.awt.Color.GRAY));
+            south.add(hint, BorderLayout.WEST);
+        } else {
+            south.add(load, BorderLayout.WEST);
+        }
         south.add(buttons, BorderLayout.EAST);
 
         JPanel root = new JPanel(new BorderLayout(0, 8));
@@ -395,7 +410,7 @@ final class RemoteDialog extends JDialog {
         p.putInt("remote.lastMb", (Integer) mb.getValue());
         p.putBoolean("remote.whole", whole.isSelected());
         RemoteMirror.Target t = targetFromFields(path);
-        long lastBytes = whole.isSelected() ? 0 : (Integer) mb.getValue() * 1024L * 1024L;
+        long lastBytes = heapDump || whole.isSelected() ? 0 : (Integer) mb.getValue() * 1024L * 1024L;
         dispose();
         onChosen.accept(new Choice(t, lastBytes));
     }
