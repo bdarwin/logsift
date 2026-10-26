@@ -176,6 +176,16 @@ class HeapDumpTest {
                 .orElseThrow(() -> new AssertionError(w.collections().toString()));
         assertEquals("HashMap mostly empty (under a quarter used)", emptied.what());
         assertEquals((2048 - 10) * 4, emptied.wasted());
+        HeapWaste.Collections seen = w.collections().stream()
+                .filter(c -> c.where().equals("LeakApp.SEEN (static)")).findFirst()
+                .orElseThrow(() -> new AssertionError(w.collections().toString()));
+        assertEquals("ConcurrentHashMap mostly empty (under a quarter used)", seen.what());
+        assertEquals((2048 - 10) * 4, seen.wasted());
+        HeapWaste.Collections queues = w.collections().stream()
+                .filter(c -> c.what().equals("Empty ArrayDeque")).findFirst()
+                .orElseThrow(() -> new AssertionError(w.collections().toString()));
+        assertEquals(300, queues.count());
+        assertTrue(queues.where().contains("LeakApp.QUEUES"), queues.where());
         assertTrue(w.total() > LeakApp.SESSIONS * 24L * 2, "total " + w.total());
     }
 

@@ -237,20 +237,31 @@ public final class HeapWaste {
 
     // ---------------------------------------------------------------- collections
 
+    /**
+     * The collections looked at: the field with their size (null: the references in their array are
+     * counted), and how many array slots an entry takes.
+     */
     private enum Base {
-        ARRAY_LIST("java.util.ArrayList", "size", "elementData"),
-        VECTOR("java.util.Vector", "elementCount", "elementData"),
-        HASH_MAP("java.util.HashMap", "size", "table"),
-        HASHTABLE("java.util.Hashtable", "count", "table");
+        ARRAY_LIST("java.util.ArrayList", "size", 1),
+        VECTOR("java.util.Vector", "elementCount", 1),
+        HASH_MAP("java.util.HashMap", "size", 1),
+        HASHTABLE("java.util.Hashtable", "count", 1),
+        WEAK_HASH_MAP("java.util.WeakHashMap", "size", 1),
+        IDENTITY_HASH_MAP("java.util.IdentityHashMap", "size", 2), // keys and values side by side
+        CONCURRENT_HASH_MAP("java.util.concurrent.ConcurrentHashMap", null, 1), // its size is spread out: bins used
+        ARRAY_DEQUE("java.util.ArrayDeque", null, 1),
+        COPY_ON_WRITE("java.util.concurrent.CopyOnWriteArrayList", null, 1), // no spare room: only empty ones
+        LINKED_LIST("java.util.LinkedList", "size", 1), // no array: only empty ones
+        TREE_MAP("java.util.TreeMap", "size", 1);
 
         final String cls;
         final String sizeField;
-        final String arrayField;
+        final int perEntry;
 
-        Base(String cls, String sizeField, String arrayField) {
+        Base(String cls, String sizeField, int perEntry) {
             this.cls = cls;
             this.sizeField = sizeField;
-            this.arrayField = arrayField;
+            this.perEntry = perEntry;
         }
     }
 
@@ -269,22 +280,26 @@ public final class HeapWaste {
         l.progress("Looking for empty collections", 0);
         int classes = d.classes.size();
         int[] sizePos = new int[classes];
+        Base[] base = new Base[classes];
         java.util.Arrays.fill(sizePos, -1);
-        int hashSet = d.classIndex("java.util.HashSet");
         for (int c = 0; c < classes; c++) {
             if (d.extendsClass(c, "java.util.Properties")) {
                 continue; // keeps its entries in a map of its own
             }
             for (Base b : Base.values()) {
                 if (d.extendsClass(c, b.cls)) {
-                    sizePos[c] = d.fieldPos(c, b.sizeField, HeapDump.T_INT);
+                    int pos = b.sizeField == null ? 0 : d.fieldPos(c, b.sizeField, HeapDump.T_INT);
+                    if (pos >= 0) {
+                        sizePos[c] = pos;
+                        base[c] = b;
+                    }
                 }
             }
         }
         BitSet wanted = new BitSet(d.n);
         for (int v = 0; v < d.n; v++) {
             int c = d.classIndex(v);
-            if (sizePos[c] >= 0 && d.isReachable(v) && !d.isClassObject(v)) {
+            if (base[c] != null && d.isReachable(v) && !d.isClassObject(v)) {
                 wanted.set(v);
             }
             check(v);
@@ -298,21 +313,31 @@ public final class HeapWaste {
             }
             r.bytes(data[0], 0, (int) len);
             int c = d.classIndex(v);
-            if (sizePos[c] + 4 > len) {
+            Base b = base[c];
+            if (b.sizeField != null && sizePos[c] + 4 > len) {
                 return;
             }
-            int size = HeapDump.intAt(data[0], sizePos[c]);
             int arr = -1;
             for (int w : d.refs(v)) {
                 if (array[d.classIndex(w)] && d.holder(w) == v) {
                     arr = w;
                 }
             }
-            long slots = arr < 0 ? 0 : (d.shallow(arr) - d.arrayHeader()) / d.refSize();
+            long slots = arr < 0 ? 0 : (d.shallow(arr) - d.arrayHeader()) / d.refSize() / b.perEntry;
+            long size;
+            if (b.sizeField != null) {
+                size = HeapDump.intAt(data[0], sizePos[c]);
+            } else {
+                size = arr < 0 ? 0 : d.refs(arr).length; // the slots in use
+            }
+            if (b == Base.COPY_ON_WRITE) {
+                slots = size; // it is always full
+            }
             int subject = v;
             int p = d.parent(v);
-            if (hashSet >= 0 && p >= 0 && p != d.root() && d.extendsClass(d.classIndex(p), "java.util.HashSet")
-                    && d.holder(v) == p) {
+            if (p >= 0 && p != d.root() && d.holder(v) == p
+                    && (d.extendsClass(d.classIndex(p), "java.util.HashSet")
+                    || d.extendsClass(d.classIndex(p), "java.util.TreeSet"))) {
                 subject = p; // a set: its map is how it is made
             }
             String kind = simple(d.className(subject));
@@ -322,7 +347,7 @@ public final class HeapWaste {
                 w = d.shallow(subject) + (subject != v ? d.shallow(v) : 0) + (arr < 0 ? 0 : d.shallow(arr));
                 what = "Empty " + kind;
             } else if (arr >= 0 && slots - size >= 8 && size * 4L < slots) {
-                w = (slots - size) * d.refSize();
+                w = (slots - size) * d.refSize() * b.perEntry;
                 what = kind + " mostly empty (under a quarter used)";
             } else {
                 return;
