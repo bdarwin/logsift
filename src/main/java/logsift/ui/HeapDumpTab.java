@@ -81,6 +81,11 @@ final class HeapDumpTab extends JPanel {
     private final JTextField classFilter = new JTextField();
     private final JEditorPane why = new JEditorPane("text/html", "");
     private final JPanel wasteSlot = new JPanel();
+    private final JPanel mapSlot = new JPanel(new BorderLayout());
+    private HeapTreemap map;
+    static final int MAP_TAB = 2;
+    static final int CLASSES_TAB = 3;
+    static final int WASTE_TAB = 4;
     private final CardLayout wasteCards = new CardLayout();
     private final JPanel wastePanel = new JPanel(wasteCards);
     private final JLabel wasteWorking = new JLabel("Looking for wasted memory…");
@@ -277,6 +282,7 @@ final class HeapDumpTab extends JPanel {
         objects.add(hint, BorderLayout.NORTH);
         objects.add(new JScrollPane(tree), BorderLayout.CENTER);
         views.addTab("Biggest objects", objects);
+        views.addTab("Map", mapSlot);
 
         classTable.setAutoCreateRowSorter(false);
         TableRowSorter<ClassModel> sorter = new TableRowSorter<>(classModel);
@@ -359,6 +365,8 @@ final class HeapDumpTab extends JPanel {
 
     private void show(List<HeapFindings.Finding> found) {
         HeapDump d = dump;
+        map = new HeapTreemap(d, this::select);
+        mapSlot.add(map, BorderLayout.CENTER);
         String when = d.timestamp() > 0 ? " · taken " + DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
                 .format(Instant.ofEpochMilli(d.timestamp()).atZone(ZoneId.systemDefault())) : "";
         long size = 0;
@@ -432,7 +440,7 @@ final class HeapDumpTab extends JPanel {
         if (f.kind() == HeapFindings.Kind.WASTE) {
             JPanel b = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             JButton w = new JButton("Show the waste");
-            w.addActionListener(e -> views.setSelectedIndex(3));
+            w.addActionListener(e -> views.setSelectedIndex(WASTE_TAB));
             b.add(w);
             c.add(b, BorderLayout.SOUTH);
         } else if (f.node() >= 0) {
@@ -947,6 +955,10 @@ final class HeapDumpTab extends JPanel {
 
     void showTabForTest(int i) {
         views.setSelectedIndex(i);
+    }
+
+    HeapTreemap mapForTest() {
+        return map;
     }
 
     JTable classTableForTest() {

@@ -135,7 +135,7 @@ public final class HeapFindings {
     }
 
     /** Where an object is kept: "in static LeakApp.CACHE", "in a local variable in Foo.bar() of thread "main"". */
-    static String where(HeapDump d, int v) throws IOException {
+    public static String where(HeapDump d, int v) throws IOException {
         List<HeapDump.Step> path = d.pathFromRoot(v);
         if (path.isEmpty()) {
             return "(not strongly reachable)";
@@ -169,7 +169,8 @@ public final class HeapFindings {
     }
 
     /** A collection's own parts (entries, tables), not what it holds. */
-    static boolean isInternal(String cls) {
+    /** The insides of a collection (its entries, its table's nodes): not what is kept in it. */
+    public static boolean isInternal(String cls) {
         return cls.matches(".*\\$(Node|Entry|TreeNode|TreeBin|Segment|ForwardingNode)(\\[\\])?")
                 || cls.equals("java.util.WeakHashMap$Entry[]");
     }

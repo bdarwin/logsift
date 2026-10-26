@@ -4628,9 +4628,49 @@ class VisualTest {
         settle();
         shot("89-heap-biggest-objects");
 
+        // the heap as a map: boxes as big as what they hold, the biggest objects inside
+        onEdt(() -> {
+            tab.showTabForTest(HeapDumpTab.MAP_TAB);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.mapForTest().isReadForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the map");
+        List<String> boxes = onEdt(() -> tab.mapForTest().boxesForTest());
+        assertTrue(boxes.get(0).startsWith("class LeakApp "), boxes.toString());
+        int leakApp = onEdt(() -> {
+            logsift.heap.HeapDump d = tab.dumpForTest();
+            return d.held(d.root(), 1)[0];
+        });
+        onEdt(() -> {
+            tab.mapForTest().zoomIntoForTest(leakApp);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.mapForTest().isReadForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the map of class LeakApp");
+        List<String> inside = onEdt(() -> tab.mapForTest().boxesForTest());
+        assertTrue(inside.get(0).startsWith("HashMap (20,000 entries) "), inside.toString());
+        List<String> sessions = onEdt(() -> tab.mapForTest().insideFirstForTest());
+        assertTrue(sessions.get(0).startsWith("20,000 × LeakApp.Session "), sessions.toString());
+        onEdt(() -> {
+            tab.mapForTest().zoomOutForTest();
+            return null;
+        });
+        settle();
+        shot("89a-heap-map");
+
         // the classes; selecting one shows why its biggest object is alive
         onEdt(() -> {
-            tab.showTabForTest(2);
+            tab.showTabForTest(HeapDumpTab.CLASSES_TAB);
             JTable t = tab.classTableForTest();
             for (int r = 0; r < t.getRowCount(); r++) {
                 if ("logsift.heap.LeakApp$Session".equals(t.getValueAt(r, 0))) {
@@ -4665,7 +4705,7 @@ class VisualTest {
         assertTrue(onEdt(tab::findingsTextForTest).contains("is spent on copies of the same strings and empty"),
                 onEdt(tab::findingsTextForTest));
         onEdt(() -> {
-            tab.showTabForTest(3);
+            tab.showTabForTest(HeapDumpTab.WASTE_TAB);
             JTable t = tab.wasteTableForTest(0);
             t.setRowSelectionInterval(0, 0);
             return null;

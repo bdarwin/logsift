@@ -1058,6 +1058,13 @@ public final class HeapDump implements AutoCloseable {
         return out;
     }
 
+    /** Calls {@code f} with each object this one holds directly (its children in the dominator tree). */
+    public void eachHeld(int node, java.util.function.IntConsumer f) {
+        for (int e = domStart.get(node), end = domStart.get(node + 1); e < end; e++) {
+            f.accept(domKids.get(e));
+        }
+    }
+
     /** Totals for one class among the objects an object holds. */
     public static final class Tally {
         public long count;
