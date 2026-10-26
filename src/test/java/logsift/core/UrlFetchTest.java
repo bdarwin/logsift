@@ -116,4 +116,42 @@ class UrlFetchTest {
                 "no characters a file name can't have");
         assertEquals("passwd", UrlFetch.fileName(u, "attachment; filename=\"../../etc/passwd\""));
     }
+
+    /** A server with a certificate nothing trusts (as behind a company proxy): said so, then opened when asked. */
+    @Test
+    void anUntrustedCertificateIsSaidAndCanBeSkipped() throws Exception {
+        Path ks = dir.resolve("self-signed.p12");
+        String keytool = Path.of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win") ? "keytool.exe" : "keytool")
+                .toString();
+        Process p = new ProcessBuilder(keytool, "-genkeypair", "-alias", "s", "-keyalg", "RSA", "-keysize", "2048",
+                "-dname", "CN=logsift-test", "-validity", "2", "-storetype", "PKCS12", "-keystore", ks.toString(),
+                "-storepass", "secret", "-keypass", "secret").redirectErrorStream(true).start();
+        p.getInputStream().readAllBytes();
+        assertEquals(0, p.waitFor());
+        java.security.KeyStore store = java.security.KeyStore.getInstance("PKCS12");
+        try (var in = java.nio.file.Files.newInputStream(ks)) {
+            store.load(in, "secret".toCharArray());
+        }
+        javax.net.ssl.KeyManagerFactory kmf = javax.net.ssl.KeyManagerFactory.getInstance(
+                javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(store, "secret".toCharArray());
+        javax.net.ssl.SSLContext ctx = javax.net.ssl.SSLContext.getInstance("TLS");
+        ctx.init(kmf.getKeyManagers(), null, null);
+        com.sun.net.httpserver.HttpsServer https = com.sun.net.httpserver.HttpsServer.create(
+                new InetSocketAddress("127.0.0.1", 0), 0);
+        https.setHttpsConfigurator(new com.sun.net.httpserver.HttpsConfigurator(ctx));
+        https.createContext("/app.log", x -> send(x, 200, "over https\n", null));
+        https.start();
+        try {
+            java.net.URI u = UrlFetch.parse("https://127.0.0.1:" + https.getAddress().getPort() + "/app.log");
+            UrlFetch.UntrustedCertificate e = assertThrows(UrlFetch.UntrustedCertificate.class,
+                    () -> UrlFetch.download(u, null, dir, null, () -> false));
+            assertEquals("127.0.0.1", e.host());
+            Path f = UrlFetch.download(u, null, dir, null, () -> false, true);
+            assertEquals("over https\n", java.nio.file.Files.readString(f));
+        } finally {
+            https.stop(0);
+        }
+    }
 }

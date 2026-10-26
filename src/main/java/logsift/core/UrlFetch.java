@@ -41,6 +41,20 @@ public final class UrlFetch {
         }
     }
 
+    /** A server whose certificate isn't trusted (here, or by the computer's own trust store). */
+    public static final class UntrustedCertificate extends IOException {
+        private final String host;
+
+        UntrustedCertificate(String host, Throwable cause) {
+            super("The certificate of " + host + " isn't trusted (" + cause.getMessage() + ")", cause);
+            this.host = host;
+        }
+
+        public String host() {
+            return host;
+        }
+    }
+
     private static final int MAX_REDIRECTS = 5;
     private static final Pattern DISPOSITION_NAME = Pattern.compile(
             "filename\\*?=\\s*(?:UTF-8'')?\"?([^\";]+)\"?", Pattern.CASE_INSENSITIVE);
@@ -67,10 +81,22 @@ public final class UrlFetch {
      */
     public static Path download(URI url, Auth auth, Path dir, DoubleConsumer progress, BooleanSupplier cancelled)
             throws IOException {
+        return download(url, auth, dir, progress, cancelled, false);
+    }
+
+    /**
+     * The same; {@code anyCertificate}: don't check the server's certificate (for a server, or a
+     * company proxy, whose certificate nothing here trusts, when the person says so).
+     */
+    public static Path download(URI url, Auth auth, Path dir, DoubleConsumer progress, BooleanSupplier cancelled,
+                                boolean anyCertificate) throws IOException {
         URI at = url;
         String authHeader = auth == null ? null : auth.header();
         for (int hop = 0; ; hop++) {
             HttpURLConnection c = (HttpURLConnection) at.toURL().openConnection();
+            if (c instanceof javax.net.ssl.HttpsURLConnection https) {
+                Tls.apply(https, anyCertificate);
+            }
             c.setInstanceFollowRedirects(false);
             c.setConnectTimeout(15_000);
             c.setReadTimeout(60_000);
@@ -82,6 +108,11 @@ public final class UrlFetch {
             int code;
             try {
                 code = c.getResponseCode();
+            } catch (javax.net.ssl.SSLException e) {
+                if (Tls.isTrustProblem(e)) {
+                    throw new UntrustedCertificate(at.getHost(), e);
+                }
+                throw new IOException("Secure connection to " + at.getHost() + " failed: " + e.getMessage(), e);
             } catch (java.net.UnknownHostException e) {
                 throw new IOException("Unknown host: " + at.getHost());
             } catch (java.net.ConnectException | java.net.SocketTimeoutException e) {

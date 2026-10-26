@@ -1606,14 +1606,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
      */
     public void openUrls(List<java.net.URI> urls, logsift.core.UrlFetch.Auth auth) {
         String what = urls.size() == 1 ? urls.get(0).getHost() : urls.size() + " files";
-        ProgressDialog.run(this, "Downloading from " + what + "…", (progress, cancelled) -> {
+        String message = "Downloading from " + what + "…";
+        ProgressDialog.run(this, message, (progress, cancelled) -> {
             Path dir = Files.createTempDirectory("logsift-url-");
             dir.toFile().deleteOnExit();
             List<Path> got = new ArrayList<>();
             for (int i = 0; i < urls.size(); i++) {
                 int at = i;
                 Path f = logsift.core.UrlFetch.download(urls.get(i), auth, dir,
-                        p -> progress.accept((at + p) / urls.size()), cancelled);
+                        p -> progress.accept((at + p) / urls.size()), cancelled,
+                        anyCertificate(urls.get(i).getHost()));
                 if (f == null) {
                     return null;
                 }
@@ -1644,7 +1646,44 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 t.setFileNames("");
                 status.setText("Downloaded " + got.size() + " files; type what to find in them");
             }
-        });
+        }, e -> {
+            if (e instanceof logsift.core.UrlFetch.UntrustedCertificate u && askAnyCertificate(u)) {
+                openUrls(urls, auth); // again, without checking that server's certificate
+                return;
+            }
+            JOptionPane.showMessageDialog(this, message + " failed: " + e.getMessage(), "Logsift",
+                    JOptionPane.ERROR_MESSAGE);
+        }, () -> { });
+    }
+
+    /** Servers whose certificates aren't checked, for this run (and the ones remembered). */
+    private static final java.util.Set<String> ANY_CERTIFICATE = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private static boolean anyCertificate(String host) {
+        String h = host.toLowerCase(java.util.Locale.ROOT);
+        return ANY_CERTIFICATE.contains(h)
+                || java.util.Arrays.asList(PREFS.get("url.anyCertificate", "").split(",")).contains(h);
+    }
+
+    /** Asks whether to open a server's files without checking its certificate. */
+    private boolean askAnyCertificate(logsift.core.UrlFetch.UntrustedCertificate u) {
+        String host = u.host().toLowerCase(java.util.Locale.ROOT);
+        Object[] options = {"Open Anyway", "Always for " + host, "Cancel"};
+        int r = JOptionPane.showOptionDialog(this, "<html><div style='width:420px'><b>The certificate of " + host
+                        + " isn't trusted.</b><br><br>Neither Java nor this computer trusts it. On a company network,"
+                        + " a proxy that checks traffic often uses its own certificate. Open it anyway, without"
+                        + " checking the certificate, only if you trust this network and server.</div></html>",
+                "Untrusted Certificate", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, options,
+                options[2]);
+        if (r == 0 || r == 1) {
+            ANY_CERTIFICATE.add(host);
+            if (r == 1) {
+                String kept = PREFS.get("url.anyCertificate", "");
+                PREFS.put("url.anyCertificate", kept.isEmpty() ? host : kept + "," + host);
+            }
+            return true;
+        }
+        return false;
     }
 
     /** Opens a file at a line and runs Find All for the query there. */
