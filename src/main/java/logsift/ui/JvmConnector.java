@@ -178,9 +178,9 @@ final class JvmConnector {
         }
 
         @Override
-        public void heapDump(Path local, java.util.function.DoubleConsumer progress,
-                             java.util.function.BooleanSupplier cancelled) throws IOException {
-            t().heapDump(local, progress, cancelled);
+        public String heapDump(Path local, java.util.function.DoubleConsumer progress,
+                               java.util.function.BooleanSupplier cancelled) throws IOException {
+            return t().heapDump(local, progress, cancelled);
         }
 
         @Override

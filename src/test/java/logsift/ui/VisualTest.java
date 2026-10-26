@@ -4879,13 +4879,19 @@ class VisualTest {
                 return null;
             });
 
-            // closing the tab ends the reader there, and its index goes
+            // closing the tab ends the reader there: its index was temporary files, gone with it
             String work = asked.get(0).workDir();
             onEdt(() -> {
                 frame.closeCurrentTabForTest();
                 return null;
             });
-            waitFor(() -> !Files.exists(Path.of(work)), 30_000, "the index on the server removed");
+            waitFor(() -> {
+                try (var left = Files.list(Path.of(work))) {
+                    return left.findAny().isEmpty();
+                } catch (java.io.IOException e) {
+                    return false;
+                }
+            }, 30_000, "the reader's temporary index gone");
         } finally {
             System.clearProperty("logsift.noKnownHosts");
             server.stop(true);

@@ -175,7 +175,7 @@ final class ThreadsTab extends JPanel {
             b.setFocusable(false);
             right.add(b);
         }
-        take.setToolTipText("Take a thread dump now");
+        take.setToolTipText("Take a thread dump now (the JVM stops for a moment: milliseconds, more with many threads)");
         record.setToolTipText("Take several dumps some seconds apart, to see stuck threads and CPU use");
         stop.setToolTipText("Stop recording");
         profileButton.setToolTipText("See where the JVM spends its time, memory or lock waits (a flame graph)");
@@ -413,7 +413,8 @@ final class ThreadsTab extends JPanel {
         p.add(new JLabel("seconds apart"));
         JPanel all = new JPanel(new BorderLayout(0, 8));
         all.add(p, BorderLayout.CENTER);
-        JLabel note = new JLabel("<html>Each dump pauses the JVM very briefly (usually a few milliseconds).</html>");
+        JLabel note = new JLabel("<html>Each dump stops the JVM for a moment: usually milliseconds, longer with"
+                + " thousands of threads or a big heap (finding who holds which lock walks the heap).</html>");
         note.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
         all.add(note, BorderLayout.SOUTH);
         if (JOptionPane.showConfirmDialog(this, all, "Record Thread Dumps", JOptionPane.OK_CANCEL_OPTION,

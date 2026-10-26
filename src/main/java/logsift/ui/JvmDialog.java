@@ -140,10 +140,11 @@ final class JvmDialog extends JDialog {
         JButton cancel = new JButton("Close");
         cancel.addActionListener(e -> dispose());
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-        JLabel note = new JLabel("Logsift only reads threads; it changes nothing in the JVM.");
+        JLabel note = new JLabel("<html>Attaching starts the JVM's management agent and takes a thread dump (a short"
+                + " stop). Heap dumps, histograms and profiling do more: each says what before it runs.</html>");
         note.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
-        JPanel south = new JPanel(new BorderLayout());
-        south.add(note, BorderLayout.WEST);
+        JPanel south = new JPanel(new BorderLayout(12, 0));
+        south.add(note, BorderLayout.CENTER); // wraps in the room the buttons leave
         buttons.add(cancel);
         buttons.add(attach);
         south.add(buttons, BorderLayout.EAST);

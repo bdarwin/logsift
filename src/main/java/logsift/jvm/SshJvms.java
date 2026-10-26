@@ -370,6 +370,16 @@ public final class SshJvms implements AutoCloseable {
         return dir + "/bin/asprof";
     }
 
+    /** The size of a file on the server, or -1 if there is none (or it can't be read). */
+    public long fileSize(String path) throws IOException {
+        Result r = exec("[ -f " + q(path) + " ] && [ -r " + q(path) + " ] && wc -c < " + q(path), null, 30);
+        try {
+            return r.exit() == 0 ? Long.parseLong(r.out().trim()) : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
     /** Copies a file from the server. */
     public void download(String remote, Path local, java.util.function.DoubleConsumer progress) throws IOException {
         download(remote, local, progress, null);
@@ -488,7 +498,7 @@ public final class SshJvms implements AutoCloseable {
 
     /**
      * Writes a stream to a file on the server ({@code remote}.part, renamed when complete); {@code
-     * done} gets the bytes written so far; {@code cancel} stops it (the part is removed).
+     * done} gets the bytes written so far; {@code cancel} stops it (the part stays).
      */
     public void put(InputStream data, String remote, java.util.function.LongConsumer done,
                     java.util.function.BooleanSupplier cancel) throws IOException {
@@ -534,8 +544,8 @@ public final class SshJvms implements AutoCloseable {
             }
         }
         if (stopped[0]) {
-            exec("rm -f " + q(remote + ".part"), null, 30); // the SFTP channel is done for after a stop
-            throw new java.util.concurrent.CancellationException();
+            throw new java.util.concurrent.CancellationException("stopped; the part written so far stays at "
+                    + remote + ".part on " + label());
         }
     }
 

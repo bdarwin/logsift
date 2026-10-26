@@ -150,7 +150,7 @@ class RemoteHeapTest {
     }
 
     @Test
-    void stoppingEndsTheServerAndRemovesItsIndex() throws Exception {
+    void stoppingEndsTheServerAndItsTemporaryIndex() throws Exception {
         Path dir = Files.createTempDirectory("logsift-remote-stop");
         Process p = startServer(file, dir.resolve("index"), dir.resolve("state"));
         RemoteHeap r = connect(dir.resolve("state"));
@@ -159,7 +159,10 @@ class RemoteHeapTest {
         r.stopServer();
         r.close();
         assertTrue(p.waitFor(30, TimeUnit.SECONDS), "the server ended");
-        assertTrue(!Files.exists(dir.resolve("state/server")), "its state file is removed");
-        assertTrue(!Files.exists(dir.resolve("index")), "its index is removed");
+        assertEquals("stopped", new String(Files.readAllBytes(dir.resolve("state/server")), "UTF-8").trim(),
+                "its state file stays, saying so");
+        try (java.util.stream.Stream<Path> left = Files.list(dir.resolve("index"))) {
+            assertEquals(0, left.count(), "its index was temporary files, gone with it");
+        }
     }
 }

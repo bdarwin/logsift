@@ -154,6 +154,8 @@ val visualTest by tasks.registering(Test::class) {
     systemProperty("logsift.home", layout.buildDirectory.dir("visual/home").get().asFile.absolutePath)
     // tests expect a file's tab right after opening it; allow slow CI machines time for that
     systemProperty("logsift.openWaitMs", "10000")
+    // no message boxes that wait for a click (notes go to the status line)
+    systemProperty("logsift.visual.noNotes", "true")
     testLogging {
         events("passed", "failed", "skipped")
         showStandardStreams = true

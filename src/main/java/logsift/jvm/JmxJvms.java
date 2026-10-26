@@ -242,13 +242,15 @@ public final class JmxJvms {
             }
             try {
                 jfr.setPredefinedConfiguration(id, "profile");
-                jfr.setRecordingOptions(id, Map.of("name", "logsift-" + System.nanoTime(), "disk", "true"));
+                // a duration: it ends by itself even if Logsift is gone before it is done; with no destination
+                // nothing is written anywhere on the JVM's machine
+                jfr.setRecordingOptions(id, Map.of("name", "logsift-" + System.nanoTime(), "disk", "true",
+                        "duration", (seconds + 60) + " s"));
                 jfr.startRecording(id);
                 long end = System.currentTimeMillis() + seconds * 1000L;
                 while (System.currentTimeMillis() < end) {
                     if (cancelled.getAsBoolean()) {
-                        jfr.stopRecording(id);
-                        return false;
+                        return false; // closed below, without writing it anywhere
                     }
                     try {
                         Thread.sleep(Math.min(200, Math.max(1, end - System.currentTimeMillis())));
@@ -257,8 +259,9 @@ public final class JmxJvms {
                         return false;
                     }
                 }
-                jfr.stopRecording(id);
-                long stream = jfr.openStream(id, Map.of("blockSize", Integer.toString(1 << 20)));
+                // a stopped copy is streamed back; stopping the recording itself would write it to its file
+                long copy = jfr.cloneRecording(id, true);
+                long stream = jfr.openStream(copy, Map.of("blockSize", Integer.toString(1 << 20)));
                 try (OutputStream out = Files.newOutputStream(local)) {
                     for (byte[] b = jfr.readStream(stream); b != null; b = jfr.readStream(stream)) {
                         out.write(b);
@@ -268,6 +271,7 @@ public final class JmxJvms {
                     }
                 } finally {
                     jfr.closeStream(stream);
+                    jfr.closeRecording(copy);
                 }
                 return true;
             } catch (RuntimeException e) {

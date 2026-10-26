@@ -5,3 +5,6 @@ build/
 *.iml
 out/
 .DS_Store
+
+# recordings a test JVM might write into its working folder
+/hotspot-pid-*.jfr

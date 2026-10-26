@@ -131,6 +131,8 @@ final class RemoteDialog extends JDialog {
                 useKey.setSelected(true);
             }
         });
+        whole.setToolTipText("<html>Reads all of it from the server first: for a log of many GB, that is a big read"
+                + "<br>of the server's disk and network. The last few MB are usually enough.</html>");
         connect.putClientProperty("JButton.buttonType", "default");
         connect.addActionListener(e -> connect());
         host.addActionListener(e -> connect());

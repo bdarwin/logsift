@@ -94,6 +94,12 @@ public final class Profiler {
                 return "Give the method as package.Class.method (a * matches anything), for example"
                         + " com.acme.orders.Api.handle";
             }
+            if ((mode == Mode.METHOD_CALLS || mode == Mode.METHOD_LATENCY) && method.trim().lastIndexOf('.') > 0
+                    && method.trim().substring(0, method.trim().lastIndexOf('.')).contains("*")) {
+                // com.*.* would instrument a great many methods, and can make the JVM stop answering
+                return "Name one class: a * is allowed only in the method name (com.acme.orders.Api.*), since"
+                        + " tracing the methods of many classes can make the JVM stop answering";
+            }
             if (mode == Mode.HARDWARE && (event == null || !EVENT.matcher(event.trim()).matches())) {
                 return "Choose a hardware event";
             }
@@ -127,8 +133,12 @@ public final class Profiler {
         /** A diagnostic command in the JVM, by its jcmd name ({@code GC.class_histogram}). */
         String diagnostic(String command, String... args) throws IOException;
 
-        /** Writes a heap dump (.hprof) of the JVM to {@code local}. */
-        void heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException;
+        /**
+         * Writes a heap dump (.hprof) of the JVM to {@code local}.
+         *
+         * @return a note for the person (where a copy stays on the JVM's machine), or null
+         */
+        String heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException;
 
         /** Why heap dumps can't be saved here, or null if they can. */
         default String noHeapDump() {
@@ -158,7 +168,13 @@ public final class Profiler {
         /** Makes a file the JVM wrote readable for Logsift, and copies it here. */
         void fetch(String file, Path local, DoubleConsumer progress) throws IOException;
 
+        /** Removes a temporary file Logsift made here (on this computer only: never on a server). */
         void remove(String file);
+
+        /** Where a temporary file stays (on a server, where nothing is removed), or null when it is removed. */
+        default String keptAt(String file) {
+            return null;
+        }
     }
 
     /** A JVM on this computer (attached with {@code session}). */
@@ -321,18 +337,21 @@ public final class Profiler {
 
             @Override
             public void fetch(String file, Path local, DoubleConsumer progress) throws IOException {
-                // written by the JVM's user: readable for the login user too
-                ssh.run(jvm, options, true, "chmod 0644 " + SshJvms.q(file), 30);
+                // written by the JVM's user: given to the login user, readable by no one else (it holds the
+                // JVM's data, and stays on the server)
+                ssh.run(jvm, options, true, "chown " + SshJvms.q(ssh.user()) + " " + SshJvms.q(file) + " 2>/dev/null"
+                        + " && chmod 0600 " + SshJvms.q(file) + " || chmod 0644 " + SshJvms.q(file), 30);
                 ssh.download(file, local, progress);
             }
 
             @Override
             public void remove(String file) {
-                try {
-                    ssh.run(jvm, options, true, "rm -f " + SshJvms.q(file), 30);
-                } catch (IOException e) {
-                    // left in /tmp
-                }
+                // nothing is removed on a server: the file stays (see keptAt)
+            }
+
+            @Override
+            public String keptAt(String file) {
+                return file + " on " + ssh.label().substring(ssh.label().indexOf('@') + 1);
             }
         });
     }
@@ -392,10 +411,10 @@ public final class Profiler {
              * folder there, then {@link JmxJvms.DumpOnServer} says where (to copy it over SSH).
              */
             @Override
-            public void heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
+            public String heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
                 if (session.isLocal()) {
                     session.dumpTo(local.toAbsolutePath().toString(), true);
-                    return;
+                    return null;
                 }
                 String host = session.machine() == null ? session.address().label() : session.machine();
                 throw new JmxJvms.DumpOnServer(host, session.heapDumpThere(true));
@@ -501,6 +520,7 @@ public final class Profiler {
                         Mode first = r.mode() == Mode.ALL ? Mode.CPU : Mode.NATIVE_LEAKS;
                         List<Profile> views = views(fromJfr(local, want, r.perThread(), m -> m.label + suffix), first);
                         warnings(res.err(), views);
+                        keptNote(file, views);
                         return views;
                     } finally {
                         Files.deleteIfExists(local);
@@ -540,7 +560,10 @@ public final class Profiler {
         private List<Profile> flightRecorder(Request r, String suffix, BooleanSupplier cancelled) throws IOException {
             String name = "logsift-" + System.nanoTime();
             String file = sh.tempFile(".jfr");
-            sh.diagnostic("JFR.start", "name=" + name, "settings=profile");
+            // with a duration, the recording ends by itself even if Logsift is gone before it stops it; its
+            // file is named, or the JVM would write one into its working folder when it ends
+            sh.diagnostic("JFR.start", "name=" + name, "settings=profile", "duration=" + (r.seconds() + 60) + "s",
+                    "filename=" + file);
             waitFor(r.seconds(), cancelled);
             sh.diagnostic("JFR.stop", "name=" + name, "filename=" + file);
             if (cancelled.getAsBoolean()) {
@@ -552,10 +575,20 @@ public final class Profiler {
                 sh.fetch(file, local, null);
                 Map<Mode, Profile> all = fromJfr(local, EnumSet.of(Mode.CPU, Mode.WALL, Mode.ALLOC, Mode.LOCK),
                         r.perThread(), m -> m.label + suffix);
-                return views(all, r.mode() == Mode.ALL ? Mode.CPU : r.mode());
+                List<Profile> views = views(all, r.mode() == Mode.ALL ? Mode.CPU : r.mode());
+                keptNote(file, views);
+                return views;
             } finally {
                 Files.deleteIfExists(local);
                 sh.remove(file);
+            }
+        }
+
+        /** Says where a recording stays on a server (nothing is removed there). */
+        private void keptNote(String file, List<Profile> views) {
+            String kept = sh.keptAt(file);
+            if (kept != null && !views.isEmpty()) {
+                views.get(0).warn("The recording stays at " + kept + " (Logsift doesn't remove files on a server).");
             }
         }
 
@@ -565,7 +598,7 @@ public final class Profiler {
         }
 
         @Override
-        public void heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
+        public String heapDump(Path local, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
             String file = sh.tempFile(".hprof");
             try {
                 String out = sh.diagnostic("GC.heap_dump", file);
@@ -573,12 +606,15 @@ public final class Profiler {
                     throw new IOException(LocalJvms.first(out));
                 }
                 if (cancelled.getAsBoolean()) {
-                    return;
+                    return null;
                 }
                 sh.fetch(file, local, progress);
             } finally {
                 sh.remove(file);
             }
+            String kept = sh.keptAt(file);
+            return kept == null ? null : "The dump also stays at " + kept + " (Logsift doesn't remove files on a"
+                    + " server): remove it there when you are done.";
         }
     }
 

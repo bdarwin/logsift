@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -109,7 +110,7 @@ class RemoteCopyTest {
         Path dest = otherHome.resolve("copy1.hprof");
         assertThrows(RemoteCopy.NoDirectWay.class, () -> RemoteCopy.direct(toOther, target(prod), dump.toString(),
                 dest.toString(), data.length, f -> { }, () -> false));
-        assertTrue(!Files.exists(dest) && !Files.exists(Path.of(dest + ".part")), "nothing left from the try");
+        assertTrue(!Files.exists(dest) && !Files.exists(Path.of(dest + ".part")), "a failed try writes nothing");
         double[] seen = {0};
         RemoteCopy.throughHere(toProd, toOther, dump.toString(), dest.toString(), data.length, f -> seen[0] = f,
                 () -> false);
@@ -126,17 +127,28 @@ class RemoteCopyTest {
         p.getInputStream().readAllBytes();
         assertEquals(0, p.waitFor());
         Path dest = otherHome.resolve("copy2.hprof");
+        Process scan = new ProcessBuilder("/usr/bin/ssh-keyscan", "-p", String.valueOf(prod.getPort()), "127.0.0.1")
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        byte[] known = scan.getInputStream().readAllBytes();
+        scan.waitFor();
+        Files.write(otherHome.resolve(".ssh/known_hosts"), known);
         RemoteCopy.direct(toOther, target(prod), dump.toString(), dest.toString(), data.length, f -> { }, () -> false);
         assertArrayEquals(data, Files.readAllBytes(dest));
-        assertTrue(!Files.exists(Path.of(dest + ".copy.log")), "its log removed");
+        assertTrue(!Files.exists(Path.of(dest + ".part")));
+        // nothing is overwritten: the same name again is refused
+        IOException taken = assertThrows(IOException.class, () -> RemoteCopy.direct(toOther, target(prod),
+                dump.toString(), dest.toString(), data.length, f -> { }, () -> false));
+        assertTrue(taken.getMessage().contains("already"), taken.getMessage());
+        assertArrayEquals(data, Files.readAllBytes(dest), "still the same");
         assertTrue(RemoteCopy.free(toOther, otherHome.toString()) > 0);
     }
 
     @Test
-    void cancellingThroughHereLeavesNothing() throws Exception {
+    void cancellingThroughHereLeavesItsPart() throws Exception {
         Path dest = otherHome.resolve("copy3.hprof");
-        assertThrows(java.util.concurrent.CancellationException.class, () -> RemoteCopy.throughHere(toProd, toOther,
-                dump.toString(), dest.toString(), data.length, f -> { }, () -> true));
-        assertTrue(!Files.exists(dest) && !Files.exists(Path.of(dest + ".part")));
+        var stopped = assertThrows(java.util.concurrent.CancellationException.class, () -> RemoteCopy.throughHere(
+                toProd, toOther, dump.toString(), dest.toString(), data.length, f -> { }, () -> true));
+        assertTrue(stopped.getMessage().contains(dest + ".part"), "says where the part is: " + stopped.getMessage());
+        assertTrue(!Files.exists(dest) && Files.exists(Path.of(dest + ".part")), "nothing on a server is removed");
     }
 }

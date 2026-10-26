@@ -1245,7 +1245,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             if (plan.freeBytes() >= 0) {
                 sb.append(" (").append(logsift.heap.HeapFindings.bytes(plan.freeBytes())).append(" free)");
             }
-            sb.append("</li><li><b>Memory:</b> 2 GB");
+            sb.append("</li><li><b>Memory:</b> 2 GB, plus the disk cache for its index");
             if (plan.memoryBytes() >= 0) {
                 sb.append(" (").append(logsift.heap.HeapFindings.bytes(plan.memoryBytes())).append(" available");
                 if (plan.memoryBytes() < 3L << 30) {
@@ -1255,12 +1255,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
             sb.append("</li><li><b>Time:</b> about ").append(minutes).append(minutes == 1 ? " minute" : " minutes")
                     .append(" of one CPU core (more on a busy machine)</li>")
-                    .append("<li><b>Disk reads:</b> the whole dump, once</li></ul>")
-                    .append("It keeps going if you disconnect, and ends, removing its index, when you close the tab or ")
+                    .append("<li><b>Disk reads:</b> the whole dump, once (and the wasted-memory report after)</li></ul>")
+                    .append("It keeps going if you disconnect, and ends when you close the tab or ")
                     .append("after ").append(logsift.jvm.RemoteHeaps.IDLE_MINUTES)
-                    .append(" minutes with no one connected.<br><br>")
+                    .append(" minutes with no one connected. Its index is temporary files that go when it ends;")
+                    .append(" nothing else is removed there.<br><br>")
                     .append("<span style='color:#858b94'>On a production server, <b>Copy to Another Machine</b> reads")
-                    .append(" it once, gently, and does the rest there.</span>");
+                    .append(" it once, at low CPU and disk priority, and does the rest there. The network isn't")
+                    .append(" limited: ").append(logsift.heap.HeapFindings.bytes(plan.dumpBytes()))
+                    .append(" go from this server to the other one.</span>");
         }
         sb.append("</div></html>");
         Object[] options = problem != null ? new Object[] {"Copy to Another Machine…", "Use Another Folder…", "Cancel"}
@@ -1293,6 +1296,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     private volatile boolean copying;
+
+    /** A copy was stopped: what was copied so far stays on the server (Logsift removes nothing there). */
+    private void partLeft(logsift.core.RemoteMirror.Target to, String dest) {
+        javax.swing.JTextField where = new javax.swing.JTextField(dest + ".part");
+        where.setEditable(false);
+        JOptionPane.showMessageDialog(this, new Object[] {"The copy was stopped. What was copied so far stays on "
+                + to.host() + ":", where, "Logsift doesn't remove files on a server: remove it there when you want."},
+                "Copy Stopped", JOptionPane.INFORMATION_MESSAGE);
+    }
 
     /**
      * Copies a dump to {@code to} (a folder there): directly when that machine can sign in to the
@@ -1355,6 +1367,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 }, () -> {
                     copying = false;
                     fromSsh.close();
+                    partLeft(to, dest);
                 });
                 return;
             }
@@ -1367,6 +1380,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }, () -> {
             copying = false;
             fromSsh.close();
+            partLeft(to, dest);
         });
     }
 
@@ -1374,7 +1388,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void copied(logsift.jvm.SshJvms fromSsh, logsift.core.RemoteMirror.Target to, String dest) {
         copying = false;
         fromSsh.close();
-        status.setText("Copied to " + to.host() + ":" + dest + " (it stays there: delete it when you are done)");
+        status.setText("Copied to " + to.host() + ":" + dest + " (it stays there: remove it when you are done)");
         openHeapDumpOnServer(new logsift.core.RemoteMirror.Target(to.host(), to.port(), to.user(), dest,
                 to.password(), to.privateKey(), to.passphrase()), null);
     }
@@ -1538,20 +1552,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             Path knownHosts = Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
             try (logsift.jvm.SshJvms con = logsift.jvm.SshJvms.connect(ssh,
                     Boolean.getBoolean("logsift.noKnownHosts") ? null : knownHosts, this::trustHost)) {
+                // only find it here: copying a heap-sized file off a server is asked first
                 for (String c : logsift.core.HeapDumpMentions.candidates(said, dir)) {
-                    Path local = Files.createTempDirectory("logsift-heap-")
-                            .resolve(logsift.core.HeapDumpMentions.fileName(c));
-                    try {
-                        con.download(c, local, progress, cancelled);
-                        local.toFile().deleteOnExit();
-                        local.getParent().toFile().deleteOnExit();
-                        return new String[] {said, local.toString()};
-                    } catch (IOException | java.util.concurrent.CancellationException e) {
-                        Files.deleteIfExists(local);
-                        Files.deleteIfExists(local.getParent()); // not there: the next place
-                        if (e instanceof java.util.concurrent.CancellationException ce) {
-                            throw ce;
-                        }
+                    long size = con.fileSize(c);
+                    if (size >= 0) {
+                        return new String[] {said, null, c, String.valueOf(size)};
                     }
                 }
             }
@@ -1559,6 +1564,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }, found -> {
             if (found[1] != null) {
                 openHeapDump(Path.of(found[1]));
+                return;
+            }
+            if (found.length > 2) {
+                long size = Long.parseLong(found[3]);
+                int choice = remoteDumpConfirm.applyAsInt(new Object[] {ssh, found[2], size});
+                if (choice == 0) {
+                    copyRemoteDump(ssh, found[2]);
+                } else if (choice == 1) {
+                    openHeapDumpOnServer(new logsift.core.RemoteMirror.Target(ssh.host(), ssh.port(), ssh.user(),
+                            found[2], ssh.password(), ssh.privateKey(), ssh.passphrase()), null);
+                }
                 return;
             }
             Path logDir = tab.path().toAbsolutePath().getParent();
@@ -1577,6 +1593,39 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 openHeapDumpDialog(logDir == null ? null : logDir.toString());
             }
         });
+    }
+
+    /** Asks before copying a heap dump off a server: 0 copy here, 1 read it there, else neither. Tests replace it. */
+    java.util.function.ToIntFunction<Object[]> remoteDumpConfirm = a -> {
+        logsift.core.RemoteMirror.Target ssh = (logsift.core.RemoteMirror.Target) a[0];
+        Object[] options = {"Copy Here", "Read It There…", "Cancel"};
+        return JOptionPane.showOptionDialog(this, "<html><div style='width:460px'><b>Copy " + esc((String) a[1]) + " ("
+                        + humanBytes((Long) a[2]) + ") from " + esc(ssh.host()) + "?</b><br><br>It is read from that"
+                        + " server's disk and sent over the network at full speed: on a busy production server that"
+                        + " takes disk and network from the service. Copy it at a quiet time, or read it on the server"
+                        + " (or another machine) instead.</div></html>", "Heap Dump on " + ssh.host(),
+                JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+    };
+
+    /** Copies a heap dump off a server and opens it. */
+    private void copyRemoteDump(logsift.core.RemoteMirror.Target ssh, String path) {
+        Path knownHosts = Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        ProgressDialog.run(this, "Copying the heap dump from " + ssh.host() + "…", (progress, cancelled) -> {
+            try (logsift.jvm.SshJvms con = logsift.jvm.SshJvms.connect(ssh,
+                    Boolean.getBoolean("logsift.noKnownHosts") ? null : knownHosts, this::trustHost)) {
+                Path local = Files.createTempDirectory("logsift-heap-").resolve(logsift.core.HeapDumpMentions.fileName(path));
+                try {
+                    con.download(path, local, progress, cancelled);
+                } catch (IOException | java.util.concurrent.CancellationException e) {
+                    Files.deleteIfExists(local); // the partial copy on this computer
+                    Files.deleteIfExists(local.getParent());
+                    throw e;
+                }
+                local.toFile().deleteOnExit();
+                local.getParent().toFile().deleteOnExit();
+                return local;
+            }
+        }, this::openHeapDump);
     }
 
     HeapDumpTab currentHeapDumpTab() {

@@ -150,36 +150,23 @@ public final class HeapServer {
         }
     }
 
-    /** Ends: the index and the state file go. */
+    /**
+     * Ends. Nothing is removed by name: the index files are temporary files the reader opened
+     * itself (gone when it ends, like swap), and the state file stays, saying the reader stopped.
+     */
     private void shutDown() {
         requestStop();
-        HeapDump d = dump;
-        if (d != null) {
-            d.close();
-        }
+        // the dump isn't closed here: closing would also tidy the index folder by name; on exit the
+        // JVM drops the temporary index files it opened (and nothing else)
         try {
-            Files.deleteIfExists(state.resolve("server"));
+            Path tmp = state.resolve("server.tmp");
+            Files.write(tmp, "stopped\n".getBytes(StandardCharsets.UTF_8));
+            Files.move(tmp, state.resolve("server"), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
-            // left
+            // the next start writes it anew
         }
-        deleteTree(work);
         pool.shutdownNow();
         System.exit(0);
-    }
-
-    private static void deleteTree(Path p) {
-        if (!Files.exists(p)) {
-            return;
-        }
-        try (java.util.stream.Stream<Path> w = Files.walk(p)) {
-            List<Path> all = new ArrayList<>();
-            w.forEach(all::add);
-            for (int i = all.size() - 1; i >= 0; i--) {
-                Files.deleteIfExists(all.get(i));
-            }
-        } catch (IOException e) {
-            // what is left stays
-        }
     }
 
     private void writeState() throws IOException {

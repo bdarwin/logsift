@@ -103,7 +103,9 @@ class RemoteHeapsTest {
             Thread.sleep(200);
         }
         assertNull(RemoteHeaps.plan(ssh, dump.toString(), null).running(), "stopped");
-        assertTrue(!Files.exists(Path.of(plan.workDir())), "the index is removed");
+        try (java.util.stream.Stream<Path> left = Files.list(Path.of(plan.workDir()))) {
+            assertEquals(0, left.count(), "the index was temporary files, gone with the reader");
+        }
     }
 
     @Test

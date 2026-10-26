@@ -189,6 +189,15 @@ class ProfilerTest {
         assertNull(new Profiler.Request(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.METHOD_CALLS, 5, false,
                 "java.io.FileInputStream.read*", 0, "").problem());
         assertNotNull(Profiler.Request.of(Profiler.Engine.JFR, Profiler.Mode.LIVE, 5).problem());
+        // tracing the methods of many classes can stall the JVM: one class, a * only in the method name
+        for (String many : List.of("com.*.*", "*.*", "com.acme.*.handle")) {
+            String why = new Profiler.Request(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.METHOD_CALLS, 5, false,
+                    many, 0, "").problem();
+            assertNotNull(why, many);
+            assertTrue(why.contains("one class"), why);
+        }
+        assertNull(new Profiler.Request(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.METHOD_LATENCY, 5, false,
+                "com.acme.orders.Api.*", 100, "").problem());
         // the hardware events async-profiler lists on Linux (placeholders left out)
         assertEquals(List.of("page-faults", "context-switches", "cycles", "cache-misses"), Profiler.perfEvents("""
                 Basic events:

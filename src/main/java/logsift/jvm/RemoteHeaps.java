@@ -85,7 +85,8 @@ public final class RemoteHeaps {
                 command -v ionice >/dev/null 2>&1 && echo "ionice=1"
                 if [ -f "$state/server" ]; then
                   read port token pid < "$state/server"
-                  if kill -0 "$pid" 2>/dev/null && [ "$(sed -n 2p "$state/server")" = "$f" ]; then
+                  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && ps -p "$pid" -o args= 2>/dev/null | grep -q HeapServer \\
+                      && [ "$(sed -n 2p "$state/server")" = "$f" ]; then
                     echo "running=$port $token $pid"
                   fi
                 fi
@@ -179,7 +180,7 @@ public final class RemoteHeaps {
         String heapDir = state.substring(0, state.lastIndexOf('/'));
         String remoteJar = heapDir + "/logsift-heap-" + sha + ".jar";
         SshJvms.Result mk = ssh.exec("mkdir -p " + SshJvms.q(state) + " && chmod 700 " + SshJvms.q(heapDir) + " "
-                + SshJvms.q(state) + " && rm -f " + SshJvms.q(state + "/server") + " && test -f "
+                + SshJvms.q(state) + " && test -f "
                 + SshJvms.q(remoteJar) + " && echo have", null, 30);
         if (!mk.out().contains("have")) {
             if (mk.exit() != 0 && !mk.err().isBlank()) {
@@ -187,7 +188,8 @@ public final class RemoteHeaps {
             }
             ssh.upload(jar, remoteJar);
         }
-        String command = "cd " + SshJvms.q(state) + " && nohup " + (plan.ionice() ? "ionice -c2 -n7 " : "")
+        // "cd …;" before, not "cd … &&": with && the whole list goes to the background and $! is a subshell
+        String command = "cd " + SshJvms.q(state) + " || exit 1; nohup " + (plan.ionice() ? "ionice -c2 -n7 " : "")
                 + "nice -n 19 " + SshJvms.q(plan.java()) + " -Xmx2g -cp " + SshJvms.q(remoteJar) + " "
                 + HeapServer.class.getName() + " --dump " + SshJvms.q(plan.dump()) + " --work "
                 + SshJvms.q(plan.workDir()) + " --state " + SshJvms.q(state) + " --idle " + IDLE_MINUTES
@@ -204,17 +206,18 @@ public final class RemoteHeaps {
                 ssh.exec("kill " + pid, null, 10);
                 throw new java.util.concurrent.CancellationException();
             }
-            SshJvms.Result s = ssh.exec("cat " + SshJvms.q(state + "/server") + " 2>/dev/null || (kill -0 " + pid
-                    + " 2>/dev/null && echo waiting || (echo ended; tail -5 " + SshJvms.q(state + "/log") + "))",
+            SshJvms.Result s = ssh.exec("if kill -0 " + pid + " 2>/dev/null; then cat " + SshJvms.q(state + "/server")
+                    + " 2>/dev/null || echo waiting; else echo ended; tail -5 " + SshJvms.q(state + "/log") + "; fi",
                     null, 30);
             String out = s.out().trim();
             if (out.startsWith("ended")) {
                 throw new IOException("the heap reader on " + ssh.label() + " ended: "
                         + out.substring("ended".length()).trim());
             }
-            if (!out.equals("waiting") && !out.isEmpty()) {
+            if (!out.equals("waiting") && !out.isEmpty() && !out.startsWith("stopped")) {
                 String[] w = out.split("\n")[0].trim().split(" ");
-                if (w.length >= 3) {
+                // an earlier reader's file ("stopped", or another pid) is not this one's
+                if (w.length >= 3 && w[2].equals(String.valueOf(pid))) {
                     return new Running(Integer.parseInt(w[0]), w[1], Long.parseLong(w[2]));
                 }
             }

@@ -129,10 +129,10 @@ final class JvmBar extends JPanel {
             b.setFocusable(false);
             buttons.add(b);
         }
-        threadsButton.setToolTipText("Take a thread dump of this JVM now");
+        threadsButton.setToolTipText("Take a thread dump of this JVM now (it stops for a moment)");
         profileButton.setToolTipText("Profile this JVM: where it spends its time, memory or lock waits");
         heapButton.setToolTipText("See what fills this JVM's heap, and what grows");
-        connectButton.setToolTipText("Connect to the JVM this log is linked to");
+        connectButton.setToolTipText("Connect to the JVM this log is linked to (it takes a first thread dump: a short stop)");
         more.setToolTipText("Link to another JVM, or forget the link");
         close.setToolTipText("Hide");
         threadsButton.addActionListener(e -> withConnection(this::showThreads));

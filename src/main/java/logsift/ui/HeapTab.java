@@ -90,10 +90,12 @@ final class HeapTab extends JPanel {
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
         take.putClientProperty("JButton.buttonType", "default");
-        take.setToolTipText("Count the objects in the heap by class");
+        take.setToolTipText("<html>Count the objects in the heap by class. The JVM stands still while it counts;"
+                + "<br>with Only live objects, after a full garbage collection.</html>");
         take.addActionListener(e -> takeHistogram());
-        liveOnly.setToolTipText("<html>Runs a full garbage collection first, so only objects still in use are counted."
-                + "<br>That pauses the JVM (longer for big heaps). Off: counts garbage too, without the pause.</html>");
+        liveOnly.setToolTipText("<html>On: a full garbage collection first, so only objects still in use are counted."
+                + "<br>The JVM stops for it (seconds for big heaps). Off: garbage is counted too, and the stop is"
+                + "<br>shorter: the JVM still stands still while it walks the heap.</html>");
         liveOnly.addActionListener(e -> AppState.prefs().putBoolean("heap.live", liveOnly.isSelected()));
         dump.putClientProperty("JButton.buttonType", "toolBarButton");
         dump.setToolTipText("Write every object in the heap to a .hprof file, for a heap analyzer");
@@ -233,7 +235,9 @@ final class HeapTab extends JPanel {
         background(() -> {
             String text = target.diagnostic("GC.class_histogram", live ? new String[0] : new String[] {"-all"});
             if (!live && !text.contains("Total")) {
-                text = target.diagnostic("GC.class_histogram"); // JDK 8 has no -all
+                // never quietly fall back to the live count: that would run a full GC no one asked for
+                throw new IOException("this JVM can't count without a full GC (" + firstLine(text) + "): turn on"
+                        + " Only live objects if a full GC is all right now");
             }
             HeapHistogram h = HeapHistogram.parse(text, System.currentTimeMillis());
             if (h.rows().isEmpty()) {
@@ -304,13 +308,21 @@ final class HeapTab extends JPanel {
         if (ch.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }
-        if (JOptionPane.showConfirmDialog(this, "<html>A heap dump pauses the JVM while it is written (seconds, or longer"
-                        + " for big heaps),<br>and the file is about as big as the heap. Save one now?</html>",
+        if (JOptionPane.showConfirmDialog(this, "<html><div style='width:460px'><b>The JVM stops while the heap dump is"
+                        + " written.</b> It runs a full garbage collection, then writes every object in use: seconds,"
+                        + " or minutes for a big heap. Meanwhile the program doesn't answer.<br><br>"
+                        + "The file is about as big as the heap in use. For a JVM on a server it is written there"
+                        + " (in /tmp, or the JVM's temporary folder over a JMX port) and stays there: Logsift doesn't"
+                        + " remove files on a server. Make sure that disk has room (if /tmp is in memory, the dump"
+                        + " takes memory). It is then copied here over the network.<br><br>Save one now?</div></html>",
                 "Heap Dump", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION) {
             return;
         }
         heapDump(ch.getSelectedFile().toPath());
     }
+
+    /** Off in tests: the note about a copy left on the server is only in the status then. */
+    static boolean showNotes = !Boolean.getBoolean("logsift.visual.noNotes");
 
     void heapDump(Path file) {
         if (busy != null) {
@@ -321,8 +333,9 @@ final class HeapTab extends JPanel {
         setWorking(true, "Writing the heap dump…");
         background(() -> {
             java.nio.file.Files.deleteIfExists(file);
+            String note;
             try {
-                target.heapDump(file, f -> SwingUtilities.invokeLater(() -> {
+                note = target.heapDump(file, f -> SwingUtilities.invokeLater(() -> {
                     bar.setValue((int) Math.round(f * 1000));
                     status.setText("Copying the heap dump… " + Math.round(f * 100) + "%");
                 }), cancel::get);
@@ -335,7 +348,12 @@ final class HeapTab extends JPanel {
             }
             long size = java.nio.file.Files.size(file);
             SwingUtilities.invokeLater(() -> {
-                setWorking(false, "Saved " + file.getFileName() + " (" + bytes(size) + ")");
+                setWorking(false, "Saved " + file.getFileName() + " (" + bytes(size) + ")"
+                        + (note == null ? "" : ". " + note));
+                if (note != null && showNotes) {
+                    javax.swing.JOptionPane.showMessageDialog(this, note, "Heap Dump",
+                            javax.swing.JOptionPane.INFORMATION_MESSAGE);
+                }
                 dumpSaved.accept(file); // on this computer (a remote dump is copied here)
             });
         }, error -> setWorking(false, "Could not save a heap dump: " + error));

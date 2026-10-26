@@ -367,7 +367,9 @@ final class ProfileTab extends JPanel {
         Thread t = new Thread(() -> {
             List<Profiler.Engine> engines = target.engines();
             boolean ap = engines.contains(Profiler.Engine.ASYNC_PROFILER);
-            List<String> hw = ap ? target.hardwareEvents() : List.of();
+            // hardware events are asked for only when that mode is chosen: asking loads async-profiler
+            // into the JVM, which opening this tab shouldn't do
+            List<String> hw = List.of();
             List<Profiler.Mode> apModes = ap ? target.modes(Profiler.Engine.ASYNC_PROFILER) : List.of();
             SwingUtilities.invokeLater(() -> {
                 asyncModes = apModes;
@@ -416,8 +418,53 @@ final class ProfileTab extends JPanel {
         latency.setVisible(m == Profiler.Mode.METHOD_LATENCY);
         latencyLabel.setVisible(m == Profiler.Mode.METHOD_LATENCY);
         hardware.setVisible(m == Profiler.Mode.HARDWARE);
-        about.setText(m == null ? " " : m.description + note(m));
+        if (m == Profiler.Mode.HARDWARE && hardware.getItemCount() == 0 && !hardwareLoading) {
+            loadHardware();
+        }
+        Profiler.Engine e = (Profiler.Engine) engine.getSelectedItem();
+        about.setText(m == null ? " " : "<html>" + m.description + note(m) + "<br><span style='color:#b45309'>"
+                + cost(m, e) + "</span></html>");
         revalidate();
+    }
+
+    private boolean hardwareLoading;
+
+    /** The hardware events async-profiler offers for this JVM (it is loaded into the JVM to ask). */
+    private void loadHardware() {
+        hardwareLoading = true;
+        Thread t = new Thread(() -> {
+            List<String> hw = target.hardwareEvents();
+            SwingUtilities.invokeLater(() -> {
+                hardware.setModel(new DefaultComboBoxModel<>(hw.toArray(String[]::new)));
+                String lastHw = AppState.prefs().get("profile.hardware", "cache-misses");
+                if (hw.contains(lastHw)) {
+                    hardware.setSelectedItem(lastHw);
+                }
+                hardwareLoading = false;
+            });
+        }, "logsift-profile-hardware");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** What a run costs the JVM, said where it is chosen. */
+    static String cost(Profiler.Mode m, Profiler.Engine e) {
+        if (e == Profiler.Engine.JFR) {
+            return "Cost to the JVM: about 2–3% CPU while it records; the first recording in a JVM starts Flight"
+                    + " Recorder there.";
+        }
+        String agent = " async-profiler is loaded into the JVM for the first run and stays loaded until the JVM ends.";
+        return "Cost to the JVM: " + switch (m) {
+            case CPU, ALLOC, HARDWARE -> "light (about 1–3% CPU while it runs).";
+            case WALL -> "light, more with many threads (every thread is sampled, idle ones too).";
+            case LIVE -> "light, plus a little memory and GC work to follow the sampled objects.";
+            case LOCK, NATIVE_LOCKS -> "light to moderate where threads fight over locks.";
+            case NATIVE_MEMORY, NATIVE_LEAKS -> "every malloc in the process is recorded: noticeable where native code"
+                    + " allocates a lot (TLS, compression, Netty). Better not on a busy production JVM without need.";
+            case METHOD_CALLS, METHOD_LATENCY -> "every call of the method costs a little: a method called very often"
+                    + " slows the program, and the JVM recompiles some code the first time.";
+            case ALL -> "all of these at once, native memory too: heavier. Better not on a busy production JVM.";
+        } + agent;
     }
 
     private static String note(Profiler.Mode m) {
@@ -426,7 +473,7 @@ final class ProfileTab extends JPanel {
             case NATIVE_LEAKS -> ". Allocations in the last tenth of the run are left out (they may simply not be freed yet).";
             case METHOD_CALLS, METHOD_LATENCY -> ". The method is instrumented during the run; the first time,"
                     + " the JVM recompiles some code.";
-            case ALL -> ". Heavier than one at a time: better not on a busy production JVM.";
+            case ALL -> ".";
             default -> ".";
         };
     }
