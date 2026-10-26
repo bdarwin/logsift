@@ -345,6 +345,10 @@ Open a `.hprof` file (**File → Open**, **JVM → Open Heap Dump…**, **Open H
 
 **Compare with Another Dump…** (or **JVM → Compare Two Heap Dumps…**) takes an earlier dump of the same program and says what grew, and where: *"HashMap in static LeakApp.CACHE grew by 11.8 MB (3.92 MB → 15.7 MB). 5,000 entries → 20,000 entries. Mostly 20,000 × LeakApp.Session."* Objects move between dumps, so places are matched by the chain of fields from a GC root that keeps them, not by address; when a place grows mostly because of a place inside it, the inner one is shown. **Classes** lists every class with its objects before and after. The dumps are put in order by when they were taken.
 
+**On a server:** **JVM → Open Heap Dump on a Server…** reads a dump where it is, over SSH, so a 40 GB dump doesn't have to come to your computer. Logsift first looks at the server (the dump's size, a Java 8 or later there, free disk and memory) and says what reading it takes before anything starts: up to the dump's size in disk for the index, 2 GB of memory, a CPU core for some minutes, and one read of the dump. Its reader is copied to `~/.logsift/heap` there and runs at low priority (`nice`, `ionice`); the app asks it questions through an SSH tunnel to a port only reachable on that machine, with a secret token. It keeps going if the connection drops (opening the dump again reconnects), and ends, removing its index, when you close the tab or after 30 minutes with no one connected. On a production machine, **Copy to Another Machine…** copies the dump to a folder on another server and reads it there: that server fetches it itself when it can sign in to the first with its own key, else (if you agree) it goes through your computer; either way the first machine reads it once at low priority.
+
+![Reading a heap dump on a server: what it takes there, asked before it starts](docs/screenshots/heap-on-a-server-question.png)
+
 **Threads (N)** at the top opens the dump's threads in the Threads view: names, states and stacks at the moment of the dump (a heap dump doesn't record which locks they hold).
 
 **From a log:** when a JVM started with `-XX:+HeapDumpOnOutOfMemoryError` runs out of memory, it prints `Dumping heap to java_pid4242.hprof ...`. Right-click the `OutOfMemoryError` line (or that one) and choose **Open the Heap Dump**, or click **Open Heap Dump** on the known problem in Insights: Logsift finds where the log says the dump went (as written, or next to the log) and opens it; for a log read over SSH, it is copied from the server first.
@@ -542,6 +546,10 @@ logsift.heap
   HeapFindings    what fills the heap, in sentences
   HeapWaste       copies of the same strings, empty and mostly empty collections
   HeapDiff        two dumps compared: what grew, matched by where it is kept
+  HeapMap         what an object holds, as boxes for the map
+  HeapServer      reads a dump on a server, answers the app over one connection (Java 8+)
+  RemoteHeap      the app's side of that connection
+(logsift.heap is built for Java 8 into logsift-heap.jar, which is also copied to servers)
   Store           big arrays in memory, or in memory-mapped files on disk for big dumps
 logsift.ui
   LogView         virtual view: paints only visible rows; scrollbar counts rows
@@ -573,7 +581,7 @@ Design choices:
 - **Logs from zips and the web** are copies made when opened; they don't follow the original.
 - **Merged logs and remote logs** are local copies: they keep up while the sources grow, but entries that arrive late in a merge are appended, not inserted in time order.
 - **Time zones** are not converted: times are shown as written in each log.
-- **Heap dumps** in HotSpot's `.hprof` format are read (not compressed `.hprof.gz`, and not OpenJ9 `.phd`). A dump doesn't say how the JVM laid its objects out (compressed pointers or not, compact headers), so Logsift works it out from the addresses of objects next to each other. A big dump's index needs free disk space up to the dump's size, in `~/.logsift/heap-index` (Logsift says so before it starts when there isn't enough). Wasted memory counts the JDK's collections (ArrayList, Vector, HashMap, LinkedHashMap, HashSet, Hashtable, WeakHashMap, IdentityHashMap, ConcurrentHashMap, ArrayDeque, CopyOnWriteArrayList, LinkedList, TreeMap, TreeSet), not those of other libraries.
+- **Heap dumps** in HotSpot's `.hprof` format are read (not compressed `.hprof.gz`, and not OpenJ9 `.phd`). A dump doesn't say how the JVM laid its objects out (compressed pointers or not, compact headers), so Logsift works it out from the addresses of objects next to each other. A big dump's index needs free disk space up to the dump's size, in `~/.logsift/heap-index` (Logsift says so before it starts when there isn't enough). Comparing two dumps works with dumps on this computer, not with ones read on a server. A server needs `sh`, `nohup` and `nice` (any Linux or macOS has them) and a Java 8 or later. Wasted memory counts the JDK's collections (ArrayList, Vector, HashMap, LinkedHashMap, HashSet, Hashtable, WeakHashMap, IdentityHashMap, ConcurrentHashMap, ArrayDeque, CopyOnWriteArrayList, LinkedList, TreeMap, TreeSet), not those of other libraries.
 - **Thread dumps** of HotSpot JVMs (OpenJDK, Oracle, Temurin, Zulu, Corretto and the like) are read. OpenJ9 `javacore` files are not.
 - **GC logs** of HotSpot JVMs are read (Java 8 and later). OpenJ9's verbose GC (XML) is not. A rotated GC log (`gc.log.0`, `gc.log.1`…) is read one file at a time; merge them first (Merge by Time) to see them together.
 - **async-profiler** runs on Linux (x64, ARM64) and macOS JVMs; for JVMs on Windows, use Flight Recorder.

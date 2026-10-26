@@ -81,6 +81,10 @@ final class RemoteDialog extends JDialog {
     private final JSpinner mb = new JSpinner(new SpinnerNumberModel(p.getInt("remote.lastMb", 50), 1, 100_000, 10));
     private final JButton open = new JButton("Open");
 
+    /** What the dialog is for. */
+    enum Mode { LOG, HEAP_DUMP, FOLDER }
+
+    private final Mode mode;
     private final boolean heapDump;
     private RemoteBrowser browser;
     private RemoteMirror.Target connected;
@@ -93,8 +97,16 @@ final class RemoteDialog extends JDialog {
     /** {@code heapDump}: for choosing a heap dump to read on the server (nothing is loaded here). */
     RemoteDialog(Window owner, Path knownHosts, Predicate<String> trustHost, Consumer<Choice> onChosen,
                  boolean heapDump) {
-        super(owner, heapDump ? "Open Heap Dump on a Server (SSH)" : "Open Remote Log (SFTP)", ModalityType.MODELESS);
-        this.heapDump = heapDump;
+        this(owner, knownHosts, trustHost, onChosen, heapDump ? Mode.HEAP_DUMP : Mode.LOG, null);
+    }
+
+    /** {@code title}: for {@link Mode#FOLDER} (choosing a folder on a server; the choice's path is it). */
+    RemoteDialog(Window owner, Path knownHosts, Predicate<String> trustHost, Consumer<Choice> onChosen, Mode mode,
+                 String title) {
+        super(owner, title != null ? title : mode == Mode.HEAP_DUMP ? "Open Heap Dump on a Server (SSH)"
+                : "Open Remote Log (SFTP)", ModalityType.MODELESS);
+        this.mode = mode;
+        this.heapDump = mode != Mode.LOG;
         this.knownHosts = knownHosts;
         this.trustHost = trustHost;
         this.onChosen = onChosen;
@@ -192,8 +204,9 @@ final class RemoteDialog extends JDialog {
         buttons.add(cancel);
         buttons.add(open);
         if (heapDump) {
-            open.setText("Read It There…");
-            JLabel hint = new JLabel("The dump is read on the server; you see the answers here.");
+            open.setText(mode == Mode.FOLDER ? "Copy Here" : "Read It There…");
+            JLabel hint = new JLabel(mode == Mode.FOLDER ? "Choose a folder with room for the dump and its index."
+                    : "The dump is read on the server; you see the answers here.");
             hint.setForeground(Theme.uiColor("Label.disabledForeground", java.awt.Color.GRAY));
             south.add(hint, BorderLayout.WEST);
         } else {
@@ -250,7 +263,8 @@ final class RemoteDialog extends JDialog {
 
     private void updateOpenButton() {
         int r = table.getSelectedRow();
-        open.setEnabled(browser != null && r >= 0 && r < entries.size() && !entries.get(r).dir());
+        open.setEnabled(mode == Mode.FOLDER ? browser != null && currentDir != null
+                : browser != null && r >= 0 && r < entries.size() && !entries.get(r).dir());
     }
 
     // ---------------------------------------------------------------- connecting and browsing
@@ -357,6 +371,7 @@ final class RemoteDialog extends JDialog {
         listings++;
         currentDir = dir;
         address.setText(dir);
+        updateOpenButton();
         entries.clear();
         if (!dir.equals("/")) {
             entries.add(new RemoteBrowser.Entry("..", true, 0, 0));
@@ -402,6 +417,14 @@ final class RemoteDialog extends JDialog {
     }
 
     void openSelected() {
+        if (mode == Mode.FOLDER) {
+            if (connected != null && currentDir != null) {
+                RemoteMirror.Target t = targetFromFields(currentDir);
+                dispose();
+                onChosen.accept(new Choice(t, 0));
+            }
+            return;
+        }
         int r = table.getSelectedRow();
         if (connected == null || r < 0 || r >= entries.size() || entries.get(r).dir()) {
             return;

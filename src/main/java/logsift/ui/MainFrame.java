@@ -1188,6 +1188,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     }
                     return;
                 }
+                if (choice == 3) {
+                    copyHeapDumpDialog(target, ssh, plan);
+                    return;
+                }
                 if (choice != 0) {
                     ssh.close();
                     return;
@@ -1197,7 +1201,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
     }
 
-    /** Asks before reading a dump on a server: 0 read it there, 1 another folder, else cancel (tests replace it). */
+    /**
+     * Asks before reading a dump on a server: 0 read it there, 1 another folder, 3 copy it to another
+     * machine, else cancel (tests replace it).
+     */
     java.util.function.ToIntFunction<logsift.jvm.RemoteHeaps.Plan> heapServerConfirm = this::confirmHeapServer;
 
     private int confirmHeapServer(logsift.jvm.RemoteHeaps.Plan plan) {
@@ -1211,10 +1218,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 r = i;
             }
         }
+        // 0 read it there, 1 another folder, 3 copy elsewhere
         if (plan.problem() != null) {
-            return r == 0 ? 1 : 2;
+            return r == 0 ? 3 : r == 1 ? 1 : 2;
         }
-        return r;
+        return r == 1 ? 3 : r == 2 ? 1 : r;
     }
 
     /** What reading a dump on a server takes, as a question. */
@@ -1251,18 +1259,124 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     .append("It keeps going if you disconnect, and ends, removing its index, when you close the tab or ")
                     .append("after ").append(logsift.jvm.RemoteHeaps.IDLE_MINUTES)
                     .append(" minutes with no one connected.<br><br>")
-                    .append("<span style='color:#858b94'>On a production server, consider copying the dump to another")
-                    .append(" machine and reading it there.</span>");
+                    .append("<span style='color:#858b94'>On a production server, <b>Copy to Another Machine</b> reads")
+                    .append(" it once, gently, and does the rest there.</span>");
         }
         sb.append("</div></html>");
-        Object[] options = problem != null ? new Object[] {"Use Another Folder…", "Cancel"}
-                : new Object[] {"Read It There", "Use Another Folder…", "Cancel"};
+        Object[] options = problem != null ? new Object[] {"Copy to Another Machine…", "Use Another Folder…", "Cancel"}
+                : new Object[] {"Read It There", "Copy to Another Machine…", "Use Another Folder…", "Cancel"};
         return new JOptionPane(sb.toString(), problem != null ? JOptionPane.WARNING_MESSAGE
                 : JOptionPane.QUESTION_MESSAGE, JOptionPane.DEFAULT_OPTION, null, options, options[0]);
     }
 
     private static String esc(String s) {
         return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    /** Chooses where on another machine to copy a dump, then copies it there and reads it there. */
+    private void copyHeapDumpDialog(logsift.core.RemoteMirror.Target from, logsift.jvm.SshJvms fromSsh,
+                                    logsift.jvm.RemoteHeaps.Plan plan) {
+        Path knownHosts = Boolean.getBoolean("logsift.noKnownHosts") ? null
+                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        RemoteDialog d = new RemoteDialog(this, knownHosts, this::trustHost,
+                c -> copyHeapDump(from, fromSsh, plan, c.target()), RemoteDialog.Mode.FOLDER,
+                "Copy the Heap Dump to Another Machine");
+        d.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosed(java.awt.event.WindowEvent e) {
+                if (!copying) {
+                    fromSsh.close(); // closed without choosing
+                }
+            }
+        });
+        d.setVisible(true);
+    }
+
+    private volatile boolean copying;
+
+    /**
+     * Copies a dump to {@code to} (a folder there): directly when that machine can sign in to the
+     * first by itself, else (when the person agrees) through this computer; then reads it there.
+     */
+    void copyHeapDump(logsift.core.RemoteMirror.Target from, logsift.jvm.SshJvms fromSsh,
+                      logsift.jvm.RemoteHeaps.Plan plan, logsift.core.RemoteMirror.Target to) {
+        copying = true;
+        Path knownHosts = Boolean.getBoolean("logsift.noKnownHosts") ? null
+                : Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
+        String name = plan.dump().substring(plan.dump().lastIndexOf('/') + 1);
+        String dest = to.path().replaceAll("/+$", "") + "/" + name;
+        ProgressDialog.run(this, "Copying " + name + " to " + to.host() + "…", (progress, cancelled) -> {
+            logsift.jvm.SshJvms toSsh = logsift.jvm.SshJvms.connect(to, knownHosts, this::trustHost);
+            try {
+                long free = logsift.jvm.RemoteCopy.free(toSsh, to.path());
+                long need = plan.dumpBytes() + logsift.heap.HeapDump.diskNeeded(plan.dumpBytes()) + (1L << 30);
+                if (free >= 0 && free < need) {
+                    throw new IOException("The copy and its index need up to " + logsift.heap.HeapFindings.bytes(need)
+                            + " in " + to.path() + " on " + to.host() + ", and there is only "
+                            + logsift.heap.HeapFindings.bytes(free) + " free.");
+                }
+                try {
+                    logsift.jvm.RemoteCopy.direct(toSsh, from, plan.dump(), dest, plan.dumpBytes(), progress,
+                            cancelled);
+                    return Boolean.TRUE;
+                } catch (logsift.jvm.RemoteCopy.NoDirectWay e) {
+                    return e.getMessage();
+                }
+            } finally {
+                toSsh.close();
+            }
+        }, result -> {
+            if (result instanceof String why) {
+                long mb = Math.max(1, plan.dumpBytes() >> 20);
+                Object[] options = {"Copy Through This Computer", "Cancel"};
+                int r = JOptionPane.showOptionDialog(this, "<html><div style='width:440px'><b>" + esc(to.host())
+                                + " can't sign in to " + esc(plan.host()) + " by itself.</b><br><br>" + esc(why)
+                                + "<br><br>Logsift can copy it through this computer instead: " + String.format("%,d", mb)
+                                + " MB go through your network connection, so it takes longer. (Or give "
+                                + esc(to.host()) + " a key it can use for " + esc(plan.host()) + ", and try again.)"
+                                + "</div></html>", "Copy the Heap Dump", JOptionPane.DEFAULT_OPTION,
+                        JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+                if (r != 0) {
+                    copying = false;
+                    fromSsh.close();
+                    return;
+                }
+                ProgressDialog.run(this, "Copying " + name + " through this computer…", (progress, cancelled) -> {
+                    try (logsift.jvm.SshJvms toSsh = logsift.jvm.SshJvms.connect(to, knownHosts, this::trustHost)) {
+                        logsift.jvm.RemoteCopy.throughHere(fromSsh, toSsh, plan.dump(), dest, plan.dumpBytes(),
+                                progress, cancelled);
+                    }
+                    return Boolean.TRUE;
+                }, ok -> copied(fromSsh, to, dest), e -> {
+                    copying = false;
+                    fromSsh.close();
+                    JOptionPane.showMessageDialog(this, "Copying failed: " + e.getMessage(), "Logsift",
+                            JOptionPane.ERROR_MESSAGE);
+                }, () -> {
+                    copying = false;
+                    fromSsh.close();
+                });
+                return;
+            }
+            copied(fromSsh, to, dest);
+        }, e -> {
+            copying = false;
+            fromSsh.close();
+            JOptionPane.showMessageDialog(this, "Copying failed: " + e.getMessage(), "Logsift",
+                    JOptionPane.ERROR_MESSAGE);
+        }, () -> {
+            copying = false;
+            fromSsh.close();
+        });
+    }
+
+    /** The copy is there: read it there. */
+    private void copied(logsift.jvm.SshJvms fromSsh, logsift.core.RemoteMirror.Target to, String dest) {
+        copying = false;
+        fromSsh.close();
+        status.setText("Copied to " + to.host() + ":" + dest + " (it stays there: delete it when you are done)");
+        openHeapDumpOnServer(new logsift.core.RemoteMirror.Target(to.host(), to.port(), to.user(), dest,
+                to.password(), to.privateKey(), to.passphrase()), null);
     }
 
     /** A dump read on a server: started (or found running) there, and stopped when the tab closes. */

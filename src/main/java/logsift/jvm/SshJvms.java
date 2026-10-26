@@ -463,6 +463,82 @@ public final class SshJvms implements AutoCloseable {
         }
     }
 
+    /** What a command writes, as a stream (closing it ends the command's channel). */
+    public InputStream stream(String command) throws IOException {
+        try {
+            ChannelExec ch = (ChannelExec) session.openChannel("exec");
+            ch.setCommand(command);
+            ch.setErrStream(java.io.OutputStream.nullOutputStream());
+            InputStream in = ch.getInputStream();
+            ch.connect(15_000);
+            return new java.io.FilterInputStream(in) {
+                @Override
+                public void close() throws IOException {
+                    try {
+                        super.close();
+                    } finally {
+                        ch.disconnect();
+                    }
+                }
+            };
+        } catch (JSchException e) {
+            throw new IOException(RemoteMirror.describe(e), e);
+        }
+    }
+
+    /**
+     * Writes a stream to a file on the server ({@code remote}.part, renamed when complete); {@code
+     * done} gets the bytes written so far; {@code cancel} stops it (the part is removed).
+     */
+    public void put(InputStream data, String remote, java.util.function.LongConsumer done,
+                    java.util.function.BooleanSupplier cancel) throws IOException {
+        ChannelSftp sftp = null;
+        boolean[] stopped = {false};
+        try {
+            sftp = (ChannelSftp) session.openChannel("sftp");
+            sftp.connect(15_000);
+            sftp.put(data, remote + ".part", new com.jcraft.jsch.SftpProgressMonitor() {
+                private long n;
+
+                @Override
+                public void init(int op, String src, String dest, long max) {
+                }
+
+                @Override
+                public boolean count(long k) {
+                    n += k;
+                    if (done != null) {
+                        done.accept(n);
+                    }
+                    if (cancel != null && cancel.getAsBoolean()) {
+                        stopped[0] = true;
+                        return false;
+                    }
+                    return true;
+                }
+
+                @Override
+                public void end() {
+                }
+            }, ChannelSftp.OVERWRITE);
+            if (!stopped[0]) {
+                sftp.rename(remote + ".part", remote);
+            }
+        } catch (JSchException | SftpException e) {
+            if (!stopped[0]) {
+                throw new IOException("cannot write " + remote + " on " + label() + ": " + RemoteMirror.describe(e), e);
+            }
+        } finally {
+            if (sftp != null) {
+                sftp.disconnect();
+            }
+        }
+        if (stopped[0]) {
+            exec("rm -f " + q(remote + ".part"), null, 30); // the SFTP channel is done for after a stop
+            throw new java.util.concurrent.CancellationException();
+        }
+    }
+
     /** A connection to a port on the server's own 127.0.0.1, through SSH. */
     public logsift.heap.RemoteHeap.Link tunnel(int port) throws IOException {
         try {
