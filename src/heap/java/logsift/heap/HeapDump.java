@@ -26,7 +26,7 @@ import java.util.function.BooleanSupplier;
  * <p>Sizes are what the JVM uses: object headers of 12 bytes and references of 4 (compressed
  * pointers, the default for heaps under 32 GB), objects aligned to 8 bytes.
  */
-public final class HeapDump implements AutoCloseable {
+public final class HeapDump implements HeapModel {
     static final int T_OBJECT = 2;
     static final int T_BOOLEAN = 4;
     static final int T_CHAR = 5;
@@ -1291,6 +1291,40 @@ public final class HeapDump implements AutoCloseable {
 
     public Path file() {
         return file;
+    }
+
+    @Override
+    public String fileName() {
+        return file.getFileName().toString();
+    }
+
+    @Override
+    public String location() {
+        return file.toAbsolutePath().toString();
+    }
+
+    @Override
+    public long fileBytes() {
+        try {
+            return channel.size();
+        } catch (IOException e) {
+            return 0;
+        }
+    }
+
+    @Override
+    public List<HeapFindings.Finding> findings() throws IOException {
+        return HeapFindings.of(this);
+    }
+
+    @Override
+    public HeapWaste.Report waste(Listener listener, BooleanSupplier cancel) throws IOException {
+        return HeapWaste.of(this, listener, cancel);
+    }
+
+    @Override
+    public HeapMap.Box map(int focus) throws IOException {
+        return HeapMap.read(this, focus);
     }
 
     /** When the dump was taken (ms since 1970). */

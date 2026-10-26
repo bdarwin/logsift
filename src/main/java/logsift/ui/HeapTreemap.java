@@ -28,8 +28,10 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
-import logsift.heap.HeapDump;
 import logsift.heap.HeapFindings;
+import logsift.heap.HeapMap;
+import logsift.heap.HeapMap.Box;
+import logsift.heap.HeapModel;
 
 /**
  * The heap as a treemap: each box is an object, as big as what it holds (its retained size), with
@@ -37,14 +39,7 @@ import logsift.heap.HeapFindings;
  * into it; the path at the top goes back out.
  */
 final class HeapTreemap extends JPanel {
-    /** Children shown at the first level, and inside each of them. */
-    static final int FIRST = 60;
-    static final int SECOND = 30;
-
-    /** One box: an object (node), or the rest that is too small to show ({@code node} -1). */
-    record Box(int node, long bytes, String label, String tip, long count, List<Box> inside) { }
-
-    private final HeapDump dump;
+    private final HeapModel dump;
     private final IntConsumer select;
     private final List<Integer> path = new ArrayList<>(); // the nodes zoomed into, from the root
     private final JPanel crumbs = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
@@ -53,7 +48,7 @@ final class HeapTreemap extends JPanel {
     private int selected = -1;
     private int generation;
 
-    HeapTreemap(HeapDump dump, IntConsumer select) {
+    HeapTreemap(HeapModel dump, IntConsumer select) {
         super(new BorderLayout());
         this.dump = dump;
         this.select = select;
@@ -97,7 +92,7 @@ final class HeapTreemap extends JPanel {
         Thread t = new Thread(() -> {
             Box b;
             try {
-                b = read(dump, focus);
+                b = dump.map(focus);
             } catch (Exception e) {
                 b = new Box(focus, dump.retained(focus), "Could not read it: " + e.getMessage(), null, 1, List.of());
             }
@@ -113,168 +108,11 @@ final class HeapTreemap extends JPanel {
         t.start();
     }
 
-    /** Objects looked at for one box's contents, at the most. */
-    static final int BUDGET = 20_000_000;
-
-    /** The objects of one class among what a box holds. */
-    private static final class Group {
-        final String cls;
-        long count;
-        long bytes;
-        final int[] top = {-1, -1, -1}; // the biggest three, biggest first
-        final long[] topBytes = {-1, -1, -1};
-
-        Group(String cls) {
-            this.cls = cls;
-        }
-
-        void add(int v, long b) {
-            count++;
-            bytes += b;
-            for (int i = 0; i < 3; i++) {
-                if (b > topBytes[i]) {
-                    for (int j = 2; j > i; j--) {
-                        top[j] = top[j - 1];
-                        topBytes[j] = topBytes[j - 1];
-                    }
-                    top[i] = v;
-                    topBytes[i] = b;
-                    return;
-                }
-            }
-        }
-    }
-
-    private static boolean isReferenceArray(String cls) {
-        return cls.endsWith("[]") && !cls.matches("(boolean|byte|char|short|int|long|float|double)(\\[])+");
-    }
-
-    /** The focus with what it holds, and what the biggest of those hold. */
-    static Box read(HeapDump d, int focus) throws java.io.IOException {
-        List<Box> kids = contents(d, focus, 2);
-        return new Box(focus, d.retained(focus), focus == d.root() ? "The heap" : d.describe(focus), null, 1, kids);
-    }
-
-    /**
-     * What an object holds, as boxes: through the insides of collections (their tables and entries)
-     * to what is kept in them, objects of one class together ("20,000 × Session"), the biggest
-     * apart; {@code deeper}: how many levels of the biggest boxes' own contents to read.
-     */
-    private static List<Box> contents(HeapDump d, int v, int deeper) throws java.io.IOException {
-        long total = d.retained(v) - d.shallow(v);
-        // by class name (one String per class): its group, and what kind of class it is
-        Map<String, Group> groups = new java.util.IdentityHashMap<>();
-        Map<String, Integer> kinds = new java.util.IdentityHashMap<>(); // 1: a collection's insides, 2: an array of references
-        java.util.ArrayDeque<Integer> todo = new java.util.ArrayDeque<>();
-        todo.add(v);
-        int[] seen = {0};
-        while (!todo.isEmpty()) {
-            int x = todo.poll();
-            boolean top = x == v;
-            d.eachHeld(x, k -> {
-                String cls = d.className(k);
-                int kind = kinds.computeIfAbsent(cls,
-                        c -> HeapFindings.isInternal(c) ? 1 : isReferenceArray(c) ? 2 : 0);
-                boolean expand = seen[0] < BUDGET && (kind == 1 || kind == 2 && top && v != d.root());
-                seen[0]++;
-                if (expand) {
-                    todo.add(k);
-                } else {
-                    groups.computeIfAbsent(cls, Group::new).add(k, d.retained(k));
-                }
-            });
-        }
-        List<Group> sorted = new ArrayList<>(groups.values());
-        sorted.sort((a, b) -> Long.compare(b.bytes, a.bytes));
-        List<Box> out = new ArrayList<>();
-        long shown = 0;
-        long small = 0;
-        for (Group g : sorted) {
-            if (out.size() >= FIRST || total > 0 && g.bytes < total / 1000) {
-                small += g.bytes;
-                continue;
-            }
-            long rest = g.bytes;
-            int apart = 0; // the biggest, shown on their own
-            while (apart < 3 && g.top[apart] >= 0) {
-                long b = g.topBytes[apart];
-                if (g.count - apart > 1 && b < total * 0.03) {
-                    break; // the rest go together
-                }
-                List<Box> inside = deeper > 0 && total > 0 && b >= total / 100
-                        ? contents(d, g.top[apart], deeper - 1) : List.of();
-                out.add(box(d, g.top[apart], b, 1, inside));
-                rest -= b;
-                shown += b;
-                apart++;
-            }
-            long left = g.count - apart;
-            if (left == 1 && apart < 3) {
-                out.add(box(d, g.top[apart], rest, 1, List.of())); // the last one: as itself
-                shown += rest;
-            } else if (left > 0) {
-                out.add(group(d, g.cls, left, rest, apart < 3 ? g.top[apart] : g.top[0]));
-                shown += rest;
-            }
-        }
-        long structure = total - shown - small;
-        if (small > 0) {
-            out.add(new Box(-1, small, "smaller objects", "<html>Smaller objects: " + HeapFindings.bytes(small)
-                    + "</html>", 0, List.of()));
-        }
-        if (v != d.root() && structure > total / 200 && structure > 0) {
-            String kind = shortName(d.describe(v));
-            int sp = kind.indexOf(' ');
-            kind = sp < 0 ? kind : kind.substring(0, sp);
-            out.add(new Box(-1, structure, kind + "'s own parts", "<html>The " + esc(kind)
-                    + "'s own parts (its table, its entries): " + HeapFindings.bytes(structure) + "</html>", 0,
-                    List.of()));
-        }
-        out.sort((a, b) -> Long.compare(b.bytes(), a.bytes()));
-        return out;
-    }
-
-    private static Box box(HeapDump d, int v, long bytes, long count, List<Box> inner) throws java.io.IOException {
-        String what = d.describe(v);
-        String where = HeapFindings.where(d, v);
-        String tip = "<html><b>" + esc(what) + "</b><br>" + esc(where) + "<br>holds " + HeapFindings.bytes(bytes)
-                + "</html>";
-        return new Box(v, bytes, shortName(what), tip, count, inner);
-    }
-
-    private static Box group(HeapDump d, String cls, long count, long bytes, int sample) throws java.io.IOException {
-        String name = shortName(cls);
-        String tip = "<html><b>" + String.format("%,d", count) + " × " + esc(cls) + "</b>, "
-                + HeapFindings.bytes(bytes / Math.max(1, count)) + " each on average, with what they hold<br>"
-                + esc(HeapFindings.where(d, sample)) + "<br>hold " + HeapFindings.bytes(bytes)
-                + "<br>Click: why the biggest is alive. Double-click: go into it.</html>";
-        return new Box(sample, bytes, String.format("%,d", count) + " × " + name, tip, count, List.of());
-    }
-
-    /** "java.util.HashMap (7,000,000 entries)" → "HashMap (7,000,000 entries)". */
-    static String shortName(String described) {
-        if (described.startsWith("class ")) {
-            return "class " + shortName(described.substring(6));
-        }
-        int sp = described.indexOf(' ');
-        String cls = sp < 0 ? described : described.substring(0, sp);
-        String rest = sp < 0 ? "" : described.substring(sp);
-        int bracket = cls.indexOf('[');
-        String base = bracket < 0 ? cls : cls.substring(0, bracket);
-        int dot = base.lastIndexOf('.');
-        return (dot < 0 ? base : base.substring(dot + 1)).replace('$', '.') + (bracket < 0 ? "" : cls.substring(bracket))
-                + rest;
-    }
-
-    private static String esc(String s) {
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-    }
-
     private void updateCrumbs() {
         crumbs.removeAll();
         for (int i = 0; i < path.size(); i++) {
             int v = path.get(i);
-            String name = v == dump.root() ? "The heap" : shortName(dump.describe(v));
+            String name = v == dump.root() ? "The heap" : HeapMap.shortName(dump.describe(v));
             if (i == path.size() - 1) {
                 JLabel l = new JLabel(name + "  ·  " + HeapFindings.bytes(dump.retained(v)));
                 l.setFont(l.getFont().deriveFont(Font.BOLD));
