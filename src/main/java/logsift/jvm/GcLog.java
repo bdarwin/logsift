@@ -139,6 +139,21 @@ public final class GcLog {
         void read(long first, int n, String[] out);
     }
 
+    /** An opened log (read once it is indexed). */
+    public static Lines of(logsift.core.LogDocument doc) {
+        return new Lines() {
+            @Override
+            public long count() {
+                return doc.lineCount();
+            }
+
+            @Override
+            public void read(long first, int n, String[] out) {
+                doc.readLines(first, n, out);
+            }
+        };
+    }
+
     /** A log in memory, as lines. */
     public static Lines of(List<String> lines) {
         return new Lines() {

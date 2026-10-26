@@ -83,8 +83,7 @@ final class FilterPanel extends JPanel {
             AppState.prefs().getBoolean("entries", true));
     /** Level chips: E W I D T, all on = no level filtering. */
     static final String[] LEVEL_CHIPS = {"E", "W", "I", "D", "T"};
-    static final String[][] LEVEL_WORDS = {{"ERROR", "FATAL", "SEVERE", "CRITICAL"},
-        {"WARN", "WARNING"}, {"INFO", "NOTICE"}, {"DEBUG"}, {"TRACE"}};
+    static final String[][] LEVEL_WORDS = logsift.core.Levels.WORDS;
     private final JToggleButton[] levelChips = new JToggleButton[LEVEL_CHIPS.length];
     private final javax.swing.JSpinner context = new javax.swing.JSpinner(
             new javax.swing.SpinnerNumberModel(0, 0, 50, 1));
