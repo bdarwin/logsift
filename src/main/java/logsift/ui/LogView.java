@@ -723,6 +723,9 @@ public final class LogView extends JPanel {
             if (cl != null) {
                 int[] starts = new int[cl.format().columns().size()];
                 String[] split = cl.format().split(raw, starts);
+                if (split == null) {
+                    split = cl.format().headerCells(raw, starts); // a CSV's names, in their columns
+                }
                 this.cells = split;
                 this.cellStarts = starts;
                 int msg = cl.messageColumn();
@@ -780,7 +783,8 @@ public final class LogView extends JPanel {
         /** X where segment {@code seg} starts. */
         int segX(int seg) {
             int gutter = gutterWidth();
-            int base = columns != null ? gutter - hOffset + columns.messageX(charWidth) : gutter - hOffset;
+            int base = columns != null && !(cells == null && columns.leftOfAll())
+                    ? gutter - hOffset + columns.messageX(charWidth) : gutter - hOffset;
             if (!wrap) {
                 return base;
             }
@@ -872,7 +876,8 @@ public final class LogView extends JPanel {
 
         /** Where to break the text so each segment fits the width, preferring spaces. */
         private int[] wrapPoints() {
-            int used = gutterWidth() + (columns != null ? columns.messageX(charWidth) : 0);
+            int used = gutterWidth() + (columns != null && !(cells == null && columns.leftOfAll())
+                    ? columns.messageX(charWidth) : 0);
             int avail = Math.max(charWidth * 8, canvas.getWidth() - used - charWidth);
             int n = text.length();
             List<Integer> starts = new ArrayList<>();

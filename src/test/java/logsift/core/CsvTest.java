@@ -94,4 +94,30 @@ class CsvTest {
         String msg = ValueTree.lineRegex(f, "message", List.of(new ValueTree.Hidden("b, c", false)));
         assertTrue(Pattern.compile(msg).matcher("\"t, 2\",web-2,\"b, c\"").find(), "after a quoted field with a comma");
     }
+
+    @Test
+    void rowsWithAFewFieldsMoreOrLessAreStillRows() {
+        List<String> sample = List.of("id,name,email,city", "1,Ann,a@x.com,Paris,,", "2,Bob,b@x.com,Lyon",
+                "3,Cy,c@x.com", "4,Di,d@x.com,Nice");
+        LogFormat f = LogFormat.detectCsv(sample, true);
+        assertNotNull(f);
+        assertArrayEquals(new String[] {"1", "Ann", "a@x.com", "Paris,,"}, f.split("1,Ann,a@x.com,Paris,,", null),
+                "extra separators join the last column");
+        assertArrayEquals(new String[] {"3", "Cy", "c@x.com", null}, f.split("3,Cy,c@x.com", null), "one missing");
+        assertTrue(f.matches("3,Cy,c@x.com"));
+        assertEquals("Paris,,", f.value("1,Ann,a@x.com,Paris,,", "city"));
+        assertNull(f.split("second line of a value", null), "a piece of a value written over lines");
+        assertNull(f.split("x", null));
+    }
+
+    @Test
+    void theHeaderIsNotARowButShowsInTheColumns() {
+        LogFormat f = LogFormat.detectCsv(List.of("\uFEFFtimestamp,level,host", "2026-10-21 10:00:00,INFO,web-1"), true);
+        assertNull(f.split("\uFEFFtimestamp,level,host", null), "not a row (no host called host)");
+        int[] starts = new int[3];
+        assertArrayEquals(new String[] {"timestamp", "level", "host"},
+                f.headerCells("\uFEFFtimestamp,level,host", starts));
+        assertArrayEquals(new int[] {1, 11, 17}, starts);
+        assertNull(f.headerCells("2026-10-21 10:00:00,INFO,web-1", null));
+    }
 }

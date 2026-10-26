@@ -121,7 +121,7 @@ public final class LogFormat {
     /** Whether a line has this layout. */
     public boolean matches(String line) {
         if (delimiter != 0) {
-            return line != null && !isHeader(line) && Csv.fieldCount(line, delimiter) == columns.size();
+            return line != null && split(line, null) != null;
         }
         return jsonKeys != null ? Json.parseObject(line) != null : pattern.matcher(line).matches();
     }
@@ -370,8 +370,7 @@ public final class LogFormat {
             if (isHeader(line)) {
                 return null;
             }
-            List<String> v = Csv.split(line, delimiter, starts);
-            return v.size() == columns.size() ? v.toArray(new String[0]) : null;
+            return csvRow(Csv.split(line, delimiter, starts), starts);
         }
         Matcher m = pattern.matcher(line);
         if (!m.matches()) {
@@ -386,6 +385,50 @@ public final class LogFormat {
             }
         }
         return out;
+    }
+
+    /**
+     * A CSV line's fields as the columns. A row with a few fields missing (or extra, joined in
+     * the last column) is still a row: exports often differ from their header by a trailing
+     * separator or two. A line with much fewer (one piece of a value written over several
+     * lines) is not.
+     */
+    private String[] csvRow(List<String> v, int[] starts) {
+        int n = columns.size();
+        if (v.size() == n) {
+            return v.toArray(new String[0]);
+        }
+        if (v.size() < 2 || v.size() < n - n / 2) {
+            return null;
+        }
+        String[] out = new String[n];
+        for (int i = 0; i < n; i++) {
+            if (i < v.size()) {
+                out[i] = i == n - 1 && v.size() > n
+                        ? String.join(String.valueOf(delimiter), v.subList(i, v.size())) : v.get(i);
+            } else if (starts != null) {
+                starts[i] = -1;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * CSV: the header row's names, each in its column (null for any other line). The view shows
+     * them in the columns, so the header doesn't look like an empty row.
+     */
+    public String[] headerCells(String line, int[] starts) {
+        if (delimiter == 0 || !isHeader(line)) {
+            return null;
+        }
+        String[] v = Csv.split(line, delimiter, starts).toArray(new String[0]);
+        if (v.length > 0 && v[0].startsWith("\uFEFF")) {
+            v[0] = v[0].substring(1);
+            if (starts != null && starts.length > 0) {
+                starts[0]++;
+            }
+        }
+        return v.length == columns.size() ? v : null;
     }
 
     private String[] splitJson(String line, int[] starts) {

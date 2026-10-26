@@ -118,6 +118,14 @@ final class ColumnLayout {
         return visible.length == 0 ? -1 : visible[visible.length - 1];
     }
 
+    /**
+     * Whether a line that isn't a row is drawn from the left edge rather than in the last column:
+     * a CSV without a message column (its last column is just another value, often far right).
+     */
+    boolean leftOfAll() {
+        return format.isCsv() && !format.columns().contains("message");
+    }
+
     boolean isLevel(int col) {
         return format.columns().get(col).equals("level");
     }
