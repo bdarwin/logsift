@@ -1224,13 +1224,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     Path local = Files.createTempDirectory("logsift-heap-")
                             .resolve(logsift.core.HeapDumpMentions.fileName(c));
                     try {
-                        con.download(c, local, progress);
+                        con.download(c, local, progress, cancelled);
                         local.toFile().deleteOnExit();
                         local.getParent().toFile().deleteOnExit();
                         return new String[] {said, local.toString()};
-                    } catch (IOException e) {
+                    } catch (IOException | java.util.concurrent.CancellationException e) {
                         Files.deleteIfExists(local);
                         Files.deleteIfExists(local.getParent()); // not there: the next place
+                        if (e instanceof java.util.concurrent.CancellationException ce) {
+                            throw ce;
+                        }
                     }
                 }
             }

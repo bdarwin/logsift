@@ -1296,6 +1296,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         applyEntryOptions();
         updateHighlights();
+        if (matchingOnly && !filterPanel.hasActiveFilters() && timeRange == null
+                && (treePanel == null || treePanel.hiddenColumn() == null)) {
+            setMatchingOnly(false); // nothing left that hides lines (Color filters only color them)
+        }
         updateFilterStatus();
     }
 

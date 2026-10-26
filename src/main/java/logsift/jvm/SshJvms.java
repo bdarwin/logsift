@@ -372,13 +372,39 @@ public final class SshJvms implements AutoCloseable {
 
     /** Copies a file from the server. */
     public void download(String remote, Path local, java.util.function.DoubleConsumer progress) throws IOException {
+        download(remote, local, progress, null);
+    }
+
+    /**
+     * Copies a file from the server; {@code cancel} stops the copy (the part copied is removed,
+     * and a CancellationException is thrown).
+     */
+    public void download(String remote, Path local, java.util.function.DoubleConsumer progress,
+                         java.util.function.BooleanSupplier cancel) throws IOException {
+        boolean stopped = false;
+        try {
+            stopped = copy(remote, local, progress, cancel);
+        } finally {
+            if (stopped) {
+                java.nio.file.Files.deleteIfExists(local);
+            }
+        }
+        if (stopped) {
+            throw new java.util.concurrent.CancellationException("the copy of " + remote + " was stopped");
+        }
+    }
+
+    /** True when it was stopped. */
+    private boolean copy(String remote, Path local, java.util.function.DoubleConsumer progress,
+                         java.util.function.BooleanSupplier cancel) throws IOException {
+        boolean[] stopped = {false};
         ChannelSftp sftp = null;
         try {
             sftp = (ChannelSftp) session.openChannel("sftp");
             sftp.connect(15_000);
             long size = Math.max(1, sftp.stat(remote).getSize());
             try (OutputStream out = java.nio.file.Files.newOutputStream(local)) {
-                sftp.get(remote, out, progress == null ? null : new com.jcraft.jsch.SftpProgressMonitor() {
+                sftp.get(remote, out, progress == null && cancel == null ? null : new com.jcraft.jsch.SftpProgressMonitor() {
                     private long done;
 
                     @Override
@@ -388,7 +414,13 @@ public final class SshJvms implements AutoCloseable {
                     @Override
                     public boolean count(long n) {
                         done += n;
-                        progress.accept(Math.min(1, done / (double) size));
+                        if (progress != null) {
+                            progress.accept(Math.min(1, done / (double) size));
+                        }
+                        if (cancel != null && cancel.getAsBoolean()) {
+                            stopped[0] = true;
+                            return false; // stops the transfer
+                        }
                         return true;
                     }
 
@@ -398,12 +430,16 @@ public final class SshJvms implements AutoCloseable {
                 });
             }
         } catch (JSchException | SftpException e) {
+            if (stopped[0]) {
+                return true;
+            }
             throw new IOException("cannot copy " + remote + " from the server: " + RemoteMirror.describe(e), e);
         } finally {
             if (sftp != null) {
                 sftp.disconnect();
             }
         }
+        return stopped[0] || (cancel != null && cancel.getAsBoolean());
     }
 
     private void upload(String p, String dir) throws IOException {

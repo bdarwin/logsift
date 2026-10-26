@@ -112,6 +112,27 @@ class SshJvmsTest {
     }
 
     @Test
+    void aCopyFromTheServerStopsWhenCancelled() throws Exception {
+        Path remote = dir.resolve("big.hprof");
+        byte[] block = new byte[1 << 20];
+        try (var out = Files.newOutputStream(remote)) {
+            for (int i = 0; i < 64; i++) {
+                out.write(block);
+            }
+        }
+        Path local = Files.createTempDirectory("logsift-copy").resolve("big.hprof");
+        double[] seen = {0};
+        assertThrows(java.util.concurrent.CancellationException.class,
+                () -> ssh.download(remote.toString(), local, f -> seen[0] = f, () -> seen[0] > 0.1));
+        assertTrue(seen[0] < 0.9, "stopped early, at " + seen[0]);
+        assertTrue(!Files.exists(local), "the part copied is removed");
+        ssh.download(remote.toString(), local, null, () -> false);
+        assertEquals(64L << 20, Files.size(local));
+        Files.delete(local);
+        Files.delete(remote);
+    }
+
+    @Test
     void listsJvms() throws Exception {
         JvmProcess p = fixture();
         assertEquals(FixtureApp.class.getName(), p.name());

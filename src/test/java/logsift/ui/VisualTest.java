@@ -513,6 +513,27 @@ class VisualTest {
         assertEquals(kept, back, "same line after switching back to all lines");
         settle();
         shot("11-filters-all-lines-grayed");
+        // only a Color filter left: nothing is filtered, so "Matching only" goes off by itself
+        boolean[] matching = onEdt(() -> {
+            FilterPanel p = tab.filterPanel();
+            tab.setMatchingOnly(true);
+            boolean before = tab.isMatchingOnly();
+            p.setFormula(null);
+            for (FilterDef d : p.filters()) {
+                d.enabled = d.action == FilterDef.Action.MARK;
+            }
+            tab.filtersChanged();
+            boolean after = tab.isMatchingOnly();
+            for (FilterDef d : p.filters()) {
+                d.enabled = true;
+            }
+            p.setFormula("A AND NOT C");
+            tab.filtersChanged();
+            tab.setMatchingOnly(false);
+            return new boolean[] {before, after};
+        });
+        assertTrue(matching[0], "matching only on");
+        assertTrue(!matching[1], "matching only off when only a Color filter is left");
     }
 
     @Test
