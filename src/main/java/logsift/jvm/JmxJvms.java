@@ -305,6 +305,18 @@ public final class JmxJvms {
         return last == null ? null : last.replace("[", "").replace("]", "");
     }
 
+    /**
+     * A path on the JVM's machine as SFTP wants it: a Windows path ({@code C:\Temp\x.hprof})
+     * becomes {@code /C:/Temp/x.hprof}, as Windows' own SSH server reads it; others stay.
+     */
+    public static String sftpPath(String path) {
+        if (path.length() > 2 && Character.isLetter(path.charAt(0)) && path.charAt(1) == ':'
+                && (path.charAt(2) == '\\' || path.charAt(2) == '/')) {
+            return "/" + path.replace('\\', '/');
+        }
+        return path;
+    }
+
     /** Whether a host name or address is this computer. */
     static boolean isThisMachine(String host) {
         try {

@@ -4853,7 +4853,7 @@ class VisualTest {
     @Order(49)
     void heapDumpOverJmxIsCopiedFromTheServer() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "the test SSH server runs commands with /bin/sh");
-        // over a JMX port the JVM writes the dump on its own machine; Logsift copies it over SSH and removes it there
+        // over a JMX port the JVM writes the dump on its own machine; Logsift copies it over SSH (and leaves it there)
         Path hprof = dir.resolve("shop-leak.hprof");
         if (!Files.exists(hprof)) {
             logsift.heap.LeakApp.run(hprof, dir.resolve("shop-leak-histogram.txt"));
@@ -4890,7 +4890,7 @@ class VisualTest {
                 }
             }, 60_000, "the copied dump opened");
             assertEquals(Files.size(hprof), Files.size(here), "copied whole");
-            assertTrue(!Files.exists(there), "removed on the server");
+            assertTrue(Files.exists(there), "left on the server: Logsift doesn't remove it");
         } finally {
             onEdt(() -> {
                 frame.sshForDumpForTest = null;

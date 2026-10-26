@@ -93,6 +93,9 @@ class JmxJvmsTest {
         assertEquals("db1", JmxJvms.machineOf("service:jmx:rmi://db1:9011/jndi/rmi://db1:9010/jmxrmi"));
         assertEquals("fe80::1", JmxJvms.machineOf("service:jmx:rmi:///jndi/rmi://[fe80::1]:9010/jmxrmi"));
         assertEquals("server", JmxJvms.machineOf("server"));
+        assertEquals("/C:/Windows/Temp/logsift-heap-1-2.hprof", JmxJvms.sftpPath("C:\\Windows\\Temp\\logsift-heap-1-2.hprof"));
+        assertEquals("/D:/dumps/x.hprof", JmxJvms.sftpPath("D:/dumps/x.hprof"));
+        assertEquals("/tmp/x.hprof", JmxJvms.sftpPath("/tmp/x.hprof"));
         JmxJvms.DumpOnServer d = new JmxJvms.DumpOnServer("db1", "/tmp/x.hprof");
         assertTrue(d.getMessage().contains("db1") && d.getMessage().contains("/tmp/x.hprof"));
     }

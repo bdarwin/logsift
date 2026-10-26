@@ -991,7 +991,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /**
      * A heap dump the JVM wrote on its own machine (asked over its JMX port): offers to copy it
-     * here over SSH (then removes it there) and opens it; else says where it is.
+     * here over SSH and opens it; else says where it is. It is never removed there.
      */
     void copyDumpFromServer(logsift.jvm.JmxJvms.DumpOnServer there, Path local) {
         logsift.core.RemoteMirror.Target login = sshForDumpForTest != null ? sshForDumpForTest.apply(there)
@@ -1000,7 +1000,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             javax.swing.JTextField where = new javax.swing.JTextField(there.path());
             where.setEditable(false);
             JOptionPane.showMessageDialog(this, new Object[] {"The heap dump stays on " + there.host() + ":", where,
-                    "Copy it here yourself and open it (JVM → Open Heap Dump…), or remove it there when done."},
+                    "Copy it here yourself and open it (JVM → Open Heap Dump…). Remove it there when you are done."},
                     "Heap Dump", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
@@ -1009,12 +1009,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         ProgressDialog.run(this, "Copying the heap dump from " + there.host() + "…", (progress, cancelled) -> {
             try (logsift.jvm.SshJvms ssh = logsift.jvm.SshJvms.connect(login, knownHosts, this::trustHost)) {
                 try {
-                    ssh.download(there.path(), local, progress::accept);
+                    ssh.download(logsift.jvm.JmxJvms.sftpPath(there.path()), local, progress::accept);
                 } catch (IOException e) {
                     Files.deleteIfExists(local);
                     throw e;
                 }
-                ssh.exec("rm -f '" + there.path().replace("'", "'\\''") + "'", null, 30); // ours, in its temp folder
             }
             return local;
         }, this::openHeapDump, e -> JOptionPane.showMessageDialog(this, "Could not copy the heap dump: "
@@ -1056,7 +1055,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         javax.swing.JTextField where = new javax.swing.JTextField(there.path());
         where.setEditable(false);
         Object[] msg = {"<html>Over a JMX port, the JVM writes the heap dump on its own machine. It is saved there:</html>",
-                where, "<html><br>Copy it here over SSH and open it? It is removed there once copied.</html>", form};
+                where, "<html><br>Copy it here over SSH and open it? It stays there too: remove it when you are done.</html>", form};
         Object[] options = {"Copy Here", "Leave It There"};
         int answer = JOptionPane.showOptionDialog(this, msg, "Heap Dump on " + there.host(), JOptionPane.DEFAULT_OPTION,
                 JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
