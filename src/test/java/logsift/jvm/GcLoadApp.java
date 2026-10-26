@@ -6,7 +6,7 @@ import java.util.Random;
 
 /**
  * A program for GC logs: it allocates for some seconds. With "leak" it also keeps a growing part
- * of what it allocates and calls System.gc() once; without, it allocates gently and keeps nothing.
+ * of what it allocates and calls System.gc() once; without, it allocates gently and keeps little.
  */
 public final class GcLoadApp {
     private GcLoadApp() {}
@@ -23,8 +23,9 @@ public final class GcLoadApp {
         long n = 0;
         while (System.currentTimeMillis() < end) {
             window.add(new byte[256 + r.nextInt(4096)]);
-            if (window.size() > 20_000) {
-                window.subList(0, 10_000).clear();
+            int keep = leak ? 20_000 : 1_000; // healthy: a small, steady set in use
+            if (window.size() > keep) {
+                window.subList(0, keep / 2).clear();
             }
             n++;
             if (leak && n % 200 == 0) {
@@ -34,8 +35,8 @@ public final class GcLoadApp {
                 System.gc();
                 called = true;
             }
-            if (!leak && n % 2_000 == 0) {
-                Thread.sleep(1); // about 20 MB a second
+            if (!leak && n % 500 == 0) {
+                Thread.sleep(1); // a few MB a second
             }
         }
         System.out.println(KEPT.size() + " " + window.size());

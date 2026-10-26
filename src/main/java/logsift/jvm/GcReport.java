@@ -15,7 +15,8 @@ import java.util.Map;
  */
 public final class GcReport {
 
-    public enum Severity { BAD, WARN, INFO, GOOD }
+    /** In the order findings are listed: problems first, then "looks healthy", then the rest. */
+    public enum Severity { BAD, WARN, GOOD, INFO }
 
     /**
      * One thing worth knowing.
