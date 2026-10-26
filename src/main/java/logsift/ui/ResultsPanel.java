@@ -149,13 +149,21 @@ final class ResultsPanel extends JPanel {
      * @throws PatternSyntaxException for an invalid regex
      */
     FindGroup add(SearchQuery q) {
+        return add(q, null);
+    }
+
+    /**
+     * Adds a search that finds only in the lines {@code within} accepts (the filtered lines), or
+     * in the whole file when it is null.
+     */
+    FindGroup add(SearchQuery q, java.util.function.LongPredicate within) {
         for (FindGroup g : groups) {
-            if (g.parent == null && g.query.equals(q)) {
+            if (g.parent == null && g.query.equals(q) && (g.within != null) == (within != null)) {
                 moveToTop(g);
                 return g;
             }
         }
-        FindGroup g = new FindGroup(doc, q, null, nextColor++, update);
+        FindGroup g = new FindGroup(doc, q, null, within, nextColor++, update);
         for (FindGroup other : groups) {
             if (other.parent == null) {
                 other.expanded = false; // older searches fold away

@@ -1352,12 +1352,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Opens a new Folder Search tab with this text to find (or none). */
     FolderSearchTab openFolderSearch(Path folder, String text) {
-        if (folder == null && currentTab() != null) {
+        if (folder == null && tabs.getSelectedComponent() instanceof ArchiveTab a) {
+            folder = a.zip(); // a zip's tab: search that zip
+        } else if (folder == null && currentTab() != null) {
             // a file in a zip: search that zip
             logsift.core.Archives.Located in = logsift.core.Archives.locate(currentTab().path());
             folder = in != null ? in.zip() : currentTab().path().getParent();
         }
         FolderSearchTab tab = new FolderSearchTab(this, folder, text);
+        if (folder != null && logsift.core.Archives.isZip(folder) && Files.isRegularFile(folder)) {
+            tab.setFileNames(""); // a zip: all its files, whatever they are called
+        }
         tab.resultsView().setFontSize(fontSize);
         tabs.addTab(tab.title(), tab);
         tabs.setSelectedIndex(tabs.getTabCount() - 1);
@@ -1498,8 +1503,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
 
         @Override
-        public void searchArchive(Path zip) {
-            searchInArchive(zip);
+        public void searchArchive(Path zip, String text) {
+            searchInArchive(zip, text);
         }
     };
 
@@ -1512,13 +1517,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     FolderSearchTab searchInArchiveForTest(Path zip) {
-        return searchInArchive(zip);
+        return searchInArchive(zip, "");
     }
 
-    /** Searches every file in a zip (zips and .gz files in it too). */
-    private FolderSearchTab searchInArchive(Path zip) {
-        FolderSearchTab t = openFolderSearch(zip);
+    /** Searches every file in a zip (zips and .gz files in it too); with text, right away. */
+    private FolderSearchTab searchInArchive(Path zip, String text) {
+        FolderSearchTab t = openFolderSearch(zip, text == null || text.isEmpty() ? null : text);
         t.setFileNames("");
+        if (text != null && !text.isEmpty()) {
+            t.search(zip, "", new SearchQuery(text, false, false, false));
+        }
         return t;
     }
 
@@ -2204,6 +2212,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     void openFind() {
         if (tabs.getSelectedComponent() instanceof FolderSearchTab f) {
             f.focusFind();
+            return;
+        }
+        if (tabs.getSelectedComponent() instanceof ArchiveTab a) {
+            a.focusFind(); // a zip: find in all its files
             return;
         }
         LogTab t = currentTab();

@@ -38,7 +38,8 @@ import logsift.core.SearchQuery;
 
 /**
  * Search in all files of a folder. Results are grouped by file; double-click a
- * line to open the file there, double-click a file to fold it.
+ * line to open the file there, double-click a file to fold it. Above the results, the files
+ * shown can be narrowed by name, and all folded or opened.
  */
 final class FolderSearchTab extends JPanel {
 
@@ -63,6 +64,7 @@ final class FolderSearchTab extends JPanel {
     private final JButton searchButton = new JButton("Search");
     private final JButton stopButton = new JButton("Stop");
     private final JLabel status = new JLabel(" ");
+    private final JTextField fileFilter = new JTextField(24);
     private final LogView results = new LogView();
     private final Set<FolderSearch.FileResult> collapsed = new HashSet<>();
     private final Runnable update;
@@ -89,7 +91,10 @@ final class FolderSearchTab extends JPanel {
                 : startFolder.toString());
         find.setText(text == null ? "" : text);
         add(buildForm(), BorderLayout.NORTH);
-        add(results, BorderLayout.CENTER);
+        JPanel center = new JPanel(new BorderLayout());
+        center.add(buildResultsBar(), BorderLayout.NORTH);
+        center.add(results, BorderLayout.CENTER);
+        add(center, BorderLayout.CENTER);
 
         results.setSource(new Rows());
         results.setHighlightRules(List.of(
@@ -185,6 +190,61 @@ final class FolderSearchTab extends JPanel {
         c.gridwidth = 3;
         p.add(status, c);
         return p;
+    }
+
+    /** Above the results: show only files whose name has some text; fold or open them all. */
+    private JComponent buildResultsBar() {
+        JPanel bar = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 2));
+        bar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY)),
+                BorderFactory.createEmptyBorder(2, 8, 2, 8)));
+        fileFilter.putClientProperty("JTextField.placeholderText", "Filter results by file name");
+        fileFilter.putClientProperty("JTextField.showClearButton", true);
+        fileFilter.setToolTipText("Show only the files whose name or path has this text");
+        fileFilter.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                refresh();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                refresh();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                refresh();
+            }
+        });
+        JButton expand = new JButton("Expand All");
+        expand.setToolTipText("Show the matching lines of every file");
+        expand.addActionListener(e -> collapseAll(false));
+        JButton collapse = new JButton("Collapse All");
+        collapse.setToolTipText("Fold every file to its name, to see which files have matches");
+        collapse.addActionListener(e -> collapseAll(true));
+        bar.add(fileFilter);
+        bar.add(expand);
+        bar.add(collapse);
+        return bar;
+    }
+
+    /** Sets the file name filter of the results (for tests). */
+    void setFileFilterForTest(String text) {
+        fileFilter.setText(text);
+    }
+
+    /** Header rows (one per file shown), for tests. */
+    List<String> fileRowsForTest() {
+        List<String> out = new java.util.ArrayList<>();
+        for (int i = 0; i < files.size(); i++) {
+            out.add(label(files.get(i)));
+        }
+        return out;
+    }
+
+    int rowCountForTest() {
+        return rowCount;
     }
 
     private void browse() {
@@ -324,7 +384,9 @@ final class FolderSearchTab extends JPanel {
         if (s == null) {
             return;
         }
-        files = s.results();
+        String only = fileFilter.getText().trim().toLowerCase(java.util.Locale.ROOT);
+        files = only.isEmpty() ? s.results() : s.results().stream()
+                .filter(f -> label(f).toLowerCase(java.util.Locale.ROOT).contains(only)).toList();
         firstRow = new int[files.size()];
         int row = 0;
         long max = 0;
@@ -341,7 +403,11 @@ final class FolderSearchTab extends JPanel {
         maxLine = max;
         results.rowsChanged();
         stopButton.setEnabled(s.isRunning());
-        status.setText(statusText());
+        String text = statusText();
+        if (!only.isEmpty()) {
+            text += String.format(" · %,d file%s shown", files.size(), files.size() == 1 ? "" : "s");
+        }
+        status.setText(text);
         status.setToolTipText(s.errors().isEmpty() ? null
                 : "<html>" + String.join("<br>", s.errors().stream().limit(20).toList()) + "</html>");
         host.folderTabChanged(this);

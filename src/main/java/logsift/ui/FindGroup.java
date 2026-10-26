@@ -13,10 +13,14 @@ import logsift.core.SearchSession;
  * One Find All in the results window: its live search, and the lines it shows. A search within
  * results ("ERROR › timeout") shows the lines of its parent that its own search also finds; it
  * searches the whole file (fast) and merges with the parent's lines, so it stays up to date.
+ * A search made while the log shows only the lines its filters keep finds only in those lines
+ * ({@code within}), as the filters are now.
  */
 final class FindGroup {
     final SearchQuery query;
     final FindGroup parent;
+    /** Only lines this accepts (the filtered lines), or null for the whole file. */
+    final java.util.function.LongPredicate within;
     final int colorIndex;
     private final LogDocument doc;
     private final SearchSession session;
@@ -27,10 +31,17 @@ final class FindGroup {
 
     /** @throws java.util.regex.PatternSyntaxException for an invalid regex */
     FindGroup(LogDocument doc, SearchQuery query, FindGroup parent, int colorIndex, Runnable onUpdate) {
+        this(doc, query, parent, null, colorIndex, onUpdate);
+    }
+
+    /** @throws java.util.regex.PatternSyntaxException for an invalid regex */
+    FindGroup(LogDocument doc, SearchQuery query, FindGroup parent, java.util.function.LongPredicate within,
+              int colorIndex, Runnable onUpdate) {
         query.toPattern();
         this.doc = doc;
         this.query = query;
         this.parent = parent;
+        this.within = parent == null ? within : null; // a child keeps to its parent's lines anyway
         this.colorIndex = colorIndex;
         this.session = new SearchSession(doc, query);
         session.addListener(new SearchSession.Listener() {
@@ -63,16 +74,26 @@ final class FindGroup {
         return parent == null ? query.text() : parent.title() + " › " + query.text();
     }
 
+    /** Whether the lines shown are a selection of the search's hits (not all of them). */
+    private boolean refined() {
+        return parent != null || within != null;
+    }
+
+    /** Whether it finds only in the lines the filters keep. */
+    boolean inFiltered() {
+        return within != null || (parent != null && parent.inFiltered());
+    }
+
     int count() {
-        return parent == null ? session.hits().size() : rowCount;
+        return refined() ? rowCount : session.hits().size();
     }
 
     long lineAt(int i) {
-        return parent == null ? session.hits().get(i) : rows[i];
+        return refined() ? rows[i] : session.hits().get(i);
     }
 
     int firstAtOrAfter(long line) {
-        if (parent == null) {
+        if (!refined()) {
             return session.hits().firstAtOrAfter(line);
         }
         int i = java.util.Arrays.binarySearch(rows, 0, rowCount, line);
@@ -97,9 +118,26 @@ final class FindGroup {
         return new LogView.Highlight(query.toPattern(), c[0], c[1]);
     }
 
-    /** For a search within results: the parent's lines that this search also finds. */
+    /**
+     * For a search within results: the parent's lines that this search also finds. For a search
+     * in the filtered lines: its hits that the filters keep.
+     */
     void refresh() {
         if (parent == null) {
+            if (within != null) {
+                HitList mine = session.hits();
+                int mn = mine.size();
+                long[] out = new long[mn];
+                int k = 0;
+                for (int i = 0; i < mn; i++) {
+                    long line = mine.get(i);
+                    if (within.test(line)) {
+                        out[k++] = line;
+                    }
+                }
+                rows = out;
+                rowCount = k;
+            }
             return;
         }
         int pn = parent.count();
@@ -139,6 +177,9 @@ final class FindGroup {
         }
         if (query.wholeWord()) {
             opts.add("whole word");
+        }
+        if (within != null) {
+            opts.add("in filtered lines");
         }
         if (!opts.isEmpty()) {
             sb.append("  (").append(String.join(", ", opts)).append(')');

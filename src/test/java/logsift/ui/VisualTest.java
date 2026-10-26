@@ -3713,6 +3713,45 @@ class VisualTest {
         settle();
         shot("74-csv-columns");
 
+        // with a branch of the tree hidden (only the lines kept shown), Find All finds in those lines
+        onEdt(() -> {
+            hosts.toggleForTest("web-1");
+            return null;
+        });
+        waitForFilter(csvTab);
+        assertTrue(onEdt(csvTab::isMatchingOnly));
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("Payment failed", true, false, false));
+            return null;
+        });
+        waitForSearch(csvTab);
+        FindGroup inFiltered = onEdt(() -> csvTab.results().current());
+        waitFor(() -> {
+            try {
+                return onEdt(() -> {
+                    csvTab.results().refresh();
+                    return inFiltered.count() == 10;
+                });
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the failed payments not on web-1");
+        assertTrue(onEdt(inFiltered::header).contains("in filtered lines"), onEdt(inFiltered::header));
+        assertEquals(2, onEdt(() -> csvTab.results().groups().size()), "the whole-file search is kept too");
+        // Clear All (lit while anything is set): no filters, no tree hiding, no searches
+        assertTrue(onEdt(() -> csvTab.logBar().clearAllLitForTest()));
+        settle();
+        shot("74b-find-in-filtered-and-clear-all");
+        onEdt(() -> {
+            csvTab.logBar().clearAllButtonForTest().doClick();
+            return null;
+        });
+        waitForFilter(csvTab);
+        assertEquals(0, onEdt(() -> csvTab.results().groups().size()), "searches closed");
+        assertTrue(!onEdt(csvTab::isMatchingOnly) && onEdt(csvTab::treeHiddenCount) == 0, "the whole log again");
+        assertEquals(List.of(), onEdt(() -> csvTab.logBar().chipTexts()));
+        assertTrue(!onEdt(() -> csvTab.logBar().clearAllLitForTest()), "nothing left to clear");
+
         // like any log: bookmarks are remembered, and it opens again by its name (recent files, sessions)
         onEdt(() -> {
             csvTab.mainView().goToRow(26, true);
@@ -3782,6 +3821,39 @@ class VisualTest {
         }
         assertEquals(java.util.Map.of("data.zip!/exports/orders.csv", 16L, "logs/app.log", 6L, "logs/old.log.gz", 6L),
                 hits, "every file in the zip, the .gz and the zip inside it too");
+        // the results narrowed by file name, and folded or opened all at once
+        onEdt(() -> {
+            zs.setFileFilterForTest("old.log");
+            return null;
+        });
+        assertEquals(1, onEdt(zs::fileRowsForTest).size(), onEdt(zs::fileRowsForTest).toString());
+        assertTrue(onEdt(zs::fileRowsForTest).get(0).contains("old.log.gz"));
+        onEdt(() -> {
+            zs.setFileFilterForTest("");
+            zs.collapseAll(true);
+            return null;
+        });
+        assertEquals(3, onEdt(zs::rowCountForTest), "one row per file");
+        onEdt(() -> {
+            zs.collapseAll(false);
+            return null;
+        });
+        assertTrue(onEdt(zs::rowCountForTest) > 3 + 16, "the lines again");
+
+        // in the zip's own tab: find in all its files (Ctrl+F goes there), whatever they are called
+        onEdt(() -> {
+            frame.tabsForTest().setSelectedComponent(at);
+            at.setFindForTest("Payment failed");
+            at.runFindForTest();
+            return null;
+        });
+        FolderSearchTab fromZip = onEdt(() -> (FolderSearchTab) frame.tabsForTest().getSelectedComponent());
+        logsift.core.FolderSearch fz = onEdt(fromZip::search);
+        assertTrue(fz.awaitDone(30_000));
+        assertEquals(16L, fz.totalHits(), "the CSV in the zip inside the zip");
+        assertEquals(zip.toString(), onEdt(fromZip::folderForTest));
+        settle();
+        shot("75b-find-in-a-zip");
 
         // from the web: one file opens, several are searched together
         com.sun.net.httpserver.HttpServer web = com.sun.net.httpserver.HttpServer.create(

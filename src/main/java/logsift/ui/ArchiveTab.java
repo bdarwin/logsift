@@ -42,7 +42,8 @@ final class ArchiveTab extends JPanel {
 
         void mergeEntries(Path zip, List<Archives.Entry> entries);
 
-        void searchArchive(Path zip);
+        /** Searches every file of the zip for {@code text} (empty: just opens the search). */
+        void searchArchive(Path zip, String text);
     }
 
     /** A folder, a zip inside the zip, or a file. */
@@ -60,6 +61,7 @@ final class ArchiveTab extends JPanel {
     private final Path zip;
     private final Host host;
     private final JTextField filter = new JTextField(22);
+    private final JTextField find = new JTextField(28);
     private final JTree tree = new JTree(new DefaultMutableTreeNode());
     private final JLabel summary = new JLabel(" ");
     private final JButton open = new JButton("Open");
@@ -128,25 +130,37 @@ final class ArchiveTab extends JPanel {
                 host.mergeEntries(zip, sel);
             }
         });
-        JButton search = new JButton("Search in All Files…");
-        search.setToolTipText("Search every file in this zip, also in zips and .gz files inside it");
-        search.addActionListener(e -> host.searchArchive(zip));
+        find.putClientProperty("JTextField.placeholderText", "Find in all files (Enter)");
+        find.putClientProperty("JTextField.showClearButton", true);
+        find.putClientProperty("JTextField.leadingIcon", Icons.find());
+        find.setToolTipText("Search every file in this zip, also in zips and .gz files inside it ("
+                + (MainFrame.isMac() ? "⌘F" : "Ctrl+F") + ")");
+        find.addActionListener(e -> host.searchArchive(zip, find.getText()));
+        JButton search = new JButton("Search");
+        search.setToolTipText(find.getToolTipText());
+        search.addActionListener(e -> host.searchArchive(zip, find.getText()));
 
-        JPanel top = new JPanel(new BorderLayout(8, 0));
+        // two rows, so nothing is cut off in a narrow window: the zip and the search; then the files
+        JPanel top = new JPanel(new java.awt.GridLayout(2, 1, 0, 4));
         top.setBorder(BorderFactory.createEmptyBorder(8, 10, 6, 10));
+        JPanel first = new JPanel(new BorderLayout(8, 0));
         JPanel title = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         JLabel name = new JLabel(zip.getFileName().toString(), Icons.of("folder-archive"), JLabel.LEFT);
         name.setFont(name.getFont().deriveFont(java.awt.Font.BOLD));
         title.add(name);
         summary.setForeground(Theme.uiColor("Label.disabledForeground", java.awt.Color.GRAY));
         title.add(summary);
-        top.add(title, BorderLayout.WEST);
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        first.add(title, BorderLayout.WEST);
+        JPanel searching = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        searching.add(find);
+        searching.add(search);
+        first.add(searching, BorderLayout.EAST);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         actions.add(filter);
         actions.add(open);
         actions.add(merge);
-        actions.add(search);
-        top.add(actions, BorderLayout.EAST);
+        top.add(first);
+        top.add(actions);
 
         JLabel hint = new JLabel("Double-click a file to open it as a log. Select several (Ctrl/⌘-click) to open"
                 + " them together or merge them by time.");
@@ -186,6 +200,20 @@ final class ArchiveTab extends JPanel {
                 }
             }
         }
+    }
+
+    /** Ctrl+F: the box that finds in all files. */
+    void focusFind() {
+        find.requestFocusInWindow();
+        find.selectAll();
+    }
+
+    void setFindForTest(String text) {
+        find.setText(text);
+    }
+
+    void runFindForTest() {
+        find.postActionEvent();
     }
 
     void focusTree() {

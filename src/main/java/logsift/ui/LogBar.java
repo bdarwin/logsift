@@ -55,6 +55,7 @@ final class LogBar extends JPanel {
     private final JToggleButton timeline = new JToggleButton(Icons.of("chart-column"));
     private final JCheckBoxMenuItem autoReload = new JCheckBoxMenuItem("Reload Automatically", Icons.autoReload());
     private boolean stale;
+    private boolean anythingSet; // filters, a time range, the tree or a search: Clear All lights up
     private String shown; // what the chips show now
     /** Reload: an amber pill while the file on disk has changes that aren't loaded. */
     private final JButton reload = new JButton("Reload", Icons.reload()) {
@@ -64,6 +65,21 @@ final class LogBar extends JPanel {
                 Graphics2D g = (Graphics2D) g0.create();
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g.setColor(Theme.isDark() ? new Color(0x6B5310) : new Color(0xFFE08A));
+                g.fillRoundRect(1, 2, getWidth() - 2, getHeight() - 4, 10, 10);
+                g.dispose();
+            }
+            super.paintComponent(g0);
+        }
+    };
+
+    /** Clear All: back to the whole log, no search. A pill in the accent color while anything is set. */
+    private final JButton clearAll = new JButton("Clear All", Icons.of("x")) {
+        @Override
+        protected void paintComponent(Graphics g0) {
+            if (anythingSet) {
+                Graphics2D g = (Graphics2D) g0.create();
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(Theme.isDark() ? new Color(0x1E3A6E) : new Color(0xDBE7FF));
                 g.fillRoundRect(1, 2, getWidth() - 2, getHeight() - 4, 10, 10);
                 g.dispose();
             }
@@ -84,6 +100,10 @@ final class LogBar extends JPanel {
         JButton filters = flat(new JButton("Filters", Icons.of("filter")));
         filters.setToolTipText("Add or change filters: show, hide or color lines (the Filters tab below)");
         filters.addActionListener(e -> tab.showFilters());
+        flat(clearAll);
+        clearAll.setToolTipText("<html>Back to the whole log: removes every filter, the time range, what the tree hides,"
+                + "<br>and the searches (the find bar and Find results)</html>");
+        clearAll.addActionListener(e -> tab.clearEverything());
         flat(matchingOnly);
         matchingOnly.setToolTipText("<html>On: only the lines the filters keep.<br>"
                 + "Off: every line, with matching lines colored.</html>");
@@ -132,6 +152,7 @@ final class LogBar extends JPanel {
         add(find);
         add(Box.createHorizontalStrut(4));
         add(filters);
+        add(clearAll);
         add(chips);
         add(matchingOnly);
         add(Box.createHorizontalGlue());
@@ -205,6 +226,7 @@ final class LogBar extends JPanel {
         }
         sig.append(fp.levelWords()).append(tab.timeRangeText()).append(tab.treeHiddenCount());
         matchingOnly.setSelected(tab.isMatchingOnly());
+        updateClearAll();
         if (sig.toString().equals(shown)) { // the same chips: only their counts change
             for (java.awt.Component c : chips.getComponents()) {
                 if (c instanceof Chip ch && ch.def != null) {
@@ -248,6 +270,25 @@ final class LogBar extends JPanel {
         chips.revalidate();
         chips.repaint();
         revalidate();
+    }
+
+    /** Lights Clear All up while there is anything to clear. */
+    void updateClearAll() {
+        boolean set = tab.hasAnythingToClear();
+        clearAll.setEnabled(set);
+        if (set != anythingSet) {
+            anythingSet = set;
+            clearAll.repaint();
+        }
+    }
+
+    /** Whether Clear All is lit, for tests. */
+    boolean clearAllLitForTest() {
+        return anythingSet && clearAll.isEnabled();
+    }
+
+    JButton clearAllButtonForTest() {
+        return clearAll;
     }
 
     private Chip filterChip(FilterDef d) {

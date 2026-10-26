@@ -53,7 +53,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 ## Opening logs
 
 - **Files:** File → Open, or drag files onto the window. On Windows, right-click a file or folder → **Open with Logsift** (a folder opens a search in it); Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does. On macOS, use Open With or drop files on the Dock icon. If Logsift is already running, files open in the same window.
-- **Zip and .gz files:** a `.zip` (File → Open, drag and drop, Recent files) opens as a tab showing its folders and files as a tree, also the files of zips inside it, with their sizes and a filter. Double-click a file (or select several and press **Open**) to open it as a log; **Merge by Time** merges the selected logs; **Search in All Files…** searches every file in it. A zip with one file opens that file right away, and a `.gz` file opens directly. A file from a zip is named by its place in it (`bundle.zip/logs/app.log`) and behaves like any log: its bookmarks, filters and format are remembered, and it is in Recent files and the last session. It is unpacked to a temporary copy once, when first opened.
+- **Zip and .gz files:** a `.zip` (File → Open, drag and drop, Recent files) opens as a tab showing its folders and files as a tree, also the files of zips inside it, with their sizes and a filter. Double-click a file (or select several and press **Open**) to open it as a log; **Merge by Time** merges the selected logs; **Find in all files** (Ctrl+F in the zip's tab) searches every file in it, whatever it is called. A zip with one file opens that file right away, and a `.gz` file opens directly. A file from a zip is named by its place in it (`bundle.zip/logs/app.log`) and behaves like any log: its bookmarks, filters and format are remembered, and it is in Recent files and the last session. It is unpacked to a temporary copy once, when first opened.
 - **Web addresses:** File → Open URL… (Ctrl+Shift+U) takes one or more `http`/`https` addresses, one per line, with an optional user and password or token (sent as a Bearer token). One address opens in a tab; several are downloaded into one temporary folder and searched together. A `.zip` or `.gz` download is unpacked as above. The file is a copy: it doesn't follow the server's file as it grows. Certificates count as trusted when Java or this computer trusts them (Windows' and macOS's own stores, where a company proxy's certificate usually is); when neither does, Logsift asks whether to open it anyway without checking, once or always for that server.
 - **WSL (Windows):** File → Open from WSL… opens your Linux home folder. Windows reaches WSL files directly (`\\wsl.localhost\Ubuntu\…`), so they open and follow like any other file, without SSH.
 - **Command line:** `logsift app.log other.log`. `logsift --version` prints the version.
@@ -148,7 +148,7 @@ Make a test log:
 - Pick a folder, file name patterns (`*.log;*.txt`), and whether to include subfolders and archives.
 - Rotated logs count as the log they came from: `*.log` also finds `app.log.1`, `app.log.2026-10-21`, `app.log.2.gz`, and `.log` files inside any `.zip`, also inside zips and `.gz` files within a zip (up to 5 levels deep).
 - All files are searched in parallel with the same fast search as Find All. Binary files are skipped. Results are grouped by file and appear while the search runs.
-- Double-click a line to open the file at that line, with Find All already run there. Files from `.gz` or `.zip` are unpacked to a temporary file first. Double-click a file name to fold it.
+- Double-click a line to open the file at that line, with Find All already run there. Files from `.gz` or `.zip` are unpacked to a temporary file first. Double-click a file name to fold it. Above the results, **Filter results by file name** shows only the files whose name or path has some text, and **Expand All** / **Collapse All** open or fold every file.
 
 ## Timeline
 
@@ -391,7 +391,7 @@ A narrow bar beside the scrollbar shows the whole file at a glance. It has red m
 
 **Ctrl+F** (⌘F on macOS) opens a find bar at the top of the log, with the selected text filled in. Matches light up as you type and the log goes to the first one; the bar counts them ("3 of 1,240"). **Enter** and **Shift+Enter** go to the next and previous match, and **Esc** closes the bar. From there:
 
-- **Find All** (Ctrl+Enter) lists every match in **Find results** below the log, where several searches can stay side by side.
+- **Find All** (Ctrl+Enter) lists every match in **Find results** below the log, where several searches can stay side by side. While the log shows only the lines its filters keep (Matching only), Find All finds in those lines (*in filtered lines*), and follows the filters as they change.
 - **Filter ▾** turns the search into a filter: show only the matching lines, hide them, or color them.
 - The folder button searches for it in a whole folder, zips included (Ctrl+Shift+F).
 
@@ -416,7 +416,7 @@ The **Filters** panel below the log holds any number of filters (up to 26). Each
 
 **Alerts:** click the bell on a filter to be told when new lines matching it are written (while the file grows). Logsift shows a desktop notification and a popup you can click to jump to the line, beeps, and puts a count on the tab. Bursts are combined (at most one alert per filter every 3 seconds). Lines that were already in the file don't alert.
 
-**Clear all** (next to + Add filter) removes every filter, turns all levels back on and clears the time range. In Find results, **Close** removes the selected search, **Close all** removes every one, and Shift+Esc closes the selected search.
+**Clear All** in the log's bar (lit while anything is set) goes back to the whole log: it removes every filter, turns all levels back on, clears the time range and what the tree hides, and closes the find bar and the Find results. **Clear all** in Filters (next to + Add filter) clears only the filters. In Find results, **Close** removes the selected search, **Close all** removes every one, and Shift+Esc closes the selected search.
 
 Quick ways to add filters: select text in the log, right-click, then choose **Show / Hide / Mark lines with "…"**. Filter sets can be saved and loaded (the ⋯ menu), and filters keep working while the file grows.
 

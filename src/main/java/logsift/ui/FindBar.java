@@ -217,6 +217,20 @@ final class FindBar extends JPanel {
         host.closed();
     }
 
+    /** Empties the box and closes the bar (Clear All). */
+    void clear() {
+        typing.stop();
+        field.setText("");
+        typing.stop();
+        if (isVisible()) {
+            close();
+        } else {
+            stopSession();
+            count.setText("");
+            host.searchChanged();
+        }
+    }
+
     /** Sets the search (text and options) without running it. */
     void setQuery(SearchQuery q) {
         matchCase.setSelected(q.matchCase());

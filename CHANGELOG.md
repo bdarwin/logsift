@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Find in a zip:** a zip's tab has a **Find in all files** box (Ctrl+F goes there) that searches every file in the zip, whatever it is called (a `.csv` too, not only `*.log`). Search in Folder from a zip's tab searches that zip.
+- **Folder search results:** **Filter results by file name**, and **Expand All** / **Collapse All**, above the results.
+- **Find All in the filtered lines:** while the log shows only the lines its filters keep, Find All finds in those lines, and follows the filters as they change.
+- **Clear All** in the log's bar, lit while anything is set: removes every filter, the time range and what the tree hides, and closes the find bar and the Find results.
 - **Attach over JMX works in the installed app:** connecting to a JMX port failed with "Failed to retrieve RMIServer stub" because the app's bundled Java left out the part that looks up a JMX port.
 - **CSV files no longer show empty rows:** rows with a field or two more or less than the header (a trailing separator, a missing last value) are shown in their columns instead of as empty-looking lines, and the header row shows its names in the columns. In a CSV without a message column, a line that isn't a row starts at the left instead of far to the right.
 - **Open URL behind a company proxy:** certificates the computer trusts (Windows' and macOS's own stores) are trusted too, so a proxy's certificate no longer stops a download. When a certificate still isn't trusted, Logsift asks whether to open it anyway without checking, once or always for that server.

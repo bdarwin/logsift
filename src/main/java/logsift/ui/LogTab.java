@@ -1976,6 +1976,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         filterResult = r;
         main.rowsChanged();
+        if (results != null) {
+            results.refresh(); // searches in the filtered lines follow the filters
+        }
         tryPendingLine();
         if (!alerts.isEmpty() || hasAlerts()) {
             checkAlerts();
@@ -2858,7 +2861,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
      * @throws java.util.regex.PatternSyntaxException for an invalid regex
      */
     FindGroup findAll(SearchQuery q) {
-        FindGroup g = results.add(q);
+        // while the log shows only the filtered lines, find in those (as the filters are then and later)
+        FindGroup g = results.add(q, matchingOnly && filterResult.isFiltering()
+                ? line -> filterResult.contains(line) : null);
         setBottomCollapsed(false);
         bottom.setSelectedComponent(results);
         return g;
@@ -2898,11 +2903,44 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         };
     }
 
+    /** Whether a filter, a time range, the tree or a search is set (what Clear All clears). */
+    boolean hasAnythingToClear() {
+        for (FilterDef d : filterPanel.filters()) {
+            if (!d.text.isEmpty()) {
+                return true;
+            }
+        }
+        return filterPanel.hasActiveFilters() || timeRange() != null || treeHiddenCount() > 0 || matchingOnly
+                || (findBar != null && findBar.isVisible() && !findBar.text().isEmpty())
+                || (results != null && !results.groups().isEmpty());
+    }
+
+    /**
+     * Clear All: back to the whole log. Every filter, the time range and what the tree hides go;
+     * the find bar is emptied and closed, and the Find results are closed.
+     */
+    void clearEverything() {
+        filterPanel.clearAll(); // also the time range, the tree and Matching only
+        if (findBar != null) {
+            findBar.clear();
+        }
+        if (results != null) {
+            results.closeAll();
+        }
+        if (logBar != null) {
+            logBar.updateClearAll();
+        }
+        main.focusView();
+    }
+
     /** Matches of Find All searches and of the find bar, in the log and its overview. */
     private void updateSearchHighlights() {
         List<LogView.Highlight> hl = new ArrayList<>();
         for (FindGroup g : results.groups()) {
             hl.add(g.highlight());
+        }
+        if (logBar != null) {
+            logBar.updateClearAll();
         }
         LogView.Highlight quick = findBar == null ? null : findBar.highlight();
         if (quick != null) {
