@@ -55,6 +55,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         /** Opens the thread dumps in this log in a Threads tab. */
         default void analyzeThreads(LogTab tab) {}
 
+        /** Reads the GC lines of this log and explains them in a tab of their own. */
+        default void analyzeGc(LogTab tab) {}
+
         /** Shows the thread a line names in a thread dump of the log's JVM. */
         default void showThread(LogTab tab, String thread) {}
 
@@ -369,10 +372,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         banners.setLayout(new javax.swing.BoxLayout(banners, javax.swing.BoxLayout.Y_AXIS));
         this.banners = banners;
         banners.add(dumpsBanner);
+        banners.add(gcBanner);
         banners.add(noColumns);
         north.add(banners, BorderLayout.SOUTH);
         noColumns.setVisible(false);
         dumpsBanner.setVisible(false);
+        gcBanner.setVisible(false);
         checkForThreadDumps();
         JPanel logArea = new JPanel(new BorderLayout());
         logArea.add(north, BorderLayout.NORTH);
@@ -2461,6 +2466,43 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return p;
     }
 
+    /** Offers to explain a GC log (or the GC lines in a log). */
+    private final JPanel gcBanner = gcBanner();
+
+    private JPanel gcBanner() {
+        JPanel p = new JPanel(new BorderLayout(10, 0));
+        p.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.uiColor("Component.borderColor", java.awt.Color.GRAY)),
+                javax.swing.BorderFactory.createEmptyBorder(5, 10, 5, 8)));
+        JLabel text = new JLabel("This is a Java GC log. See how long the program stood still, what the pauses were,"
+                + " whether memory keeps growing, and what to tune.", Icons.of("gauge"), javax.swing.SwingConstants.LEFT);
+        text.setIconTextGap(8);
+        p.add(text, BorderLayout.CENTER);
+        JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 4, 0));
+        buttons.setOpaque(false);
+        javax.swing.JButton analyze = new javax.swing.JButton("Analyze GC");
+        analyze.addActionListener(e -> host.analyzeGc(this));
+        javax.swing.JButton close = new javax.swing.JButton(Icons.of("x"));
+        close.putClientProperty("JButton.buttonType", "toolBarButton");
+        close.setToolTipText("Hide");
+        close.addActionListener(e -> {
+            p.setVisible(false);
+            revalidate();
+        });
+        buttons.add(analyze);
+        buttons.add(close);
+        p.add(buttons, BorderLayout.EAST);
+        return p;
+    }
+
+    boolean gcBannerShownForTest() {
+        return gcBanner.isVisible();
+    }
+
+    javax.swing.JButton gcAnalyzeButtonForTest() {
+        return (javax.swing.JButton) ((JPanel) gcBanner.getComponent(1)).getComponent(0);
+    }
+
     boolean dumpsBannerShownForTest() {
         return dumpsBanner.isVisible();
     }
@@ -2522,6 +2564,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 if (logsift.jvm.DumpParser.looksLikeDump(text)) {
                     SwingUtilities.invokeLater(() -> {
                         dumpsBanner.setVisible(true);
+                        revalidate();
+                    });
+                }
+                if (logsift.jvm.GcLog.looksLikeGcLog(text)) {
+                    SwingUtilities.invokeLater(() -> {
+                        gcBanner.setVisible(true);
                         revalidate();
                     });
                 }

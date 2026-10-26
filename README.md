@@ -29,6 +29,7 @@
 - **Java threads (and Python's).** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log; `py-spy dump` and `faulthandler` for Python), or attach to a running JVM on your computer, on a server over SSH, or through its JMX port. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
 - **A log knows its JVM.** Open a log and Logsift names the JVM writing it, with its threads, profile and heap a click away. Right-click a line to see its thread's stack; from a thread, show only its lines.
 - **Heap dumps, explained.** Open a `.hprof` file and Logsift says what fills the memory in plain sentences ("one HashMap in static SessionCache.CACHE holds 1.2 GB: mostly 20,000 sessions"), and for any object, the chain of references that keeps it alive. Dumps of tens of GB open with the app's usual 2 GB of memory: a 12 GB dump with 223 million objects in about 2½ minutes.
+- **GC logs, explained.** Open a Java GC log (Java 8 to 25; G1, Parallel, Serial, CMS, ZGC, Shenandoah) and Logsift says how much of the time the program stood still, what the longest pauses were and why, whether the memory left after GC keeps growing, and what went wrong (full collections, evacuation failures, allocation stalls, System.gc() calls), each with what to try; with charts of the heap, pauses, allocation and time in GC.
 - **Profiling and memory.** Flame graphs of a JVM's CPU, wall-clock time, allocations, live objects (memory leaks), locks, native memory and native leaks, calls of a method and slow calls, or hardware events, with async-profiler or the JVM's own Flight Recorder. Compare runs, see who calls a method, and find which classes fill the heap and keep growing.
 - **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
 
@@ -88,6 +89,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 | ![Insights with a known problem and what to try](docs/screenshots/insights.png) **Insights** with known problems | ![Thread dumps explained: deadlocks, a lock queue, a busy thread, and a thread's stack with the threads waiting for its lock](docs/screenshots/threads.png) **Thread dumps**, explained |
 | ![A flame graph of a JVM's CPU use, with the methods that use the most](docs/screenshots/flame-graph.png) **Profiling** with a flame graph | ![A heap dump explained: one HashMap in a static field holds 85% of the heap, with the chain of references that keeps it alive](docs/screenshots/heap-dump.png) **Heap dumps** explained, and why an object is alive |
 | ![Wasted memory in a heap dump: 20,001 copies of the string ACTIVE and 20,000 empty ArrayLists, each with the field that holds them](docs/screenshots/heap-waste.png) **Wasted memory**: copies of strings, empty collections | ![A log with a bar naming the JVM that writes it, with Threads, Profile and Heap buttons](docs/screenshots/log-jvm.png) **A log knows its JVM** |
+| ![A GC log explained: the share of time stopped, the longest pause, full collections and allocation, each with what to try](docs/screenshots/gc-log.png) **GC logs** explained | ![The heap before and after each collection over time, with the heap size](docs/screenshots/gc-heap.png) **GC charts**: heap, pauses, allocation, time in GC |
 | ![Two heap dumps compared: a HashMap in a static field grew by 11.8 MB, from 5,000 to 20,000 entries](docs/screenshots/heap-compare.png) **Two heap dumps compared**: what grew, and where | ![Dark mode](docs/screenshots/dark-mode.png) **Dark mode** |
 
 ## Run from source
@@ -349,6 +351,26 @@ Weak, soft and phantom references don't keep anything alive here (as in the JVM 
 
 **Big dumps:** when a dump is too big to index in memory, the index goes to files on disk (in Logsift's folder, removed when the tab closes). A 1.6 GB dump with 41 million objects opens in about 20 seconds with 2 GB of memory; the index on disk is a few times the size of the dump.
 
+## GC logs
+
+Open a Java GC log like any log: Logsift sees it is one and offers **Analyze GC** in a bar above it (also **JVM → Analyze GC in This Log**, or **JVM → Open GC Log…** to open and explain one in one go). GC lines inside other output (a console log with `-Xlog:gc`) count too.
+
+Logsift reads the logs of Java 9 and later (`-Xlog:gc*`, with any decorations: uptime, time, both) and the older ones of Java 8 (`-XX:+PrintGCDetails`, with or without `-XX:+PrintGCDateStamps`), for every collector: G1, Parallel, Serial, CMS, ZGC (also generational) and Shenandoah. For the most to go on, log with `-Xlog:gc*,safepoint:file=gc.log:time,uptime,level,tags` (Java 9 and later) or `-XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -Xloggc:gc.log` (Java 8).
+
+The tab starts with the numbers that matter (the share of the time stopped for GC, the longest pause, 99% of pauses under, full collections, allocation per second, the most left after GC), then says what it found, worst first, each with what to try and **Show in Log**:
+
+- **Time stopped:** *"GC stopped the program 12% of the time. 4,102 pauses, 3.6 min in all over 30 min. At its worst, 1 min from 10:32, it was 35%."*
+- **The longest pause**, what it was and why, and how many took 200 ms or more.
+- **Full collections**, by cause; for a collector that works alongside the program (G1, CMS, ZGC, Shenandoah) that means it couldn't keep up.
+- **Memory left after GC keeps growing:** the least heap left after a collection, stretch by stretch; when it trends up, the program keeps more and more (a leak, or a cache with no limit). Or the heap stays nearly full after GC.
+- **What went wrong:** G1 running out of room to copy objects (to-space exhausted, evacuation failure), promotion failed and concurrent mode failure (CMS), allocation stalls (ZGC, Shenandoah), Shenandoah falling back to stopping the program.
+- **Causes worth knowing:** System.gc() calls, metaspace filling, large (humongous) arrays.
+- **The machine, not GC:** pauses that took longer on the clock than the GC threads worked (a busy machine, swapping, a throttled container), and pauses spent in the kernel.
+- **Safepoints:** threads that took long to stop, and time stopped for other reasons than GC.
+- **Allocation:** how fast the program allocates.
+
+Then: **Heap** (in use before and after each collection, with the heap size and full collections marked), **Pauses** (each pause by kind over time, on a log scale, and how many took how long), **Allocation & GC Time** (allocated per second and the share of time stopped, per stretch of time), **By Kind** (pauses by kind and cause: how many, in all, average, longest) and **All Collections** (every collection, pause and stall, sortable). Drag across a chart to zoom in on that time (all charts follow), double-click to see it all; click a point or double-click a row to see its line in the log.
+
 ## Settings
 
 **Settings** (Ctrl+, or Logsift → Settings on macOS) has the font and its size, tab width, line stripes, the timeline, dark mode, the encoding for text that isn't UTF-8 (for example Shift_JIS or GB18030), how often files are checked for changes, whether the last session reopens at start, update checks, and your log formats.
@@ -511,6 +533,8 @@ logsift.jvm     (thread dumps and running JVMs)
   JvmLink         a log's JVM, remembered by program
   Profiler        async-profiler (every mode) or Flight Recorder → Profiles (trees of stacks)
   HeapHistogram   GC.class_histogram, and what grew between two
+  GcLog           GC logs (Java 8 and -Xlog:gc*, every collector) → collections, pauses, stalls, safepoints
+  GcReport        a GC log worked out: time stopped, pauses, allocation, growth of the memory kept, findings
 logsift.heap
   HeapDump        reads a .hprof: object graph, dominators (Semi-NCA), retained sizes, paths to GC roots
   HeapFindings    what fills the heap, in sentences
@@ -524,7 +548,7 @@ logsift.ui
   OverviewBar     highlight bar beside the scrollbar (errors, warnings, filters, hits)
   FolderSearchTab folder search form and results grouped by file
   TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
-  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, HeapDumpTab, JvmDialog, JvmBar
+  ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, HeapDumpTab, GcTab, GcChart, JvmDialog, JvmBar
   MainFrame       window, menus, status bar, drag & drop
 logsift.tools
   LogGenerator    realistic reproducible logs (levels, threads, stack traces, Unicode)
@@ -549,6 +573,7 @@ Design choices:
 - **Time zones** are not converted: times are shown as written in each log.
 - **Heap dumps** in HotSpot's `.hprof` format are read (not compressed `.hprof.gz`, and not OpenJ9 `.phd`). A dump doesn't say how the JVM laid its objects out (compressed pointers or not, compact headers), so Logsift works it out from the addresses of objects next to each other. A big dump's index needs free disk space up to the dump's size, in `~/.logsift/heap-index` (Logsift says so before it starts when there isn't enough). Wasted memory counts the JDK's ArrayList, Vector, HashMap (and LinkedHashMap, HashSet), and Hashtable, not other collections.
 - **Thread dumps** of HotSpot JVMs (OpenJDK, Oracle, Temurin, Zulu, Corretto and the like) are read. OpenJ9 `javacore` files are not.
+- **GC logs** of HotSpot JVMs are read (Java 8 and later). OpenJ9's verbose GC (XML) is not. A rotated GC log (`gc.log.0`, `gc.log.1`…) is read one file at a time; merge them first (Merge by Time) to see them together.
 - **async-profiler** runs on Linux (x64, ARM64) and macOS JVMs; for JVMs on Windows, use Flight Recorder.
 - **Tested** on Windows, macOS and Linux by CI (unit and visual tests, including log rotation by logback on Windows). The downloads are not code-signed yet.
 

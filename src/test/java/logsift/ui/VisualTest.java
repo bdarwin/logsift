@@ -4744,6 +4744,111 @@ class VisualTest {
     }
 
     /** Waits until the current tab is a log titled so. */
+    @Test
+    @Order(48)
+    void gcLogExplained() throws Exception {
+        // a GC log of a JVM whose heap was too small for what it kept (Java 17, G1, with dates)
+        Path gc = dir.resolve("orders-gc.log");
+        try (var in = new java.util.zip.GZIPInputStream(getClass().getResourceAsStream("/gc/j17-g1-time.log.gz"))) {
+            Files.write(gc, in.readAllBytes());
+        }
+        onEdt(() -> {
+            frame.openFile(gc);
+            return null;
+        });
+        LogTab log = waitForTab("orders-gc.log");
+        waitFor(() -> {
+            try {
+                return onEdt(log::gcBannerShownForTest);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the offer to analyze the GC log");
+        settle();
+        shot("96-gc-log-banner");
+        onEdt(() -> {
+            log.gcAnalyzeButtonForTest().doClick();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentGcTabForTest() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the GC tab");
+        GcTab gt = onEdt(frame::currentGcTabForTest);
+        logsift.jvm.GcReport r = gt.report();
+        assertEquals("G1", r.log().collector());
+        assertTrue(r.pauses().count() > 100, "pauses: " + r.pauses().count());
+        List<String> titles = r.findings().stream().map(logsift.jvm.GcReport.Finding::title).toList();
+        assertTrue(titles.stream().anyMatch(t -> t.startsWith("GC stopped the program")), titles.toString());
+        assertTrue(onEdt(frame::statusTextForTest).contains("pauses"), onEdt(frame::statusTextForTest));
+        settle();
+        shot("97-gc-summary");
+        String[] views = {"98-gc-heap", "99-gc-pauses", "100-gc-allocation", "101-gc-by-kind", "102-gc-all"};
+        for (int i = 0; i < views.length; i++) {
+            int tab = i + 1;
+            onEdt(() -> {
+                gt.viewsForTest().setSelectedIndex(tab);
+                return null;
+            });
+            settle();
+            shot(views[i]);
+        }
+        // charts zoom together
+        double[] whole = onEdt(() -> gt.heapChartForTest().rangeForTest());
+        onEdt(() -> {
+            gt.viewsForTest().setSelectedIndex(1);
+            GcChart c = gt.heapChartForTest();
+            int y = c.getHeight() / 2;
+            java.awt.event.MouseEvent press = new java.awt.event.MouseEvent(c, java.awt.event.MouseEvent.MOUSE_PRESSED,
+                    0, 0, 200, y, 1, false, java.awt.event.MouseEvent.BUTTON1);
+            for (var l : c.getMouseListeners()) {
+                l.mousePressed(press);
+            }
+            java.awt.event.MouseEvent drag = new java.awt.event.MouseEvent(c, java.awt.event.MouseEvent.MOUSE_DRAGGED,
+                    0, 0, 400, y, 1, false, java.awt.event.MouseEvent.BUTTON1);
+            for (var l : c.getMouseMotionListeners()) {
+                l.mouseDragged(drag);
+            }
+            java.awt.event.MouseEvent rel = new java.awt.event.MouseEvent(c, java.awt.event.MouseEvent.MOUSE_RELEASED,
+                    0, 0, 400, y, 1, false, java.awt.event.MouseEvent.BUTTON1);
+            for (var l : c.getMouseListeners()) {
+                l.mouseReleased(rel);
+            }
+            return null;
+        });
+        double[] zoomed = onEdt(() -> gt.pauseChartForTest().rangeForTest());
+        assertTrue(zoomed[0] > whole[0] && zoomed[1] < whole[1], "the pause chart zoomed with the heap chart");
+        // a collection in the table: double-click shows its line in the log
+        JTable t = onEdt(gt::eventsTableForTest);
+        long line = onEdt(() -> {
+            gt.viewsForTest().setSelectedIndex(5);
+            java.awt.Rectangle cell = t.getCellRect(10, 3, true);
+            java.awt.event.MouseEvent click = new java.awt.event.MouseEvent(t, java.awt.event.MouseEvent.MOUSE_CLICKED,
+                    0, 0, cell.x + 2, cell.y + 2, 2, false, java.awt.event.MouseEvent.BUTTON1);
+            for (var l : t.getMouseListeners()) {
+                l.mouseClicked(click);
+            }
+            return r.log().events().get(t.convertRowIndexToModel(10)).line();
+        });
+        assertEquals(log, onEdt(frame::currentTab), "back in the log");
+        assertEquals(line, onEdt(log::currentLine), "at the collection's line");
+        // JVM → Open GC Log opens a file and explains it in one go
+        onEdt(() -> {
+            frame.openGcLog(gc);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentGcTabForTest() != null && frame.currentGcTabForTest() != gt);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "a second GC tab");
+    }
+
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {
             try {

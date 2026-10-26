@@ -1269,6 +1269,76 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 });
     }
 
+    /** Reads the GC lines of a log (once it is indexed) and explains them in a tab next to it. */
+    @Override
+    public void analyzeGc(LogTab t) {
+        LogDocument doc = t.document();
+        ProgressDialog.run(this, "Reading the GC log " + t.title() + "…", (progress, cancelled) -> {
+            while (doc.isIndexing()) {
+                if (cancelled.getAsBoolean()) {
+                    throw new java.util.concurrent.CancellationException();
+                }
+                Thread.sleep(50);
+            }
+            logsift.jvm.GcLog log = logsift.jvm.GcLog.parse(new logsift.jvm.GcLog.Lines() {
+                @Override
+                public long count() {
+                    return doc.lineCount();
+                }
+
+                @Override
+                public void read(long first, int n, String[] out) {
+                    doc.readLines(first, n, out);
+                }
+            }, progress::accept, cancelled::getAsBoolean);
+            return logsift.jvm.GcReport.of(log);
+        }, report -> {
+            if (report.log().events().isEmpty()) {
+                JOptionPane.showMessageDialog(this, "There are no garbage collections in " + t.title()
+                        + " that Logsift can read.", "GC Log", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            openGcTab(t, report);
+        });
+    }
+
+    GcTab openGcTab(LogTab t, logsift.jvm.GcReport report) {
+        GcTab tab = new GcTab(t.title(), report, line -> {
+            if (tabs.indexOfComponent(t) >= 0) {
+                tabs.setSelectedComponent(t);
+                t.showLine(line);
+                t.mainView().focusView();
+            }
+        });
+        int at = tabs.indexOfComponent(t) + 1;
+        tabs.insertTab(tab.title(), Icons.of("gauge"), tab, t.path().toString(), at);
+        tabs.setSelectedComponent(tab);
+        updateEmptyState();
+        return tab;
+    }
+
+    GcTab currentGcTabForTest() {
+        return tabs.getSelectedComponent() instanceof GcTab g ? g : null;
+    }
+
+    /** Asks for a GC log, opens it and explains it. */
+    private void openGcLogDialog() {
+        FileDialog fd = new FileDialog(this, "Open GC Log", FileDialog.LOAD);
+        String folder = PREFS.get("lastDir", null);
+        if (folder != null) {
+            fd.setDirectory(folder);
+        }
+        fd.setVisible(true);
+        if (fd.getFile() != null) {
+            openGcLog(Path.of(fd.getDirectory(), fd.getFile()));
+        }
+    }
+
+    /** Opens a file as a log and explains its GC lines. */
+    void openGcLog(Path file) {
+        openFile(file, null, this::analyzeGc);
+    }
+
     @Override
     public void showDiff(CompareTab ct, logsift.core.LogCompare.Diff d) {
         boolean inB = d.countB() > 0;
@@ -2027,6 +2097,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 analyzeThreads(t);
             }
         }));
+        jvm.add(item("Open GC Log…", "gauge", null, e -> openGcLogDialog()));
+        jvm.add(item("Analyze GC in This Log", "gauge", null, e -> {
+            LogTab t = currentTab();
+            if (t == null) {
+                JOptionPane.showMessageDialog(this, "Open a GC log first (written with -Xlog:gc* or"
+                        + " -XX:+PrintGCDetails), or use Open GC Log….", "GC Log", JOptionPane.INFORMATION_MESSAGE);
+            } else {
+                analyzeGc(t);
+            }
+        }));
         jvm.add(item("Open Profile…", "flame", null, e -> openProfileDialog()));
         jvm.add(item("Open Heap Dump…", "memory-stick", null, e -> openHeapDumpDialog()));
         jvm.add(item("Compare Two Heap Dumps…", "git-compare", null, e -> compareHeapDumpsDialog()));
@@ -2694,6 +2774,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         formatButton.setToolTipText(t != null && t.formatChoice() != null
                 ? "Lines are read as \u201c" + fmt + "\u201d (chosen for this file). Click to change."
                 : "Lines are read as \u201c" + fmt + "\u201d (detected). Click if that is wrong.");
+        if (tabs.getSelectedComponent() instanceof GcTab gt) {
+            setTitle(gt.title() + " — Logsift");
+            status.setText(gt.statusText());
+            statusRight.setText(memory());
+            progress.setVisible(false);
+            return;
+        }
         if (tabs.getSelectedComponent() instanceof HeapDumpTab hd) {
             setTitle(hd.title() + " — Logsift");
             status.setText(hd.statusText());
