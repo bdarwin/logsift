@@ -329,6 +329,8 @@ public final class GcLog {
     private static final Pattern O_G1_CONC = Pattern.compile("\\[GC concurrent-([a-z-]+)-end, (\\d[\\d.,]*) secs\\]");
     private static final Pattern O_PHASE_START = Pattern.compile(
             "(?:\\d{4}-\\d\\d-\\d\\dT[\\d:.]+[+-]\\d{4}: )?(?:\\d+[.,]\\d+: )?\\[(?:CMS-concurrent|GC concurrent)-[a-z-]+-start\\]");
+    private static final Pattern O_DATE_ONLY = Pattern.compile(
+            "(\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d+[+-]\\d{4}): (?!\\d+[.,]\\d+: )");
     private static final Pattern O_STAMP = Pattern.compile(
             "(?:(\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d+[+-]\\d{4}): )?(\\d+[.,]\\d+): ");
 
@@ -391,17 +393,29 @@ public final class GcLog {
                     }
                 } else if (!isLevel(d)) {
                     String t = d.replace(" ", "");
-                    if (!TAGS.matcher(t).matches()) {
-                        return false; // not decorations ("[PSYoungGen: …" of an old log)
+                    if (TAGS.matcher(t).matches()) {
+                        tags = t;
+                    } else if (d.chars().anyMatch(ch -> Character.isWhitespace(ch) || ch == ':' || ch == '(')) {
+                        return false; // not decorations ("[GC (Allocation Failure) [PSYoungGen: …" of an old log)
                     }
-                    tags = t;
+                    // else a host name ("[prod-app-01.acme.local]"): skipped
                 }
             }
-            if (tags == null) {
-                return false;
+            String msg = s.substring(pos).trim();
+            boolean tagless = false;
+            if (tags == null || !tags.startsWith("gc") && !tags.startsWith("safepoint")) {
+                // "-Xlog:gc:file=…:time" writes no level and tags: tell by the message
+                if (msg.startsWith("GC(") || msg.startsWith("Using ") || msg.startsWith("Allocation Stall ")
+                        || msg.startsWith("Version: ") || msg.contains("Max Capacity: ")) {
+                    tags = "gc";
+                } else if (msg.startsWith("Safepoint \"") || msg.startsWith("Total time for which")) {
+                    tags = "safepoint";
+                } else if (tags == null) {
+                    return false;
+                }
+                tagless = true;
             }
             modern = true;
-            String msg = s.substring(pos).trim();
             if (Double.isNaN(up) && wall != Long.MIN_VALUE) {
                 if (wallOffset == Long.MIN_VALUE) {
                     wallOffset = wall; // no uptime: time counts from the first line
@@ -417,7 +431,7 @@ public final class GcLog {
             if (!tags.startsWith("gc")) {
                 return true;
             }
-            boolean plain = tags.equals("gc");
+            boolean plain = tags.equals("gc") || tagless;
             boolean phases = tags.equals("gc,phases");
             Matcher m;
             if ((plain || phases) && msg.startsWith("GC(") && (m = U_PAUSE.matcher(msg)).matches()) {
@@ -486,7 +500,7 @@ public final class GcLog {
                         bytesOr(m.group(5)), ms, -1, -1, -1, ""));
                 return true;
             }
-            if (tags.equals("gc,cpu") && (m = U_CPU.matcher(msg)).matches()) {
+            if ((tags.equals("gc,cpu") || tagless) && (m = U_CPU.matcher(msg)).matches()) {
                 Integer at = lastPauseOfId.get(Integer.parseInt(m.group(1)));
                 if (at != null && at < events.size()) {
                     Event e = events.get(at);
@@ -515,7 +529,7 @@ public final class GcLog {
                 jvm = m.group(1);
                 return true;
             }
-            if ((m = U_MAX.matcher(msg)).matches() && tags.startsWith("gc,init")) {
+            if ((m = U_MAX.matcher(msg)).matches() && (tags.startsWith("gc,init") || tagless)) {
                 maxHeap = bytes(m.group(1));
                 return true;
             }
@@ -576,6 +590,9 @@ public final class GcLog {
         // ---- Java 8
 
         private void old(long no, String s) {
+            if (s.length() > 30 && Character.isDigit(s.charAt(0)) || s.contains(": [")) {
+                s = withUptime(s);
+            }
             if (s.contains("-start]")) {
                 // "[CMS-concurrent-sweep-start]" can be printed into the middle of a collection's line
                 s = O_PHASE_START.matcher(s).replaceAll("");
@@ -656,6 +673,31 @@ public final class GcLog {
                     finishPending();
                 }
             }
+        }
+
+        /**
+         * "-XX:+PrintGCDateStamps" without "-XX:+PrintGCTimeStamps": puts the seconds since the
+         * first date after each date ("2026-…+0800: [GC" → "2026-…+0800: 0.000: [GC").
+         */
+        private String withUptime(String s) {
+            Matcher d = O_DATE_ONLY.matcher(s);
+            if (!d.find()) {
+                return s;
+            }
+            StringBuilder out = new StringBuilder();
+            int last = 0;
+            do {
+                long w = wall(d.group(1));
+                if (w == Long.MIN_VALUE) {
+                    continue;
+                }
+                if (wallOffset == Long.MIN_VALUE) {
+                    wallOffset = w;
+                }
+                out.append(s, last, d.end()).append(String.format(Locale.ROOT, "%.3f: ", (w - wallOffset) / 1000.0));
+                last = d.end();
+            } while (d.find());
+            return out.append(s, last, s.length()).toString();
         }
 
         private double stampBefore(String s, int at) {
