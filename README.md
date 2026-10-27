@@ -9,6 +9,8 @@
 
 ![Logsift with four filters combined as (A OR B) AND NOT C, the timeline on top and the highlight bar on the right](docs/screenshots/filters.png)
 
+**[User guide](https://bdarwin.github.io/logsift/guide/)**: what each view shows, what its colours and numbers mean, and what to do about them (also **Help → Documentation** in the app).
+
 ## Features
 
 - **Huge files, instantly.** A 1 GB log shows its first lines in 0.12 s and is fully indexed in 0.26 s. Scrolling and jumping to any line stay smooth at any size.
@@ -71,6 +73,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 
 ## Help, updates and privacy
 
+- **Help → Documentation** opens the [user guide](https://bdarwin.github.io/logsift/guide/) (its pages are in [docs/guide](docs/guide/index.md)). The GC tab's **What do these mean?** opens its [GC page](https://bdarwin.github.io/logsift/guide/gc.html).
 - **Help → Keyboard Shortcuts** (Ctrl+/ or ⌘/) lists every shortcut. **Help → Report a Bug** opens a GitHub issue with your version and system filled in.
 - **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the status bar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
 - **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub**. Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).

@@ -26,6 +26,7 @@ You need JDK 21 or newer.
 
 - Keep changes focused, and add a test: a unit test for `core` code, or a step in `VisualTest` for UI changes.
 - `./gradlew test` must pass. CI also runs the visual tests on Linux and Windows.
+- Changes users can see also update [docs/guide](docs/guide/index.md), the user guide (colours and thresholds there come from the code; screenshots come from `VisualTest`).
 - Describe what changed and why in plain words.
 
 By contributing, you agree that your contributions are licensed under the [MIT license](LICENSE).

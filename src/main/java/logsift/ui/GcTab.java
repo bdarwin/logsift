@@ -136,7 +136,16 @@ final class GcTab extends JPanel {
         JLabel t = new JLabel("<html><b style='font-size:1.15em'>" + esc(name) + "</b>&nbsp;&nbsp;<span style='color:#6b7280'>"
                 + esc(String.join(" · ", about)) + "</span></html>", Icons.of("gauge"), SwingConstants.LEFT);
         t.setIconTextGap(8);
-        p.add(t, BorderLayout.NORTH);
+        // what the tiles, colours and findings mean: the GC page of the user guide
+        JButton help = new JButton("What do these mean?", Icons.of("book-open"));
+        help.putClientProperty("JButton.buttonType", "toolBarButton");
+        help.setToolTipText("Opens the GC page of the user guide in your browser");
+        help.addActionListener(e -> HelpSupport.browse(this, HelpSupport.guide("gc")));
+        JPanel top = new JPanel(new BorderLayout());
+        top.setOpaque(false);
+        top.add(t, BorderLayout.CENTER);
+        top.add(help, BorderLayout.EAST);
+        p.add(top, BorderLayout.NORTH);
 
         GcReport.Stats ps = report.pauses();
         JPanel tiles = new JPanel(new GridLayout(1, 0, 10, 0));

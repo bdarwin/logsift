@@ -124,6 +124,9 @@ tasks.test {
     systemProperty("logsift.prefs", "/logsift-test/ui")
     systemProperty("logsift.updateUrl", "none")
     systemProperty("logsift.home", layout.buildDirectory.dir("test-home").get().asFile.absolutePath)
+    // GuideLinksTest checks the user guide's links and pictures: run it again when they change
+    inputs.dir("docs/guide").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("docs/screenshots").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // Visual tests: generate large log files, open them in the real UI,

@@ -31,8 +31,14 @@ final class HelpSupport {
     private HelpSupport() {}
 
     static final String REPO = "https://github.com/bdarwin/logsift";
-    static final String DOCS = REPO + "#readme";
+    /** The user guide (docs/guide, published with GitHub Pages). */
+    static final String DOCS = "https://bdarwin.github.io/logsift/guide/";
     static final String ISSUES = REPO + "/issues";
+
+    /** A page of the user guide: {@code guide("gc")} is the GC page. */
+    static String guide(String page) {
+        return DOCS + page + ".html";
+    }
 
     /** "macOS 15.5 (aarch64)" and similar. */
     static String osText() {

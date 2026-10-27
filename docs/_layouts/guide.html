@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if page.title and page.title != 'User guide' %}{{ page.title }} · {% endif %}Logsift user guide</title>
+<meta name="description" content="{{ page.description | default: 'The Logsift user guide: what each view shows, what its colours and numbers mean, and what to do about them.' }}">
+<link rel="canonical" href="https://bdarwin.github.io/logsift{{ page.url }}">
+<style>
+  :root { --bg:#ffffff; --fg:#1f2328; --muted:#59636e; --accent:#1d4ed8; --card:#f6f8fa; --border:#d1d9e0; --code:#eff2f5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --accent:#79a8ff; --card:#151b23; --border:#30363d; --code:#1f2630; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { border-bottom:1px solid var(--border); background:var(--card); }
+  header nav { max-width:960px; margin:0 auto; padding:10px 16px; display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; }
+  header nav a { color:var(--fg); text-decoration:none; }
+  header nav a.home { font-weight:700; }
+  header nav a:hover { color:var(--accent); }
+  main { max-width:960px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:2.1rem; margin:0 0 12px; letter-spacing:-0.01em; line-height:1.25; }
+  h2 { margin:40px 0 12px; font-size:1.45rem; border-bottom:1px solid var(--border); padding-bottom:4px; }
+  h3 { margin:28px 0 8px; font-size:1.15rem; }
+  a { color:var(--accent); }
+  img { max-width:100%; height:auto; border:1px solid var(--border); border-radius:8px; display:block; margin:12px 0; }
+  code { background:var(--code); padding:1px 5px; border-radius:4px; font-size:0.9em; }
+  pre { background:var(--code); padding:12px; border-radius:8px; overflow-x:auto; }
+  pre code { background:none; padding:0; }
+  table { border-collapse:collapse; margin:12px 0 20px; display:block; overflow-x:auto; max-width:100%; }
+  th, td { border:1px solid var(--border); padding:6px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--card); }
+  blockquote { margin:12px 0; padding:8px 14px; border-left:4px solid var(--accent); background:var(--card); border-radius:0 8px 8px 0; }
+  blockquote p { margin:4px 0; }
+  .sw { display:inline-block; width:0.95em; height:0.95em; border-radius:3px; border:1px solid rgba(127,127,127,.6);
+        vertical-align:-0.12em; margin:0 2px; }
+  .pagenav { margin-top:48px; padding-top:16px; border-top:1px solid var(--border); color:var(--muted); font-size:0.95rem; }
+  footer { margin-top:24px; color:var(--muted); font-size:0.9rem; }
+</style>
+</head>
+<body>
+<header>
+  <nav>
+    <a class="home" href="{{ '/' | relative_url }}">Logsift</a>
+    <a href="{{ '/guide/' | relative_url }}">User guide</a>
+    <a href="{{ '/guide/shortcuts.html' | relative_url }}">Shortcuts</a>
+    <a href="{{ '/guide/troubleshooting.html' | relative_url }}">Troubleshooting</a>
+    <a href="https://github.com/bdarwin/logsift/releases/latest">Download</a>
+    <a href="https://github.com/bdarwin/logsift">GitHub</a>
+  </nav>
+</header>
+<main>
+{{ content }}
+  <div class="pagenav"><a href="{{ '/guide/' | relative_url }}">← All guide pages</a></div>
+  <footer>Logsift is free and open source under the MIT license. Something wrong or missing here? <a href="https://github.com/bdarwin/logsift/issues">Tell us in Issues</a>.</footer>
+</main>
+</body>
+</html>
