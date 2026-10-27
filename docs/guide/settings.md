@@ -6,7 +6,7 @@ description: Every Logsift setting with its default, log formats, source folders
 
 # Settings
 
-**Edit → Settings…** (Ctrl+,), or **Logsift → Settings** on macOS (⌘,). Changes apply at once. Three tabs: **General**, **Log Formats**, **Source Code**.
+**Edit → Settings…** (Ctrl+,), or **Logsift → Settings** on macOS (⌘,). Changes apply at once. Four tabs: **General**, **Log Formats**, **Source Code**, **Agents**.
 
 ## General
 
@@ -63,7 +63,13 @@ In `~/.logsift` (your home folder):
 | `errors.log` | Unexpected errors (Help → Open Error Log) |
 | `stdin/` | Piped output, kept a week |
 | `heap-index/` | Indexes of big heap dumps, removed when their tab closes |
+| `agent.properties` | Settings → Agents: what is masked, which folders agents may read |
+| `agent.log` | Each call coding agents made (never the answers) |
 
 Other preferences (window size, recent files, last folders, servers and users, never passwords) are kept in Java's preferences store for your user.
 
-Logsift never sends your logs anywhere. Its only network connections are the daily update check (if on) and the servers you choose: SSH servers, JMX ports, and web addresses you open.
+Logsift never sends your logs anywhere. Its only network connections are the daily update check (if on) and the servers you choose: SSH servers, JMX ports, and web addresses you open. When you set up a [coding agent](agents.md), what Logsift answers it goes to the agent's AI provider.
+
+## Agents
+
+How to let a coding agent such as GitHub Copilot ask Logsift about your logs, what is masked in its answers, and which folders it may read. See [Coding agents](agents.md).
