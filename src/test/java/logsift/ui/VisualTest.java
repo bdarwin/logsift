@@ -5162,6 +5162,193 @@ class VisualTest {
         }
     }
 
+    @Test
+    @Order(50)
+    void tableCsvProfile() throws Exception {
+        // a table, not a log: no time column; an ID, categories, numbers, yes/no and free text
+        StringBuilder sb = new StringBuilder("order_id,country,amount_eur,weight_kg,paid,size_bytes,note\n");
+        String[] countries = {"DE", "FR", "NL", "DE", "DE", "IT", "ES", "DE", "FR", "PL"};
+        Random rnd = new Random(7);
+        for (int i = 0; i < 2000; i++) {
+            double amount = Math.round(Math.exp(2 + rnd.nextGaussian() * 0.6) * 100) / 100.0;
+            sb.append(String.format(java.util.Locale.ROOT, "A-%05d,%s,%.2f,%d,%s,%d,%s%n", i, countries[rnd.nextInt(10)],
+                    amount, 1 + rnd.nextInt(5), rnd.nextInt(5) == 0 ? "no" : "yes",
+                    (long) Math.pow(10, 2 + rnd.nextInt(5)) + rnd.nextInt(900),
+                    i % 7 == 0 ? "\"Leave it with the neighbour, number " + (i % 40) + ", please\"" : ""));
+        }
+        Path csv = dir.resolve("orders-table.csv");
+        Files.writeString(csv, sb.toString());
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.openFiles(List.of(csv));
+            return null;
+        });
+        LogTab tab = waitForTab("orders-table.csv");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the table's columns");
+        // no times: no timeline, and its button says why
+        assertTrue(!onEdt(tab::hasTimes));
+        assertTrue(!onEdt(() -> tab.timeline().isVisible()));
+        assertTrue(!onEdt(() -> tab.logBar().timelineButtonForTest().isEnabled()));
+        assertTrue(onEdt(() -> tab.logBar().timelineButtonForTest().getToolTipText()).startsWith("No times in this file"));
+        // the Profile tab: a card per column with its kind and a chart
+        ProfilePanel pp = onEdt(tab::profilePanel);
+        javax.swing.JSplitPane split = onEdt(() -> {
+            setBottomFor(tab, pp);
+            javax.swing.JSplitPane sp = (javax.swing.JSplitPane) SwingUtilities.getAncestorOfClass(
+                    javax.swing.JSplitPane.class, SwingUtilities.getAncestorOfClass(JTabbedPane.class, pp));
+            sp.setDividerLocation(260); // room for the cards
+            return sp;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the profile");
+        Map<String, logsift.core.ColumnProfile.Kind> kinds = new LinkedHashMap<>();
+        onEdt(() -> {
+            pp.result().columns().forEach(c -> kinds.put(c.title(), c.kind()));
+            return null;
+        });
+        assertEquals(List.of("ID", "category", "number", "category", "yes / no", "number", "text"),
+                kinds.values().stream().map(k -> k.label).toList(), kinds.toString());
+        assertEquals(2000, onEdt(() -> pp.result().rows()), "rows, not the header");
+        assertTrue(onEdt(() -> pp.result().columns().get(5).logScale()), "sizes over orders of magnitude");
+        assertEquals(7, onEdt(() -> pp.cardsForTest().size()));
+        settle();
+        shot("103-table-profile");
+        // click a value: a filter on that column; the profile then counts the rows the filters keep
+        onEdt(() -> {
+            pp.cardsForTest().get(1).chart.clickForTest(0); // the most frequent country
+            return null;
+        });
+        waitForFilter(tab);
+        String top = onEdt(() -> pp.result().columns().get(1).bars().get(0).label());
+        assertEquals("DE", top);
+        assertEquals(List.of("Show: Country = DE"), onEdt(() -> tab.logBar().chipTexts()));
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning() && pp.result().filtered());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the profile of the filtered rows");
+        long des = onEdt(() -> tab.filterResultForTest().matchCount());
+        assertEquals(des, (long) onEdt(() -> pp.result().rows()));
+        assertEquals(1, (long) onEdt(() -> pp.result().columns().get(1).distinct()));
+        assertTrue(onEdt(pp::summaryForTest).contains("only the rows the filters keep"));
+        // a histogram bucket: a "between" filter on the amounts
+        onEdt(() -> {
+            ProfilePanel.ColumnCard amount = pp.cardsForTest().get(2);
+            int biggest = 0;
+            List<logsift.core.ColumnProfile.Bar> bars = amount.column.bars();
+            for (int i = 1; i < bars.size(); i++) {
+                biggest = bars.get(i).count() > bars.get(biggest).count() ? i : biggest;
+            }
+            amount.chart.clickForTest(biggest);
+            return null;
+        });
+        waitForFilter(tab);
+        List<String> chips = onEdt(() -> tab.logBar().chipTexts());
+        assertEquals(2, chips.size(), chips.toString());
+        assertTrue(chips.get(1).startsWith("Show: Amount_eur between "), chips.toString());
+        onEdt(() -> {
+            tab.filterPanel().setFormula("A AND B");
+            return null;
+        });
+        waitForFilter(tab);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning() && pp.result().rows()
+                        == tab.filterResultForTest().matchCount());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the profile follows the filters");
+        assertTrue(onEdt(() -> pp.result().rows()) > 0);
+        settle();
+        shot("103b-table-profile-filtered");
+        // dark mode
+        onEdt(() -> {
+            tab.logBar().clearAllButtonForTest().doClick();
+            frame.toggleDark();
+            return null;
+        });
+        waitForFilter(tab);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning() && !pp.result().filtered());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the whole table again");
+        settle();
+        shot("103c-table-profile-dark");
+        onEdt(() -> {
+            frame.toggleDark();
+            return null;
+        });
+        // Metrics and Insights work without times
+        onEdt(() -> {
+            setBottomFor(tab, tab.metricsPanel());
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.metricsPanel().metrics() != null && !tab.metricsPanel().isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the table's metrics");
+        List<String> measured = onEdt(() -> tab.metricsPanel().metrics().numbers().stream()
+                .map(logsift.core.Numbers.Series::name).toList());
+        assertTrue(measured.contains("amount_eur") && measured.contains("size_bytes"), measured.toString());
+        assertTrue(measured.stream().noneMatch(n -> n.contains(" = ")), "no rows per minute without times");
+        onEdt(() -> {
+            tab.metricsPanel().itemsForTest().setRowSelectionInterval(0, 0);
+            return null;
+        });
+        settle();
+        shot("103d-table-metrics-no-times");
+        onEdt(() -> {
+            setBottomFor(tab, tab.insightsPanel());
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.insightsPanel().report() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the table's insights");
+        assertTrue(onEdt(() -> tab.insightsPanel().report().findings().stream()
+                .noneMatch(f -> f.kind() == logsift.core.Insights.Kind.NOISE)), "rows of values are no messages");
+        settle();
+        shot("103e-table-insights-no-times");
+        onEdt(() -> {
+            setBottomFor(tab, tab.messagesPanel());
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.messagesPanel().statusForTest().startsWith("This table has no message column"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "Messages says why it is empty");
+        onEdt(() -> {
+            split.setDividerLocation(split.getHeight() - 240);
+            return null;
+        });
+    }
+
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {
             try {

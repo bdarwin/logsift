@@ -20,7 +20,8 @@ New to Logsift? Start with [Opening logs](opening-logs.md) and [The log view](lo
 | [Filters](filters.md) | Show, Hide and Mark filters, the formula, chips, level chips, stack traces, context lines, alerts |
 | [Timeline](timeline.md) | The bar of lines over time, its colours, and picking a time range |
 | [Insights and messages](insights.md) | Error bursts, new errors, silences, restarts, noise, known problems; top messages |
-| [Metrics](metrics.md) | How long things took, things that never ended, numbers in messages, the chart |
+| [Metrics](metrics.md) | How long things took, things that never ended, numbers in messages and columns, the chart |
+| [Profile](profile.md) | What each column of a table (a CSV file) holds, with a chart per column; filtering by a click |
 | [Exceptions](exceptions.md) | Exceptions grouped by root cause, the stack, opening your source code |
 | [Requests](requests.md) | Following one request through a log, all open logs or a folder |
 | [Compare and merge](compare.md) | A bad run against a good one; several logs merged by time |

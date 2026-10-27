@@ -13,7 +13,7 @@ From top to bottom, a log tab has:
 - **The log's bar:** **Find**, **Filters**, **Clear All** and the chips of the filters that are on, on the left; the line count, the format and the view buttons on the right.
 - **The [timeline](timeline.md):** how much was logged over time.
 - **The lines**, with line numbers on the left and the **highlight bar** on the right. A **tree of loggers** can sit on the left.
-- **The bottom panel** with its tabs: Filters, Insights, Exceptions, Metrics, Find results, Messages, Bookmarks, Details (and Request once you follow one). **Ctrl+J** (⌘J), the ▾ button, or a double-click on a tab folds or opens it.
+- **The bottom panel** with its tabs: Filters, Insights, Exceptions, Metrics, Profile (for CSV files), Find results, Messages, Bookmarks, Details (and Request once you follow one). **Ctrl+J** (⌘J), the ▾ button, or a double-click on a tab folds or opens it.
 - **The status bar.**
 
 ## Level colours
@@ -93,7 +93,7 @@ Right: *MATCHING ONLY*, the line number (*Ln 1,234*), the current line's time, *
 ![Parsed columns with top messages below](../screenshots/columns-and-messages.png)
 
 - Drag a header edge to resize a column.
-- Right-click a header: **Count Values in …** (every value with its number of lines; double-click one, or **Show Only**, to see its rows, or **Hide** them), **Filter by …** (a filter that looks only in that column, see [Filters on a column](filters.md#filters-on-a-column)), **Hide … Column**, tick columns on and off, **Show All Columns**.
+- Right-click a header: **Count Values in …** (every value with its number of lines; double-click one, or **Show Only**, to see its rows, or **Hide** them), **Filter by …** (a filter that looks only in that column, see [Filters on a column](filters.md#filters-on-a-column)), **Profile of the Columns** (the [Profile](profile.md) tab), **Hide … Column**, tick columns on and off, **Show All Columns**.
 - Right-click a value: **Show Only Rows Where Host = web-1** or **Hide Rows Where Host = web-1**. *N columns hidden ▾* at the right of the header shows which; hidden columns are remembered for each format.
 - When Logsift doesn't know the layout, it says *"Logsift doesn't know this log's layout, so it can't show it as columns"* and offers **Define Its Format…** (see [Settings](settings.md#log-formats)).
 
@@ -119,7 +119,7 @@ A `.csv` or `.tsv` file is read as a table: the header row names the columns, an
 
 - In the Columns view the header row isn't shown as a row: its names are the column titles. Line numbers are those of the file, so the first row is line 2. Hover a title to see the name in the file when Logsift uses its own (*timestamp* is **Time**). The plain view shows the header line as it is.
 - Right-click a value to show only (or hide) the rows with it, or a column title for **Filter by …**: see [Filters on a column](filters.md#filters-on-a-column).
-- The **Messages** tab groups rows by the message column. The [Metrics](metrics.md#columns) tab charts the columns of numbers, and how many rows each value of a column like *host* or *status* has over time.
+- The [Profile](profile.md) tab shows what each column holds, with a chart per column. The **Messages** tab groups rows by the message column (a table without one has no messages to group). The [Metrics](metrics.md#columns) tab charts the columns of numbers, and how many rows each value of a column like *host* or *status* has over time.
 
 ![A CSV file from inside a zip, shown as columns, with its hosts in the tree](../screenshots/csv.png)
 

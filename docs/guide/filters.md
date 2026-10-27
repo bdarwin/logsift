@@ -27,7 +27,7 @@ Each filter is a row:
 | **A**, **B**, **C** … | Its letter, for the formula. The circle has the filter's colour |
 | **Show** / **Hide** / **Mark** | **Show** keeps matching lines, **Hide** removes them, **Mark** only colours them |
 | **Line** / a column | Where to look: the whole line, or one column of the log's format. Shown when the log's format has columns |
-| **contains** / **=** / **>** / **<** | For a column: how its value is compared (below) |
+| **contains** / **=** / **>** / **<** / **between** | For a column: how its value is compared (below) |
 | Text, with **Aa** **W** **.\*** | What to match: match case, whole word, regular expression. A wrong regular expression gets a red outline |
 | Colour | The colour of its lines (below), or *No color* |
 | Count | How many lines match |
@@ -63,6 +63,7 @@ A filter can look in one column instead of the whole line: pick the column in th
 | **contains** | contains the text. **Aa**, **W** and **.\*** work as usual |
 | **=** | is the text, all of it: *web-1* is not *web-10* |
 | **>** / **<** | is a number above or below the one you type. Units count: *1.5 s* is more than *800 ms*, and *2 KB* more than *900* |
+| **between** | is a number from the first to the second, both included: *10..20*. A click on a [Profile](profile.md) histogram adds one |
 
 The quick ways:
 

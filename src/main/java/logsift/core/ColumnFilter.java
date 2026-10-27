@@ -1,5 +1,6 @@
 package logsift.core;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -20,7 +21,8 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
         CONTAINS("contains", "The value contains the text (Aa, W and .* apply)"),
         EQUALS("=", "The whole value is the text"),
         MORE(">", "The value is a number above this one (7 ms, 1.5 s and 2 KB compare too)"),
-        LESS("<", "The value is a number below this one (7 ms, 1.5 s and 2 KB compare too)");
+        LESS("<", "The value is a number below this one (7 ms, 1.5 s and 2 KB compare too)"),
+        BETWEEN("between", "The value is a number from the first to the second, as in 10..20 (both included)");
 
         public final String label;
         public final String tip;
@@ -45,8 +47,12 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
         if (!format.columns().contains(column)) {
             throw new IllegalArgumentException("This log has no column “" + column + "”");
         }
-        if ((op == Op.MORE || op == Op.LESS) && Double.isNaN(number(query.text()))) {
+        String hint = unitHint(format, column);
+        if ((op == Op.MORE || op == Op.LESS) && Double.isNaN(number(query.text(), hint))) {
             throw new IllegalArgumentException("Not a number: " + query.text());
+        }
+        if (op == Op.BETWEEN && range(query.text(), hint) == null) {
+            throw new IllegalArgumentException("Not two numbers like 10..20: " + query.text());
         }
         if (op == Op.CONTAINS) {
             query.toPattern(); // check it
@@ -55,20 +61,61 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
 
     /** A number as written, in milliseconds or bytes when it has a unit; NaN if it isn't one. */
     public static double number(String text) {
-        return text == null ? Double.NaN : Numbers.parse(text, "", new Numbers.Unit[1]);
+        return number(text, "");
+    }
+
+    /** Like {@link #number(String)}; a number without a unit has the column's ({@code hint}: "ms", "kb"…). */
+    static double number(String text, String hint) {
+        return text == null ? Double.NaN : Numbers.parse(text, hint, new Numbers.Unit[1]);
+    }
+
+    /** The unit a column's name gives its numbers (duration_ms: ms), or "". */
+    static String unitHint(LogFormat format, String column) {
+        List<String> titles = format.headerNames();
+        int i = format.columns().indexOf(column);
+        return ColumnMetrics.unitOf(titles != null && i >= 0 ? titles.get(i) : column);
+    }
+
+    /** "10..20" as {10, 20} (smaller first), or null. */
+    static double[] range(String text, String hint) {
+        int dots = text.indexOf("..");
+        if (dots < 0) {
+            return null;
+        }
+        double a = number(text.substring(0, dots), hint);
+        double b = number(text.substring(dots + 2), hint);
+        return Double.isNaN(a) || Double.isNaN(b) ? null : new double[] {Math.min(a, b), Math.max(a, b)};
+    }
+
+    /** A number in a column's base unit (ms, bytes), written so that filters read it back. */
+    public static String write(double v, Numbers.Unit unit) {
+        String n = java.math.BigDecimal.valueOf(v).round(new java.math.MathContext(10)).stripTrailingZeros()
+                .toPlainString();
+        return switch (unit) {
+            case MILLIS -> n + " ms";
+            case BYTES -> n + " b";
+            case PERCENT -> n + "%";
+            case NONE -> n;
+        };
     }
 
     /** A matcher for lines of the document (text in {@code cs}); its scans may run in parallel. */
     LineMatcher matcher(java.nio.charset.Charset cs) {
         Pattern p = op == Op.CONTAINS ? query.toPattern() : null;
-        double limit = op == Op.MORE || op == Op.LESS ? number(query.text()) : Double.NaN;
+        String hint = unitHint(format, column);
+        double limit = op == Op.MORE || op == Op.LESS ? number(query.text(), hint) : Double.NaN;
+        double[] range = op == Op.BETWEEN ? range(query.text(), hint) : null;
         String text = query.text().strip();
         boolean exact = query.matchCase();
         java.util.function.Predicate<String> test = switch (op) {
             case CONTAINS -> v -> p.matcher(v).find();
             case EQUALS -> v -> exact ? v.strip().equals(text) : v.strip().equalsIgnoreCase(text);
-            case MORE -> v -> number(v) > limit;
-            case LESS -> v -> number(v) < limit;
+            case MORE -> v -> number(v, hint) > limit;
+            case LESS -> v -> number(v, hint) < limit;
+            case BETWEEN -> v -> {
+                double x = number(v, hint);
+                return x >= range[0] && x <= range[1];
+            };
         };
         // a line can only match if it has the text somewhere: a fast byte search finds those first
         boolean literal = (op == Op.EQUALS || op == Op.CONTAINS) && !text.isEmpty()

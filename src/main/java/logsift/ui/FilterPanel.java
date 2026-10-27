@@ -624,7 +624,8 @@ final class FilterPanel extends JPanel {
             op.setMaximumSize(new Dimension(96, 30));
             op.setVisible(d.column != null);
             op.setToolTipText("<html>contains: the value contains the text<br>= : the whole value is the text"
-                    + "<br>&gt; &lt; : the value is a number above or below it (7 ms, 1.5 s and 2 KB compare too)</html>");
+                    + "<br>&gt; &lt; : the value is a number above or below it (7 ms, 1.5 s and 2 KB compare too)"
+                    + "<br>between: a number from the first to the second, as in 10..20</html>");
             op.addActionListener(e -> {
                 d.op = (ColumnFilter.Op) op.getSelectedItem();
                 listener.filtersChanged();

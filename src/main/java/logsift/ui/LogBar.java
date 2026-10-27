@@ -171,7 +171,7 @@ final class LogBar extends JPanel {
                 + (MainFrame.isMac() ? "⇧⌘K" : "Ctrl+Shift+K") + ")", "columns", tab::setColumnsVisible);
         view(tree, "Tree of loggers (threads, components…) on the left: hide or show their lines ("
                 + (MainFrame.isMac() ? "⇧⌘B" : "Ctrl+Shift+B") + ")", "valuesTree", tab::setValuesTreeVisible);
-        view(timeline, "Timeline: lines over time, errors in red; click it to jump to a time", "timeline",
+        view(timeline, TIMELINE_TIP, "timeline",
                 tab::setTimelineVisible);
 
         add(find);
@@ -194,6 +194,12 @@ final class LogBar extends JPanel {
         add(reloadMenu);
         update();
         syncView();
+    }
+
+    private static final String TIMELINE_TIP = "Timeline: lines over time, errors in red; click it to jump to a time";
+
+    JToggleButton timelineButtonForTest() {
+        return timeline;
     }
 
     /** A view toggle: for this log, and remembered as the default for logs opened next. */
@@ -228,6 +234,8 @@ final class LogBar extends JPanel {
         tree.setEnabled(tab.hasTree());
         timeline.setSelected(tab.isTimelineWanted());
         timeline.setEnabled(tab.hasTimes());
+        timeline.setToolTipText(tab.hasTimes() ? TIMELINE_TIP
+                : "No times in this file, so no timeline (a table without a time column)");
         autoReload.setSelected(tab.isAutoReload());
         updateFormat();
     }

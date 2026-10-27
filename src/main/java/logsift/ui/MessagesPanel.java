@@ -203,9 +203,18 @@ final class MessagesPanel extends JPanel {
         analyze.setText("Analyze again");
         result = r;
         model.refilter();
+        if (r.noMessageColumn()) {
+            status.setText("This table has no message column, so there are no messages to group."
+                    + " See the Profile tab for what its columns hold.");
+            return;
+        }
         status.setText(String.format("%,d kinds of messages in %,d lines (%,d ms)%s",
                 r.templates().size(), r.lines(), r.millis(),
                 r.truncated() ? " · too many kinds, some were not counted" : ""));
+    }
+
+    String statusForTest() {
+        return status.getText();
     }
 
     /** Messages of the whole file counted elsewhere (by Insights): used if there are none yet. */

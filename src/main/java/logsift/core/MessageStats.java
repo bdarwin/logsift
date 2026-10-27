@@ -43,8 +43,16 @@ public final class MessageStats {
         }
     }
 
-    /** The result: templates by count (most first), and how many lines were counted. */
-    public record Result(List<Template> templates, long lines, long millis, boolean truncated) {}
+    /**
+     * The result: templates by count (most first), and how many lines were counted.
+     * {@code noMessageColumn}: a table (a CSV without a message column), so nothing was counted.
+     */
+    public record Result(List<Template> templates, long lines, long millis, boolean truncated,
+                         boolean noMessageColumn) {
+        public Result(List<Template> templates, long lines, long millis, boolean truncated) {
+            this(templates, lines, millis, truncated, false);
+        }
+    }
 
     static final String WILDCARD = "<*>";
     private static final int MAX_TEMPLATES_PER_RANGE = 50_000;
@@ -74,7 +82,10 @@ public final class MessageStats {
                                  LongPredicate include, BooleanSupplier cancelled,
                                  java.util.function.DoubleConsumer progress) {
         long start = System.nanoTime();
-        LogFormat csv = format != null && format.isCsv() && format.columns().contains("message") ? format : null;
+        if (format != null && format.isCsv() && !format.columns().contains("message")) {
+            return new Result(List.of(), 0, 0, false, true); // rows of values: no messages to group
+        }
+        LogFormat csv = format != null && format.isCsv() ? format : null;
         Raw raw = countRaw(doc, entries, csv, from, to, include, cancelled, progress);
         if (raw.cancelled) {
             return new Result(List.of(), raw.lines, 0, true);
