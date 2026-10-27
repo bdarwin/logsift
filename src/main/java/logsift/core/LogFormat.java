@@ -275,6 +275,15 @@ public final class LogFormat {
         {"logger", "logger_name", "loggername", "category"},
         {"message", "msg"}};
 
+    /** CSV: the header's names as written, one per column (null for other formats). */
+    public List<String> headerNames() {
+        if (header == null) {
+            return null;
+        }
+        List<String> names = Csv.split(header, delimiter, null).stream().map(String::strip).toList();
+        return names.size() == columns.size() ? names : null;
+    }
+
     /** True for CSV (columns from the header row, not a regex). */
     public boolean isCsv() {
         return delimiter != 0;

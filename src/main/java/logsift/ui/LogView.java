@@ -201,6 +201,9 @@ public final class LogView extends JPanel {
     // Columns view: lines split by a log format into cells under a header.
     private ColumnLayout columns;
     private final ColumnHeader header = new ColumnHeader();
+    // 1 while row 0 is a CSV's header row in the columns view: the strip above names the
+    // columns, so that row isn't shown (line numbers stay those of the file); -1: not known yet
+    private int headerRows = -1;
     private BiConsumer<String, MouseEvent> columnMenu;
 
     // The layout of what is on screen: one entry per display row.
@@ -229,7 +232,7 @@ public final class LogView extends JPanel {
         setFontSize(13f);
         vbar.addAdjustmentListener(e -> {
             if (!adjusting) {
-                topRow = e.getValue();
+                topRow = Math.max(firstRow(), e.getValue());
                 topSeg = 0;
                 changed();
                 updateFollowFromPosition();
@@ -270,6 +273,7 @@ public final class LogView extends JPanel {
 
     public void setSource(RowSource source) {
         this.source = source;
+        headerRows = -1;
         topRow = 0;
         topSeg = 0;
         hOffset = 0;
@@ -357,6 +361,7 @@ public final class LogView extends JPanel {
      */
     void setColumns(ColumnLayout layout) {
         columns = layout;
+        headerRows = -1;
         topSeg = 0;
         header.setVisible(columns != null);
         header.repaint();
@@ -423,6 +428,7 @@ public final class LogView extends JPanel {
 
     /** Call after the row source changed size or content. */
     public void rowsChanged() {
+        headerRows = -1;
         int n = source.rowCount();
         if (lead >= n || anchor >= n) {
             anchor = lead = n - 1;
@@ -459,7 +465,7 @@ public final class LogView extends JPanel {
         if (n == 0) {
             return;
         }
-        row = Math.max(0, Math.min(n - 1, row));
+        row = Math.max(firstRow(), Math.min(n - 1, row));
         anchor = lead = row;
         anchorCol = leadCol = 0;
         lineMode = false;
@@ -957,6 +963,10 @@ public final class LogView extends JPanel {
         layoutDirty = false;
         pendingShown = 0;
         int n = source.rowCount();
+        if (topRow < firstRow()) {
+            topRow = firstRow();
+            topSeg = 0;
+        }
         int vis = visibleRows() + 1;
         int count = Math.max(0, Math.min(vis, n - topRow));
         String[] texts = new String[count];
@@ -993,10 +1003,35 @@ public final class LogView extends JPanel {
 
     /** Lines that were still being read are there now: paints them. Call on the UI thread. */
     public void textsArrived() {
+        if (headerRows < 0) {
+            changed();
+            updateScrollbars(); // row 0 may turn out to be a CSV header
+        }
         if (follow) {
             scrollToBottom(); // wrapped lines may take more rows than thought
         }
         changed();
+    }
+
+    /**
+     * The first row shown: 1 when row 0 is the header row of a CSV in the columns view (the
+     * strip above shows its names), else 0.
+     */
+    int firstRow() {
+        if (headerRows < 0) {
+            ColumnLayout cl = columns;
+            if (cl == null || !cl.format().isCsv() || source.rowCount() < 2) {
+                headerRows = 0;
+            } else {
+                String[] one = new String[1];
+                source.textsNow(0, 1, one);
+                if (one[0] == null) {
+                    return 0; // not read yet: asked again when it is
+                }
+                headerRows = cl.format().isHeader(one[0]) ? 1 : 0;
+            }
+        }
+        return headerRows;
     }
 
     /** Marks the layout stale and repaints. */
@@ -1013,8 +1048,9 @@ public final class LogView extends JPanel {
         if (n == 0) {
             return new int[] {0, 0};
         }
+        int first = firstRow();
         if (!wrap) {
-            return new int[] {Math.max(0, Math.min(n - 1, row + delta)), 0};
+            return new int[] {Math.max(first, Math.min(n - 1, row + delta)), 0};
         }
         while (delta > 0) {
             int segs = segCount(row);
@@ -1035,7 +1071,7 @@ public final class LogView extends JPanel {
             if (step > 0) {
                 seg -= step;
                 delta += step;
-            } else if (row > 0) {
+            } else if (row > first) {
                 row--;
                 seg = segCount(row) - 1;
                 delta++;
@@ -1051,7 +1087,7 @@ public final class LogView extends JPanel {
         int n = source.rowCount();
         int vis = visibleRows();
         if (!wrap) {
-            return new int[] {Math.max(0, n - vis), 0};
+            return new int[] {Math.max(firstRow(), n - vis), 0};
         }
         if (n == 0) {
             return new int[] {0, 0};
@@ -1071,7 +1107,7 @@ public final class LogView extends JPanel {
 
     private void setTop(int row, int seg) {
         int n = source.rowCount();
-        row = Math.max(0, Math.min(Math.max(0, n - 1), row));
+        row = Math.max(firstRow(), Math.min(Math.max(0, n - 1), row));
         seg = Math.max(0, seg);
         // only near the end can the position be past the last screenful
         if (row >= n - visibleRows() - 1) {
@@ -1143,10 +1179,11 @@ public final class LogView extends JPanel {
         try {
             int n = source.rowCount();
             int vis = visibleRows();
-            vbar.setValues(Math.min(topRow, Math.max(0, n - 1)), Math.min(vis, Math.max(n, 1)), 0,
-                    Math.max(n, 1));
+            int first = firstRow();
+            vbar.setValues(Math.max(first, Math.min(topRow, Math.max(0, n - 1))),
+                    Math.min(vis, Math.max(n - first, 1)), first, Math.max(n, 1));
             vbar.setBlockIncrement(Math.max(1, vis - 1));
-            vbar.setEnabled(n > vis || topRow > 0 || topSeg > 0);
+            vbar.setEnabled(n - first > vis || topRow > first || topSeg > 0);
 
             if (wrap) {
                 hOffset = 0;
@@ -1170,7 +1207,7 @@ public final class LogView extends JPanel {
         if (n == 0) {
             return;
         }
-        row = Math.max(0, Math.min(n - 1, row));
+        row = Math.max(firstRow(), Math.min(n - 1, row));
         lead = row;
         if (!extend || anchor < 0) {
             anchor = row;
@@ -1193,7 +1230,7 @@ public final class LogView extends JPanel {
         if (n == 0) {
             return;
         }
-        row = Math.max(0, Math.min(n - 1, row));
+        row = Math.max(firstRow(), Math.min(n - 1, row));
         boolean rowChanged = row != lead;
         lead = row;
         leadCol = col;
@@ -2186,6 +2223,14 @@ public final class LogView extends JPanel {
                 return "Hidden: " + String.join(", ", columns.hidden().stream()
                         .map(n -> n.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + n.substring(1)).toList())
                         + " · click to show them";
+            }
+            String col = columns == null ? null : columnAt(e.getX());
+            java.util.List<String> names = col == null ? null : columns.format().headerNames();
+            if (names != null) {
+                String asWritten = names.get(columns.format().columns().indexOf(col));
+                if (!asWritten.equalsIgnoreCase(col)) { // a name Logsift knows: time, level…
+                    return "“" + asWritten + "” in the file · " + super.getToolTipText(e);
+                }
             }
             return super.getToolTipText(e);
         }
