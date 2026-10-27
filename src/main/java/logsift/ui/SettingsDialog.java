@@ -31,11 +31,13 @@ import javax.swing.SpinnerNumberModel;
 final class SettingsDialog extends JDialog {
     static final String FORMATS = "Log Formats";
     static final String SOURCE = "Source Code";
+    static final String AGENTS = "Agents";
 
     private static final Preferences PREFS = AppState.prefs();
     private final MainFrame frame;
     private final LogFormatsPanel formats;
     private final JTabbedPane tabs = new JTabbedPane();
+    private final AgentsPanel agents;
     private static SettingsDialog lastForTest;
 
     /**
@@ -49,6 +51,8 @@ final class SettingsDialog extends JDialog {
         tabs.addTab("General", general());
         tabs.addTab(FORMATS, formats);
         tabs.addTab(SOURCE, sourceCode());
+        agents = new AgentsPanel(logsift.agent.AgentSettings.launcher(), this::openAgentActivity);
+        tabs.addTab(AGENTS, agents);
         JButton close = new JButton("Close");
         close.addActionListener(e -> dispose());
         getRootPane().setDefaultButton(close);
@@ -76,6 +80,23 @@ final class SettingsDialog extends JDialog {
 
     LogFormatsPanel formats() {
         return formats;
+    }
+
+    AgentsPanel agents() {
+        return agents;
+    }
+
+    /** Opens the log of what agents asked (closing Settings). */
+    private void openAgentActivity() {
+        java.nio.file.Path log = AppState.home().resolve("agent.log");
+        if (!java.nio.file.Files.isRegularFile(log)) {
+            javax.swing.JOptionPane.showMessageDialog(this, "No agent has asked Logsift anything yet.\n"
+                    + "Each call will be listed in " + log + ".", "What Agents Asked",
+                    javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        dispose();
+        frame.openFile(log);
     }
 
     static SettingsDialog lastForTest() {

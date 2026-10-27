@@ -53,10 +53,13 @@ COMPONENT = f'''
 
 UTIL_NS = 'http://schemas.microsoft.com/wix/UtilExtension'
 
-# Asks a running Logsift to close (it saves its session), and ends it if it doesn't.
+# Asks a running Logsift to close (it saves its session), and ends it if it doesn't. A
+# logsift-mcp a coding agent started is ended (it keeps nothing; the agent starts it again).
 CLOSE = '''
     <util:CloseApplication Id="CloseLogsift" Target="Logsift.exe" CloseMessage="yes"
                            RebootPrompt="no" TerminateProcess="1" Timeout="5"/>
+    <util:CloseApplication Id="CloseLogsiftMcp" Target="logsift-mcp.exe" RebootPrompt="no"
+                           TerminateProcess="1" Timeout="1"/>
 '''
 
 
