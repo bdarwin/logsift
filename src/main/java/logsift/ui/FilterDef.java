@@ -2,6 +2,7 @@ package logsift.ui;
 
 import java.awt.Color;
 import java.util.List;
+import logsift.core.ColumnFilter;
 import logsift.core.SearchQuery;
 
 /** One filter as the user set it up. Edited on the EDT. */
@@ -52,6 +53,8 @@ final class FilterDef {
     int swatch = -1; // index into SWATCHES; -1 = no color
     boolean enabled = true;
     boolean alert;   // notify about new matching lines while the file grows
+    String column;   // look only in this column of the log's format; null: the whole line
+    ColumnFilter.Op op = ColumnFilter.Op.CONTAINS; // with a column: how its value is compared
     String error;    // invalid regex message, or null
 
     FilterDef(char id) {
@@ -61,6 +64,16 @@ final class FilterDef {
     /** The search, or null if the text is empty. */
     SearchQuery query() {
         return text.isEmpty() ? null : new SearchQuery(text, matchCase, regex, wholeWord);
+    }
+
+    /** What it looks for, as on its chip: "ERROR", or "Host = web-1" for a column. */
+    String label() {
+        if (column == null) {
+            return text;
+        }
+        String c = column.isEmpty() ? column : column.substring(0, 1).toUpperCase(java.util.Locale.ROOT)
+                + column.substring(1);
+        return c + " " + op.label + " " + text;
     }
 
     Swatch color() {

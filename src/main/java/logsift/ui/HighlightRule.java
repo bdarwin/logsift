@@ -5,11 +5,20 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Colors a whole line when it matches. The first matching rule wins.
- * Colors may be null to keep the default.
+ * Colors a whole line when it matches its pattern (or, for a filter on a column, passes its
+ * test). The first matching rule wins. Colors may be null to keep the default.
  */
-record HighlightRule(String name, Pattern pattern,
+record HighlightRule(String name, Pattern pattern, java.util.function.Predicate<String> test,
                      Color fgLight, Color bgLight, Color fgDark, Color bgDark) {
+
+    HighlightRule(String name, Pattern pattern, Color fgLight, Color bgLight, Color fgDark, Color bgDark) {
+        this(name, pattern, null, fgLight, bgLight, fgDark, bgDark);
+    }
+
+    /** Whether a line gets this rule's colors ({@code m}: a matcher of the pattern, or null). */
+    boolean matches(String line, java.util.regex.Matcher m) {
+        return test != null ? test.test(line) : m.reset(line).find();
+    }
 
     Color foreground() {
         return Theme.isDark() ? fgDark : fgLight;

@@ -1496,7 +1496,48 @@ public final class LogView extends JPanel {
         header.repaint();
     }
 
+    /** A value in the columns view: its column (a name of the format) and its text. */
+    record Cell(String column, String value) {}
+
+    private Cell popupCell;
+
+    /** The cell under the last right-click in the columns view, or null. */
+    Cell popupCell() {
+        return popupCell;
+    }
+
+    /** The cell at a point of the view (columns view only), or null. */
+    Cell cellAt(int x, int y) {
+        ColumnLayout cl = columns;
+        int i = shownAt(y);
+        if (cl == null || i < 0 || inGutter(x)) {
+            return null;
+        }
+        Line l = shownLines[shownLine[i]];
+        if (l.cells == null || l.pending || cl.format().isHeader(l.raw)) {
+            return null;
+        }
+        int cx = gutterWidth() - hOffset;
+        int[] visible = cl.visible();
+        for (int c = 0; c < visible.length; c++) {
+            boolean last = c == visible.length - 1;
+            int w = last ? Integer.MAX_VALUE / 4 : cl.width(c, charWidth);
+            if (x >= cx && x < cx + w) {
+                String v = l.cells[visible[c]];
+                return v == null ? null : new Cell(cl.format().columns().get(visible[c]), v);
+            }
+            cx += w;
+        }
+        return null;
+    }
+
     private void popup(MouseEvent e) {
+        menuAt(e.getX(), e.getY()).show(canvas, e.getX(), e.getY());
+    }
+
+    /** The right-click menu for a point of the view. */
+    private JPopupMenu menuAt(int x, int y) {
+        popupCell = cellAt(x, y);
         JPopupMenu menu = new JPopupMenu();
         JMenuItem copy = new JMenuItem(hasSelection() ? "Copy" : "Copy Line");
         copy.addActionListener(a -> copySelection());
@@ -1507,7 +1548,25 @@ public final class LogView extends JPanel {
         if (popupExtender != null) {
             popupExtender.accept(this, menu);
         }
-        menu.show(canvas, e.getX(), e.getY());
+        return menu;
+    }
+
+    /** The right-click menu at a point, not shown. For tests. */
+    JPopupMenu menuForTest(int x, int y) {
+        return menuAt(x, y);
+    }
+
+    /** X inside a column of the columns view (a little right of where it starts). For tests. */
+    int xForCellForTest(String column) {
+        int cx = gutterWidth() - hOffset;
+        int[] visible = columns.visible();
+        for (int c = 0; c < visible.length; c++) {
+            if (columns.format().columns().get(visible[c]).equals(column)) {
+                return cx + charWidth;
+            }
+            cx += c == visible.length - 1 ? 0 : columns.width(c, charWidth);
+        }
+        return -1;
     }
 
     private void installKeys() {
@@ -1729,7 +1788,8 @@ public final class LogView extends JPanel {
             }
             Matcher[] rm = new Matcher[rules.size()];
             for (int i = 0; i < rm.length; i++) {
-                rm[i] = rules.get(i).pattern().matcher("");
+                Pattern rp = rules.get(i).pattern();
+                rm[i] = rp == null ? null : rp.matcher("");
             }
 
             // per line: colors and match ranges (in display columns)
@@ -1744,7 +1804,7 @@ public final class LogView extends JPanel {
                 Color lb = null;
                 boolean dim = source.dimmed(l.row);
                 for (int r = 0; r < rm.length && !dim; r++) {
-                    if (rm[r].reset(l.raw).find()) {
+                    if (rules.get(r).matches(l.raw, rm[r])) {
                         HighlightRule rule = rules.get(r);
                         if (rule.foreground() != null) {
                             lf = rule.foreground();

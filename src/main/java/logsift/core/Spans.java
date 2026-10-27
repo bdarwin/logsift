@@ -147,7 +147,10 @@ public final class Spans {
         String[] parts = template.split(Pattern.quote(MessageStats.WILDCARD), -1);
         for (int i = 0; i < parts.length; i++) {
             if (i > 0) {
-                sb.append("([^\\s,;()\\[\\]{}\"'<>|=]+)");
+                // a variable part right before , ; | or = may hold those too: "web-2,u1" is one <*>
+                // when the template came from a CSV row (digit tokens joined by punctuation)
+                boolean separatorNext = !parts[i].isEmpty() && ",;|=".indexOf(parts[i].charAt(0)) >= 0;
+                sb.append(separatorNext ? "([^\\s()\\[\\]{}\"'<>]+?)" : "([^\\s,;()\\[\\]{}\"'<>|=]+)");
             }
             String[] words = parts[i].split(" ", -1);
             for (int w = 0; w < words.length; w++) {

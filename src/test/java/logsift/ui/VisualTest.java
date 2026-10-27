@@ -2254,29 +2254,29 @@ class VisualTest {
         assertTrue(onEdt(() -> tab.entryFormat().startsEntry("21.10.26 10:00:13.000|I|Http|x")));
         assertTrue(!onEdt(() -> tab.entryFormat().startsEntry("    at com.acme.Pay.charge(Pay.java:12)")));
 
-        // the status bar shows the format; clicking it picks another for this file
+        // the log's bar shows the format; clicking it picks another for this file
         waitFor(() -> {
             try {
-                return onEdt(() -> frame.formatButtonForTest().isShowing()
-                        && frame.formatButtonForTest().getText().contains("orders"));
+                return onEdt(() -> tab.logBar().formatButtonForTest().isShowing()
+                        && tab.logBar().formatButtonForTest().getText().equals("Format: orders ▾"));
             } catch (Exception e) {
                 return false;
             }
-        }, 10_000, "format in the status bar");
+        }, 10_000, "format in the log's bar");
         onEdt(() -> {
-            frame.formatButtonForTest().doClick();
+            tab.logBar().formatButtonForTest().doClick();
             return null;
         });
         settle();
-        shot("46b-format-from-status-bar");
+        shot("46b-format-from-log-bar");
         // choosing a format by hand is remembered for the file
         onEdt(() -> {
-            for (java.awt.Component c : frame.formatPopupForTest().getComponents()) {
+            for (java.awt.Component c : tab.logBar().formatMenuForTest().getComponents()) {
                 if (c instanceof javax.swing.JMenuItem mi && mi.getText().equals(logsift.core.Formats.PLAIN)) {
                     mi.doClick();
                 }
             }
-            frame.formatPopupForTest().setVisible(false);
+            tab.logBar().formatMenuForTest().setVisible(false);
             return null;
         });
         waitFor(() -> {
@@ -3772,6 +3772,112 @@ class VisualTest {
         assertTrue(!onEdt(csvTab::isMatchingOnly) && onEdt(csvTab::treeHiddenCount) == 0, "the whole log again");
         assertEquals(List.of(), onEdt(() -> csvTab.logBar().chipTexts()));
         assertTrue(!onEdt(() -> csvTab.logBar().clearAllLitForTest()), "nothing left to clear");
+
+        // the header row is named by the strip above the columns, not shown again as a row
+        onEdt(() -> {
+            csvTab.mainView().goToRow(0, true);
+            return null;
+        });
+        assertEquals(1, (int) onEdt(() -> csvTab.mainView().selectedRow()), "line 1 is the header: line 2");
+        assertTrue(onEdt(() -> csvTab.mainView().textAtForTest(0)).startsWith("2026-10-21 10:00:00,ERROR,web-1"),
+                onEdt(() -> csvTab.mainView().textAtForTest(0)));
+        // the format is in the log's bar
+        assertEquals("Format: CSV ▾", onEdt(() -> csvTab.logBar().formatButtonForTest().getText()));
+        assertTrue(onEdt(() -> csvTab.logBar().formatButtonForTest().isShowing()));
+        // right-click a host: show only the rows of that host (a filter on the Host column)
+        int hostX = onEdt(() -> csvTab.mainView().xForCellForTest("Host"));
+        int rowY = onEdt(() -> csvTab.mainView().yForRowForTest(3));
+        assertEquals(new LogView.Cell("Host", "web-3"), onEdt(() -> csvTab.mainView().cellAt(hostX, rowY)));
+        javax.swing.JPopupMenu cellMenu = onEdt(() -> {
+            javax.swing.JPopupMenu m = csvTab.mainView().menuForTest(hostX, rowY);
+            m.show(csvTab.mainView().canvasForTest(), hostX, rowY);
+            return m;
+        });
+        settle();
+        onEdt(() -> {
+            for (java.awt.Component c : cellMenu.getComponents()) {
+                if (c instanceof javax.swing.JMenuItem mi && mi.getText().equals("Show Only Rows Where Host = web-3")) {
+                    mi.doClick();
+                }
+            }
+            cellMenu.setVisible(false);
+            return null;
+        });
+        waitForFilter(csvTab);
+        assertEquals(List.of("Show: Host = web-3"), onEdt(() -> csvTab.logBar().chipTexts()));
+        assertEquals(133, onEdt(() -> csvTab.filterResultForTest().matchCount()), "web-3's rows, not the header");
+        assertTrue(onEdt(csvTab::isMatchingOnly));
+        // a filter on one column from the column's menu: User contains "u1" (u1, u10…u19)
+        onEdt(() -> {
+            csvTab.addColumnFilter("User");
+            FilterDef d = csvTab.filterPanel().filters().get(1);
+            d.text = "u1";
+            csvTab.filterPanel().setFilterAction(d, FilterDef.Action.SHOW);
+            csvTab.filterPanel().setFormula("A AND B");
+            return null;
+        });
+        waitForFilter(csvTab);
+        // web-3 rows are i % 3 == 2; users u1, u10..u19 are i % 40 in {1, 10..19}
+        long expected = java.util.stream.IntStream.range(0, 400)
+                .filter(i -> i % 3 == 2 && (i % 40 == 1 || (i % 40 >= 10 && i % 40 <= 19))).count();
+        assertEquals(expected, (long) onEdt(() -> csvTab.filterResultForTest().matchCount()));
+        assertEquals(List.of("Show: Host = web-3", "Show: User contains u1"), onEdt(() -> csvTab.logBar().chipTexts()));
+        settle();
+        shot("74d-csv-column-filters");
+        // the metrics of a CSV: numbers in its messages, and rows per stretch of time for each host
+        onEdt(() -> {
+            setBottomFor(csvTab, csvTab.metricsPanel());
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> csvTab.metricsPanel().metrics() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the CSV's metrics");
+        List<String> measured = onEdt(() -> csvTab.metricsPanel().metrics().numbers().stream()
+                .map(logsift.core.Numbers.Series::name).toList());
+        assertTrue(measured.contains("Host = web-1") && measured.stream().anyMatch(n -> n.contains("took # ms")),
+                measured.toString());
+        onEdt(() -> {
+            int row = 0;
+            for (MetricsPanel.Item it : csvTab.metricsPanel().itemListForTest()) {
+                if (it.name().equals("Host = web-1")) {
+                    break;
+                }
+                row++;
+            }
+            csvTab.metricsPanel().itemsForTest().setRowSelectionInterval(row, row);
+            return null;
+        });
+        settle();
+        shot("74e-csv-metrics");
+        // a narrow window: the log's bar still fits, the format's name is cut short
+        onEdt(() -> {
+            frame.setSize(820, 860);
+            frame.validate();
+            return null;
+        });
+        settle();
+        onEdt(() -> {
+            LogBar bar = csvTab.logBar();
+            java.awt.Component lastOne = bar.getComponent(bar.getComponentCount() - 1);
+            assertTrue(lastOne.getX() + lastOne.getWidth() <= bar.getWidth(), "Reload ▾ in the window");
+            assertTrue(bar.formatButtonForTest().isShowing() && bar.formatButtonForTest().getWidth() >= 50,
+                    "the format button stays");
+            assertEquals("CSV ▾", bar.formatButtonForTest().getText(), "without “Format: ”");
+            return null;
+        });
+        shot("74f-narrow-window");
+        onEdt(() -> {
+            frame.setSize(1400, 860);
+            frame.validate();
+            csvTab.logBar().clearAllButtonForTest().doClick();
+            return null;
+        });
+        waitForFilter(csvTab);
+        assertEquals(List.of(), onEdt(() -> csvTab.logBar().chipTexts()));
 
         // like any log: bookmarks are remembered, and it opens again by its name (recent files, sessions)
         onEdt(() -> {

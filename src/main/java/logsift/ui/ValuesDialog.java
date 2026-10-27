@@ -120,7 +120,7 @@ final class ValuesDialog {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2 && table.getSelectedRow() >= 0) {
-                    tab.filterByValue(shown.get(table.getSelectedRow()).value(), FilterDef.Action.SHOW);
+                    tab.filterByValue(column, shown.get(table.getSelectedRow()).value(), FilterDef.Action.SHOW);
                 }
             }
         });
@@ -129,7 +129,7 @@ final class ValuesDialog {
         showOnly.addActionListener(e -> {
             int r = table.getSelectedRow();
             if (r >= 0) {
-                tab.filterByValue(shown.get(r).value(), FilterDef.Action.SHOW);
+                tab.filterByValue(column, shown.get(r).value(), FilterDef.Action.SHOW);
             }
         });
         JButton hide = new JButton("Hide");
@@ -137,7 +137,7 @@ final class ValuesDialog {
         hide.addActionListener(e -> {
             int r = table.getSelectedRow();
             if (r >= 0) {
-                tab.filterByValue(shown.get(r).value(), FilterDef.Action.HIDE);
+                tab.filterByValue(column, shown.get(r).value(), FilterDef.Action.HIDE);
             }
         });
 

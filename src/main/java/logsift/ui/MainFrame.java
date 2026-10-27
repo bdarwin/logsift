@@ -59,8 +59,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final JPanel center = new JPanel(new CardLayout());
     private final JLabel status = new JLabel(" ");
     private final JLabel statusRight = new JLabel(" ");
-    private final javax.swing.JButton formatButton = new javax.swing.JButton();
-    private javax.swing.JPopupMenu formatPopup;
     private final JButton updateButton = new JButton();
     /** What the window shows with nothing open. */
     private final StartPage.Host startHost = new StartPage.Host() {
@@ -2294,14 +2292,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    javax.swing.JButton formatButtonForTest() {
-        return formatButton;
-    }
-
-    javax.swing.JPopupMenu formatPopupForTest() {
-        return formatPopup;
-    }
-
     public LogTab currentTab() {
         return tabs.getSelectedComponent() instanceof LogTab t ? t : null;
     }
@@ -2348,17 +2338,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         right.setOpaque(false);
         right.add(statusRight, BorderLayout.CENTER);
         right.add(progress, BorderLayout.EAST);
-        formatButton.putClientProperty("JButton.buttonType", "borderless");
-        formatButton.setFocusable(false);
-        formatButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
-        formatButton.setVisible(false);
-        formatButton.addActionListener(e -> {
-            javax.swing.JPopupMenu popup = new javax.swing.JPopupMenu();
-            fillFormatMenu(popup);
-            formatPopup = popup;
-            popup.show(formatButton, 0, -popup.getPreferredSize().height);
-        });
-        right.add(formatButton, BorderLayout.WEST);
         updateButton.putClientProperty("JButton.buttonType", "borderless");
         updateButton.setFont(updateButton.getFont().deriveFont(Font.BOLD));
         updateButton.setForeground(new Color(0x2563EB));
@@ -2501,8 +2480,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 () -> PREFS.getBoolean("stripes", true), e -> setStripes(!PREFS.getBoolean("stripes", true))));
         view.addSeparator();
         JMenu format = submenu("Log Format", "braces");
-        onOpen(format, () -> fillFormatMenu(format));
-        fillFormatMenu(format);
+        onOpen(format, () -> fillFormatMenu(format, currentTab()));
+        fillFormatMenu(format, currentTab());
         view.add(format);
         JMenu encoding = submenu("Encoding", "languages");
         encoding.add(item("Detect Automatically", null, e -> reopenWithEncoding(null)));
@@ -2974,10 +2953,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    private void fillFormatMenu(JComponent menu) {
+    @Override
+    public void fillFormatMenu(LogTab tab, javax.swing.JPopupMenu menu) {
+        fillFormatMenu(menu, tab);
+    }
+
+    /** The formats to read a log with ({@code t}: that log, or null). */
+    private void fillFormatMenu(JComponent menu, LogTab t) {
         Runnable separator = () -> menu.add(new javax.swing.JPopupMenu.Separator());
         menu.removeAll();
-        LogTab t = currentTab();
         String choice = t == null ? null : t.formatChoice();
         logsift.core.LogFormat now = t == null ? null : t.logFormat();
         javax.swing.ButtonGroup group = new javax.swing.ButtonGroup();
@@ -2986,9 +2970,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     java.util.Objects.equals(choice, name));
             mi.setEnabled(t != null);
             mi.addActionListener(e -> {
-                LogTab cur = currentTab();
-                if (cur != null) {
-                    cur.setFormatChoice(name);
+                if (t != null) {
+                    t.setFormatChoice(name);
                 }
             });
             group.add(mi);
@@ -3010,7 +2993,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         radio.accept("JSON lines", "JSON lines");
         radio.accept("CSV (header row, columns by , ; tab or |)", logsift.core.LogFormat.CSV);
         separator.run();
-        JMenuItem create = item("New Format from This Log…", null, e -> newFormatFromCurrentLog());
+        JMenuItem create = item("New Format from This Log…", null, e -> {
+            if (t != null) {
+                defineFormat(t);
+            }
+        });
         create.setEnabled(t != null);
         menu.add(create);
         menu.add(item("Edit Log Formats…", null, e -> showSettings(SettingsDialog.FORMATS)));
@@ -3232,12 +3219,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void refreshStatus() {
         LogTab t = currentTab();
         updateReloadButton(t);
-        String fmt = t == null || tabs.getSelectedComponent() != t ? "" : t.formatName();
-        formatButton.setVisible(!fmt.isEmpty());
-        formatButton.setText("Format: " + fmt + " \u25BE");
-        formatButton.setToolTipText(t != null && t.formatChoice() != null
-                ? "Lines are read as \u201c" + fmt + "\u201d (chosen for this file). Click to change."
-                : "Lines are read as \u201c" + fmt + "\u201d (detected). Click if that is wrong.");
         if (tabs.getSelectedComponent() instanceof GcTab gt) {
             setTitle(gt.title() + " — Logsift");
             status.setText(gt.statusText());

@@ -14,6 +14,16 @@ public record Metrics(Spans.Result spans, List<Numbers.Series> numbers) {
         return spans.kinds().isEmpty() && numbers.isEmpty();
     }
 
+    /** These, and the measurements of the log's columns ({@link ColumnMetrics}) after them. */
+    public Metrics withColumns(List<Numbers.Series> columns) {
+        if (columns.isEmpty()) {
+            return this;
+        }
+        List<Numbers.Series> all = new java.util.ArrayList<>(numbers);
+        all.addAll(columns);
+        return new Metrics(spans, List.copyOf(all));
+    }
+
     /** Both, from the log's message kinds; null if cancelled. */
     public static Metrics analyze(List<MessageStats.Template> templates, Spans.Lines lines, RequestTrace.Reader reader,
                                   BooleanSupplier cancelled) {
