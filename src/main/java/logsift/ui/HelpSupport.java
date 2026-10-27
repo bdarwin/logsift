@@ -113,8 +113,10 @@ final class HelpSupport {
         }
         boolean mac = MainFrame.isMac();
         String menu = mac ? "⌘" : "Ctrl+";
-        rows.add(new String[] {"Find box", "Find All", "Enter"});
-        rows.add(new String[] {"Find box", "Stop a running search", "Esc"});
+        rows.add(new String[] {"Find bar", "Next / previous match", "Enter / Shift+Enter"});
+        rows.add(new String[] {"Find bar", "Find All", menu + "Enter"});
+        rows.add(new String[] {"Find bar", "Close the find bar", "Esc"});
+        rows.add(new String[] {"Folder search", "Search / stop", "Enter / Esc"});
         rows.add(new String[] {"Log", "Copy selected text", menu + "C"});
         rows.add(new String[] {"Log", "Select all", menu + "A"});
         rows.add(new String[] {"Log", "Select lines", "Shift+click, Shift+arrows, or drag in the line numbers"});

@@ -208,7 +208,7 @@ public final class LocalJvms {
             return s;
         }
         throw new IOException(attachFailed != null ? "cannot attach: " + attachFailed.getMessage()
-                : "this Logsift cannot attach to JVMs and no jcmd was found; set the JDK folder in Settings");
+                : "this Logsift cannot attach to JVMs and no jcmd was found; set the JDK folder (for jcmd) in the Attach window");
     }
 
     /** A session that uses {@code jcmd} (for tests, and when attaching isn't possible). */
