@@ -162,7 +162,7 @@ public final class ColumnMetrics {
             boolean numeric = k.numbers >= k.filled * 0.9;
             boolean counter = k.rising >= k.numbers * 0.98 && k.distinct.size() > MAX_DISTINCT; // a sequence
             boolean id = ID.matcher(titles.get(c)).matches() || ID.matcher(name).matches();
-            if (numeric && (!unit.isEmpty() || (!id && !counter && k.tooMany))) {
+            if (numeric && !id && !counter && (!unit.isEmpty() || k.tooMany)) {
                 if (numberCols.size() < MAX_NUMBER_COLUMNS) {
                     numberCols.add(c);
                 }

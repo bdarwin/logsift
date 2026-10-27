@@ -284,6 +284,18 @@ public final class Numbers {
         return Insights.display(sb.toString());
     }
 
+    /** Whether the values (nearly) only go up: a row number, an offset, a clock, not a measurement. */
+    static boolean mostlyRising(Series s) {
+        double[] v = s.values();
+        int rising = 0;
+        for (int i = 1; i < v.length; i++) {
+            if (v[i] >= v[i - 1]) {
+                rising++;
+            }
+        }
+        return v.length > 1 && rising >= (v.length - 1) * 0.9;
+    }
+
     /** Times when a measurement was far above usual (at least 3× its median, for a while). */
     public static List<Spike> spikes(Series s) {
         int n = s.size();

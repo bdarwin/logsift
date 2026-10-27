@@ -119,7 +119,7 @@ A `.csv` or `.tsv` file is read as a table: the header row names the columns, an
 
 - In the Columns view the header row isn't shown as a row: its names are the column titles. Line numbers are those of the file, so the first row is line 2. Hover a title to see the name in the file when Logsift uses its own (*timestamp* is **Time**). The plain view shows the header line as it is.
 - Right-click a value to show only (or hide) the rows with it, or a column title for **Filter by …**: see [Filters on a column](filters.md#filters-on-a-column).
-- The [Metrics](metrics.md#columns) tab charts the columns of numbers, and how many rows each value of a column like *host* or *status* has over time.
+- The **Messages** tab groups rows by the message column. The [Metrics](metrics.md#columns) tab charts the columns of numbers, and how many rows each value of a column like *host* or *status* has over time.
 
 ![A CSV file from inside a zip, shown as columns, with its hosts in the tree](../screenshots/csv.png)
 

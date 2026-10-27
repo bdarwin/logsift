@@ -26,7 +26,7 @@ class ColumnMetricsTest {
         for (int i = 0; i < 600; i++) {
             out.add(String.format("2026-10-21 10:%02d:%02d,%d,%d,web-%d,%d,%d,%d,\"GET /orders/%d\"", i / 60, i % 60,
                     i, 900_000 + (i * 7919) % 100_000, i % 3 + 1, i % 20 == 0 ? 500 : 200, 40 + (i * 37) % 300,
-                    1000 + i * 13, i));
+                    1000 + (i * 7919) % 5000, i));
         }
         return out;
     }
@@ -69,7 +69,7 @@ class ColumnMetricsTest {
         List<String> lines = new ArrayList<>();
         for (int i = 0; i < 200; i++) {
             lines.add(String.format("10.0.0.%d - - [21/Oct/2026:10:%02d:%02d +0000] \"GET /a/%d HTTP/1.1\" %d %d",
-                    i % 5, i / 60, i % 60, i, i % 10 == 0 ? 404 : 200, 500 + i * 11));
+                    i % 5, i / 60, i % 60, i, i % 10 == 0 ? 404 : 200, 500 + (i * 37) % 900));
         }
         List<Numbers.Series> s = analyze(lines, "access.log");
         assertTrue(names(s).contains("size"), names(s).toString());
@@ -95,20 +95,129 @@ class ColumnMetricsTest {
     }
 
     @Test
-    void numbersInCsvMessages() {
-        // a CSV row's other fields run together into one variable part: "web-2,u1"
-        String template = "INFO,<*>,\"Request <*> took <*> ms\"";
-        Matcher m = Spans.capturing(template).matcher("2026-10-21 10:00:01,INFO,web-2,u1,\"Request 1 took 7 ms\"");
+    void variablePartsStopAtSeparators() {
+        // the capture regex is the same for every log: a variable part stops at , ; | =
+        Matcher m = Spans.capturing("took <*>, retry <*>").matcher("took 12ms, retry 3");
         assertTrue(m.find());
-        assertEquals("web-2,u1", m.group(1));
-        assertEquals("7", m.group(3));
-        // elsewhere a variable part still stops at a comma
-        Matcher m2 = Spans.capturing("took <*>, retry <*>").matcher("took 12ms, retry 3");
+        assertEquals("12ms", m.group(1));
+        assertEquals("3", m.group(2));
+        Matcher m2 = Spans.capturing("queue size=<*>").matcher("queue size=42, more");
         assertTrue(m2.find());
-        assertEquals("12ms", m2.group(1));
-        assertEquals("3", m2.group(2));
-        Matcher m3 = Spans.capturing("queue size=<*>").matcher("queue size=42, more");
-        assertTrue(m3.find());
-        assertEquals("42", m3.group(1));
+        assertEquals("42", m2.group(1));
+    }
+
+    @org.junit.jupiter.api.io.TempDir
+    java.nio.file.Path dir;
+
+    private static String orders() {
+        StringBuilder csv = new StringBuilder("Timestamp,Level,Host,User,Message\n");
+        for (int i = 0; i < 400; i++) {
+            csv.append(String.format("2026-10-21 10:%02d:%02d,%s,web-%d,u%d,\"%s\"\n", i / 60, i % 60,
+                    i % 25 == 0 ? "ERROR" : i % 7 == 0 ? "WARN" : "INFO", i % 3 + 1, i % 40,
+                    i % 25 == 0 ? "Payment failed, card declined" : "Request " + i + " took " + (i * 7 % 300) + " ms"));
+        }
+        return csv.toString();
+    }
+
+    @Test
+    void csvMessagesAreTheMessageColumn() throws Exception {
+        java.nio.file.Path f = dir.resolve("orders.csv");
+        java.nio.file.Files.writeString(f, orders());
+        try (LogDocument doc = LogDocument.open(f)) {
+            assertTrue(doc.awaitIdle(10_000));
+            List<String> sample = new ArrayList<>();
+            for (int i = 0; i < 200; i++) {
+                sample.add(doc.line(i));
+            }
+            Formats.Detected d = Formats.detect(sample, List.of(), "orders.csv", null, 2026);
+            MessageStats.Result r = MessageStats.analyze(doc, d.entries(), d.columns(), 0, Long.MAX_VALUE, null,
+                    () -> false, null);
+            assertEquals(List.of("Request <*> took <*> ms", "Payment failed, card declined"),
+                    r.templates().stream().map(MessageStats.Template::text).toList(), "one per message, not per level");
+            assertEquals(List.of("WARN", "ERROR"), r.templates().stream().map(MessageStats.Template::level).toList(),
+                    "the most severe level of its rows");
+            assertEquals(384, r.templates().get(0).count());
+            assertEquals(400, r.lines(), "rows, not the header");
+            // its numbers, read from the rows
+            Metrics m = Metrics.analyze(r.templates(), (t, c) -> {
+                try (SearchSession s = new SearchSession(doc, new SearchQuery(t.regex(), true, true, false)).start()) {
+                    s.awaitIdle(10_000);
+                    long[] out = new long[s.hits().size()];
+                    for (int i = 0; i < out.length; i++) {
+                        out[i] = s.hits().get(i);
+                    }
+                    return out;
+                }
+            }, RequestTrace.reader(doc::line, d.times(), d.columns()), () -> false);
+            assertEquals(List.of("Request … took # ms"), m.numbers().stream().map(Numbers.Series::name).toList());
+            assertEquals(384, m.numbers().get(0).size());
+        }
+    }
+
+    @Test
+    void otherLogsKeepTheirMessages() throws Exception {
+        StringBuilder log = new StringBuilder();
+        for (int i = 0; i < 300; i++) {
+            log.append(String.format("2026-10-21 10:%02d:%02d.000 %s [worker-%d] c.a.Shop - order %d placed in %d ms%n",
+                    i / 60, i % 60, i % 9 == 0 ? "WARN " : "INFO ", i % 4, i, i * 3));
+        }
+        java.nio.file.Path f = dir.resolve("shop.log");
+        java.nio.file.Files.writeString(f, log);
+        try (LogDocument doc = LogDocument.open(f)) {
+            assertTrue(doc.awaitIdle(10_000));
+            List<String> sample = new ArrayList<>();
+            for (int i = 0; i < 200; i++) {
+                sample.add(doc.line(i));
+            }
+            Formats.Detected d = Formats.detect(sample, List.of(), "shop.log", null, 2026);
+            List<MessageStats.Template> before = MessageStats.analyze(doc, d.entries(), 0, Long.MAX_VALUE, null,
+                    () -> false, null).templates();
+            List<MessageStats.Template> now = MessageStats.analyze(doc, d.entries(), d.columns(), 0, Long.MAX_VALUE,
+                    null, () -> false, null).templates();
+            assertEquals(before, now, "a layout's lines are counted as before");
+            assertEquals(2, now.size(), "still one per level, as for every log");
+        }
+    }
+
+    /** A column series, one value a second. */
+    private static Numbers.Series column(String name, double[] v) {
+        long[] lines = new long[v.length];
+        long[] times = new long[v.length];
+        for (int i = 0; i < v.length; i++) {
+            lines[i] = i + 1;
+            times[i] = 1_792_000_000_000L + i * 1000L;
+        }
+        return new Numbers.Series(name, null, 0, Numbers.Unit.NONE, lines, times, v, v.length,
+                Numbers.Source.COLUMN, "column");
+    }
+
+    @Test
+    void columnsThatOnlyGoUpAreNoMeasurementsAndNoSpikes() {
+        List<String> lines = new ArrayList<>();
+        lines.add("time,row,offset_bytes,epoch_ms,latency_ms");
+        long offset = 0;
+        for (int i = 0; i < 600; i++) {
+            offset += (long) Math.pow(1.02, i); // grows faster and faster
+            lines.add(String.format("2026-10-21 10:%02d:%02d,%d,%d,%d,%d", i / 60, i % 60, i, offset,
+                    1_792_000_000_000L + i * 1000L, 20 + i % 7));
+        }
+        assertEquals(List.of("latency_ms"), names(analyze(lines, "rows.csv")),
+                "not a row number, an offset or a clock, even with a unit in the name");
+        // and Insights finds no spike in a column that only goes up, however it jumps
+        double[] rising = new double[600];
+        for (int i = 0; i < rising.length; i++) {
+            rising[i] = i < 450 ? i : 100_000 + i;
+        }
+        Metrics m = new Metrics(Spans.Result.EMPTY, List.of(column("offset", rising)));
+        assertTrue(Insights.measurements(m, true).isEmpty());
+        // the same jump in a real measurement is one
+        double[] jump = new double[600];
+        for (int i = 0; i < jump.length; i++) {
+            jump[i] = (i >= 300 && i < 360 ? 500 : 20) + i % 5;
+        }
+        List<Insights.Finding> f = Insights.measurements(new Metrics(Spans.Result.EMPTY, List.of(column("latency", jump))),
+                true);
+        assertEquals(1, f.size());
+        assertEquals(Insights.Kind.SPIKE, f.get(0).kind());
     }
 }

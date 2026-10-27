@@ -20,13 +20,13 @@ The **Metrics** tab (below the log) shows what the log measures, without any set
 
 When a log has columns, its columns are measured too:
 
-- **A column of numbers** (with a unit, or more than 12 different values) is a measurement: *duration_ms*, *bytes*, *latency*, the access log's *size*. The unit comes from the value (*7 ms*, *1.5 s*, *2 KB*) or from the column's name (`_ms`, `_s`, `_bytes`, `_kb`, `_pct`; *duration*, *latency*, *elapsed* and *took* are taken as milliseconds). Columns that number things rather than measure them are left out: IDs, ports, years, and numbers that only go up (a row number).
-- **A column with a few values** (2 to 12, such as *status* or *host*) gives, for each of its most frequent values, how many rows have it in each stretch of time: *Host = web-1*, *rows per minute*. The stretch fits the log: per second for a log of a minute, per hour for a day. This needs times in the log. At most two such columns, the ones with the fewest values.
-- Time, level, thread, logger and message columns are not measured this way; the message is still read for numbers (above).
+- **A column of numbers** (with a unit, or more than 12 different values) is a measurement: *duration_ms*, *bytes*, *latency*, the access log's *size*. The unit comes from the value (*7 ms*, *1.5 s*, *2 KB*) or from the column's name (`_ms`, `_s`, `_bytes`, `_kb`, `_pct`; *duration*, *latency*, *elapsed* and *took* are taken as milliseconds). Columns that number things rather than measure them are left out, whatever their name says: IDs, ports, years, and numbers that only go up (a row number, an offset, a clock).
+- **A column with a few values** (2 to 12, such as *status* or *host*) gives, for each of its most frequent values, how many rows have it in each stretch of time: *Host = web-1*, *rows per minute*. The stretch fits the log: per second for a log of a minute, per hour for a day. This needs times in the log. At most two such columns, the ones with the fewest values. [Insights](insights.md) doesn't report these (the [timeline](timeline.md) shows busy times).
+- Time, level, thread, logger and message columns are not measured this way; the message is still read for numbers (above). In a CSV file only the message column is read for them, so a measurement is named by the message (*Request … took # ms*), once for all levels.
 
 A column needs 20 rows or more. On big logs every n-th row is read, as for numbers in messages.
 
-![The Metrics of a CSV file: numbers in its messages, and rows per 10 seconds for each host](../screenshots/csv-metrics.png)
+![The Metrics of a CSV file: the numbers in its message column, and rows per 10 seconds for each host](../screenshots/csv-metrics.png)
 
 ## The list
 

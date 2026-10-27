@@ -119,7 +119,9 @@ public final class Insights {
         if (timed) {
             List<Numbers.Spike> spikes = new ArrayList<>();
             for (Numbers.Series s : m.numbers()) {
-                if (s.source() != Numbers.Source.ROWS) { // busy times are the timeline's business
+                // busy times are the timeline's business; a column that only goes up is no measurement
+                if (s.source() == Numbers.Source.MESSAGE
+                        || s.source() == Numbers.Source.COLUMN && !Numbers.mostlyRising(s)) {
                     spikes.addAll(Numbers.spikes(s));
                 }
             }

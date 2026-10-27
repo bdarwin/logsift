@@ -1593,8 +1593,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 }
                 step.accept("Grouping messages…");
                 long n = doc.lineCount();
-                logsift.core.MessageStats.Result m = logsift.core.MessageStats.analyze(doc, entryFormat, 0,
-                        Long.MAX_VALUE, null, cancel::get, progress);
+                logsift.core.MessageStats.Result m = logsift.core.MessageStats.analyze(doc, entryFormat, logFormat,
+                        0, Long.MAX_VALUE, null, cancel::get, progress);
                 if (cancel.get()) {
                     return null;
                 }
@@ -1761,7 +1761,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 }
                 step.accept("Grouping messages…");
                 logsift.core.MessageStats.Result m = messages.result() != null ? messages.result()
-                        : logsift.core.MessageStats.analyze(doc, entryFormat, 0, Long.MAX_VALUE, null, cancel::get, null);
+                        : logsift.core.MessageStats.analyze(doc, entryFormat, logFormat, 0, Long.MAX_VALUE, null,
+                                cancel::get, null);
                 if (cancel.get()) {
                     return null;
                 }
@@ -1899,7 +1900,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 boolean filtered = onlyFiltered && r.isFiltering();
                 long from = filtered ? r.windowStart() : 0;
                 long to = filtered ? r.windowEnd() : Long.MAX_VALUE;
-                return logsift.core.MessageStats.analyze(doc, entryFormat, from, to,
+                return logsift.core.MessageStats.analyze(doc, entryFormat, logFormat, from, to,
                         filtered ? r::contains : null, cancel::get, progress);
             }
 
