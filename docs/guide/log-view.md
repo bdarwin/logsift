@@ -140,7 +140,7 @@ The **Bookmarks** tab lists them: **Line**, **Time**, **Note** (type a note ther
 
 ## Merged logs
 
-A log made with **File → Merge Files by Time…** starts each line with a label like `<node2-app>` and a coloured stripe at the far left. See [Compare and merge](compare.md#merge-logs-by-time).
+A log made with **File → Merge Files by Time…** starts each line with a label like `<node2-app>` and a coloured stripe at the far left. See [Compare and merge](compare.md#merge-logs-by-time). CSV files merge into one CSV with a Source column instead: see [Merge CSV files](compare.md#merge-csv-files).
 
 ## Text encodings
 

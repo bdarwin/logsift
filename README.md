@@ -429,7 +429,7 @@ Logs with one JSON object per line are recognized. With **Columns** on, the usua
 
 ## Merge logs by time
 
-**File → Merge Files by Time…** (Ctrl+Shift+M) merges several logs (say, the same app on two nodes, or an app log and its server log) into one view in timestamp order. Each line starts with a label like `<node2-app>` and a colored stripe, so you can see where it came from; right-click → **Show Only Lines from <node2-app>** filters to one source. Stack traces stay with their log line. The merged view is an ordinary log, so filters, the timeline, messages and search all work on it, and it keeps updating while the source logs grow.
+**File → Merge Files by Time…** (Ctrl+Shift+M) merges several logs (say, the same app on two nodes, or an app log and its server log) into one view in timestamp order. Each line starts with a label like `<node2-app>` and a colored stripe, so you can see where it came from; right-click → **Show Only Lines from <node2-app>** filters to one source. Stack traces stay with their log line. The merged view is an ordinary log, so filters, the timeline, messages and search all work on it, and it keeps updating while the source logs grow. CSV files merge into one CSV instead: one header with all their columns (matched by name), a **Source** column, rows in time order (or one file after the other when a file has no times).
 
 ## Top messages
 

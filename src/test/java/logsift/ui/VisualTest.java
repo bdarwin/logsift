@@ -5349,6 +5349,116 @@ class VisualTest {
         });
     }
 
+    @Test
+    @Order(51)
+    void mergeCsvFiles() throws Exception {
+        // three exports of one shop: one has an extra column, one uses ; between fields
+        Path box = Files.createDirectories(dir.resolve("csv-merge"));
+        StringBuilder eu = new StringBuilder("time,host,status,duration_ms\n");
+        StringBuilder us = new StringBuilder("time,host,status,duration_ms,region\n");
+        StringBuilder ap = new StringBuilder("Time;Host;Status;Duration_ms\n");
+        Random rnd = new Random(3);
+        for (int i = 0; i < 300; i++) {
+            String t = String.format("2026-10-21 10:%02d:%02d", i / 60 % 60, i % 60);
+            int ms = 20 + rnd.nextInt(200);
+            switch (i % 3) {
+                case 0 -> eu.append(String.format("%s,eu-%d,%d,%d%n", t, i % 2 + 1, i % 40 == 0 ? 500 : 200, ms));
+                case 1 -> us.append(String.format("%s,us-%d,%d,%d,\"us-east, zone %d\"%n", t, i % 2 + 1,
+                        i % 25 == 1 ? 404 : 200, ms, i % 3));
+                default -> ap.append(String.format("%s;ap-1;%d;%d%n", t, 200, ms));
+            }
+        }
+        Path a = box.resolve("shop-eu.csv");
+        Path b = box.resolve("shop-us.csv");
+        Path c = box.resolve("shop-ap.csv");
+        Files.writeString(a, eu);
+        Files.writeString(b, us);
+        Files.writeString(c, ap);
+        String how = MainFrame.mergeExplanation(List.of(a, b, c));
+        assertTrue(how.contains("These are CSV files") && how.contains("time order"), how);
+        // CSV files and a log together: merged as logs, and the dialog says so
+        assertTrue(MainFrame.mergeExplanation(List.of(a, dir.resolve("shop-requests.log"))).contains("merged as logs"));
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.mergeFiles(List.of(a, b, c));
+            return null;
+        });
+        LogTab tab = waitForTab("merged-3-files.csv");
+        assertEquals("Merged (3 CSV files)", onEdt(() -> frame.tabsForTest().getTitleAt(
+                frame.tabsForTest().indexOfComponent(tab))));
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null && tab.timeIndex() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the merged CSV's columns");
+        logsift.core.LogFormat f = onEdt(tab::logFormat);
+        assertTrue(f.isCsv());
+        assertEquals(List.of("source", "time", "host", "status", "duration_ms", "region"), f.columns());
+        assertEquals(301, onEdt(() -> tab.document().lineCount()), "one header and every row");
+        String first = onEdt(() -> tab.document().line(1));
+        assertTrue(first.startsWith("shop-eu,2026-10-21 10:00:00,eu-1,500,") && first.endsWith(","),
+                "the first row, by time, region empty: " + first);
+        assertTrue(onEdt(() -> tab.document().line(2)).startsWith("shop-us,2026-10-21 10:00:01,us-2,404,"));
+        assertTrue(onEdt(() -> tab.document().line(2)).endsWith(",\"us-east, zone 1\""), "quoted again");
+        // the tree splits by source
+        ValuesTreePanel tree = tab.valuesTree();
+        waitFor(() -> tree.isShowing() && tree.valuesForTest() != null && !tree.isCountingForTest(), 20_000,
+                "the tree of sources");
+        assertEquals(List.of("shop-ap", "shop-eu", "shop-us"),
+                tree.valuesForTest().root().children().stream().map(n -> n.label()).sorted().toList());
+        settle();
+        shot("104-csv-merge");
+        // the Profile has the sources as a category
+        ProfilePanel pp = onEdt(tab::profilePanel);
+        onEdt(() -> {
+            setBottomFor(tab, pp);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the merged CSV's profile");
+        assertEquals(logsift.core.ColumnProfile.Kind.CATEGORY, onEdt(() -> pp.result().columns().get(0).kind()));
+        assertEquals(3, (long) onEdt(() -> pp.result().columns().get(0).distinct()));
+        settle();
+        shot("104b-csv-merge-profile");
+        // rows written to a source later are added, in the merged columns
+        Files.writeString(c, "2026-10-21 11:00:00;ap-9;503;999\n", java.nio.file.StandardOpenOption.APPEND);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.document().lineCount() == 302);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the new row followed");
+        assertEquals("shop-ap,2026-10-21 11:00:00,ap-9,503,999,", onEdt(() -> tab.document().line(301)));
+        // tables without times: one file after the other
+        Path t1 = box.resolve("stock-berlin.csv");
+        Path t2 = box.resolve("stock-paris.csv");
+        Files.writeString(t1, "sku,qty\nA-1,5\nA-2,7\n");
+        Files.writeString(t2, "qty;sku;aisle\n3;B-1;4\n");
+        assertTrue(MainFrame.mergeExplanation(List.of(t1, t2)).contains("one file after the other"));
+        onEdt(() -> {
+            frame.mergeFiles(List.of(t1, t2));
+            return null;
+        });
+        LogTab stock = waitForTab("merged-2-files.csv");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> stock.logFormat() != null && stock.document().lineCount() == 4);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the merged tables");
+        assertEquals(List.of("source,sku,qty,aisle", "stock-berlin,A-1,5,", "stock-berlin,A-2,7,", "stock-paris,B-1,3,4"),
+                onEdt(() -> java.util.stream.LongStream.range(0, 4).mapToObj(l -> stock.document().line(l)).toList()));
+    }
+
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {
             try {

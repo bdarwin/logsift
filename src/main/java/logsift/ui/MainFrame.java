@@ -629,11 +629,41 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             SwingUtilities.getWindowAncestor(list).pack();
         });
         JPanel panel = new JPanel(new BorderLayout(0, 8));
-        panel.add(new JLabel("<html>Merge these logs into one, in time order.<br>"
-                + "Each line gets a label like &lt;node1&gt; showing where it came from.</html>"),
-                BorderLayout.NORTH);
+        JLabel how = new JLabel(" ");
+        panel.add(how, BorderLayout.NORTH);
         panel.add(new javax.swing.JScrollPane(list), BorderLayout.CENTER);
         panel.add(add, BorderLayout.SOUTH);
+        // say what the merge will do, for the files ticked now (reading their first lines)
+        Runnable explain = () -> {
+            List<Path> on = new ArrayList<>();
+            for (javax.swing.JCheckBox b : boxes) {
+                if (b.isSelected()) {
+                    on.add((Path) b.getClientProperty("path"));
+                }
+            }
+            Thread t = new Thread(() -> {
+                String text = mergeExplanation(on);
+                SwingUtilities.invokeLater(() -> {
+                    how.setText(text);
+                    mergeExplanationForTest = text;
+                });
+            }, "logsift-merge-plan");
+            t.setDaemon(true);
+            t.start();
+        };
+        list.addContainerListener(new java.awt.event.ContainerAdapter() {
+            @Override
+            public void componentAdded(java.awt.event.ContainerEvent e) {
+                if (e.getChild() instanceof javax.swing.JCheckBox b) {
+                    b.addActionListener(a -> explain.run());
+                }
+                explain.run();
+            }
+        });
+        for (javax.swing.JCheckBox b : boxes) {
+            b.addActionListener(a -> explain.run());
+        }
+        explain.run();
         panel.setPreferredSize(new Dimension(560, 300));
         if (JOptionPane.showConfirmDialog(this, panel, "Merge Files by Time",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) {
@@ -1813,6 +1843,40 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         t.mainView().focusView();
     }
 
+    volatile String mergeExplanationForTest;
+
+    /** What merging these files does, for the merge dialog (reads their first lines). */
+    static String mergeExplanation(List<Path> files) {
+        String logs = "<html>Merge these logs into one, in time order.<br>"
+                + "Each line gets a label like &lt;node1&gt; showing where it came from.</html>";
+        try {
+            if (files.size() >= 2 && logsift.core.CsvMerger.allCsv(files)) {
+                List<String> labels = logsift.core.LogMerger.labels(files);
+                List<logsift.core.LogMerger.Source> sources = new ArrayList<>();
+                for (int i = 0; i < files.size(); i++) {
+                    sources.add(new logsift.core.LogMerger.Source(files.get(i), labels.get(i)));
+                }
+                logsift.core.CsvMerger.Plan plan = logsift.core.CsvMerger.plan(sources);
+                return "<html>These are CSV files: they become one CSV with " + plan.columns().size()
+                        + " columns (matched by name) and a <b>" + plan.sourceColumn() + "</b> column with each row's file.<br>"
+                        + (plan.order() == logsift.core.CsvMerger.Order.BY_TIME
+                                ? "Every file has times: rows go in time order."
+                                : "Rows go one file after the other, in this order ("
+                                        + String.join(", ", plan.untimed()) + (plan.untimed().size() == 1 ? " has" : " have")
+                                        + " no times).")
+                        + "</html>";
+            }
+            if (logsift.core.CsvMerger.someCsv(files)) {
+                return "<html>Some of these are CSV files and some are logs: they are merged as logs, in time order,"
+                        + "<br>each line labelled like &lt;node1&gt;, so the CSV files won't show as columns."
+                        + "<br>Merge the CSV files on their own to get one CSV.</html>";
+            }
+        } catch (IOException | RuntimeException e) {
+            // not readable now: the merge will say why
+        }
+        return logs;
+    }
+
     /** Merges logs by timestamp into a new tab (in the background, with progress). */
     public void mergeFiles(List<Path> files) {
         List<String> labels = logsift.core.LogMerger.labels(files);
@@ -1827,7 +1891,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         cancel.addActionListener(e -> cancelled.set(true));
         JPanel p = new JPanel(new BorderLayout(8, 8));
         p.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        p.add(new JLabel("Merging " + files.size() + " logs by time…"), BorderLayout.NORTH);
+        p.add(new JLabel("Merging " + files.size() + " files…"), BorderLayout.NORTH);
         p.add(bar, BorderLayout.CENTER);
         p.add(cancel, BorderLayout.EAST);
         dlg.setContentPane(p);
@@ -1836,6 +1900,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         dlg.setVisible(true);
         Thread t = new Thread(() -> {
             try {
+                if (logsift.core.CsvMerger.allCsv(files)) {
+                    mergeCsv(files, sources, dlg, bar, cancelled);
+                    return;
+                }
                 Path dir = Files.createTempDirectory("logsift-merge-");
                 dir.toFile().deleteOnExit();
                 Path out = dir.resolve("merged-" + files.size() + "-logs.log");
@@ -1868,6 +1936,36 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }, "logsift-merge-start");
         t.setDaemon(true);
         t.start();
+    }
+
+    /** CSV files merged into one CSV (on the merge's thread); it opens as a CSV tab. */
+    private void mergeCsv(List<Path> files, List<logsift.core.LogMerger.Source> sources, javax.swing.JDialog dlg,
+                          JProgressBar bar, java.util.concurrent.atomic.AtomicBoolean cancelled) throws IOException {
+        Path dir = Files.createTempDirectory("logsift-merge-");
+        dir.toFile().deleteOnExit();
+        Path out = dir.resolve("merged-" + files.size() + "-files.csv");
+        out.toFile().deleteOnExit();
+        logsift.core.CsvMerger m = logsift.core.CsvMerger.merge(sources, out,
+                f -> SwingUtilities.invokeLater(() -> bar.setValue((int) (f * 1000))), cancelled::get);
+        SwingUtilities.invokeLater(() -> {
+            dlg.dispose();
+            if (cancelled.get()) {
+                m.close();
+                return;
+            }
+            openFile(out, java.nio.charset.StandardCharsets.UTF_8, tab -> {
+                tab.addCloseHook(m::close);
+                int i = tabs.indexOfComponent(tab);
+                tabs.setTitleAt(i, "Merged (" + files.size() + " CSV files)");
+                StringBuilder tip = new StringBuilder("<html>");
+                for (logsift.core.LogMerger.Source s : sources) {
+                    tip.append(s.label()).append(": ").append(s.path()).append("<br>");
+                }
+                tabs.setToolTipTextAt(i, tip.append(m.plan().order() == logsift.core.CsvMerger.Order.BY_TIME
+                        ? "rows in time order" : "rows one file after the other").append("</html>").toString());
+                m.follow(500);
+            });
+        });
     }
 
     /** Opens a new Folder Search tab (folder null = the current file's folder or the last one). */

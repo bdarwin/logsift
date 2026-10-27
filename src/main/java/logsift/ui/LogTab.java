@@ -2836,7 +2836,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         m.add(label);
         java.util.Set<String> hidden = hiddenColumns();
         for (String c : layout.format().columns()) {
-            if (c.equals("message") || (c.equals("source") && sourceLabels == null)) {
+            if (c.equals("message") || (c.equals("source") && sourceLabels == null && !layout.format().isCsv())) {
                 continue;
             }
             javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(
