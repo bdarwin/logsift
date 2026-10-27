@@ -5610,6 +5610,50 @@ class VisualTest {
         return (System.nanoTime() - t0) / 1_000_000;
     }
 
+    @Test
+    @Order(50)
+    void agentsAreSetUpInSettings() throws Exception {
+        // where logsift-mcp is, what to paste for Copilot, and what is masked
+        Path launcher = dir.resolve("Logsift App").resolve("logsift-mcp");
+        System.setProperty("logsift.mcpLauncher", launcher.toString());
+        Path props = logsift.agent.AgentSettings.file(AppState.home());
+        try {
+            SettingsDialog before = SettingsDialog.lastForTest();
+            javax.swing.SwingUtilities.invokeLater(() -> frame.showSettings(SettingsDialog.AGENTS));
+            waitFor(() -> SettingsDialog.lastForTest() != before && SettingsDialog.lastForTest() != null
+                    && SettingsDialog.lastForTest().isShowing(), 10_000, "Settings");
+            SettingsDialog sd = SettingsDialog.lastForTest();
+            AgentsPanel ap = sd.agents();
+            String vscode = onEdt(ap::snippetText);
+            assertTrue(vscode.contains("\"servers\"") && vscode.contains("\"type\": \"stdio\""), vscode);
+            assertTrue(vscode.contains(logsift.agent.JsonWriter.write(launcher.toString())), vscode);
+            onEdt(() -> {
+                ap.selectAgent(logsift.agent.AgentSettings.Agent.COPILOT_CLI);
+                return null;
+            });
+            String cli = onEdt(ap::snippetText);
+            assertTrue(cli.contains("\"mcpServers\"") && cli.contains("\"tools\": [\"*\"]"), cli);
+            assertTrue(onEdt(() -> ap.secretsBox().isSelected()), "secrets are masked by default");
+            settle();
+            shotOf(sd.getRootPane(), "80-settings-agents");
+            onEdt(() -> {
+                ap.secretsBox().doClick(); // off, saved for logsift-mcp
+                return null;
+            });
+            assertTrue(Files.readString(props).contains("mask.off=true"), Files.readString(props));
+            onEdt(() -> {
+                ap.secretsBox().doClick();
+                sd.dispose();
+                return null;
+            });
+            assertTrue(logsift.agent.AgentSettings.load(AppState.home()).masking().custom().isEmpty());
+            assertTrue(logsift.agent.AgentSettings.load(AppState.home()).masking().secrets(), "back on");
+        } finally {
+            System.clearProperty("logsift.mcpLauncher");
+            Files.deleteIfExists(props);
+        }
+    }
+
     private static String mbPerSec(long bytes, long ms) {
         return ms <= 0 ? "-" : String.format("%,.0f MB/s", bytes / 1048576.0 / (ms / 1000.0));
     }

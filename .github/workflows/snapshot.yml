@@ -92,6 +92,7 @@ jobs:
                   --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
                   --java-options '-splash:$APPDIR/splash.png'
                   --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets,jdk.attach,java.management,java.management.rmi,jdk.naming.rmi,jdk.jfr,jdk.management.jfr
+                  --add-launcher logsift-mcp=packaging/mcp/launcher.properties
                   --vendor bdarwin --description "Viewer for very large log files")
           mkdir -p dist
           ASSOC=(--file-associations packaging/file-associations/log.properties)
@@ -130,6 +131,34 @@ jobs:
           esac
           ls -l dist
 
+      - name: Try logsift-mcp in the app (a coding agent's first requests)
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            macos-*) MCP=pkg/Logsift.app/Contents/MacOS/logsift-mcp ;;
+            windows-*) MCP=pkg/Logsift/logsift-mcp.exe ;;
+            linux-*) MCP=pkg/Logsift/bin/logsift-mcp ;;
+          esac
+          mkdir -p mcp-try
+          printf '2026-10-21 10:00:00.000 ERROR [main] App - Payment declined token=abc123secret\n' > mcp-try/app.log
+          LOG=$(cd mcp-try && pwd -W 2>/dev/null || pwd)/app.log
+          LOG=${LOG//\\//}
+          {
+            echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
+            echo '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+            echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+            echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search","arguments":{"log":"'"$LOG"'","query":"Payment"}}}'
+          } | "$MCP" --root mcp-try > mcp-out.txt
+          cat mcp-out.txt
+          [ "$(wc -l < mcp-out.txt | tr -d ' ')" = 3 ] || { echo "expected 3 answers"; exit 1; }
+          grep -q '"serverInfo":{"name":"logsift"' mcp-out.txt
+          grep -q '"name":"analyze_gc"' mcp-out.txt
+          grep -q '1 line matches' mcp-out.txt
+          grep -q 'token=‹masked:secret›' mcp-out.txt
+          if grep -q abc123secret mcp-out.txt; then echo "secret not masked"; exit 1; fi
+          "$MCP" --version
+          rm -rf mcp-try mcp-out.txt
+
       - name: Try the Windows installer (install, check, uninstall)
         if: matrix.target == 'windows-x64'
         shell: pwsh
@@ -151,6 +180,9 @@ jobs:
           $default = (Get-ItemProperty -LiteralPath $log -ErrorAction SilentlyContinue).'(default)'
           if ($default -and $default -match 'Logsift') { throw ".log files were taken over: $default" }
           if (-not (Test-Path (Join-Path $exe.Directory.FullName 'app\splash.png'))) { throw "no splash screen" }
+          $mcp = Join-Path $exe.Directory.FullName 'logsift-mcp.exe'
+          if (-not (Test-Path $mcp)) { throw "logsift-mcp.exe not installed" }
+          Write-Host "logsift-mcp: $(& $mcp --version | Out-String)"
           $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
           if (Test-Path $exe.FullName) { throw "still there after uninstall" }

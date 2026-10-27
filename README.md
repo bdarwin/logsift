@@ -33,6 +33,7 @@
 - **A log knows its JVM.** Open a log and Logsift names the JVM writing it, with its threads, profile and heap a click away. Right-click a line to see its thread's stack; from a thread, show only its lines.
 - **Heap dumps, explained.** Open a `.hprof` file and Logsift says what fills the memory in plain sentences ("one HashMap in static SessionCache.CACHE holds 1.2 GB: mostly 20,000 sessions"), and for any object, the chain of references that keeps it alive. Dumps of tens of GB open with the app's usual 2 GB of memory: a 12 GB dump with 223 million objects in about 2½ minutes.
 - **GC logs, explained.** Open a Java GC log (Java 8 to 25; G1, Parallel, Serial, CMS, ZGC, Shenandoah) and Logsift says how much of the time the program stood still, what the longest pauses were and why, whether the memory left after GC keeps growing, and what went wrong (full collections, evacuation failures, allocation stalls, System.gc() calls), each with what to try; with charts of the heap, pauses, allocation and time in GC.
+- **Ask from your coding agent.** GitHub Copilot (and other agents that support MCP) can call Logsift: ask in the chat why a log is full of timeouts, and Logsift reads it on your computer and answers with the findings and line numbers. Read-only, with secrets masked. See [Coding agents](#coding-agents-github-copilot).
 - **Profiling and memory.** Flame graphs of a JVM's CPU, wall-clock time, allocations, live objects (memory leaks), locks, native memory and native leaks, calls of a method and slow calls, or hardware events, with async-profiler or the JVM's own Flight Recorder. Compare runs, see who calls a method, and find which classes fill the heap and keep growing.
 - **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
 
@@ -77,7 +78,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 - **Help → Keyboard Shortcuts** (Ctrl+/ or ⌘/) lists every shortcut. **Help → Report a Bug** opens a GitHub issue with your version and system filled in.
 - **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the status bar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
 - **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub**. Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).
-- Logsift never sends your logs anywhere. Its only other network connections are to servers you choose: SSH servers, JMX ports, and web addresses you open.
+- Logsift never sends your logs anywhere. Its only other network connections are to servers you choose: SSH servers, JMX ports, and web addresses you open. If you connect a [coding agent](#coding-agents-github-copilot), what Logsift answers it goes on to the agent's AI provider: the agent sends it, not Logsift.
 
 ## Screenshots
 
@@ -411,9 +412,38 @@ The tab starts with the numbers that matter (the share of the time stopped for G
 
 Then: **Heap** (in use before and after each collection, with the heap size and full collections marked), **Pauses** (each pause by kind over time, on a log scale, and how many took how long), **Allocation & GC Time** (allocated per second and the share of time stopped, per stretch of time), **By Kind** (pauses by kind and cause: how many, in all, average, longest) and **All Collections** (every collection, pause and stall, sortable). Drag across a chart to zoom in on that time (all charts follow), double-click to see it all; click a point or double-click a row to see its line in the log.
 
+## Coding agents (GitHub Copilot)
+
+Ask your coding agent about your logs and it asks Logsift: *"why is orders.log full of timeouts?"*, *"what is stuck in this thread dump?"*, *"is this service's GC healthy?"*. Logsift reads the files on your computer, fast on gigabytes, and answers the agent with short summaries and line numbers, never whole files; the agent can then search and read the lines around what it found. It works with GitHub Copilot in VS Code, Visual Studio and JetBrains IDEs, Copilot CLI, and any other agent that supports MCP (the Model Context Protocol).
+
+**Set it up:** **Settings → Agents** shows the exact setup for your agent, with the path of `logsift-mcp` on this computer filled in: copy it into the agent's MCP settings. For VS Code, add to `.vscode/mcp.json` (or your own `mcp.json`: Command Palette → *MCP: Open User Configuration*):
+
+```json
+{
+  "servers": {
+    "logsift": {
+      "type": "stdio",
+      "command": "/Applications/Logsift.app/Contents/MacOS/logsift-mcp"
+    }
+  }
+}
+```
+
+Then choose **Agent** mode in Copilot Chat. `logsift-mcp` comes with Logsift: next to `Logsift.exe` on Windows, in `Logsift.app/Contents/MacOS` on macOS, in `bin/` on Linux and in the zip. Other agents: add a local (stdio) MCP server that runs `logsift-mcp`.
+
+**What the agent can ask:** open a log (also `.gz`, or a file in a zip) and get its format and time range; **insights** (what happened, most important first); **exceptions** by root cause; **search** (text or regex, by line range) and **read lines**; the most frequent **messages**; **durations and numbers**; **search a folder** (zips too); explain a **GC log**; explain **thread dumps**. Slow work (a first look at a multi-GB log) goes on in the background, and the agent is told to ask again.
+
+**What it can't do:** change or delete anything, run commands, connect to servers, or touch a running JVM. It reads only under your home folder (or the folders you list in Settings → Agents), and never files that hold keys or passwords (`~/.ssh`, `~/.aws`, `*.pem`, key stores…), even through a link.
+
+**Privacy:** whatever Logsift answers goes to the agent's AI provider, under your agreement with them. Logsift masks secrets in its answers (passwords, tokens, API keys, private keys, card numbers) as `‹masked:token›`, and says how many it masked; in Settings → Agents you can also mask email addresses, IP addresses and your own patterns (customer numbers, host names). Each call is recorded in `~/.logsift/agent.log`: when, which agent, which tool, how long the answer was and whether it worked, never the answer itself (**What Agents Asked…** opens it). Text from logs is passed on as data: Logsift tells the agent never to follow instructions found in a log.
+
+From a terminal: `logsift-mcp --help`. `--root FOLDER` (repeatable) limits reading to those folders; `--mask-emails`, `--mask-ips` and `--mask REGEX` mask more; `--no-mask` masks nothing.
+
+*GitHub Copilot is a trademark of GitHub, Inc. Logsift is not affiliated with or endorsed by GitHub.*
+
 ## Settings
 
-**Settings** (Ctrl+, or Logsift → Settings on macOS) has the font and its size, tab width, line stripes, the timeline, dark mode, the encoding for text that isn't UTF-8 (for example Shift_JIS or GB18030), how often files are checked for changes, whether the last session reopens at start, update checks, and your log formats.
+**Settings** (Ctrl+, or Logsift → Settings on macOS) has the font and its size, tab width, line stripes, the timeline, dark mode, the encoding for text that isn't UTF-8 (for example Shift_JIS or GB18030), how often files are checked for changes, whether the last session reopens at start, update checks, your log formats, and what coding agents get (**Agents**).
 
 ## CSV files
 

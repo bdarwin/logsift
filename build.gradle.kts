@@ -115,6 +115,23 @@ application {
     applicationDefaultJvmArgs = listOf("-Xmx2g", "-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED")
 }
 
+// bin/logsift-mcp next to bin/logsift: Logsift's tools for coding agents, over standard input and output.
+val mcpStartScripts by tasks.registering(CreateStartScripts::class) {
+    description = "Start scripts for logsift-mcp (Logsift's tools for coding agents)."
+    applicationName = "logsift-mcp"
+    mainClass = "logsift.agent.mcp.McpMain"
+    outputDir = layout.buildDirectory.dir("mcp-scripts").get().asFile
+    classpath = tasks.startScripts.get().classpath
+    defaultJvmOpts = listOf("-Xmx2g", "-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED", "-Djava.awt.headless=true")
+}
+distributions {
+    main {
+        contents {
+            from(mcpStartScripts) { into("bin") }
+        }
+    }
+}
+
 // Fast unit tests (no UI windows).
 tasks.test {
     useJUnitPlatform {
