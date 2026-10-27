@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Coding agents (GitHub Copilot):** ask your coding agent about your logs, and it asks Logsift. `logsift-mcp`, which comes with Logsift, gives agents that support MCP (Copilot in VS Code, Visual Studio and JetBrains IDEs, Copilot CLI, and others) Logsift's analyses: a log's insights, exceptions by root cause, search, lines by number, top messages, durations and numbers, folder search (zips too), GC logs and thread dumps. Answers are short, with line numbers. Agents can only read, only under your home folder (or the folders you choose), never files that hold keys or passwords; secrets in answers are masked, and emails, IP addresses and your own patterns can be. **Settings → Agents** shows the exact setup for your agent, and **What Agents Asked…** lists every call.
+
 ## 1.3.0
 
 - **Heap dumps check the room first:** before the JVM writes a heap dump on its machine (over SSH, or for a JVM on this computer), Logsift compares the heap in use with the free space there. A folder without room, or a `/tmp` in memory, is refused before anything is written, and Logsift asks for another folder on that machine. Heap dumps and histograms of big heaps get time to finish (an hour, a quarter of an hour) instead of failing while the JVM is still writing.
