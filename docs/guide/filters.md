@@ -13,6 +13,7 @@ Filters show, hide or colour lines. They keep working while the file grows.
 ## Adding a filter
 
 - Select text in the log, right-click → **Show / Hide / Mark lines with "…"**.
+- In the Columns view, right-click a value → **Show Only Rows Where Host = web-1** or **Hide Rows Where Host = web-1**, or right-click a column title → **Filter by …** (see [Filters on a column](#filters-on-a-column)).
 - In the find bar, **Filter ▾** → **Show Only Matching Lines**, **Hide Matching Lines** or **Color Matching Lines**.
 - In the **Filters** tab below the log, **+ Add filter**.
 
@@ -25,6 +26,8 @@ Each filter is a row:
 | Checkbox | Turns the filter on or off |
 | **A**, **B**, **C** … | Its letter, for the formula. The circle has the filter's colour |
 | **Show** / **Hide** / **Mark** | **Show** keeps matching lines, **Hide** removes them, **Mark** only colours them |
+| **Line** / a column | Where to look: the whole line, or one column of the log's format. Shown when the log's format has columns |
+| **contains** / **=** / **>** / **<** | For a column: how its value is compared (below) |
 | Text, with **Aa** **W** **.\*** | What to match: match case, whole word, regular expression. A wrong regular expression gets a red outline |
 | Colour | The colour of its lines (below), or *No color* |
 | Count | How many lines match |
@@ -48,6 +51,26 @@ Up to 26 filters (A to Z). A new filter takes the colour used least; a Hide filt
 | Red | <span class="sw" style="background:#FAD0D0"></span> | <span class="sw" style="background:#552326"></span> | <span class="sw" style="background:#DC2626"></span> |
 
 A filter's colour replaces the [level colour](log-view.md#level-colours) on the lines it matches.
+
+## Filters on a column
+
+A filter can look in one column instead of the whole line: pick the column in the list after **Show** / **Hide** / **Mark** (it says **Line** for the whole line). It works for every log Logsift shows as columns: CSV files, JSON logs, the built-in layouts and your own formats.
+
+![Two filters on columns of a CSV file: Host = web-3 and User contains u1, as chips and in the Filters tab](../screenshots/column-filters.png)
+
+| Compare | Matches rows whose value |
+|---|---|
+| **contains** | contains the text. **Aa**, **W** and **.\*** work as usual |
+| **=** | is the text, all of it: *web-1* is not *web-10* |
+| **>** / **<** | is a number above or below the one you type. Units count: *1.5 s* is more than *800 ms*, and *2 KB* more than *900* |
+
+The quick ways:
+
+- Right-click a value in the Columns view → **Show Only Rows Where Host = web-1** or **Hide Rows Where Host = web-1**. This adds a **=** filter and switches to Matching only.
+- Right-click a column title → **Filter by …** adds an empty filter on that column in the Filters tab, ready for the text.
+- **Count Values in …** (right-click a column title): **Show Only** and **Hide** add a **=** filter on that column too.
+
+A column filter shows as a chip like *Show: Host = web-1*. Lines that aren't rows (stack traces, a CSV's header row) don't match it themselves; with **Keep stack traces** they go with their entry.
 
 ## Combining filters
 
@@ -74,7 +97,7 @@ The **E W I D T** buttons show only some levels, together with your other filter
 
 ## Chips
 
-Filters that are on show as **chips** in the log's bar: *Show: ERROR 65,529*, *Hide: …*, *Color: …* (a Mark filter), with a dot in the filter's colour and the number of lines.
+Filters that are on show as **chips** in the log's bar: *Show: ERROR 65,529*, *Hide: …*, *Color: …* (a Mark filter), *Show: Host = web-1* (a [filter on a column](#filters-on-a-column)), with a dot in the filter's colour and the number of lines.
 
 - **Click** a chip to turn its filter off or on. An off chip is gray, with a dashed outline.
 - **✕** removes it.

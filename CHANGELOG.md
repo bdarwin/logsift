@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Format in the log's bar:** **Format: CSV ▾** (or whichever format the log is read with) moved from the status bar to the log's bar, next to the view buttons. Same list: choose another format for this file, **Plain text**, or make a new one. In a narrow window it shows just the name (*CSV ▾*).
+- **No double header in CSV files:** in the Columns view, a CSV's header row is no longer shown as a row under the column titles that already name it, whether the file was detected as CSV or CSV was chosen by hand. Line numbers stay those of the file (the first row is line 2). Hover a column title to see its name in the file when Logsift renamed it (*timestamp* is **Time**).
+- **Filters on a column:** a filter can look in one column instead of the whole line: **contains**, **=** (the whole value), or **>** and **<** for numbers (*1.5 s* is more than *800 ms*). Right-click a value in the Columns view for **Show Only Rows Where Host = web-1** or **Hide Rows Where …**, or a column title for **Filter by …**; in the Filters tab, pick the column after Show / Hide / Mark. Works for CSV files, JSON logs, the built-in layouts and your own formats; such filters show as chips like *Show: Host = web-1*. **Count Values** → **Show Only** / **Hide** now filter on that column too.
+- **Metrics for CSV files and other columns:** a column of numbers is a measurement over time (*duration_ms*, *bytes*, the access log's *size*; units from the value or the column's name), and a column with a few values (*status*, *host*) shows how many rows have each value per minute (or per second, per hour). Numbers in a CSV's messages (*Request … took # ms*) are found too: they were missed before.
+
 ## 1.3.0
 
 - **Heap dumps check the room first:** before the JVM writes a heap dump on its machine (over SSH, or for a JVM on this computer), Logsift compares the heap in use with the free space there. A folder without room, or a `/tmp` in memory, is refused before anything is written, and Logsift asks for another folder on that machine. Heap dumps and histograms of big heaps get time to finish (an hour, a quarter of an hour) instead of failing while the JVM is still writing.

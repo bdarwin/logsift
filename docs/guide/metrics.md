@@ -1,7 +1,7 @@
 ---
 layout: guide
 title: Metrics
-description: The Metrics tab: how long things that start and end took, things that never ended, numbers in messages, and the chart's colours.
+description: The Metrics tab: how long things that start and end took, things that never ended, numbers in messages and columns, rows per minute, and the chart's colours.
 ---
 
 # Metrics
@@ -14,12 +14,25 @@ The **Metrics** tab (below the log) shows what the log measures, without any set
 
 - **Things that start and end:** message kinds that open and close something (*Started job sync-7* … *Finished job sync-7*, *Processing request r-12* … *Completed request r-12*) are found by their words. Lines are paired by the value they share (the job, the request), or else by thread. The list says which: *took (by its job)* or *took (by thread)*. Hover for the two messages.
 - **Numbers in messages:** a number with a unit after it (`ms`, `s`, `MB`, `%`, `rows`), or a word like *took*, *size*, *latency* or *queue* before it: *order … placed in **#** ms*, *queue size=**#***. Order numbers and IDs are not measurements. A message kind needs 20 lines or more. Durations are in milliseconds and sizes in bytes, whatever unit each line used.
+- **Columns** of a CSV file, a JSON log or a layout with columns (see below).
+
+## Columns
+
+When a log has columns, its columns are measured too:
+
+- **A column of numbers** (with a unit, or more than 12 different values) is a measurement: *duration_ms*, *bytes*, *latency*, the access log's *size*. The unit comes from the value (*7 ms*, *1.5 s*, *2 KB*) or from the column's name (`_ms`, `_s`, `_bytes`, `_kb`, `_pct`; *duration*, *latency*, *elapsed* and *took* are taken as milliseconds). Columns that number things rather than measure them are left out: IDs, ports, years, and numbers that only go up (a row number).
+- **A column with a few values** (2 to 12, such as *status* or *host*) gives, for each of its most frequent values, how many rows have it in each stretch of time: *Host = web-1*, *rows per minute*. The stretch fits the log: per second for a log of a minute, per hour for a day. This needs times in the log. At most two such columns, the ones with the fewest values.
+- Time, level, thread, logger and message columns are not measured this way; the message is still read for numbers (above).
+
+A column needs 20 rows or more. On big logs every n-th row is read, as for numbers in messages.
+
+![The Metrics of a CSV file: numbers in its messages, and rows per 10 seconds for each host](../screenshots/csv-metrics.png)
 
 ## The list
 
 | Column | Shows |
 |---|---|
-| **Measurement** | A timer icon for things that start and end, a chart icon for numbers. The **#** marks the measured part |
+| **Measurement** | A timer icon for things that start and end, a line icon for numbers in messages, a columns icon for a column of numbers, a bar icon for rows per stretch of time. The **#** marks the measured part |
 | **Count** | How many |
 | **Median** | Half are below this |
 | **95%** | 95 in 100 are below this |
@@ -44,8 +57,8 @@ Select a measurement for a chart over time. Hover a dot for its time and value; 
 
 ## Beside the chart
 
-The lines that never ended, then the slowest (or largest) ones: **Time**, **Value**, **Which**. Click one to go to its line.
+The lines that never ended, then the slowest (or largest) ones: **Time**, **Value**, **Which**. For rows per stretch of time, the busiest stretches (*12 rows*). Click one to go to its line (for a stretch, its first row with that value).
 
 ## In Insights
 
-[Insights](insights.md) reports what never ended (*1 job started and never ended*) and when a measurement was far above usual (*High: order … placed in # ms, 10:15:00 – 10:16:59*: the median of that stretch was 3 times the usual median or more), with **Show these minutes** and **Show in Metrics**. For files over 512 MB this is worked out when the Metrics tab is opened.
+[Insights](insights.md) reports what never ended (*1 job started and never ended*) and when a measurement (in a message or a column of numbers) was far above usual (*High: order … placed in # ms, 10:15:00 – 10:16:59*: the median of that stretch was 3 times the usual median or more), with **Show these minutes** and **Show in Metrics**. For files over 512 MB this is worked out when the Metrics tab is opened.

@@ -32,7 +32,7 @@ When Logsift doesn't know a log's layout, the Columns view says so and offers **
 
 Each format has a **Name**, a **Line pattern**, a **Time format** (empty for any common timestamp), and **Always use for** (file names like `app*.log; *.trace`). A preview shows sample lines split into columns.
 
-A format is used when most of a log's lines fit it, or always for the file names you give. The status bar shows the format each log is read with (**Format: …▾**); click it to choose another for that file, or **Plain text**. Levels in your format's level column drive the colours, the error marks and the E W I D T buttons.
+A format is used when most of a log's lines fit it, or always for the file names you give. The log's bar shows the format each log is read with (**Format: …▾**, on the right); click it to choose another for that file, or **Plain text**. Levels in your format's level column drive the colours, the error marks and the E W I D T buttons.
 
 Formats are saved in `~/.logsift/formats.properties`; copy it to use them on another computer.
 
