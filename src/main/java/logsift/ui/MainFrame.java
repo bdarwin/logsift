@@ -392,7 +392,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         Path abs = path.toAbsolutePath().normalize();
         for (int i = 0; i < tabs.getTabCount(); i++) {
             if (tabs.getComponentAt(i) instanceof LogTab lt && lt.path().equals(abs)) {
-                tabs.setSelectedIndex(i);
+                if (restore.takesSelection(abs)) {
+                    tabs.setSelectedIndex(i);
+                }
                 if (!isOwnCopy(abs)) {
                     AppState.addRecent(abs);
                 }
@@ -425,7 +427,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void openReal(Path read, Path abs, java.nio.charset.Charset forced,
                           java.util.function.Consumer<LogTab> then) {
         if (!opening.add(abs)) {
-            return; // already on its way
+            restore.finished(abs); // already on its way (opened by hand): that open selects it
+            return;
         }
         java.util.concurrent.CompletableFuture<Opened> f = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             try {
@@ -466,6 +469,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             opening.remove(abs);
+            restore.finished(abs);
         }
     }
 
@@ -490,6 +494,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         cancel.addActionListener(e -> {
             cancelled.set(true);
             opening.remove(abs);
+            restore.finished(abs);
             dlg.dispose();
         });
         dlg.setVisible(true);
@@ -524,11 +529,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    /** Files from the last session: if they are gone now, say nothing. */
-    private final java.util.Set<Path> quietOpen = new java.util.HashSet<>();
+    /**
+     * Files from the last session still on their way: if they are gone now, say nothing, and
+     * only the one that was selected takes the selection when it opens.
+     */
+    private final SessionRestore restore = new SessionRestore();
 
     private void showOpenError(Path abs, Throwable e) {
-        if (quietOpen.remove(abs)) {
+        if (restore.finished(abs)) {
             status.setText("Not reopened (missing): " + abs);
             return;
         }
@@ -540,7 +548,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** UTF-16 logs are read through a UTF-8 copy that follows the original. */
     private void openUtf16(Path abs, Path read, java.nio.charset.Charset cs,
                            java.util.function.Consumer<LogTab> then) {
-        ProgressDialog.run(this, "Converting " + abs.getFileName() + " from " + cs.name() + "…",
+        String message = "Converting " + abs.getFileName() + " from " + cs.name() + "…";
+        ProgressDialog.run(this, message,
                 (progress, cancelled) -> {
                     Path dir = Files.createTempDirectory("logsift-utf16-");
                     dir.toFile().deleteOnExit();
@@ -560,10 +569,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         }
                     } catch (IOException e) {
                         mirror.close();
+                        restore.finished(abs);
                         JOptionPane.showMessageDialog(this, "Cannot open " + abs + ":\n" + e.getMessage(),
                                 "Open", JOptionPane.ERROR_MESSAGE);
                     }
-                });
+                }, e -> {
+                    restore.finished(abs);
+                    JOptionPane.showMessageDialog(this, message + " failed: " + e.getMessage(), "Logsift",
+                            JOptionPane.ERROR_MESSAGE);
+                }, () -> restore.finished(abs));
     }
 
     /** Shows a new log tab with the current view settings and the file's remembered state. */
@@ -580,7 +594,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tabs.addTab(tab.title(), tab);
         int idx = tabs.getTabCount() - 1;
         tabs.setToolTipTextAt(idx, abs.toString());
-        tabs.setSelectedIndex(idx);
+        if (restore.takesSelection(abs)) {
+            tabs.setSelectedIndex(idx);
+        }
         if (!isOwnCopy(abs)) {
             logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
             Path dirOf = in != null ? in.zip().getParent() : abs.getParent();
@@ -2217,7 +2233,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }, e -> {
             opening.remove(abs);
             showOpenError(abs, e);
-        }, () -> opening.remove(abs));
+        }, () -> {
+            opening.remove(abs);
+            restore.finished(abs);
+        });
     }
 
     private UrlDialog urlDialog;
@@ -2376,18 +2395,18 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** Opens the files that were open last time (each with its filters and position). */
     public void restoreSession() {
         AppState.Session s = AppState.lastSession();
-        java.util.function.Consumer<LogTab> select = t -> SwingUtilities.invokeLater(() -> {
-            if (tabs.indexOfComponent(t) >= 0) {
-                tabs.setSelectedComponent(t);
-            }
-        });
-        for (int i = 0; i < s.files().size(); i++) {
+        List<Path> files = s.files().stream().map(f -> f.toAbsolutePath().normalize()).toList();
+        // files open in the background and finish in any order: only the selected one selects
+        restore.start(files, s.selected());
+        for (Path p : files) {
             // no existence check here: on an unreachable share it could hang; opening handles it
-            Path p = s.files().get(i).toAbsolutePath().normalize();
-            quietOpen.add(p);
-            openFile(p, null, i == s.selected() ? select.andThen(t -> quietOpen.remove(p))
-                    : t -> quietOpen.remove(p));
+            openFile(p, null, t -> restore.finished(p));
         }
+    }
+
+    /** Whether files of the last session are still being reopened. */
+    boolean isRestoringSessionForTest() {
+        return !restore.isDone();
     }
 
     public LogTab currentTab() {

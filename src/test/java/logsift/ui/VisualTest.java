@@ -1472,6 +1472,8 @@ class VisualTest {
             return m;
         });
         try {
+            // the session holds files from earlier tests too; some (in a zip) open in the background
+            waitForRestore(second);
             LogTab restored = onEdt(second::currentTab);
             assertEquals(incident.toAbsolutePath().normalize(), restored.document().path(), "selected tab");
             waitFor(() -> {
@@ -1488,6 +1490,70 @@ class VisualTest {
                 second.dispose();
                 return null;
             });
+        }
+    }
+
+    /** Waits until every file of the last session has opened (or failed to) in this window. */
+    private static void waitForRestore(MainFrame m) throws InterruptedException {
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !m.isRestoringSessionForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "session restored");
+    }
+
+    /** Restores this session in a new window; returns the selected tab's file once all are open. */
+    private static Path restoredSelection(List<Path> files, int selected) throws Exception {
+        MainFrame m = onEdt(() -> {
+            // on the EDT: after the last window's own save of its session when it closed
+            AppState.saveSession(files, selected);
+            MainFrame f = new MainFrame();
+            f.setSize(900, 600);
+            f.setVisible(true);
+            f.restoreSession();
+            return f;
+        });
+        try {
+            waitForRestore(m);
+            settle();
+            return onEdt(() -> {
+                assertEquals(files.size(), m.tabsForTest().getTabCount(), "all tabs open");
+                return m.currentTab() == null ? null : m.currentTab().path();
+            });
+        } finally {
+            onEdt(() -> {
+                m.dispose();
+                return null;
+            });
+        }
+    }
+
+    @Test
+    @Order(21)
+    void sessionRestoreSelectsSavedTabWhateverOpensLast() throws Exception {
+        Path a = dir.resolve("session-a.log").toAbsolutePath().normalize();
+        Path b = dir.resolve("session-b.log").toAbsolutePath().normalize();
+        Path gz = dir.resolve("session-slow.log.gz").toAbsolutePath().normalize();
+        Files.writeString(a, "2026-10-21 10:00:00 INFO [main] a\n");
+        Files.writeString(b, "2026-10-21 10:00:00 INFO [main] b\n");
+        try (var o = new java.util.zip.GZIPOutputStream(Files.newOutputStream(gz))) {
+            o.write("2026-10-21 10:00:00 INFO [main] packed\n".getBytes(StandardCharsets.UTF_8));
+        }
+        // a .gz is always unpacked in the background, so it opens after the plain files
+        assertEquals(a, restoredSelection(List.of(gz, a, b), 1), "selected file opens before a packed one");
+        assertEquals(b, restoredSelection(List.of(a, b, gz), 1), "packed file last in the session");
+        assertEquals(gz, restoredSelection(List.of(a, gz, b), 1), "the selected file is the slow one");
+        // every file slow (a network drive): they finish in any order, each with "Opening…"
+        System.setProperty("logsift.openWaitMs", "50");
+        System.setProperty("logsift.testOpenDelayMs", "600");
+        try {
+            assertEquals(a, restoredSelection(List.of(b, a, gz), 1), "all files slow");
+            assertEquals(b, restoredSelection(List.of(gz, a, b), 2), "all files slow, last selected");
+        } finally {
+            System.setProperty("logsift.openWaitMs", "10000");
+            System.clearProperty("logsift.testOpenDelayMs");
         }
     }
 
