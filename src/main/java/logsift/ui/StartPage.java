@@ -50,6 +50,9 @@ final class StartPage extends JPanel {
         void openRecent(Path file);
 
         void reopenSession();
+
+        /** A Compare tab: two files chosen side by side. */
+        default void compareFiles() {}
     }
 
     private final Host host;
@@ -78,7 +81,7 @@ final class StartPage extends JPanel {
 
         String m = MainFrame.isMac() ? "⌘" : "Ctrl+";
         String sm = MainFrame.isMac() ? "⇧⌘" : "Ctrl+Shift+";
-        JPanel grid = new JPanel(new GridLayout(2, 4, 12, 12));
+        JPanel grid = new JPanel(new GridLayout(0, 3, 12, 12));
         grid.setOpaque(false);
         grid.add(action("folder-open", "Open Log…", m + "O", "Files, zips, .gz", host::openLogs));
         grid.add(action("folder-open", "Open Folder…", null, "Its files: open, merge, find in all", host::openFolder));
@@ -91,6 +94,7 @@ final class StartPage extends JPanel {
         grid.add(action("activity", "Open Thread Dump…", null, "jstack, jcmd or kill -3 output",
                 host::openThreadDump));
         grid.add(action("flame", "Open Profile…", null, "A JFR recording, or saved stacks", host::openProfile));
+        grid.add(action("git-compare", "Compare Files…", null, "Two CSV files, rows matched by key", host::compareFiles));
         col.add(left(grid));
         col.add(Box.createVerticalStrut(10));
         // searching a folder without opening it: the same as File → Search in Folder…

@@ -20,7 +20,7 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Open a folder's files | File → Open Folder… (no shortcut) |
 | Search in a folder | Ctrl+Shift+F |
 | Merge files by time | Ctrl+Shift+M |
-| Compare files (CSV and TSV as tables) | File → Compare Files… (no shortcut) |
+| Compare files (CSV and TSV as tables) | File → Compare Files…, or Compare Files… on the start page (no shortcut) |
 | Compare logs by message | Ctrl+Shift+D |
 | Export lines shown by filters | Ctrl+Shift+E |
 | Close the tab | Ctrl+W, or a middle click on the tab |

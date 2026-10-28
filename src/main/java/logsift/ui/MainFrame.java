@@ -116,6 +116,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         public void reopenSession() {
             restoreSession();
         }
+
+        @Override
+        public void compareFiles() {
+            compareFilesDialog();
+        }
     };
     private final StartPage startPage = new StartPage(startHost);
     private String updateUrl = HelpSupport.REPO + "/releases/latest";
@@ -836,44 +841,53 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** For tests: the last message the compare tool gave instead of opening a tab. */
     volatile String compareNoteForTest;
 
-    /** File → Compare Files…: asks for two files (the current CSV file filled in as the left one). */
+    /** File → Compare Files…: a Compare tab (the current CSV file chosen on the left). */
     void compareFilesDialog() {
         LogTab t = currentTab();
         Path left = t != null && t.isCsv() ? t.path() : null;
-        compareFilesDialog(left, null);
+        openCompare(left, null);
     }
 
-    private void compareFilesDialog(Path left, Path right) {
-        Path[] files = ComparePicker.ask(this, left, right, PREFS.get("lastDir", null));
-        if (files != null) {
-            compareFiles(files[0], files[1]);
-        }
-    }
-
-    /** A CSV tab's Compare button: this file on the left, the other one to choose. */
+    /** A CSV tab's Compare button: this file on the left, the other one to choose next to it. */
     void compareWith(LogTab t) {
-        compareFilesDialog(t.path(), null);
+        openCompare(t.path(), null);
     }
 
-    /** Compares two files: CSV and TSV files as tables (by key); others get a note for now. */
+    /** Compares two files in a new Compare tab: CSV and TSV files as tables (by key); others get a note for now. */
     void compareFiles(Path left, Path right) {
-        compareSides(() -> List.of(compareSide(left), compareSide(right)));
+        openCompare(left, right);
+    }
+
+    /**
+     * Opens a Compare tab: a file browser on each side, showing {@code left} and {@code right}
+     * (either may be null: the browsers then show the last folder used); with both, it compares them.
+     */
+    FileCompareTab openCompare(Path left, Path right) {
+        String last = PREFS.get("lastDir", null);
+        Path near = left != null ? left.toAbsolutePath().getParent() : last != null ? Path.of(last) : null;
+        FileCompareTab tab = new FileCompareTab(left, right, near, compareHost);
+        tabs.addTab(tab.title(), Icons.of("git-compare"), tab);
+        int i = tabs.getTabCount() - 1;
+        tabs.setToolTipTextAt(i, tab.tooltip());
+        tabs.setSelectedIndex(i);
+        updateEmptyState();
+        return tab;
     }
 
     /** How a file to compare is read: a .gz unpacked first; folders and zips refused. */
     private CsvCompareTab.Side compareSide(Path p) throws IOException {
         Path abs = p.toAbsolutePath().normalize();
         if (Files.isDirectory(abs)) {
-            throw new IOException(abs.getFileName() + " is a folder: open it (File → Open Folder…), select two files"
-                    + " in it and click Compare");
+            throw new IOException(abs.getFileName() + " is a folder: choose a file in it");
         }
         if (logsift.core.Archives.isZip(abs)) {
-            throw new IOException(abs.getFileName() + " is a zip: open it, select two files in it and click Compare");
+            throw new IOException(abs.getFileName() + " is a zip: open it and choose a file in it");
         }
         logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
         if (in != null) {
             Path copy = unpack(in.zip(), in.entry(), -1, f -> { }, () -> false);
-            return new CsvCompareTab.Side(copy, abs, logsift.core.Archives.baseName(in.entry()));
+            return new CsvCompareTab.Side(copy, abs,
+                    logsift.core.Archives.gunzippedName(logsift.core.Archives.baseName(in.entry())));
         }
         if (logsift.core.Archives.isGzip(abs)) {
             Path copy = unpack(abs, null, -1, f -> { }, () -> false);
@@ -882,49 +896,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return CsvCompareTab.Side.of(abs);
     }
 
-    private interface SidesTask {
-        List<CsvCompareTab.Side> sides() throws Exception;
-    }
-
-    private record Opened2(List<CsvCompareTab.Side> sides, List<logsift.core.diff.CsvFile> files) {}
-
-    /** Reads both files in the background, then opens the comparison (or says why not). */
-    private void compareSides(SidesTask sides) {
-        ProgressDialog.run(this, "Reading the files to compare…", (progress, cancelled) -> {
-            List<CsvCompareTab.Side> s = sides.sides();
-            if (s == null) {
-                return null;
-            }
-            List<logsift.core.diff.CsvFile> f = new ArrayList<>();
-            try {
-                for (CsvCompareTab.Side x : s) {
-                    f.add(logsift.core.diff.CsvFile.open(x.read(), x.name()));
-                }
-            } catch (IOException | RuntimeException e) {
-                f.forEach(logsift.core.diff.CsvFile::close);
-                throw e;
-            }
-            return new Opened2(s, f);
-        }, o -> {
-            if (o != null) {
-                openCsvCompare(o.sides().get(0), o.sides().get(1), o.files().get(0), o.files().get(1));
-            }
-        }, e -> compareNote(e instanceof logsift.core.diff.CsvFile.NotCsvException
-                ? e.getMessage() + ".\n\nLogsift compares CSV and TSV files as tables for now (rows matched by a key)."
-                        + " Comparing text and logs line by line comes next. To compare two logs by kinds of message,"
-                        + " use File → Compare Logs by Message…"
-                : "Couldn't compare: " + e.getMessage()), () -> { });
-    }
-
     private void compareNote(String text) {
         compareNoteForTest = text;
         status.setText(text.replace("\n", " "));
-        if (HeapTab.showNotes) {
-            JOptionPane.showMessageDialog(this, text, "Compare Files", JOptionPane.INFORMATION_MESSAGE);
-        }
     }
 
-    private final CsvCompareTab.Host csvCompareHost = new CsvCompareTab.Host() {
+    private final FileCompareTab.Host compareHost = new FileCompareTab.Host() {
         @Override
         public void openLine(Path file, long line) {
             openFile(file, null, t -> {
@@ -935,30 +912,27 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
 
         @Override
-        public void titleChanged(CsvCompareTab tab) {
+        public void titleChanged(FileCompareTab tab) {
             int i = tabs.indexOfComponent(tab);
             if (i >= 0) {
                 tabs.setTitleAt(i, tab.title());
-                tabs.setToolTipTextAt(i, tab.sideForTest(0).open() + "  ↔  " + tab.sideForTest(1).open());
+                tabs.setToolTipTextAt(i, tab.tooltip());
+                if (tab == tabs.getSelectedComponent()) {
+                    refreshStatus();
+                }
             }
         }
 
         @Override
-        public CsvCompareTab.Side sideFor(Path dropped) throws IOException {
-            return compareSide(dropped);
+        public CsvCompareTab.Side sideFor(Path p) throws IOException {
+            return compareSide(p);
+        }
+
+        @Override
+        public void note(String text) {
+            compareNote(text);
         }
     };
-
-    CsvCompareTab openCsvCompare(CsvCompareTab.Side a, CsvCompareTab.Side b, logsift.core.diff.CsvFile fa,
-                                 logsift.core.diff.CsvFile fb) {
-        CsvCompareTab tab = new CsvCompareTab(a, b, fa, fb, csvCompareHost);
-        tabs.addTab(tab.title(), Icons.of("git-compare"), tab);
-        int i = tabs.getTabCount() - 1;
-        tabs.setToolTipTextAt(i, a.open() + "  ↔  " + b.open());
-        tabs.setSelectedIndex(i);
-        updateEmptyState();
-        return tab;
-    }
 
     /** For tests: the menu item with this text, or null. */
     JMenuItem findMenuItemForTest(String text) {
@@ -988,7 +962,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     CsvCompareTab currentCsvCompareTab() {
-        return tabs.getSelectedComponent() instanceof CsvCompareTab t ? t : null;
+        return tabs.getSelectedComponent() instanceof FileCompareTab t ? t.csv() : null;
+    }
+
+    FileCompareTab currentCompareTabForTest() {
+        return tabs.getSelectedComponent() instanceof FileCompareTab t ? t : null;
     }
 
     /** F7 / Shift+F7 in a comparison. */
@@ -2429,13 +2407,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         @Override
         public void compareEntries(Path dir, List<logsift.core.Archives.Entry> entries) {
-            compareSides(() -> {
-                List<CsvCompareTab.Side> out = new ArrayList<>();
-                for (logsift.core.Archives.Entry e : entries) {
-                    out.add(compareSide(dir.resolve(e.name())));
-                }
-                return out;
-            });
+            openCompare(dir.resolve(entries.get(0).name()), dir.resolve(entries.get(1).name()));
         }
     };
 
@@ -2476,18 +2448,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         @Override
         public void compareEntries(Path zip, List<logsift.core.Archives.Entry> entries) {
-            compareSides(() -> {
-                List<CsvCompareTab.Side> out = new ArrayList<>();
-                for (logsift.core.Archives.Entry e : entries) {
-                    Path copy = unpack(zip, e.name(), e.size(), f -> { }, () -> false);
-                    if (copy == null) {
-                        return null;
-                    }
-                    out.add(new CsvCompareTab.Side(copy, logsift.core.Archives.pathOf(zip, e.name()),
-                            logsift.core.Archives.gunzippedName(logsift.core.Archives.baseName(e.name()))));
-                }
-                return out;
-            });
+            openCompare(logsift.core.Archives.pathOf(zip, entries.get(0).name()),
+                    logsift.core.Archives.pathOf(zip, entries.get(1).name()));
         }
     };
 
@@ -3207,8 +3169,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             f.close();
         } else if (c instanceof CompareTab ct) {
             ct.close();
-        } else if (c instanceof CsvCompareTab cc) {
-            cc.close();
+        } else if (c instanceof FileCompareTab fc) {
+            fc.close();
         } else if (c instanceof ThreadsTab th) {
             threadLogs.remove(th);
             th.close();
@@ -3754,8 +3716,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             progress.setVisible(false);
             return;
         }
-        if (tabs.getSelectedComponent() instanceof CsvCompareTab cc) {
-            setTitle(cc.title() + " — Logsift");
+        if (tabs.getSelectedComponent() instanceof FileCompareTab cc) {
+            setTitle(cc.title() + " — " + logsift.core.Channel.appName());
             status.setText(cc.statusText());
             statusRight.setText(memory());
             progress.setVisible(false);

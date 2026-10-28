@@ -9,13 +9,16 @@ import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** Files dropped on the compare tool, through the components' transfer handlers (headless-safe). */
 class FileDropTest {
@@ -48,31 +51,99 @@ class FileDropTest {
         return c.getTransferHandler().canImport(s) && c.getTransferHandler().importData(s);
     }
 
-    @Test
-    void pickerFieldsTakeDroppedFiles() {
-        ComparePicker p = new ComparePicker(null, null, null);
-        p.setSize(700, 220);
-        p.validate();
-        Path a = Path.of("/data/a.csv");
-        Path b = Path.of("/data/b.csv");
-        assertTrue(drop(p, files(a, b)), "two files fill both fields");
-        assertEquals(a.toString(), p.left.getText());
-        assertEquals(b.toString(), p.right.getText());
-        Path c = Path.of("/data/c.csv");
-        assertTrue(drop(p.left, files(c)), "one file on a field");
-        assertEquals(c.toString(), p.left.getText());
-        assertEquals(b.toString(), p.right.getText());
-        p.fill(List.of(a), 1);
-        assertEquals(a.toString(), p.right.getText(), "one file dropped on the right field's half");
-        assertEquals(-1, p.hoverForTest(), "no outline left after a drop");
-        assertEquals(List.of(c, a), List.of(p.files()));
+    /** A Compare tab that reads nothing: only its file browsers are tried here. */
+    private static final FileCompareTab.Host HOST = new FileCompareTab.Host() {
+        @Override
+        public void openLine(Path file, long line) {}
+
+        @Override
+        public CsvCompareTab.Side sideFor(Path p) {
+            return CsvCompareTab.Side.of(p);
+        }
+
+        @Override
+        public void titleChanged(FileCompareTab tab) {}
+    };
+
+    private static <T> T edt(java.util.concurrent.Callable<T> c) throws Exception {
+        Object[] out = new Object[1];
+        Exception[] err = new Exception[1];
+        SwingUtilities.invokeAndWait(() -> {
+            try {
+                out[0] = c.call();
+            } catch (Exception e) {
+                err[0] = e;
+            }
+        });
+        if (err[0] != null) {
+            throw err[0];
+        }
+        @SuppressWarnings("unchecked")
+        T t = (T) out[0];
+        return t;
+    }
+
+    private static Path selected(FileCompareTab t, int side) throws Exception {
+        return edt(() -> t.navigatorForTest(side).selected() == null ? null
+                : t.navigatorForTest(side).selected().path());
+    }
+
+    private static void waitForSelected(FileCompareTab t, int side, Path p) throws Exception {
+        long until = System.currentTimeMillis() + 20_000;
+        while (!p.equals(selected(t, side))) {
+            if (System.currentTimeMillis() > until) {
+                throw new AssertionError("side " + side + " shows " + selected(t, side) + ", not " + p);
+            }
+            Thread.sleep(20);
+        }
     }
 
     @Test
-    void textFieldsStillTakeText() {
-        ComparePicker p = new ComparePicker(null, null, null);
-        assertTrue(drop(p.right, new StringSelection("/typed/x.csv")), "text is pasted as before");
-        assertEquals("/typed/x.csv", p.right.getText());
+    void compareTabSidesTakeDroppedFiles(@TempDir Path dir) throws Exception {
+        Path a = Files.writeString(dir.resolve("a.csv"), "id,v\n1,x\n");
+        Path b = Files.writeString(dir.resolve("b.csv"), "id,v\n1,y\n");
+        Path c = Files.writeString(dir.resolve("c.csv"), "id,v\n1,z\n");
+        FileCompareTab t = edt(() -> {
+            FileCompareTab x = new FileCompareTab(null, null, dir, HOST);
+            x.setSize(900, 500);
+            x.validate();
+            return x;
+        });
+        try {
+            assertFalse(edt(() -> t.compareButtonForTest().isEnabled()), "nothing chosen yet");
+            assertTrue(edt(() -> drop(t, files(a, b))), "two files fill both sides");
+            waitForSelected(t, 0, a);
+            waitForSelected(t, 1, b);
+            assertTrue(edt(() -> t.compareButtonForTest().isEnabled()), "a file on each side: Compare");
+            assertTrue(edt(() -> drop(t.navigatorForTest(0).treeForTest(), files(c))), "one file on a side's tree");
+            waitForSelected(t, 0, c);
+            assertEquals(b, selected(t, 1));
+            // a folder on a side: no comparison
+            assertTrue(edt(() -> drop(t.navigatorForTest(1).treeForTest(), files(dir))));
+            waitForSelected(t, 1, dir);
+            assertFalse(edt(() -> t.compareButtonForTest().isEnabled()), "a folder is not compared (yet)");
+            assertEquals("Choose the right file", edt(t::chooserStatusForTest));
+        } finally {
+            edt(() -> {
+                t.close();
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void pathFieldsStillTakeText(@TempDir Path dir) throws Exception {
+        FileCompareTab t = edt(() -> new FileCompareTab(null, null, dir, HOST));
+        try {
+            JTextField f = edt(() -> t.navigatorForTest(1).pathFieldForTest());
+            assertTrue(edt(() -> drop(f, new StringSelection("/typed/x.csv"))), "text is pasted as before");
+            assertEquals("/typed/x.csv", edt(f::getText));
+        } finally {
+            edt(() -> {
+                t.close();
+                return null;
+            });
+        }
     }
 
     @Test
