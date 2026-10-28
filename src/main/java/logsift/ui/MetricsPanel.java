@@ -275,9 +275,8 @@ final class MetricsPanel extends JPanel {
                         + (spans > 0 && nums > 0 ? "   ·   " : "")
                         + (nums > 0 ? nums + (nums == 1 ? " number" : " numbers") + " over time" : "")
                         + (open > 0 ? "   ·   " + open + " never ended" : ""));
-        if (m.filtered()) {
-            summary.setText((m.isEmpty() ? "Nothing measured" : summary.getText())
-                    + "   ·   only the lines the filters keep");
+        if (m.filtered() && m.isEmpty()) {
+            summary.setText("Nothing measured in the lines the filters keep."); // the strip above says the rest
         }
         if (!items.isEmpty()) {
             itemTable.setRowSelectionInterval(0, 0);

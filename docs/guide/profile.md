@@ -47,7 +47,7 @@ A histogram's buckets are round numbers (0–5, 5–10, …). When a column's nu
 - Click a histogram bar: a filter **Show: amount_eur between 5..<10**. A value on an edge (10) belongs to the next bar, so the filter keeps exactly the rows the bar counts; the last bar includes the largest value (*95..100*).
 - Click a bar of rows over time, for the log's own time column: only that time range is shown.
 
-These are [filters on a column](filters.md#filters-on-a-column): they show as chips and can be changed in the Filters tab. With **Matching only** on, the Profile counts only the rows the filters keep (*… · only the rows the filters keep*), and follows the filters as they change.
+These are [filters on a column](filters.md#filters-on-a-column): they show as chips and can be changed in the Filters tab. With **Matching only** on, the Profile counts only the rows the filters keep (the strip at the top of the tab says so), and follows the filters as they change.
 
 ## Big files
 

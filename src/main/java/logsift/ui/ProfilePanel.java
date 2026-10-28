@@ -204,9 +204,6 @@ final class ProfilePanel extends JPanel {
             text += String.format(" in a sample of %,d of %,d lines (blocks from all over the file)", r.linesRead(),
                     r.lineCount());
         }
-        if (r.filtered()) {
-            text += " · only the rows the filters keep";
-        }
         summary.setText(text);
         cards.removeAll();
         for (ColumnProfile.Column c : r.columns()) {

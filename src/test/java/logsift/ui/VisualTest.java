@@ -2,6 +2,7 @@ package logsift.ui;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -4609,7 +4610,8 @@ class VisualTest {
                 return false;
             }
         }, 30_000, "the metrics of the kept lines");
-        assertTrue(onEdt(mp::summaryForTest).contains("only the lines the filters keep"), onEdt(mp::summaryForTest));
+        // the strip above the tab says it's filtered (checked below); the summary doesn't repeat it
+        assertFalse(onEdt(mp::summaryForTest).contains("filters"), onEdt(mp::summaryForTest));
         logsift.core.Metrics kept = onEdt(mp::metrics);
         assertEquals(List.of("order … placed in # ms"), kept.numbers().stream().map(logsift.core.Numbers.Series::name)
                 .toList(), "queue sizes are written by another thread");
@@ -5441,7 +5443,8 @@ class VisualTest {
         long des = onEdt(() -> tab.filterResultForTest().matchCount());
         assertEquals(des, (long) onEdt(() -> pp.result().rows()));
         assertEquals(1, (long) onEdt(() -> pp.result().columns().get(1).distinct()));
-        assertTrue(onEdt(pp::summaryForTest).contains("only the rows the filters keep"));
+        assertTrue(onEdt(() -> tab.scopeForTest(pp)).startsWith("marked | Only the "), onEdt(() -> tab.scopeForTest(pp)));
+        assertFalse(onEdt(pp::summaryForTest).contains("filters"), onEdt(pp::summaryForTest));
         // a histogram bucket: a "between" filter on the amounts
         long barCount = onEdt(() -> {
             ProfilePanel.ColumnCard amount = pp.cardsForTest().get(2);
