@@ -121,7 +121,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final ExceptionsPanel exceptions;
     private final MetricsPanel metrics;
     private final ProfilePanel profile;
+    private final PivotPanel pivot;
     private boolean profileAsked; // the user opened Profile for a log that isn't CSV
+    private boolean pivotAsked;   // the user opened Pivot for a log that isn't CSV
     private int insightsGeneration = -1;
     private final Bookmarks bookmarks;
     private final BookmarksPanel bookmarksPanel;
@@ -329,6 +331,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         exceptions = new ExceptionsPanel(exceptionsHost());
         metrics = new MetricsPanel(metricsHost());
         profile = new ProfilePanel(profileHost());
+        pivot = new PivotPanel(pivotHost());
         bookmarks = new Bookmarks(this.path, doc::fileSize);
         bookmarkGeneration = doc.generation();
         bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
@@ -357,6 +360,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         metricsBanner = ScopeBanner.install(metrics, "Show all lines", () -> setMatchingOnly(false));
         profileBanner = ScopeBanner.install(profile, "Show all lines", () -> setMatchingOnly(false));
+        pivotBanner = ScopeBanner.install(pivot, "Show all lines", () -> setMatchingOnly(false));
         messagesBanner = ScopeBanner.install(messages, "Count all lines", messages::countWholeLog);
         resultsBanner = ScopeBanner.install(results, "Find in all lines", this::findCurrentInAllLines);
         bottom.addChangeListener(e -> {
@@ -380,6 +384,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
             if (bottom.getSelectedComponent() == profile) {
                 profile.showing();
+            }
+            if (bottom.getSelectedComponent() == pivot) {
+                pivot.showing();
             }
         });
         bottom.setPreferredSize(new Dimension(400, 210));
@@ -1711,6 +1718,83 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             profile.cancel();
             bottom.remove(profile);
         }
+        boolean wantPivot = f != null && (f.isCsv() || profileAsked || pivotAsked);
+        int pat = bottom.indexOfComponent(pivot);
+        if (wantPivot && pat < 0) {
+            int after = bottom.indexOfComponent(profile);
+            bottom.insertTab("Pivot", null, pivot, "A pivot table and chart of the rows, as in a spreadsheet",
+                    (after >= 0 ? after : bottom.indexOfComponent(metrics)) + 1);
+            titleLabel(pivot);
+            updateScope();
+        } else if (!wantPivot && pat >= 0) {
+            pivot.cancel();
+            bottom.remove(pivot);
+        }
+    }
+
+    PivotPanel pivotPanel() {
+        return pivot;
+    }
+
+    /** Shows the Pivot tab (added for a log that isn't CSV). */
+    void showPivot() {
+        pivotAsked = true;
+        updateProfileTab();
+        if (bottom.indexOfComponent(pivot) >= 0) {
+            setBottomCollapsed(false);
+            bottom.setSelectedComponent(pivot);
+        }
+    }
+
+    private PivotPanel.Host pivotHost() {
+        return new PivotPanel.Host() {
+            /** Waits for the file to be indexed and its format known; false if cancelled. */
+            private boolean ready(AtomicBoolean cancel) {
+                while (doc.isIndexing() || detectedGeneration != doc.generation()) {
+                    if (cancel.get() || closed) {
+                        return false;
+                    }
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return false;
+                    }
+                }
+                return logFormat != null;
+            }
+
+            @Override
+            public logsift.core.Pivot.Fields fields(AtomicBoolean cancel) {
+                if (!ready(cancel)) {
+                    return null;
+                }
+                return logsift.core.Pivot.fields(logFormat, doc.lineCount(), doc::readLines,
+                        java.time.Year.now().getValue());
+            }
+
+            @Override
+            public logsift.core.Pivot.Result compute(logsift.core.Pivot.Spec spec, logsift.core.Pivot.Fields fields,
+                                                     AtomicBoolean cancel, java.util.function.DoubleConsumer progress) {
+                if (!ready(cancel)) {
+                    return null;
+                }
+                FilterResult r = filterResult;
+                java.util.function.LongPredicate include = matchingOnly && r.isFiltering() ? r::contains : null;
+                return logsift.core.Pivot.compute(logFormat, doc.lineCount(), doc::readLines, include, spec, fields,
+                        () -> cancel.get() || closed, progress);
+            }
+
+            @Override
+            public void filter(String column, logsift.core.ColumnFilter.Op op, String text) {
+                filterByColumn(column, op, text, FilterDef.Action.SHOW);
+            }
+
+            @Override
+            public String rememberKey() {
+                return path.toString();
+            }
+        };
     }
 
     /** Shows the Profile of the columns (the tab is added for a log that isn't CSV). */
@@ -2141,6 +2225,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     private ScopeBanner metricsBanner;
     private ScopeBanner profileBanner;
+    private ScopeBanner pivotBanner;
     private ScopeBanner messagesBanner;
     private ScopeBanner resultsBanner;
     private final java.util.Map<java.awt.Component, JLabel> tabTitles = new java.util.HashMap<>();
@@ -2193,6 +2278,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         metricsBanner.show(follow ? text : null);
         markTab(profile, follow);
         profileBanner.show(follow ? text : null);
+        markTab(pivot, follow);
+        pivotBanner.show(follow ? text : null);
         boolean msgs = messages.isFilteredResult() && r.isFiltering();
         markTab(messages, msgs);
         messagesBanner.show(msgs ? text : null);
@@ -2228,6 +2315,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         FilterResult r = filterResult;
         if (profile != null && (!matchingOnly || !r.isFiltering() || r.isComplete())) {
             profile.filtersChanged(matchingOnly && r.isFiltering() ? "v" + r.version() : "");
+        }
+        if (pivot != null && (!matchingOnly || !r.isFiltering() || r.isComplete())) {
+            pivot.filtersChanged(matchingOnly && r.isFiltering() ? "v" + r.version() : "");
         }
         if (metrics != null && (!matchingOnly || !r.isFiltering() || r.isComplete())) {
             metrics.filtersChanged(matchingOnly && r.isFiltering() ? "v" + r.version() : "");
@@ -2900,6 +2990,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             prof.setToolTipText("What each column holds, with a chart (the Profile tab below)");
             prof.addActionListener(a -> showProfile());
             m.add(prof);
+            JMenuItem piv = new JMenuItem("Pivot Table and Chart", Icons.of("chart-column"));
+            piv.setToolTipText("Group the rows, sum up the values and chart them (the Pivot tab below)");
+            piv.addActionListener(a -> showPivot());
+            m.add(piv);
             JMenuItem filter = new JMenuItem("Filter by " + title + "…", Icons.of("filter"));
             filter.setToolTipText("A filter that looks only in this column: contains, =, or > < for numbers");
             filter.addActionListener(a -> addColumnFilter(col));
@@ -3497,6 +3591,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         exceptions.cancel();
         metrics.cancel();
         profile.cancel();
+        pivot.cancel();
         if (request != null) {
             request.cancel();
         }

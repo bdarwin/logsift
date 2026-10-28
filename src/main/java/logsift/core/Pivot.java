@@ -99,7 +99,7 @@ public final class Pivot {
             rows = List.copyOf(rows);
             cols = List.copyOf(cols);
             values = List.copyOf(values);
-            filters = Map.copyOf(filters);
+            filters = java.util.Collections.unmodifiableMap(new HashMap<>(filters)); // null: every value kept
         }
 
         /** The values, or a count of rows when none are chosen. */

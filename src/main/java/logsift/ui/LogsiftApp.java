@@ -25,7 +25,19 @@ public final class LogsiftApp {
         logsift.core.Channel.apply(); // a beta keeps its own settings and window
         List<Path> files = new ArrayList<>();
         boolean stdin = false;
-        for (String a : args) {
+        List<String> tool = null; // diff or merge, for git
+        for (int i = 0; i < args.length; i++) {
+            String a = args[i];
+            if (a.equals("--diff") && i + 2 < args.length) {
+                tool = List.of("diff", abs(args[i + 1]), abs(args[i + 2]));
+                i += 2;
+                continue;
+            }
+            if (a.equals("--merge") && i + 4 < args.length) {
+                tool = List.of("merge", abs(args[i + 1]), abs(args[i + 2]), abs(args[i + 3]), abs(args[i + 4]));
+                i += 4;
+                continue;
+            }
             switch (a) {
                 case "-", "--stdin" -> stdin = true;
                 case "--version", "-v" -> {
@@ -36,6 +48,10 @@ public final class LogsiftApp {
                     System.out.println("""
                             Usage: logsift [file...]        open log files
                                    command | logsift -      view another program's output as it is written
+                                   logsift --diff LEFT RIGHT
+                                                            compare two files (waits until the comparison is closed)
+                                   logsift --merge LOCAL REMOTE BASE MERGED
+                                                            merge, as git's mergetool: exits 0 when saved, 1 if not
                             """);
                     return;
                 }
@@ -48,6 +64,14 @@ public final class LogsiftApp {
         }
         // a Logsift is already running: give it the files and stop (piped input stays here)
         boolean single = !Boolean.getBoolean("logsift.multiInstance");
+        if (tool != null && single) {
+            int code = SingleInstance.command(AppState.home(), tool);
+            if (code >= 0) {
+                System.exit(code); // git waits for this
+                return;
+            }
+        }
+        List<String> toolCommand = tool;
         if (single && !stdin && SingleInstance.forward(AppState.home(), files)) {
             return;
         }
@@ -64,10 +88,11 @@ public final class LogsiftApp {
                 && java.awt.Taskbar.getTaskbar().isSupported(java.awt.Taskbar.Feature.ICON_IMAGE)) {
             java.awt.Taskbar.getTaskbar().setIconImage(logsift.tools.IconGenerator.render(512));
         }
-        if (single && !stdin) { // a window for piped input stays separate
+        if (single && !stdin && toolCommand == null) { // a window for piped input (or git) stays separate
             try {
                 SingleInstance si = SingleInstance.listen(AppState.home(),
-                        paths -> SwingUtilities.invokeLater(() -> open(paths)));
+                        paths -> SwingUtilities.invokeLater(() -> open(paths)),
+                        (cmd, reply) -> SwingUtilities.invokeLater(() -> runTool(cmd, reply)));
                 Runtime.getRuntime().addShutdownHook(new Thread(si::close));
             } catch (IOException e) {
                 // can't listen: still works, just as separate windows
@@ -82,6 +107,11 @@ public final class LogsiftApp {
             MainFrame f = new MainFrame();
             f.setVisible(true);
             frame = f;
+            if (toolCommand != null) {
+                // started for git: this window is for the comparison or merge, and ends with it
+                f.runTool(toolCommand, code -> System.exit(code));
+                return;
+            }
             if (files.isEmpty() && capture == null && pending.isEmpty()
                     && AppState.prefs().getBoolean("restoreSession", true)) {
                 f.restoreSession(); // reopen what was open last time
@@ -96,7 +126,28 @@ public final class LogsiftApp {
                 f.openFiles(List.copyOf(pending));
                 pending.clear();
             }
+            for (Object[] t : pendingTools) {
+                @SuppressWarnings("unchecked")
+                List<String> cmd = (List<String>) t[0];
+                f.runTool(cmd, (java.util.function.IntConsumer) t[1]);
+            }
+            pendingTools.clear();
         });
+    }
+
+    private static String abs(String p) {
+        return Path.of(p).toAbsolutePath().normalize().toString();
+    }
+
+    private static final List<Object[]> pendingTools = new ArrayList<>();
+
+    /** A command from a second launch (git): run it in this window when there is one. */
+    private static void runTool(List<String> cmd, java.util.function.IntConsumer reply) {
+        if (frame == null) {
+            pendingTools.add(new Object[] {cmd, reply});
+        } else {
+            frame.runTool(cmd, reply);
+        }
     }
 
     /** Files from the system (double-click, Open With, the Dock) or a second launch. */

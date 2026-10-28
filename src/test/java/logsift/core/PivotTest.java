@@ -154,6 +154,15 @@ class PivotTest {
     }
 
     @Test
+    void aFilterFieldWithEveryValueKept() {
+        java.util.Map<Integer, Set<String>> all = new java.util.HashMap<>();
+        all.put(0, null);
+        Pivot.Result r = run(sales(), new Pivot.Spec(List.of(new Pivot.Field(1)), List.of(), List.of(), all));
+        assertEquals(61, r.rows());
+        assertEquals(4, r.filterValues(0).size());
+    }
+
+    @Test
     void sortByValueAndCountDistinct() {
         Pivot.Result r = run(sales(), new Pivot.Spec(List.of(new Pivot.Field(1)), List.of(),
                 List.of(new Pivot.Value(0, Pivot.Agg.COUNT_DISTINCT), new Pivot.Value(2, Pivot.Agg.MAX)), Map.of()));

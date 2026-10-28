@@ -20,7 +20,7 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Open a folder's files | File → Open Folder… (no shortcut) |
 | Search in a folder | Ctrl+Shift+F |
 | Merge files by time | Ctrl+Shift+M |
-| Compare files (CSV and TSV as tables) | File → Compare Files…, or Compare Files… on the start page (no shortcut) |
+| Compare files or folders (CSV and TSV as tables, other files as text) | File → Compare Files…, or Compare Files… on the start page (no shortcut) |
 | Compare logs by message | Ctrl+Shift+D |
 | Export lines shown by filters | Ctrl+Shift+E |
 | Close the tab | Ctrl+W, or a middle click on the tab |
@@ -49,7 +49,7 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Go to line | Ctrl+L |
 | Go to time | Ctrl+Shift+L |
 | Next / previous error | F8 / Shift+F8 |
-| In a comparison: next / previous difference | F7 / Shift+F7 |
+| In a comparison: next / previous difference (in a merge: conflict) | F7 / Shift+F7 |
 | Follow the current line's request (or the selected text) | Ctrl+Shift+R |
 | Bookmark the current line | Ctrl+F2 |
 | Next / previous bookmark | F2 / Shift+F2 |

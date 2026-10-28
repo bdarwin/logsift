@@ -22,6 +22,7 @@ New to Logsift? Start with [Opening logs](opening-logs.md) and [The log view](lo
 | [Insights and messages](insights.md) | Error bursts, new errors, silences, restarts, noise, known problems; top messages |
 | [Metrics](metrics.md) | How long things took, things that never ended, numbers in messages and columns, the chart |
 | [Profile](profile.md) | What each column of a table (a CSV file) holds, with a chart per column; filtering by a click |
+| [Pivot](pivot.md) | A pivot table and chart of a table's rows, as in a spreadsheet: groups, sums, counts, averages, filters |
 | [Exceptions](exceptions.md) | Exceptions grouped by root cause, the stack, opening your source code |
 | [Requests](requests.md) | Following one request through a log, all open logs or a folder |
 | [Compare files](diff.md) | Two CSV or TSV files as tables: rows matched by a key whatever their order, changed values as old → new |

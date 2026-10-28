@@ -15,6 +15,11 @@ public final class Csv {
         return split(line, delimiter, null).size();
     }
 
+    /** A field as CSV: quoted when it holds a comma, a quote, a line break or spaces at an end. */
+    public static String quote(String v) {
+        return CsvMerger.quote(v);
+    }
+
     /**
      * The fields of a line, unquoted. {@code starts} (or null) receives where each field's text
      * begins in the line, as far as it has room.

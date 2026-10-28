@@ -94,7 +94,7 @@ final class StartPage extends JPanel {
         grid.add(action("activity", "Open Thread Dump…", null, "jstack, jcmd or kill -3 output",
                 host::openThreadDump));
         grid.add(action("flame", "Open Profile…", null, "A JFR recording, or saved stacks", host::openProfile));
-        grid.add(action("git-compare", "Compare Files…", null, "Two CSV files, rows matched by key", host::compareFiles));
+        grid.add(action("git-compare", "Compare Files…", null, "Two files or folders, side by side", host::compareFiles));
         col.add(left(grid));
         col.add(Box.createVerticalStrut(10));
         // searching a folder without opening it: the same as File → Search in Folder…

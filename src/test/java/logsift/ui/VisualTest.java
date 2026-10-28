@@ -6264,23 +6264,25 @@ class VisualTest {
         waitForCompare(tab, "orders-tuesday.csv", "orders-monday.csv");
         assertEquals(6, onEdt(tab::result).count(logsift.core.diff.DiffStatus.REMOVED), "swapped: new orders are removed");
 
-        // not CSV: a note that text compare comes next
+        // not CSV: compared as text, line by line
         Path logA = box.resolve("a.log");
         Path logB = box.resolve("b.log");
         Files.writeString(logA, "2026-10-21 10:00:00.000 INFO  [main] c.a.App - started\n");
         Files.writeString(logB, "2026-10-21 10:00:00.000 INFO  [main] c.a.App - stopped\n");
         onEdt(() -> {
-            frame.compareNoteForTest = null;
             frame.compareFiles(logA, logB);
             return null;
         });
-        waitFor(() -> frame.compareNoteForTest != null, 20_000, "the note");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentCompareTabForTest() != null
+                        && frame.currentCompareTabForTest().text() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the logs compared as text");
         FileCompareTab noted = onEdt(frame::currentCompareTabForTest);
-        assertTrue(onEdt(noted::chooserStatusForTest).startsWith("a.log doesn't look like a CSV file"),
-                "the note is shown in the tab, not in a pop-up: " + onEdt(noted::chooserStatusForTest));
-        assertTrue(frame.compareNoteForTest.contains("Comparing text and logs line by line comes next"),
-                frame.compareNoteForTest);
-        assertTrue(frame.compareNoteForTest.startsWith("a.log doesn't look like a CSV file"), frame.compareNoteForTest);
+        assertEquals(1, onEdt(() -> noted.text().result().linesChanged()));
 
         // the folder's tab: two files selected → Compare
         onEdt(() -> {
@@ -6319,6 +6321,575 @@ class VisualTest {
             return null;
         });
         assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app while comparing");
+    }
+
+    @Test
+    @Order(57)
+    void pivotTableAndChart() throws Exception {
+        // sales: a region, a product, an amount, a quantity and when it was sold, over three months
+        StringBuilder sb = new StringBuilder("region,product,amount,qty,sold_at\n");
+        String[] regions = {"North", "South", "East", "West"};
+        String[] products = {"Tea", "Coffee", "Cake"};
+        double total = 0;
+        double north = 0;
+        Random rnd = new Random(11);
+        for (int i = 0; i < 1200; i++) {
+            String region = regions[rnd.nextInt(4)];
+            double amount = 5 + rnd.nextInt(200) / 4.0;
+            total += amount;
+            if (region.equals("North")) {
+                north += amount;
+            }
+            sb.append(String.format(java.util.Locale.ROOT, "%s,%s,%.2f,%d,2026-%02d-%02d %02d:15:00%n", region,
+                    products[rnd.nextInt(3)], amount, 1 + rnd.nextInt(5), 1 + i % 3, 1 + i % 28, i % 24));
+        }
+        Path csv = dir.resolve("sales.csv");
+        Files.writeString(csv, sb.toString());
+        AppState.prefs().remove("pivot." + Integer.toHexString(csv.toString().hashCode()));
+        onEdt(() -> {
+            frame.openFiles(List.of(csv));
+            return null;
+        });
+        LogTab tab = waitForTab("sales.csv");
+        PivotPanel pp = onEdt(tab::pivotPanel);
+        onEdt(() -> {
+            setBottomFor(tab, pp);
+            javax.swing.JSplitPane sp = (javax.swing.JSplitPane) SwingUtilities.getAncestorOfClass(
+                    javax.swing.JSplitPane.class, SwingUtilities.getAncestorOfClass(JTabbedPane.class, pp));
+            sp.setDividerLocation(150); // room for the table and the chart
+            pp.setViewForTest("both");
+            return null;
+        });
+        assertEquals("Pivot", onEdt(() -> {
+            JTabbedPane b = (JTabbedPane) SwingUtilities.getAncestorOfClass(JTabbedPane.class, pp);
+            return b.getTitleAt(b.indexOfComponent(pp));
+        }));
+        waitForPivot(pp);
+        assertEquals(List.of("region", "product", "amount", "qty", "sold_at"), onEdt(pp::fieldsForTest));
+        assertEquals("Sum of amount by region", onEdt(pp::quickStartForTest));
+        settle();
+        shot("108-pivot-empty");
+
+        // quick start: the regions down the side, the amounts summed
+        onEdt(() -> {
+            pp.clickQuickStartForTest();
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(List.of("region"), onEdt(() -> pp.areaForTest(PivotPanel.Area.ROWS)));
+        assertEquals(List.of("Sum of amount"), onEdt(() -> pp.areaForTest(PivotPanel.Area.VALUES)));
+        JTable t = onEdt(pp::tableForTest);
+        assertEquals(List.of("East", "North", "South", "West", "Grand Total"), onEdt(() -> {
+            List<String> out = new ArrayList<>();
+            for (int r = 0; r < t.getRowCount(); r++) {
+                out.add(pp.cellTextForTest(r, 0));
+            }
+            return out;
+        }));
+        assertEquals(PivotPanel.format(Math.round(north * 100) / 100.0), onEdt(() -> pp.cellTextForTest(1, 1)));
+        assertEquals(PivotPanel.format(Math.round(total * 100) / 100.0), onEdt(() -> pp.cellTextForTest(4, 1)));
+        assertEquals(4, onEdt(() -> pp.chartForTest().data().size()), "a bar per region");
+
+        // the products across the top (dragged there), the grand total last
+        onEdt(() -> {
+            pp.drop("field:" + pp.columnForTest("product"), PivotPanel.Area.COLUMNS, -1);
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(List.of("", "Cake", "Coffee", "Tea", "Total"), onEdt(() -> {
+            List<String> out = new ArrayList<>();
+            for (int c = 0; c < t.getColumnCount(); c++) {
+                out.add(t.getColumnName(c));
+            }
+            return out;
+        }).stream().map(n -> n.startsWith("region") ? "" : n).toList());
+        assertEquals(3, onEdt(() -> pp.chartForTest().data().series().size()), "a series per product");
+        settle();
+        shot("108b-pivot-table-and-chart");
+        onEdt(() -> {
+            pp.setChartTypeForTest(PivotChart.Type.STACKED_COLUMN);
+            pp.setHeatForTest(true);
+            return null;
+        });
+        settle();
+        shot("108c-pivot-stacked-color-scale");
+
+        // months under the regions, counted as % of each row; sorted by the total, largest first
+        onEdt(() -> {
+            pp.setHeatForTest(false);
+            pp.drop("field:" + pp.columnForTest("sold_at"), PivotPanel.Area.ROWS, -1);
+            pp.setAggForTest(0, logsift.core.Pivot.Agg.COUNT, logsift.core.Pivot.ShowAs.PCT_ROW);
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(List.of("region", "sold_at (Month)"), onEdt(() -> pp.areaForTest(PivotPanel.Area.ROWS)));
+        assertEquals("North", onEdt(() -> pp.cellTextForTest(4, 0)), "East, its three months, then North");
+        assertEquals("100 %", onEdt(() -> pp.cellTextForTest(0, t.getColumnCount() - 1)), "a row is 100 % of itself");
+        assertEquals("2026-01", onEdt(() -> pp.cellTextForTest(1, 0)), "months under the first region");
+        onEdt(() -> {
+            pp.toggleForTest(0); // fold the first region
+            return null;
+        });
+        assertEquals("North", onEdt(() -> pp.cellTextForTest(1, 0)), "East folded: North next");
+        onEdt(() -> {
+            pp.toggleForTest(0);
+            pp.setChartTypeForTest(PivotChart.Type.LINE);
+            return null;
+        });
+        settle();
+        shot("108d-pivot-months-percent-line");
+
+        // a filter: only tea; the sums again, then a cell's rows in the log
+        onEdt(() -> {
+            pp.drop("item:ROWS:1", null, -1); // the months dragged out
+            pp.drop("item:COLUMNS:0", PivotPanel.Area.FILTERS, -1);
+            pp.setAggForTest(0, logsift.core.Pivot.Agg.SUM, logsift.core.Pivot.ShowAs.VALUE);
+            return null;
+        });
+        waitForPivot(pp);
+        onEdt(() -> {
+            pp.keepForTest(0, java.util.Set.of("Tea"));
+            return null;
+        });
+        waitForPivot(pp);
+        long tea = sb.toString().lines().filter(l -> l.contains(",Tea,")).count();
+        assertEquals(tea, (long) onEdt(() -> pp.result().rows()));
+        assertEquals(List.of("product: 1 values"), onEdt(() -> pp.areaForTest(PivotPanel.Area.FILTERS)));
+        onEdt(() -> {
+            pp.setChartTypeForTest(PivotChart.Type.DOUGHNUT);
+            pp.sortByForTest(1); // by the sum, largest first
+            return null;
+        });
+        String first = onEdt(() -> pp.cellTextForTest(0, 0));
+        double firstSum = Double.parseDouble(onEdt(() -> pp.cellTextForTest(0, 1)).replace(",", ""));
+        double secondSum = Double.parseDouble(onEdt(() -> pp.cellTextForTest(1, 1)).replace(",", ""));
+        assertTrue(firstSum >= secondSum, first + " " + firstSum + " " + secondSum);
+        settle();
+        shot("108e-pivot-filter-doughnut");
+        String copied = onEdt(() -> pp.tableText(true));
+        assertTrue(copied.startsWith("region\tSum of amount\n"), copied);
+        assertTrue(onEdt(pp::csvText).startsWith("region,Sum of amount\n"));
+        onEdt(() -> {
+            pp.showRowsForTest(0, 1);
+            return null;
+        });
+        waitForFilter(tab);
+        assertEquals(List.of("Show: region = " + first), onEdt(() -> tab.logBar().chipTexts()));
+
+        // the layout is remembered for the file
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            frame.openFiles(List.of(csv));
+            return null;
+        });
+        LogTab again = waitForTab("sales.csv");
+        PivotPanel pp2 = onEdt(again::pivotPanel);
+        onEdt(() -> {
+            setBottomFor(again, pp2);
+            return null;
+        });
+        waitForPivot(pp2);
+        assertEquals(List.of("region"), onEdt(() -> pp2.areaForTest(PivotPanel.Area.ROWS)));
+        assertEquals(List.of("Sum of amount"), onEdt(() -> pp2.areaForTest(PivotPanel.Area.VALUES)));
+        assertEquals(List.of("product: all"), onEdt(() -> pp2.areaForTest(PivotPanel.Area.FILTERS)),
+                "the filter's field is remembered, its values aren't");
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(again));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    /** Waits for a pivot to show what its areas ask for. */
+    private void waitForPivot(PivotPanel pp) throws Exception {
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !pp.isRunning() && pp.result() != null && pp.result().spec().equals(pp.spec()));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the pivot");
+    }
+
+    @Test
+    @Order(58)
+    void comparesTextFiles() throws Exception {
+        // two runs of a job: some lines changed, one added, one gone, and every time different
+        Path box = Files.createDirectories(dir.resolve("text-compare"));
+        List<String> a = new ArrayList<>();
+        List<String> b = new ArrayList<>();
+        for (int i = 0; i < 120; i++) {
+            String msg = switch (i % 40) {
+                case 7 -> "INFO  Connecting to db-1.prod:5432 as app";
+                case 19 -> "WARN  Pool is 80% full (16 of 20)";
+                default -> "INFO  Step " + i + " done";
+            };
+            a.add(String.format(java.util.Locale.ROOT, "2026-10-28 10:%02d:%02d,123 %s", i / 60, i % 60, msg));
+            if (i == 50) {
+                continue; // gone in the second run
+            }
+            String m2 = i == 7 ? "INFO  Connecting to db-2.prod:5432 as app" : i == 87 ? "ERROR Step 87 failed: timeout" : msg;
+            b.add(String.format(java.util.Locale.ROOT, "2026-10-29 11:%02d:%02d,456 %s", i / 60, i % 60, m2));
+            if (i == 30) {
+                b.add("2026-10-29 11:00:30,999 INFO  Retrying step 30");
+            }
+        }
+        Path left = box.resolve("run-monday.log");
+        Path right = box.resolve("run-tuesday.log");
+        Files.write(left, a);
+        Files.write(right, b);
+        FileCompareTab ct = onEdt(() -> frame.openCompare(left, right));
+        waitFor(() -> {
+            try {
+                return onEdt(() -> ct.text() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the text comparison");
+        TextCompareTab tt = onEdt(ct::text);
+        assertNull(onEdt(ct::csv), "logs aren't tables: compared as text");
+        // every line differs (the times): one changed block
+        assertEquals(1, onEdt(() -> tt.result().changes().size()));
+        // times masked: what really changed
+        onEdt(() -> {
+            tt.setOptions(new logsift.core.diff.TextDiff.Options(logsift.core.diff.TextDiff.Spaces.EXACT, false, true,
+                    false, false));
+            return null;
+        });
+        logsift.core.diff.TextDiff.Result r = onEdt(tt::result);
+        assertEquals(4, r.changes().size(), r.changes().toString());
+        assertEquals(1, r.linesAdded());
+        assertEquals(1, r.linesRemoved());
+        assertEquals(2, r.linesChanged());
+        assertTrue(onEdt(tt::statusText).startsWith("4 changes · 2 lines changed, 1 added, 1 removed"),
+                onEdt(tt::statusText));
+        // F7: the first change, then the next
+        onEdt(() -> {
+            frame.findMenuItemForTest("Next Difference").doClick();
+            return null;
+        });
+        assertEquals("change 1 of 4", onEdt(tt::positionForTest));
+        onEdt(() -> {
+            frame.findMenuItemForTest("Next Difference").doClick();
+            return null;
+        });
+        assertEquals("change 2 of 4", onEdt(tt::positionForTest));
+        // the right file's name starts where its pane does
+        settle();
+        int[] at = onEdt(tt::fileRowSplitForTest);
+        assertTrue(Math.abs(at[0] - at[1]) <= 1, at[0] + " vs " + at[1]);
+        shot("109-text-compare");
+        // unchanged stretches folded away
+        int all = onEdt(tt::shownRowsForTest);
+        onEdt(() -> {
+            tt.setFoldForTest(true);
+            return null;
+        });
+        assertTrue(onEdt(tt::shownRowsForTest) < all / 2, onEdt(tt::shownRowsForTest) + " of " + all);
+        settle();
+        shot("109b-text-compare-folded");
+        onEdt(() -> {
+            tt.setFoldForTest(false);
+            return null;
+        });
+
+        // » copies a change to the right; the right file can be saved; undo
+        int changed = onEdt(() -> {
+            List<logsift.core.diff.TextDiff.Block> bl = tt.result().blocks();
+            for (int k = 0; k < bl.size(); k++) {
+                if (bl.get(k).kind() == logsift.core.diff.Edit.Kind.REPLACE && bl.get(k).l1() == 7) {
+                    return k;
+                }
+            }
+            return -1;
+        });
+        assertTrue(changed >= 0);
+        onEdt(() -> {
+            tt.apply(changed, 1);
+            return null;
+        });
+        assertTrue(onEdt(() -> tt.edited(1)));
+        assertEquals(3, onEdt(() -> tt.result().changes().size()), "one change fewer");
+        assertTrue(onEdt(() -> tt.linesForTest(1).get(7)).endsWith("db-1.prod:5432 as app"));
+        assertTrue(onEdt(() -> tt.saveEnabledForTest(1)));
+        assertTrue(onEdt(tt::title).endsWith(" •"), "edited, not saved");
+        onEdt(() -> {
+            tt.undoForTest();
+            return null;
+        });
+        assertEquals(4, onEdt(() -> tt.result().changes().size()));
+        onEdt(() -> {
+            tt.apply(changed, 1);
+            tt.saveForTest(1);
+            return null;
+        });
+        assertTrue(Files.readAllLines(right).get(7).endsWith("db-1.prod:5432 as app"), "saved");
+        assertEquals(b.size(), Files.readAllLines(right).size());
+        assertFalse(onEdt(() -> tt.edited(1)));
+
+        // Choose Files: the browsers in the panes' place, the button stays put
+        java.awt.Point closedAt = onEdt(() -> SwingUtilities.convertPoint(ct.filesButtonForTest(), 0, 0, ct));
+        onEdt(() -> {
+            ct.filesButtonForTest().doClick();
+            return null;
+        });
+        assertTrue(onEdt(ct::chooserShownForTest));
+        settle();
+        assertEquals(closedAt, onEdt(() -> SwingUtilities.convertPoint(ct.filesButtonForTest(), 0, 0, ct)));
+        onEdt(() -> {
+            ct.filesButtonForTest().doClick();
+            return null;
+        });
+        assertFalse(onEdt(ct::chooserShownForTest));
+
+        // two binary files: whether they are the same
+        Path bin1 = box.resolve("a.bin");
+        Path bin2 = box.resolve("b.bin");
+        Files.write(bin1, new byte[] {1, 0, 2, 3});
+        Files.write(bin2, new byte[] {1, 0, 2, 4});
+        FileCompareTab bt = onEdt(() -> frame.openCompare(bin1, bin2));
+        waitFor(() -> {
+            try {
+                return onEdt(() -> bt.chooserStatusForTest().startsWith("Binary files"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the binary note");
+        assertTrue(onEdt(bt::chooserStatusForTest).contains("they differ"));
+
+        // CSV files: as a table, or as text, and back
+        Path c1 = box.resolve("prices-old.csv");
+        Path c2 = box.resolve("prices-new.csv");
+        Files.writeString(c1, "sku,price\nA,1\nB,2\n");
+        Files.writeString(c2, "sku,price\nB,2\nA,3\n");
+        FileCompareTab cc = onEdt(() -> frame.openCompare(c1, c2));
+        CsvCompareTab table = waitForCompare(null);
+        onEdt(() -> {
+            table.compareAsTextForTest();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> cc.text() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the same files as text");
+        assertNull(onEdt(cc::csv));
+        assertEquals(4, onEdt(() -> cc.text().result().rows().size()), "the header, A,1 gone, B,2, A,3 added");
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(cc));
+            frame.closeTab(frame.tabsForTest().indexOfComponent(bt));
+            frame.tabsForTest().setSelectedComponent(ct);
+            return null;
+        });
+        // dark mode
+        onEdt(() -> {
+            frame.setDark(true);
+            return null;
+        });
+        settle();
+        shot("109c-text-compare-dark");
+        onEdt(() -> {
+            frame.setDark(false);
+            frame.closeTab(frame.tabsForTest().indexOfComponent(ct));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    @Test
+    @Order(59)
+    void mergesThreeWays() throws Exception {
+        // a config changed on two branches: some changes on one side, one conflict
+        Path box = Files.createDirectories(dir.resolve("merge"));
+        List<String> base = new ArrayList<>();
+        for (int i = 0; i < 40; i++) {
+            base.add("setting." + i + " = " + i);
+        }
+        List<String> ours = new ArrayList<>(base);
+        List<String> theirs = new ArrayList<>(base);
+        ours.set(3, "setting.3 = 300   # ours");
+        theirs.set(30, "setting.30 = 3000   # theirs");
+        ours.set(20, "setting.20 = twenty (ours)");
+        theirs.set(20, "setting.20 = 20.0 (theirs)");
+        theirs.add("setting.40 = 40   # new in theirs");
+        Path local = box.resolve("app.conf.LOCAL");
+        Path remote = box.resolve("app.conf.REMOTE");
+        Path basePath = box.resolve("app.conf.BASE");
+        Path merged = box.resolve("app.conf");
+        Files.write(local, ours);
+        Files.write(remote, theirs);
+        Files.write(basePath, base);
+        Files.writeString(merged, "<<<<<<< git's own markers\n");
+        int[] code = {-9};
+        MergeTab m = onEdt(() -> frame.openMerge(local, remote, basePath, merged, c -> code[0] = c));
+        assertEquals(1L, onEdt(() -> m.mergeForTest().conflicts()));
+        assertEquals("1 of 1 conflict left", onEdt(m::statusForTest));
+        assertEquals("Merge: app.conf (1 conflict)", onEdt(m::title));
+        // non-conflicting changes are taken already; the conflict waits (the base's line meanwhile)
+        List<String> now = onEdt(m::result);
+        assertTrue(now.contains("setting.3 = 300   # ours"));
+        assertTrue(now.contains("setting.30 = 3000   # theirs"));
+        assertTrue(now.contains("setting.40 = 40   # new in theirs"));
+        assertTrue(now.contains("<<<<<<< yours"), "unresolved: git's markers");
+        settle();
+        shot("110-merge-conflict");
+        // F7 goes to the conflict; » takes yours, « then adds theirs after it
+        int conflict = onEdt(() -> {
+            List<logsift.core.diff.Merge3.Chunk> cs = m.mergeForTest().chunks();
+            for (int k = 0; k < cs.size(); k++) {
+                if (cs.get(k).kind() == logsift.core.diff.Merge3.Kind.CONFLICT) {
+                    return k;
+                }
+            }
+            return -1;
+        });
+        onEdt(() -> {
+            frame.findMenuItemForTest("Next Difference").doClick();
+            return null;
+        });
+        assertEquals(conflict, onEdt(m::currentForTest));
+        onEdt(() -> {
+            m.take(conflict, 0);
+            return null;
+        });
+        assertEquals("All conflicts resolved", onEdt(m::statusForTest));
+        onEdt(() -> {
+            m.take(conflict, 2);
+            return null;
+        });
+        assertEquals(logsift.core.diff.Merge3.Choice.OURS_THEN_THEIRS, onEdt(() -> m.choicesForTest().get(conflict)));
+        List<String> both = onEdt(m::result);
+        int at = both.indexOf("setting.20 = twenty (ours)");
+        assertEquals("setting.20 = 20.0 (theirs)", both.get(at + 1));
+        settle();
+        shot("110b-merge-resolved");
+        onEdt(() -> {
+            m.undoForTest();
+            return null;
+        });
+        assertEquals(logsift.core.diff.Merge3.Choice.OURS, onEdt(() -> m.choicesForTest().get(conflict)));
+        // by hand
+        onEdt(() -> {
+            m.setEdited(conflict, "setting.20 = 20   # agreed");
+            return null;
+        });
+        assertTrue(onEdt(m::result).contains("setting.20 = 20   # agreed"));
+        // Save: the file is written, git hears 0, the tab closes
+        onEdt(() -> {
+            m.save();
+            return null;
+        });
+        assertEquals(0, code[0]);
+        assertTrue(Files.readAllLines(merged).contains("setting.20 = 20   # agreed"));
+        assertEquals(41, Files.readAllLines(merged).size());
+        assertEquals(-1, onEdt(() -> frame.tabsForTest().indexOfComponent(m)), "closed");
+
+        // given up (Abort, or the tab closed): git hears 1 and the file stays as it was
+        Files.writeString(merged, "untouched\n");
+        int[] code2 = {-9};
+        MergeTab m2 = onEdt(() -> frame.openMerge(local, remote, basePath, merged, c -> code2[0] = c));
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(m2));
+            return null;
+        });
+        assertEquals(1, code2[0]);
+        assertEquals("untouched\n", Files.readString(merged));
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    @Test
+    @Order(60)
+    void comparesFolders() throws Exception {
+        // a release folder and the next one: a changed config, a new file, one gone, logs the same
+        Path base = Files.createDirectories(dir.resolve("folders"));
+        Path a = base.resolve("release-1.0");
+        Path b = base.resolve("release-1.1");
+        for (Path p : List.of(a, b)) {
+            Files.createDirectories(p.resolve("conf"));
+            Files.createDirectories(p.resolve("logs"));
+            Files.createDirectories(p.resolve("lib"));
+            Files.writeString(p.resolve("README.txt"), "the app\n");
+            for (int i = 0; i < 6; i++) {
+                Files.writeString(p.resolve("lib/part-" + i + ".jar"), "jar " + i);
+            }
+            Files.writeString(p.resolve("logs/app.log"), "2026-10-28 10:00:00 INFO started\n");
+        }
+        Files.writeString(a.resolve("conf/app.conf"), "port = 8080\nthreads = 8\n");
+        Files.writeString(b.resolve("conf/app.conf"), "port = 8080\nthreads = 16\n");
+        Files.writeString(a.resolve("conf/legacy.conf"), "old = yes\n");
+        Files.writeString(b.resolve("conf/feature.conf"), "new = yes\n");
+        Files.writeString(b.resolve("lib/part-6.jar"), "jar 6");
+        FileCompareTab ct = onEdt(() -> frame.openCompare(null, null));
+        onEdt(() -> {
+            ct.navigatorForTest(0).reveal(a);
+            ct.navigatorForTest(1).reveal(b);
+            return null;
+        });
+        waitForNavigator(onEdt(() -> ct.navigatorForTest(0)), a);
+        waitForNavigator(onEdt(() -> ct.navigatorForTest(1)), b);
+        assertTrue(onEdt(() -> ct.compareButtonForTest().isEnabled()), "two folders can be compared");
+        onEdt(() -> {
+            ct.compareButtonForTest().doClick();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> ct.folder() != null && !ct.folder().isRunning() && ct.folder().result() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the folder comparison");
+        FolderCompareTab ft = onEdt(ct::folder);
+        logsift.core.diff.FolderDiff.Result r = onEdt(ft::result);
+        assertEquals(12, r.files());
+        assertEquals(1, r.different());
+        assertEquals(1, r.leftOnly());
+        assertEquals(2, r.rightOnly());
+        // at first: the differences, in their folders (opened)
+        assertEquals(List.of("conf ≠", "conf/app.conf ≠", "conf/feature.conf ▶", "conf/legacy.conf ◀", "lib ≠",
+                "lib/part-6.jar ▶"), onEdt(ft::rowsForTest));
+        assertEquals("Differences  4", onEdt(() -> ft.showTextForTest(0)));
+        assertEquals("Compare: release-1.0 ↔ release-1.1",
+                onEdt(() -> frame.tabsForTest().getTitleAt(frame.tabsForTest().indexOfComponent(ct))));
+        settle();
+        shot("111-folder-compare");
+        onEdt(() -> {
+            ft.setShowForTest(1); // everything
+            ft.expandAllForTest();
+            return null;
+        });
+        assertEquals(15, onEdt(() -> ft.rowsForTest().size()), "3 folders and 12 files");
+        settle();
+        shot("111b-folder-compare-everything");
+        onEdt(() -> {
+            ft.setShowForTest(0);
+            ft.setSearchForTest("app");
+            return null;
+        });
+        assertEquals(List.of("conf ≠", "conf/app.conf ≠"), onEdt(ft::rowsForTest));
+        // double-click two files: compared in a tab of their own (text)
+        onEdt(() -> {
+            ft.activateForTest("conf/app.conf");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.tabsForTest().getSelectedComponent() instanceof FileCompareTab f
+                        && f != ct && f.text() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the two files compared");
+        FileCompareTab files = onEdt(() -> (FileCompareTab) frame.tabsForTest().getSelectedComponent());
+        assertEquals(1, onEdt(() -> files.text().result().changes().size()));
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(files));
+            frame.closeTab(frame.tabsForTest().indexOfComponent(ct));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
     }
 
     @Test
@@ -6628,11 +7199,13 @@ class VisualTest {
         });
         waitForNewResult(tab, beforeTrim, "comparing with the option");
         assertFalse(onEdt(tab::compareHighlightedForTest), "compared again: back to normal");
+        logsift.core.diff.TableDiffResult withTrim = onEdt(tab::result);
         onEdt(() -> {
             tab.clickTrimForTest();
             tab.runCompare();
             return null;
         });
+        waitForNewResult(tab, withTrim, "comparing with trim again");
 
         // Choose Files shows the browsers again, in the table's place; the button stays where it is
         java.awt.Point closedAt = onEdt(() -> SwingUtilities.convertPoint(ct.filesButtonForTest(), 0, 0, ct));
@@ -6681,7 +7254,7 @@ class VisualTest {
         assertEquals(List.of("sku"), onEdt(tab::keysForTest), "the key is kept");
 
         // two files dropped on the window: compare them, or open each in a tab (asked, unless chosen)
-        Path other = box.resolve("stock-copy.csv");
+        Path other = Files.createDirectories(dir.resolve("drop-two")).resolve("stock-copy.csv");
         Files.writeString(other, "sku,name,stock\nSKU-01,item 1,3\n");
         List<String> asked = new ArrayList<>();
         int tabs0 = onEdt(() -> frame.tabsForTest().getTabCount());

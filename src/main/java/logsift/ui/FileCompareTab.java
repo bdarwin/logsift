@@ -39,6 +39,12 @@ final class FileCompareTab extends JPanel {
 
         /** Why two files couldn't be compared (also shown in the tab). */
         default void note(String text) {}
+
+        /** Two files of a folder comparison, compared in a tab of their own. */
+        default void compareFiles(Path left, Path right) {}
+
+        /** A file of a folder comparison, opened as a log. */
+        default void openFile(Path file) {}
     }
 
     private final Host host;
@@ -53,6 +59,8 @@ final class FileCompareTab extends JPanel {
     private final JPanel bar;
     private final JLabel status = new JLabel(" ");
     private CsvCompareTab csv;
+    private TextCompareTab text;
+    private FolderCompareTab folder;
     private int generation;
     private boolean busy;
 
@@ -160,6 +168,28 @@ final class FileCompareTab extends JPanel {
         if (csv != null) {
             csv.showDrawer(on);
         }
+        if (text != null) {
+            text.showDrawer(on);
+        }
+        if (folder != null) {
+            folder.showDrawer(on);
+        }
+    }
+
+    /** Whether a comparison is shown (CSV, text or folders). */
+    private boolean comparing() {
+        return csv != null || text != null || folder != null;
+    }
+
+    /** The files (or folders) compared now, or null. */
+    private Path compared(int side) {
+        return csv != null ? csv.sideForTest(side).open() : text != null ? text.sideForTest(side).open()
+                : folder != null ? folder.rootForTest(side) : null;
+    }
+
+    /** Whether an item is a folder or zip on disk (not inside a zip), so it can be compared as a folder. */
+    private static boolean container(FileBrowse.Item i) {
+        return i != null && !i.isFile() && !i.inZip();
     }
 
     private void scrollBrowsers() {
@@ -173,17 +203,16 @@ final class FileCompareTab extends JPanel {
     private void updateButtons() {
         FileBrowse.Item a = nav[0].selected();
         FileBrowse.Item b = nav[1].selected();
-        boolean ok = a != null && b != null && a.isFile() && b.isFile();
+        boolean folders = container(a) && container(b);
+        boolean ok = a != null && b != null && (a.isFile() && b.isFile() || folders);
         compare.setEnabled(ok && !busy);
-        boolean other = ok && csv != null && !chosenAreCompared();
+        boolean other = ok && comparing() && !chosenAreCompared();
         // new files chosen (or none compared yet): Compare stands out
-        CsvCompareTab.highlightCompare(compare, ok && !busy && (csv == null || other));
+        CsvCompareTab.highlightCompare(compare, ok && !busy && (!comparing() || other));
         if (!busy) {
             status.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
-            if (a != null && b != null && !a.isFile() && !b.isFile() && a.kind() == b.kind()) {
-                status.setText(a.kind() == FileBrowse.Kind.ZIP ? "Two zips: open them and choose a file in each"
-                        + " (comparing whole folders comes later)" : "Two folders: choose a file in each"
-                        + " (comparing whole folders comes later)");
+            if (a != null && b != null && !a.isFile() && !b.isFile() && !folders) {
+                status.setText("A folder inside a zip: choose the zip itself, or a file in it");
             } else if (!ok) {
                 status.setText(a == null || !a.isFile() ? b == null || !b.isFile() ? "Choose a file on each side"
                         : "Choose the left file" : "Choose the right file");
@@ -191,9 +220,16 @@ final class FileCompareTab extends JPanel {
                 status.setText(a.name() + " ↔ " + b.name());
             }
         }
+        String chosen = !ok ? status.getText() : other ? a.name() + " ↔ " + b.name() + ": press Compare"
+                : "These are compared: choose others";
         if (csv != null) {
-            csv.filesChosen(other, !ok ? status.getText() : other ? a.name() + " ↔ " + b.name() + ": press Compare"
-                    : "These files are compared: choose others");
+            csv.filesChosen(other, chosen);
+        }
+        if (text != null) {
+            text.filesChosen(other, chosen);
+        }
+        if (folder != null) {
+            folder.filesChosen(other, chosen);
         }
     }
 
@@ -201,8 +237,7 @@ final class FileCompareTab extends JPanel {
     private boolean chosenAreCompared() {
         FileBrowse.Item a = nav[0].selected();
         FileBrowse.Item b = nav[1].selected();
-        return csv != null && a != null && b != null && a.path().equals(csv.sideForTest(0).open())
-                && b.path().equals(csv.sideForTest(1).open());
+        return comparing() && a != null && b != null && a.path().equals(compared(0)) && b.path().equals(compared(1));
     }
 
     private void swapSides() {
@@ -247,45 +282,75 @@ final class FileCompareTab extends JPanel {
     void runCompare() {
         FileBrowse.Item a = nav[0].selected();
         FileBrowse.Item b = nav[1].selected();
-        if (a == null || b == null || !a.isFile() || !b.isFile()) {
+        boolean folders = container(a) && container(b);
+        if (a == null || b == null || !(a.isFile() && b.isFile() || folders)) {
             return;
         }
-        if (csv != null) {
-            if (chosenAreCompared()) {
-                csv.showDrawer(false);
-            } else {
-                // the comparison reads the other files, keeping its keys and options
-                csv.showDrawer(false);
-                csv.drop(List.of(a.path(), b.path()), FileDrop.BOTH);
-            }
+        if (comparing() && chosenAreCompared()) {
+            showChooser(false);
+            return;
+        }
+        if (folders) {
+            showFolders(a.path(), b.path());
             return;
         }
         compare(a.path(), b.path());
     }
 
     private void compare(Path left, Path right) {
+        compare(left, right, false);
+    }
+
+    /** The most a text compared may have (both sides are read into memory). */
+    static final long MAX_TEXT_BYTES = 256L << 20;
+
+    /**
+     * Reads the two files in the background, then compares them: CSV and TSV files as tables
+     * (unless {@code asText}), others as text.
+     */
+    private void compare(Path left, Path right, boolean asText) {
         int gen = ++generation;
         busy = true;
         compare.setEnabled(false);
         status.setForeground(Theme.uiColor("Label.foreground", Color.BLACK));
         status.setText("Reading the files…");
+        if (csv != null) {
+            csv.filesChosen(false, "Reading the files…");
+        }
         Thread t = new Thread(() -> {
             List<CsvCompareTab.Side> got = new ArrayList<>();
             List<CsvFile> opened = new ArrayList<>();
+            List<TextCompareTab.Doc> docs = new ArrayList<>();
             String error = null;
             try {
                 for (Path p : List.of(left, right)) {
-                    CsvCompareTab.Side s = host.sideFor(p);
-                    got.add(s);
-                    opened.add(CsvFile.open(s.read(), s.name()));
+                    got.add(host.sideFor(p));
+                }
+                boolean table = !asText;
+                if (table) {
+                    try {
+                        for (CsvCompareTab.Side s : got) {
+                            opened.add(CsvFile.open(s.read(), s.name()));
+                        }
+                    } catch (CsvFile.NotCsvException e) {
+                        opened.forEach(CsvFile::close);
+                        opened.clear();
+                        table = false;
+                    }
+                }
+                if (!table) {
+                    for (CsvCompareTab.Side s : got) {
+                        long size = java.nio.file.Files.size(s.read());
+                        if (size > MAX_TEXT_BYTES) {
+                            throw new IOException(s.name() + " is " + MainFrame.humanBytes(size)
+                                    + ": text is compared up to " + MainFrame.humanBytes(MAX_TEXT_BYTES));
+                        }
+                        docs.add(TextCompareTab.Doc.read(s));
+                    }
                 }
             } catch (IOException | RuntimeException e) {
                 opened.forEach(CsvFile::close);
-                error = e instanceof CsvFile.NotCsvException
-                        ? e.getMessage() + ".\n\nLogsift compares CSV and TSV files as tables for now (rows matched by"
-                                + " a key). Comparing text and logs line by line comes next. To compare two logs by"
-                                + " kinds of message, use File → Compare Logs by Message…"
-                        : "Couldn't compare: " + e.getMessage();
+                error = "binary".equals(e.getMessage()) ? binaryNote(got) : "Couldn't compare: " + e.getMessage();
             }
             String err = error;
             SwingUtilities.invokeLater(() -> {
@@ -300,11 +365,26 @@ final class FileCompareTab extends JPanel {
                     status.setText(err.replace("\n\n", " ").replace("\n", " "));
                     status.setToolTipText("<html>" + err.replace("&", "&amp;").replace("<", "&lt;")
                             .replace("\n", "<br>") + "</html>");
+                    if (csv != null) {
+                        csv.filesChosen(true, err);
+                    }
+                    if (text != null) {
+                        text.filesChosen(true, err);
+                    }
                     host.note(err);
                     return;
                 }
                 status.setToolTipText(null);
-                show(got.get(0), got.get(1), opened.get(0), opened.get(1));
+                if (!opened.isEmpty() && csv != null) {
+                    // another pair of tables: the comparison reads them, keeping its keys and options
+                    opened.forEach(CsvFile::close);
+                    csv.showDrawer(false);
+                    csv.drop(List.of(left, right), FileDrop.BOTH);
+                } else if (!opened.isEmpty()) {
+                    show(got.get(0), got.get(1), opened.get(0), opened.get(1));
+                } else {
+                    showText(docs.get(0), docs.get(1));
+                }
                 updateButtons();
             });
         }, "logsift-compare-open");
@@ -312,10 +392,154 @@ final class FileCompareTab extends JPanel {
         t.start();
     }
 
-    private void show(CsvCompareTab.Side a, CsvCompareTab.Side b, CsvFile fa, CsvFile fb) {
+    /** Two files that aren't text: whether they are the same, byte for byte. */
+    private static String binaryNote(List<CsvCompareTab.Side> sides) {
+        if (sides.size() < 2) {
+            return "Binary files aren't compared";
+        }
+        try {
+            long a = java.nio.file.Files.size(sides.get(0).read());
+            long b = java.nio.file.Files.size(sides.get(1).read());
+            boolean same = a == b && java.nio.file.Files.mismatch(sides.get(0).read(), sides.get(1).read()) < 0;
+            return same ? "The files are the same (binary files, byte for byte)"
+                    : "Binary files: they differ (" + MainFrame.humanBytes(a) + " and " + MainFrame.humanBytes(b)
+                            + "); only text is compared line by line";
+        } catch (IOException e) {
+            return "Binary files aren't compared";
+        }
+    }
+
+    /** Shows two texts compared, in place of what was shown. */
+    private void showText(TextCompareTab.Doc a, TextCompareTab.Doc b) {
+        closeShown();
+        text = new TextCompareTab(a, b, textHost);
+        removeAll();
+        add(text, BorderLayout.CENTER);
+        revalidate();
+        repaint();
+        host.titleChanged(this);
+    }
+
+    private void closeShown() {
         if (csv != null) {
             csv.close();
+            csv = null;
         }
+        text = null;
+        folder = null;
+    }
+
+    /** Shows two folders (or zips) compared. */
+    private void showFolders(Path left, Path right) {
+        generation++;
+        busy = false;
+        closeShown();
+        folder = new FolderCompareTab(left, right, folderHost);
+        removeAll();
+        add(folder, BorderLayout.CENTER);
+        revalidate();
+        repaint();
+        host.titleChanged(this);
+        updateButtons();
+    }
+
+    private final FolderCompareTab.Host folderHost = new FolderCompareTab.Host() {
+        @Override
+        public void compareFiles(Path left, Path right) {
+            host.compareFiles(left, right);
+        }
+
+        @Override
+        public void openFile(Path file) {
+            host.openFile(file);
+        }
+
+        @Override
+        public void titleChanged(FolderCompareTab tab) {
+            host.titleChanged(FileCompareTab.this);
+        }
+
+        @Override
+        public JComponent drawer() {
+            return sides;
+        }
+
+        @Override
+        public void drawerShown(boolean on) {
+            if (on) {
+                scrollBrowsers();
+                updateButtons();
+            }
+        }
+
+        @Override
+        public boolean compareChosen() {
+            if (chosenAreCompared()) {
+                return false;
+            }
+            runCompare();
+            return true;
+        }
+    };
+
+    /** The folder comparison shown, or null. */
+    FolderCompareTab folder() {
+        return folder;
+    }
+
+    private final TextCompareTab.Host textHost = new TextCompareTab.Host() {
+        @Override
+        public void openLine(Path file, long line) {
+            host.openLine(file, line);
+        }
+
+        @Override
+        public void titleChanged(TextCompareTab tab) {
+            for (int s = 0; s < 2; s++) {
+                Path p = tab.sideForTest(s).open();
+                if (!selectedIs(s, p)) {
+                    nav[s].reveal(p);
+                }
+            }
+            host.titleChanged(FileCompareTab.this);
+        }
+
+        @Override
+        public JComponent drawer() {
+            return sides;
+        }
+
+        @Override
+        public void drawerShown(boolean on) {
+            if (on) {
+                scrollBrowsers();
+                updateButtons();
+            }
+        }
+
+        @Override
+        public boolean compareChosen() {
+            FileBrowse.Item a = nav[0].selected();
+            FileBrowse.Item b = nav[1].selected();
+            if (a == null || b == null || !a.isFile() || !b.isFile() || chosenAreCompared()) {
+                return false;
+            }
+            runCompare();
+            return true;
+        }
+
+        @Override
+        public boolean asTable() {
+            if (text == null) {
+                return false;
+            }
+            compare(text.sideForTest(0).open(), text.sideForTest(1).open(), false);
+            return true;
+        }
+    };
+
+    private void show(CsvCompareTab.Side a, CsvCompareTab.Side b, CsvFile fa, CsvFile fb) {
+        closeShown();
         csv = new CsvCompareTab(a, b, fa, fb, csvHost);
         removeAll();
         add(csv, BorderLayout.CENTER);
@@ -370,24 +594,36 @@ final class FileCompareTab extends JPanel {
             runCompare();
             return true;
         }
+
+        @Override
+        public void asText() {
+            if (csv != null) {
+                compare(csv.sideForTest(0).open(), csv.sideForTest(1).open(), true);
+            }
+        }
     };
 
     String title() {
-        return csv != null ? csv.title() : "Compare";
+        return csv != null ? csv.title() : text != null ? text.title() : folder != null ? folder.title() : "Compare";
     }
 
     String tooltip() {
-        return csv != null ? csv.sideForTest(0).open() + "  ↔  " + csv.sideForTest(1).open()
-                : "Choose two files to compare";
+        return comparing() ? compared(0) + "  ↔  " + compared(1) : "Choose two files to compare";
     }
 
     String statusText() {
-        return csv != null ? csv.statusText() : status.getText();
+        return csv != null ? csv.statusText() : text != null ? text.statusText() : folder != null ? folder.statusText()
+                : status.getText();
     }
 
     /** The comparison shown, or null before the first one. */
     CsvCompareTab csv() {
         return csv;
+    }
+
+    /** The text comparison shown, or null. */
+    TextCompareTab text() {
+        return text;
     }
 
     boolean isBusy() {
@@ -414,16 +650,19 @@ final class FileCompareTab extends JPanel {
 
     /** Choose Files in the comparison's row (after the first comparison). */
     javax.swing.AbstractButton filesButtonForTest() {
-        return csv == null ? null : csv.filesButtonForTest();
+        return csv != null ? csv.filesButtonForTest() : text != null ? text.filesButtonForTest()
+                : folder != null ? folder.filesButtonForTest() : null;
     }
 
     /** Whether Compare stands out: the tab's before the first comparison, then the comparison's. */
     boolean compareHighlightedForTest() {
-        return csv == null ? CsvCompareTab.isHighlighted(compare) : csv.compareHighlightedForTest();
+        return csv != null ? csv.compareHighlightedForTest() : text != null ? text.compareHighlightedForTest()
+                : folder != null ? folder.compareHighlightedForTest() : CsvCompareTab.isHighlighted(compare);
     }
 
     boolean chooserShownForTest() {
-        return csv == null || csv.isDrawerOpen();
+        return csv != null ? csv.isDrawerOpen() : text != null ? text.isDrawerOpen()
+                : folder == null || folder.isDrawerOpen();
     }
 
     String chooserStatusForTest() {

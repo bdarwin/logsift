@@ -874,6 +874,87 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return tab;
     }
 
+    /** Run when a tab is closed (a comparison or a merge git waits for). */
+    private final java.util.Map<java.awt.Component, Runnable> closeHooks = new java.util.HashMap<>();
+
+    /**
+     * A command from the command line (git): {@code diff left right} opens a comparison and
+     * answers 0 when its tab closes; {@code merge local remote base merged} opens a merge and
+     * answers 0 when it is saved, 1 when given up (or closed).
+     */
+    void runTool(List<String> cmd, java.util.function.IntConsumer reply) {
+        toFront();
+        requestFocus();
+        try {
+            if (cmd.size() == 3 && cmd.get(0).equals("diff")) {
+                FileCompareTab tab = openCompare(Path.of(cmd.get(1)), Path.of(cmd.get(2)));
+                closeHooks.put(tab, () -> reply.accept(0));
+                return;
+            }
+            if (cmd.size() == 5 && cmd.get(0).equals("merge")) {
+                openMerge(Path.of(cmd.get(1)), Path.of(cmd.get(2)), Path.of(cmd.get(3)), Path.of(cmd.get(4)), reply);
+                return;
+            }
+            status.setText("Unknown command: " + String.join(" ", cmd));
+            reply.accept(2);
+        } catch (IOException | RuntimeException e) {
+            JOptionPane.showMessageDialog(this, "Couldn't open the merge: " + e.getMessage(), "Merge",
+                    JOptionPane.ERROR_MESSAGE);
+            reply.accept(2);
+        }
+    }
+
+    /** Opens a three-way merge; {@code reply} gets 0 when it is saved, 1 when given up or closed. */
+    MergeTab openMerge(Path local, Path remote, Path base, Path merged, java.util.function.IntConsumer reply)
+            throws IOException {
+        TextCompareTab.Doc ours = TextCompareTab.Doc.read(CsvCompareTab.Side.of(local));
+        TextCompareTab.Doc theirs = TextCompareTab.Doc.read(CsvCompareTab.Side.of(remote));
+        TextCompareTab.Doc baseDoc = Files.isRegularFile(base) ? TextCompareTab.Doc.read(CsvCompareTab.Side.of(base))
+                : new TextCompareTab.Doc(CsvCompareTab.Side.of(base), List.of(), ours.charset, ours.eol, true);
+        String name = merged.getFileName().toString();
+        java.util.concurrent.atomic.AtomicBoolean answered = new java.util.concurrent.atomic.AtomicBoolean();
+        MergeTab[] holder = new MergeTab[1];
+        MergeTab tab = new MergeTab(baseDoc, ours, theirs, merged,
+                new String[] {name + " (yours: " + local.getFileName() + ")", name, name + " (theirs: "
+                        + remote.getFileName() + ")"}, new MergeTab.Host() {
+                    @Override
+                    public void done(MergeTab t, boolean saved) {
+                        if (answered.compareAndSet(false, true)) {
+                            reply.accept(saved ? 0 : 1);
+                        }
+                        int at = tabs.indexOfComponent(t);
+                        if (at >= 0) {
+                            closeTab(at);
+                        }
+                    }
+
+                    @Override
+                    public void titleChanged(MergeTab t) {
+                        int at = tabs.indexOfComponent(t);
+                        if (at >= 0) {
+                            tabs.setTitleAt(at, t.title());
+                        }
+                    }
+                });
+        holder[0] = tab;
+        tabs.addTab(tab.title(), Icons.of("git-merge"), tab);
+        int i = tabs.getTabCount() - 1;
+        tabs.setToolTipTextAt(i, "Merging into " + merged);
+        tabs.setSelectedIndex(i);
+        closeHooks.put(tab, () -> {
+            if (answered.compareAndSet(false, true)) {
+                reply.accept(1);
+            }
+        });
+        updateEmptyState();
+        return tab;
+    }
+
+    /** The merge in the selected tab, or null. */
+    MergeTab currentMergeTab() {
+        return tabs.getSelectedComponent() instanceof MergeTab m ? m : null;
+    }
+
     /** How a file to compare is read: a .gz unpacked first; folders and zips refused. */
     private CsvCompareTab.Side compareSide(Path p) throws IOException {
         Path abs = p.toAbsolutePath().normalize();
@@ -904,7 +985,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final FileCompareTab.Host compareHost = new FileCompareTab.Host() {
         @Override
         public void openLine(Path file, long line) {
-            openFile(file, null, t -> {
+            MainFrame.this.openFile(file, null, t -> {
                 tabs.setSelectedComponent(t);
                 t.showLineWhenAvailable(line);
                 t.mainView().focusView();
@@ -931,6 +1012,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         @Override
         public void note(String text) {
             compareNote(text);
+        }
+
+        @Override
+        public void compareFiles(Path left, Path right) {
+            openCompare(left, right);
+        }
+
+        @Override
+        public void openFile(Path file) {
+            MainFrame.this.openFile(file);
         }
     };
 
@@ -975,6 +1066,19 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         if (t != null) {
             t.nextChange(forward);
         }
+        TextCompareTab x = currentTextCompareTab();
+        if (x != null) {
+            x.nextChange(forward);
+        }
+        MergeTab m = currentMergeTab();
+        if (m != null) {
+            m.nextConflict(forward);
+        }
+    }
+
+    /** The text comparison in the selected tab, or null. */
+    TextCompareTab currentTextCompareTab() {
+        return tabs.getSelectedComponent() instanceof FileCompareTab t ? t.text() : null;
     }
 
     // ---------------------------------------------------------------- thread dumps
@@ -3016,6 +3120,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         help.add(item("Report a Bug or Suggest a Feature…", "bug", null,
                 e -> HelpSupport.browse(this, HelpSupport.bugReportUrl(null, null))));
         help.add(item("Show Errors…", "triangle-alert", null, e -> showErrors()));
+        help.add(item("Use Logsift with Git…", "git-merge", null, e -> GitSetup.show(this)));
         help.add(item("Open Error Log", "file-warning", null, e -> openErrorLog()));
         help.addSeparator();
         help.add(item("Check for Updates…", "circle-arrow-down", null, e -> checkForUpdates(true)));
@@ -3159,6 +3264,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             AppState.saveFileState(t.path(), t.saveState());
         }
         tabs.removeTabAt(index);
+        Runnable hook = closeHooks.remove(c);
+        if (hook != null) {
+            hook.run();
+        }
         if (c instanceof LogTab t) {
             JvmBar bar = jvmBars.remove(t);
             if (bar != null) {

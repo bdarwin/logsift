@@ -1,12 +1,12 @@
 ---
 layout: guide
 title: Compare files
-description: Comparing two CSV or TSV files as tables, with rows matched by a key whatever their order.
+description: Comparing two files, CSV and TSV as tables with rows matched by a key, other text line by line, and three-way merges for git.
 ---
 
 # Compare files
 
-**File → Compare Files…** (or **Compare Files…** on the start page) opens a **Compare** tab to compare two files. CSV and TSV files are compared as **tables**: rows are matched by a **key** (an ID column, or a few columns together), wherever they are in each file, so two exports of the same data in a different order compare cleanly. Other files get a note for now: comparing text and logs line by line is coming next. To compare two logs by kinds of message, use [Compare Logs by Message](compare.md).
+**File → Compare Files…** (or **Compare Files…** on the start page) opens a **Compare** tab to compare two files, or [two folders](#folders). CSV and TSV files are compared as **tables**: rows are matched by a **key** (an ID column, or a few columns together), wherever they are in each file, so two exports of the same data in a different order compare cleanly. Other text files, logs included, are compared [line by line](#text-and-logs), side by side. Logsift can also be [git's difftool and mergetool](#git), with a [three-way merge](#merging). To compare two logs by kinds of message, use [Compare Logs by Message](compare.md).
 
 ![Two exports of the same orders compared by order_id: 6 added, 8 removed, 20 changed, changed prices and statuses as old → new](../screenshots/csv-compare.png)
 
@@ -109,8 +109,56 @@ Next to the scroll bar, a **strip of marks** shows where the differences are amo
 - Without a key, rows changed in place are paired in order within a run of changes; if many rows moved, choose a key.
 - Changing a file while it is compared isn't noticed: compare again.
 
-## Coming next
+## Text and logs
 
-- Text and log files side by side, with changes within a line, and options to ignore spaces or mask timestamps and IDs so two runs of a job line up.
-- Comparing folders, with the same two browsers.
-- Three-way merge, and use from the command line and git.
+Files that aren't CSV or TSV (logs, code, configs) are compared line by line, side by side, as a code review shows them. A CSV comparison's **Compare as Text** shows the same files this way, and **Compare as Table** goes back.
+
+![Two runs of a job compared with times masked: a changed host, a line added, one gone, a step that failed; unchanged stretches folded](../screenshots/text-compare.png)
+
+- Lines that match are on one row; a line only one file has faces an empty, hatched row. Changed blocks are **blue**, lines added **green**, lines removed **gray**, and the words that differ within a line are marked stronger.
+- **▲ ▼** (Shift+F7 / F7) go from change to change: *change 2 of 4*. The strip by the scroll bar marks every change; click it to go there.
+- **Ignore ▾**: spaces at the ends of lines, or all spaces, and case. **Mask ▾**: times and dates, numbers, or IDs (UUIDs, long hex, IDs with digits) count as equal, so two runs of the same job line up and only what really changed shows. Masked parts aren't marked as changed words.
+- **Fold Unchanged** folds stretches of unchanged lines away (3 lines stay around each change); click a fold to open it.
+- Between the panes, **»** copies a change to the right file and **«** to the left one (also on a right-click). **Undo** takes it back; **Save Left** / **Save Right** write the file, with its encoding and line ends (a file in a zip can't be saved). An edited file has **•** after its name.
+- Click a row, drag or Shift-click for more; **Ctrl+C** (⌘C) copies those lines of that side. Double-click a line to open the file there.
+- The names over the panes say how many lines, the encoding and CRLF line ends. **Choose Files** and **⇄** work as for tables. Two binary files are only said to be the same or not. Text is compared up to 256 MB a file.
+
+## Merging
+
+A three-way merge shows **Yours** on the left, the **Result** in the middle and **Theirs** on the right, on aligned rows. Changes made on one side only are taken already; a **conflict**, where both sides changed the same lines differently, is red until resolved.
+
+![A merge: a conflict on setting.20 in red, a change of theirs already taken in the result](../screenshots/merge.png)
+
+- **»** takes your change for a conflict, **«** theirs; taking both puts them one after the other (yours first if you took yours first). A right-click offers *Accept Yours*, *Accept Theirs*, *Yours, Then Theirs*, *Theirs, Then Yours*, *Keep the Original (Base)* and *Edit the Result…*; double-click the result to edit it by hand.
+- **Accept Yours** / **Accept Theirs** resolve every conflict at once. **▲ ▼** (F7) go from conflict to conflict; the status says how many are left. **Undo** takes back the last step.
+- **Save and Finish** writes the result (asking first if conflicts are left: they keep git's `<<<<<<<` `=======` `>>>>>>>` markers) and closes the tab. **Abort** (or closing the tab) leaves the file as it was.
+
+## Git
+
+**Help → Use Logsift with Git…** shows the settings that make Logsift git's difftool and mergetool, and **Set Up Git** writes them to your global git config (or **Copy Commands** to paste them yourself):
+
+```
+git config --global difftool.logsift.cmd '"/path/to/Logsift" --diff "$LOCAL" "$REMOTE"'
+git config --global mergetool.logsift.cmd '"/path/to/Logsift" --merge "$LOCAL" "$REMOTE" "$BASE" "$MERGED"'
+git config --global mergetool.logsift.trustExitCode true
+git config --global diff.tool logsift
+git config --global merge.tool logsift
+```
+
+Then `git difftool` shows each changed file in a Compare tab (git goes on to the next file when you close the tab), and `git mergetool` opens each conflicted file as a merge: **Save and Finish** tells git it's resolved, **Abort** that it isn't. If Logsift is open, they open in its window; if not, a window opens just for them and closes when you're done.
+
+From a terminal: `logsift --diff LEFT RIGHT` and `logsift --merge LOCAL REMOTE BASE MERGED` do the same.
+
+## Folders
+
+Choose a **folder** (or a **zip**) on each side and click **Compare**: one table shows both, a row per file or folder, with its name, size and time on each side and, in the middle, **=** the same, **≠** different, **◀** only on the left or **▶** only on the right.
+
+![Two releases compared: a changed config, a file added, one gone, the folders with differences opened](../screenshots/folder-compare.png)
+
+- Files of the same size are compared byte by byte (**Compare Contents**; turn it off to count the same size and time as the same, quicker for big folders). A folder is the same when everything in it is; one with differences is ≠ and opens by itself.
+- **Show** lists the **Differences** at first, with how many; or **Everything**, **Same**, **Different**, **Only left**, **Only right**. **find a name** keeps the files whose name has the text.
+- Different rows are amber, rows only on the left red, only on the right green, with the empty side gray. The later time of a file changed on both sides is bold.
+- **Double-click two files** to compare them in a tab of their own (as a table or as text); a file on one side only opens as a log. Right-click for the same, and to copy the path. **⌄ ⌃** open and close every folder.
+- A zip is compared like a folder, the zips inside it too (as folders named like the zip). Hidden files and tool folders (*.git*, *.idea*, *node_modules*…) are left out; at most 200,000 files a side.
+- Nothing is copied, moved or deleted: the comparison only reads.
+

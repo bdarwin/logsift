@@ -28,6 +28,16 @@ import java.util.function.Consumer;
  */
 public final class SingleInstance implements AutoCloseable {
     private static final String MAGIC = "logsift-open/1";
+    private static final String COMMAND = "logsift-command/1";
+
+    /**
+     * A request from the command line that waits for its answer: {@code diff a b} or
+     * {@code merge local remote base merged}. The instance calls {@code reply} with the exit code
+     * when it is done (the comparison closed, the merge saved or given up).
+     */
+    public interface Commands {
+        void run(List<String> command, java.util.function.IntConsumer reply);
+    }
 
     private final ServerSocket server;
     private final Path file;
@@ -74,6 +84,46 @@ public final class SingleInstance implements AutoCloseable {
      * on a background thread; an empty list means "just show the window").
      */
     public static SingleInstance listen(Path home, Consumer<List<Path>> onOpen) throws IOException {
+        return listen(home, onOpen, null);
+    }
+
+    /**
+     * Sends a command to a running instance and waits (as long as it takes) for its exit code.
+     * Returns -1 if no instance is running.
+     */
+    public static int command(Path home, List<String> command) {
+        Path f = home.resolve("instance");
+        try {
+            List<String> lines = Files.readAllLines(f, StandardCharsets.UTF_8);
+            if (lines.size() < 2) {
+                return -1;
+            }
+            int port = Integer.parseInt(lines.get(0).trim());
+            String secret = lines.get(1).trim();
+            try (Socket s = new Socket()) {
+                s.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 1000);
+                Writer w = new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8);
+                w.write(COMMAND + "\n" + secret + "\n");
+                for (String c : command) {
+                    w.write(c.replace("\n", " ") + "\n");
+                }
+                w.write("\n");
+                w.flush();
+                BufferedReader r = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
+                String accepted = r.readLine();
+                if (!"ok".equals(accepted)) {
+                    return -1;
+                }
+                String done = r.readLine(); // no timeout: a merge takes as long as it takes
+                return done != null && done.startsWith("done ") ? Integer.parseInt(done.substring(5).trim()) : 1;
+            }
+        } catch (IOException | RuntimeException e) {
+            return -1;
+        }
+    }
+
+    /** Like {@link #listen(Path, Consumer)}, also taking commands that wait for an answer. */
+    public static SingleInstance listen(Path home, Consumer<List<Path>> onOpen, Commands commands) throws IOException {
         Files.createDirectories(home);
         ServerSocket server = new ServerSocket();
         server.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 10);
@@ -90,18 +140,53 @@ public final class SingleInstance implements AutoCloseable {
         Files.writeString(f, server.getLocalPort() + "\n" + secret + "\n", StandardCharsets.UTF_8,
                 StandardOpenOption.TRUNCATE_EXISTING);
         SingleInstance si = new SingleInstance(server, f);
-        Thread t = new Thread(() -> si.serve(secret, onOpen), "logsift-single-instance");
+        Thread t = new Thread(() -> si.serve(secret, onOpen, commands), "logsift-single-instance");
         t.setDaemon(true);
         t.start();
         return si;
     }
 
-    private void serve(String secret, Consumer<List<Path>> onOpen) {
+    private void serve(String secret, Consumer<List<Path>> onOpen, Commands commands) {
         while (!server.isClosed()) {
-            try (Socket s = server.accept()) {
+            Socket s;
+            try {
+                s = server.accept();
+            } catch (IOException e) {
+                continue; // closed, or a broken connection
+            }
+            boolean keep = false;
+            try {
                 s.setSoTimeout(3000);
                 BufferedReader r = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
-                if (!MAGIC.equals(r.readLine()) || !secret.equals(r.readLine())) {
+                String magic = r.readLine();
+                if (!secret.equals(r.readLine())) {
+                    continue;
+                }
+                if (COMMAND.equals(magic) && commands != null) {
+                    List<String> cmd = new ArrayList<>();
+                    String line;
+                    while ((line = r.readLine()) != null && !line.isEmpty() && cmd.size() < 20) {
+                        cmd.add(line);
+                    }
+                    Writer w = new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8);
+                    w.write("ok\n");
+                    w.flush();
+                    s.setSoTimeout(0);
+                    keep = true; // the answer comes later: the connection stays open until then
+                    java.util.concurrent.atomic.AtomicBoolean answered = new java.util.concurrent.atomic.AtomicBoolean();
+                    commands.run(cmd, code -> {
+                        if (answered.compareAndSet(false, true)) {
+                            try (s) {
+                                w.write("done " + code + "\n");
+                                w.flush();
+                            } catch (IOException e) {
+                                // the command line went away
+                            }
+                        }
+                    });
+                    continue;
+                }
+                if (!MAGIC.equals(magic)) {
                     continue;
                 }
                 List<Path> paths = new ArrayList<>();
@@ -115,6 +200,14 @@ public final class SingleInstance implements AutoCloseable {
                 onOpen.accept(paths);
             } catch (IOException | RuntimeException e) {
                 // a broken or foreign connection: ignore it and keep listening
+            } finally {
+                if (!keep) {
+                    try {
+                        s.close();
+                    } catch (IOException e) {
+                        // already closed
+                    }
+                }
             }
         }
     }

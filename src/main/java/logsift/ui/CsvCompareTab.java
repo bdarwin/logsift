@@ -115,6 +115,9 @@ final class CsvCompareTab extends JPanel {
         default boolean compareChosen() {
             return false;
         }
+
+        /** Compare as Text: the same files line by line. */
+        default void asText() {}
     }
 
     private static final String[] SHOW = {"All differences", "Changed", "Added", "Removed", "Key repeats",
@@ -288,7 +291,7 @@ final class CsvCompareTab extends JPanel {
         options.add(compare);
         options.add(progress);
         options.add(cancel);
-        options.add(status);
+        options.add(fixedWidth(status, 46));
         top.add(options);
 
         notes.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
@@ -442,8 +445,12 @@ final class CsvCompareTab extends JPanel {
         bar.add(search);
         bar.add(prev);
         bar.add(next);
-        bar.add(position);
+        bar.add(fixedWidth(position, 40));
         bar.add(export);
+        JButton asText = new JButton("Compare as Text", Icons.of("file-text"));
+        asText.setToolTipText("The same files line by line, side by side");
+        asText.addActionListener(e -> host.asText());
+        bar.add(asText);
 
         table.setFillsViewportHeight(true);
         table.setShowGrid(false);
@@ -1557,6 +1564,23 @@ final class CsvCompareTab extends JPanel {
 
     // ---------------------------------------------------------------- comparing
 
+    /**
+     * A label as wide as {@code chars} characters whatever its text (longer text ends in …, the
+     * whole of it in the tooltip), so a toolbar doesn't wrap differently, and move what is below
+     * it, when the text changes.
+     */
+    static JLabel fixedWidth(JLabel l, int chars) {
+        java.awt.FontMetrics fm = l.getFontMetrics(l.getFont());
+        Dimension d = new Dimension(fm.charWidth('n') * chars, fm.getHeight() + 2);
+        l.setPreferredSize(d);
+        l.setMinimumSize(d);
+        l.addPropertyChangeListener("text", e -> {
+            String t = l.getText();
+            l.setToolTipText(t != null && fm.stringWidth(t) > d.width ? t : null);
+        });
+        return l;
+    }
+
     /** A Compare button in the accent colour: something changed, a click shows it. */
     static void highlightCompare(JButton b, boolean on) {
         if (on) {
@@ -2669,6 +2693,10 @@ final class CsvCompareTab extends JPanel {
 
     JButton compareButtonForTest() {
         return compare;
+    }
+
+    void compareAsTextForTest() {
+        host.asText();
     }
 
     Side sideForTest(int s) {
