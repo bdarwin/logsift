@@ -170,6 +170,21 @@ final class FileNavigator extends JPanel {
         return home != null && (t.equals("~") || t.startsWith("~/")) ? home + t.substring(1) : t;
     }
 
+    /** A size for people (as the window's status bar writes it), without needing the window. */
+    static String bytes(long b) {
+        if (b < 1024) {
+            return b + " B";
+        }
+        String[] u = {"KB", "MB", "GB", "TB"};
+        double v = b;
+        int i = -1;
+        while (v >= 1024 && i < u.length - 1) {
+            v /= 1024;
+            i++;
+        }
+        return String.format("%.2f %s", v, u[i]);
+    }
+
     /** Called with the item selected (null: none). */
     void onSelect(Consumer<FileBrowse.Item> c) {
         onSelect = c;
@@ -190,7 +205,7 @@ final class FileNavigator extends JPanel {
         if (item != null) {
             pathField.setText(item.path().toString());
             info.setText(item.kind() == FileBrowse.Kind.FILE
-                    ? (item.size() >= 0 ? MainFrame.humanBytes(item.size()) : "") + (item.inZip() ? " · in a zip" : "")
+                    ? (item.size() >= 0 ? bytes(item.size()) : "") + (item.inZip() ? " · in a zip" : "")
                     : item.kind() == FileBrowse.Kind.ZIP ? "a zip: open it to choose a file in it" : "a folder");
         } else {
             info.setText(" ");
@@ -446,7 +461,7 @@ final class FileNavigator extends JPanel {
             if (n.item.isFile() && n.item.size() >= 0) {
                 String dim = sel ? "" : " style='color:#858b94'";
                 setText("<html>" + esc(n.item.name()) + "&nbsp;&nbsp;<span" + dim + ">"
-                        + MainFrame.humanBytes(n.item.size()) + "</span></html>");
+                        + bytes(n.item.size()) + "</span></html>");
             }
             return this;
         }
