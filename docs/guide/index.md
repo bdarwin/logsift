@@ -24,6 +24,7 @@ New to Logsift? Start with [Opening logs](opening-logs.md) and [The log view](lo
 | [Profile](profile.md) | What each column of a table (a CSV file) holds, with a chart per column; filtering by a click |
 | [Exceptions](exceptions.md) | Exceptions grouped by root cause, the stack, opening your source code |
 | [Requests](requests.md) | Following one request through a log, all open logs or a folder |
+| [Compare files](diff.md) | Two CSV or TSV files as tables: rows matched by a key whatever their order, changed values as old → new |
 | [Compare and merge](compare.md) | A bad run against a good one; several logs merged by time |
 | [Folder search](folder-search.md) | Searching every file in a folder, inside zips and `.gz` files too |
 

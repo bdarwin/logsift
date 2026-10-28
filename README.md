@@ -28,6 +28,7 @@
 - **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files, and zips inside zips.
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
+- **Compare CSV files by key.** Two exports of the same table, in any row order: pick the key columns (one is suggested), and see what was added, removed and changed, value by value (old → new), with changes per column, numbers within a tolerance, and an export of the differences. A million rows compare in seconds.
 - **Java threads (and Python's).** Open thread dumps (jstack, jcmd, or `kill -3` output inside a log; `py-spy dump` and `faulthandler` for Python), or attach to a running JVM on your computer, on a server over SSH, or through its JMX port. Logsift points out deadlocks, threads queueing for a lock, stuck and busy threads and full thread pools, and shows each thread over time.
 - **Safe around production.** Every action that reaches a running JVM says what it costs the service before it runs (a stop, a full GC, CPU, disk, network), and Logsift never removes files on a server. See [What Logsift does to a running service](#what-logsift-does-to-a-running-service).
 - **A log knows its JVM.** Open a log and Logsift names the JVM writing it, with its threads, profile and heap a click away. Right-click a line to see its thread's stack; from a thread, show only its lines.
@@ -134,7 +135,8 @@ Make a test log:
 | Search in a folder | Ctrl+Shift+F (⇧⌘F on macOS) |
 | Merge logs by time | Ctrl+Shift+M |
 | Open a remote log (SFTP) | Ctrl+Shift+O |
-| Compare with another log | Ctrl+Shift+D |
+| Compare logs by message | Ctrl+Shift+D |
+| Next / previous difference in a comparison | F7 / Shift+F7 |
 | Columns view | Ctrl+Shift+K |
 | Export lines shown by filters | Ctrl+Shift+E |
 | Go to line | Ctrl+L |
@@ -472,9 +474,13 @@ The **Messages** tab (next to Filters) groups the log's lines into kinds of mess
 - **Lines shown by filters** counts only the lines your filters and time range show.
 - It is fast: 1.56 million entries are grouped in about 0.25 s.
 
+## Compare two CSV files
+
+**File → Compare Files…** (or **Compare** on a folder's tab with two files selected, or the compare button in a CSV tab's bar) compares two CSV or TSV files as tables. Rows are matched by a **key**, so row order doesn't matter: Logsift suggests one (a column, or two or three together, that is unique and filled in in both files, preferring names like *id* and *…_id*), and you can pick others. Columns are matched by name; a column only one file has is mentioned once. Tiles count what was **added**, **removed**, **changed** and the same, and **duplicate keys**, which are listed, never matched. **Changes per column** says which columns changed most; a changed value shows as old → new. Options: trim spaces, ignore case, numbers as numbers within a tolerance (absolute or %), empty = missing. F7 goes to the next difference, a double-click opens the row in its file, and **Export** writes the differences as CSV. Drop a file on a side to compare another one. See [Compare files](docs/guide/diff.md).
+
 ## Compare two logs
 
-**File → Compare With…** (Ctrl+Shift+D) compares the current log with a baseline, for example the log of a run that went well. Comparing line by line is useless for logs (every timestamp differs), so Logsift compares **kinds of messages** (as in the Messages tab): what is **new** in this log, what is **gone**, and what happens much **more** or **less** often, with counts scaled to the logs' lengths. New errors come first. Double-click a row to find all its lines in the log that has them.
+**File → Compare Logs by Message…** (Ctrl+Shift+D) compares the current log with a baseline, for example the log of a run that went well. Comparing line by line is useless for logs (every timestamp differs), so Logsift compares **kinds of messages** (as in the Messages tab): what is **new** in this log, what is **gone**, and what happens much **more** or **less** often, with counts scaled to the logs' lengths. New errors come first. Double-click a row to find all its lines in the log that has them.
 
 ## Highlight bar
 
@@ -595,6 +601,12 @@ logsift.core   (no UI code; could later back a VS Code extension or a CLI)
   LogFormat       columns (regex with named groups, JSON fields, or CSV); ColumnStats counts values
   LogMerger       merges logs by time; Encoding / Utf16Mirror; RemoteMirror (SFTP)
   LineExporter    copies chosen lines' original bytes to a file
+logsift.core.diff (comparing files)
+  SequenceDiff    lines up two sequences of hashes (patience anchors, then Myers) into Edits
+  TableDiff       CSV files by key (a hash join on two 64-bit key hashes) or in file order
+  CsvFile         a CSV file's rows streamed; only where each row is, kept; rows read again when shown
+  KeySuggester    columns unique and filled in in both files, id-like names first
+  DiffStatus, ChangeNavigator, DiffOptions: shared by every kind of comparison
 logsift.jvm     (thread dumps and running JVMs)
   DumpParser      jstack / jcmd / kill -3 text (also inside logs), dump_to_file plain and JSON
   ThreadAnalysis  deadlocks (cycles of lock waits), lock queues, stuck and busy threads, pools
@@ -623,7 +635,7 @@ logsift.ui
   FilterPanel     the filter rows, formula field and All lines / Matching only switch
   OverviewBar     highlight bar beside the scrollbar (errors, warnings, filters, hits)
   FolderSearchTab folder search form and results grouped by file
-  TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, ColumnLayout ...
+  TimelineBar, MessagesPanel, BookmarksPanel, DetailsPanel, CompareTab, CsvCompareTab, ColumnLayout ...
   ThreadsTab, ThreadTimeline, ProfileTab, FlameGraph, HeapTab, HeapDumpTab, GcTab, GcChart, JvmDialog, JvmBar
   MainFrame       window, menus, status bar, drag & drop
 logsift.tools

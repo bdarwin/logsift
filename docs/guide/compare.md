@@ -8,7 +8,7 @@ description: Comparing a log with a baseline by kind of message, and merging sev
 
 ## Compare two logs
 
-**File → Compare With…** (Ctrl+Shift+D, ⇧⌘D on macOS) compares the current log with a **baseline**: another open log, for example of a run that went well. Open both logs first.
+**File → Compare Logs by Message…** (Ctrl+Shift+D, ⇧⌘D on macOS) compares the current log with a **baseline**: another open log, for example of a run that went well. Open both logs first. (To compare two CSV files row by row, see [Compare files](diff.md).)
 
 ![Comparing a bad run with a good one: new, more frequent and missing messages](../screenshots/compare.png)
 
