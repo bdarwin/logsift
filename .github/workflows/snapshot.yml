@@ -174,8 +174,8 @@ jobs:
               *)
                 grep -q 'UseZGC' "$c" || { echo "no ZGC in $c"; exit 1; } ;;
             esac
-          done < <(find pkg -name '*.cfg' -path '*app*')
-          [ "$n" -ge 2 ] || { echo "expected the Logsift and logsift-mcp launchers, found $n"; exit 1; }
+          done < <(find pkg \( -name 'Logsift.cfg' -o -name 'logsift-mcp.cfg' \)) # the launchers, not Java's own jvm.cfg
+          [ "$n" -eq 2 ] || { echo "expected the Logsift and logsift-mcp launchers, found $n"; exit 1; }
           # the zip that runs on any Java: its .bat scripts are for Windows too
           for b in build/install/logsift/bin/*.bat; do
             if grep -q 'UseZGC' "$b"; then echo "ZGC in $b"; exit 1; fi
