@@ -343,7 +343,8 @@ class McpServerTest {
 
         // a file in a zip opens too
         Answer open = ok("open_log", "path", sub.resolve("rotated.zip").resolve("app/orders-1.log").toString());
-        assertTrue(open.text().contains("rotated.zip/app/orders-1.log"), open.text());
+        // shown with this system's separators (rotated.zip\app\orders-1.log on Windows)
+        assertTrue(open.text().contains(Path.of("rotated.zip", "app", "orders-1.log").toString()), open.text());
         assertTrue(ok("search", "log", "log:1", "query", "Pricing failed").text().startsWith("9 lines match"));
     }
 
