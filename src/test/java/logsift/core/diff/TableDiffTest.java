@@ -327,7 +327,7 @@ class TableDiffTest {
                 + "removed,4,,3,plum,,3,\n", w.toString());
         String s = r.summary();
         assertTrue(s.contains("Compared a.csv (3 rows) with b.csv (3 rows), by key id."), s);
-        assertTrue(s.contains("Added: 1   Removed: 1   Changed: 1   Same: 1   Duplicate keys: 0"), s);
+        assertTrue(s.contains("Added: 1   Removed: 1   Changed: 1   Same: 1   Key repeats: 0"), s);
         assertTrue(s.contains("Changes per column: price: 1"), s);
     }
 

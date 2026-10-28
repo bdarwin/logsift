@@ -111,7 +111,7 @@ final class CsvCompareTab extends JPanel {
         }
     }
 
-    private static final String[] SHOW = {"All differences", "Changed", "Added", "Removed", "Duplicate keys",
+    private static final String[] SHOW = {"All differences", "Changed", "Added", "Removed", "Key repeats",
         "Same", "Everything"};
 
     private final Host host;
@@ -298,7 +298,7 @@ final class CsvCompareTab extends JPanel {
         tiles[1] = new Tile(DiffStatus.REMOVED, "removed (only left)", new Color(0xDC2626), 3);
         tiles[2] = new Tile(DiffStatus.CHANGED, "changed", new Color(0xD97706), 1);
         tiles[3] = new Tile(DiffStatus.SAME, "same", new Color(0x9CA3AF), 5);
-        tiles[4] = new Tile(DiffStatus.DUPLICATE, "duplicate keys", new Color(0x8B5CF6), 4);
+        tiles[4] = new Tile(DiffStatus.DUPLICATE, "key repeats", new Color(0x8B5CF6), 4);
         for (Tile t : tiles) {
             tileRow.add(t);
         }
@@ -568,13 +568,56 @@ final class CsvCompareTab extends JPanel {
                 return;
             }
             if (status == DiffStatus.DUPLICATE) {
+                // only a key can repeat: without one (rows in file order) the tile isn't shown
+                setVisible(!r.spec().keys().isEmpty());
                 big.setText(String.format(Locale.ROOT, "%,d", r.duplicateKeys()));
                 small.setText(status.symbol() + " " + label + (r.count(status) > 0
                         ? String.format(Locale.ROOT, " · %,d rows", r.count(status)) : ""));
+                setToolTipText(repeatsTip(r));
             } else {
                 big.setText(String.format(Locale.ROOT, "%,d", r.count(status)));
             }
         }
+    }
+
+    /**
+     * What the key-repeats tile means, with an example from these files: "SKU-7 is on 2 rows of
+     * stock.csv and 1 of stock-today.csv".
+     */
+    String repeatsTip(TableDiffResult r) {
+        String keyNames = String.join(" + ", r.spec().keys().stream().map(p -> r.columns().name(p)).toList());
+        StringBuilder b = new StringBuilder("<html>A key value that is on more than one row of a file: those rows can't be"
+                + " paired one to one,<br>so they are listed (never paired at random) and not compared.");
+        int[] items = r.filter(EnumSet.of(DiffStatus.DUPLICATE), -1);
+        if (items.length > 0) {
+            String key = r.keyText(items[0]);
+            int left = 0;
+            int right = 0;
+            for (int i : items) {
+                if (r.keyText(i).equals(key)) {
+                    left += r.leftRow(i) >= 0 ? 1 : 0;
+                    right += r.rightRow(i) >= 0 ? 1 : 0;
+                }
+            }
+            b.append("<br><br>For example, ").append(keyNames).append(" <b>").append(esc(key)).append("</b> is on ")
+                    .append(left).append(left == 1 ? " row" : " rows").append(" of ").append(esc(sides[0].name()))
+                    .append(" and ").append(right).append(right == 1 ? " row" : " rows").append(" of ")
+                    .append(esc(sides[1].name())).append('.');
+        }
+        b.append("<br><br>Usually the key isn't unique: tick another key column too (Choose ▾ next to Keys)"
+                + "<br>to tell the rows apart. Or a file has a row twice, say exported twice.");
+        if (items.length == 0) {
+            b.append("<br><br>None here: every ").append(esc(keyNames)).append(" is on one row in each file.");
+        }
+        return b.append("<br>Click to show only these rows.</html>").toString();
+    }
+
+    String repeatsTipForTest() {
+        return tiles[4].getToolTipText();
+    }
+
+    boolean repeatsTileShownForTest() {
+        return tiles[4].isVisible();
     }
 
     // ---------------------------------------------------------------- the files and keys
@@ -707,9 +750,10 @@ final class CsvCompareTab extends JPanel {
             none.setToolTipText("Without keys, rows are lined up in file order");
             keyChips.add(none);
         }
-        JButton add = new JButton("+ Key ▾");
-        add.setToolTipText("Add a key column (several make a key together)");
-        add.addActionListener(e -> addKeyMenu(add));
+        JButton add = new JButton("Choose ▾");
+        add.setToolTipText("Tick the key columns (several make a key together)");
+        add.addActionListener(e -> keyPicker(add));
+        keysButton = add;
         keyChips.add(add);
         if (!suggested.isEmpty() && !suggested.equals(keys)) {
             String names = String.join(" + ", suggested.stream().map(i -> files[0].header().get(i)).toList());
@@ -744,7 +788,7 @@ final class CsvCompareTab extends JPanel {
         showIgnored();
     }
 
-    /** "Not compared:" the columns left out, each with ✕, and + Leave Out ▾. */
+    /** "Not compared:" the columns left out, each with ✕, and Choose ▾ (a list to tick). */
     private void showIgnored() {
         ignoreChips.removeAll();
         JLabel l = new JLabel("Not compared:");
@@ -771,44 +815,13 @@ final class CsvCompareTab extends JPanel {
             none.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
             ignoreChips.add(none);
         }
-        JButton add = new JButton("+ Leave Out ▾");
-        add.setToolTipText("Leave a column out of the comparison");
-        add.addActionListener(e -> ignoreMenu(add));
+        JButton add = new JButton("Choose ▾");
+        add.setToolTipText("Tick the columns to leave out of the comparison");
+        add.addActionListener(e -> leaveOutPicker(add));
+        leaveOutButton = add;
         ignoreChips.add(add);
         ignoreChips.revalidate();
         ignoreChips.repaint();
-    }
-
-    private void ignoreMenu(JButton from) {
-        List<Integer> options = new ArrayList<>();
-        for (ColumnMap.Pair p : map.pairs()) {
-            if (!keys.contains(p.left()) && !ignored.contains(p.left())) {
-                options.add(p.left());
-            }
-        }
-        if (options.isEmpty()) {
-            return;
-        }
-        if (options.size() <= 25) {
-            JPopupMenu m = new JPopupMenu();
-            for (int c : options) {
-                JMenuItem it = new JMenuItem(map.name(map.pairOfLeft(c)));
-                it.addActionListener(e -> ignoreColumn(c));
-                m.add(it);
-            }
-            m.show(from, 0, from.getHeight());
-            return;
-        }
-        JList<String> list = new JList<>(options.stream().map(c -> map.name(map.pairOfLeft(c))).toArray(String[]::new));
-        list.setVisibleRowCount(16);
-        if (JOptionPane.showConfirmDialog(this, new JScrollPane(list), "Leave a Column Out", JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION) {
-            for (int i : list.getSelectedIndices()) {
-                ignored.add(options.get(i));
-            }
-            showIgnored();
-            runCompare();
-        }
     }
 
     private void ignoreColumn(int leftColumn) {
@@ -886,41 +899,74 @@ final class CsvCompareTab extends JPanel {
         }
     }
 
-    private void addKeyMenu(JButton from) {
-        List<Integer> options = new ArrayList<>();
+    /** The paired columns (left index), in the left file's order. */
+    private List<Integer> pairedColumns() {
+        List<Integer> out = new ArrayList<>();
         for (ColumnMap.Pair p : map.pairs()) {
-            if (!keys.contains(p.left())) {
-                options.add(p.left());
-            }
+            out.add(p.left());
         }
-        if (options.isEmpty()) {
-            return;
-        }
-        if (options.size() <= 25) {
-            JPopupMenu m = new JPopupMenu();
-            for (int c : options) {
-                JMenuItem it = new JMenuItem(files[0].header().get(c));
-                it.addActionListener(e -> addKey(c));
-                m.add(it);
-            }
-            m.show(from, 0, from.getHeight());
-            return;
-        }
-        JList<String> list = new JList<>(options.stream().map(c -> files[0].header().get(c)).toArray(String[]::new));
-        list.setVisibleRowCount(16);
-        if (JOptionPane.showConfirmDialog(this, new JScrollPane(list), "Add a Key Column", JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION && list.getSelectedIndex() >= 0) {
-            addKey(options.get(list.getSelectedIndex()));
-        }
+        out.sort(null);
+        return out;
     }
 
-    private void addKey(int leftColumn) {
-        if (!keys.contains(leftColumn)) {
-            keys.add(leftColumn);
-            ignored.remove(leftColumn);
-            showKeys();
-            runCompare();
+    /** Keys ▾: tick the key columns; the comparison runs again when the list closes. */
+    private ColumnPicker keyPicker(JButton from) {
+        List<Integer> cols = pairedColumns();
+        List<Integer> now = new ArrayList<>();
+        for (int k : keys) {
+            if (cols.contains(k)) {
+                now.add(cols.indexOf(k));
+            }
         }
+        ColumnPicker p = new ColumnPicker("Key columns", "Several ticked make a key together",
+                cols.stream().map(c -> map.name(map.pairOfLeft(c))).toList(), now, got -> {
+                    keys.clear();
+                    for (int i : got) {
+                        keys.add(cols.get(i));
+                        ignored.remove(cols.get(i));
+                    }
+                    showKeys();
+                    runCompare();
+                });
+        lastPicker = p;
+        p.show(from);
+        return p;
+    }
+
+    /** Not compared ▾: tick the columns to leave out; the comparison runs again when the list closes. */
+    private ColumnPicker leaveOutPicker(JButton from) {
+        List<Integer> cols = new ArrayList<>(pairedColumns());
+        cols.removeIf(keys::contains);
+        List<Integer> now = new ArrayList<>();
+        for (int i = 0; i < cols.size(); i++) {
+            if (ignored.contains(cols.get(i))) {
+                now.add(i);
+            }
+        }
+        ColumnPicker p = new ColumnPicker("Leave out of the comparison", "Still shown, in gray",
+                cols.stream().map(c -> map.name(map.pairOfLeft(c))).toList(), now, got -> {
+                    ignored.clear();
+                    for (int i : got) {
+                        ignored.add(cols.get(i));
+                    }
+                    showIgnored();
+                    runCompare();
+                });
+        lastPicker = p;
+        p.show(from);
+        return p;
+    }
+
+    private JButton keysButton;
+    private JButton leaveOutButton;
+    private ColumnPicker lastPicker;
+
+    ColumnPicker openKeyPickerForTest() {
+        return keyPicker(keysButton);
+    }
+
+    ColumnPicker openLeaveOutPickerForTest() {
+        return leaveOutPicker(leaveOutButton);
     }
 
     /** Settings changed since the last comparison. */
@@ -1401,7 +1447,7 @@ final class CsvCompareTab extends JPanel {
         List<String> rightOnly = map.rightOnly().stream().map(rn::get).toList();
         JPanel p = new JPanel(new BorderLayout(0, 8));
         p.add(new JLabel("<html>Columns are matched by name (case and spaces don't count). Pick another right column to"
-                + "<br>compare a column with. (To leave a column out, use + Leave Out under the keys.)</html>"),
+                + "<br>compare a column with. (To leave a column out: Choose ▾ next to Not compared.)</html>"),
                 BorderLayout.NORTH);
         JScrollPane sp = new JScrollPane(t);
         sp.setPreferredSize(new Dimension(560, Math.min(420, 60 + ln.size() * t.getRowHeight())));
@@ -1905,7 +1951,7 @@ final class CsvCompareTab extends JPanel {
         if (r == null) {
             return status.getText();
         }
-        return String.format(Locale.ROOT, "%,d added · %,d removed · %,d changed · %,d same · %,d duplicate keys",
+        return String.format(Locale.ROOT, "%,d added · %,d removed · %,d changed · %,d same · %,d key repeats",
                 r.count(DiffStatus.ADDED), r.count(DiffStatus.REMOVED), r.count(DiffStatus.CHANGED),
                 r.count(DiffStatus.SAME), r.duplicateKeys());
     }
@@ -2020,7 +2066,7 @@ final class CsvCompareTab extends JPanel {
         return out;
     }
 
-    /** + Leave Out ▾ → a column. */
+    /** Leaves a column out, as ticking it in the list does. */
     void leaveOutForTest(String name) {
         ignoreColumn(files[0].header().indexOf(name));
     }

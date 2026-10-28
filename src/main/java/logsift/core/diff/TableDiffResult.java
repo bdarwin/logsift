@@ -405,7 +405,7 @@ public final class TableDiffResult {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format(Locale.ROOT, "Compared %s (%,d rows) with %s (%,d rows), %s.%n", left.name(),
                 leftRows(), right.name(), rightRows(), matchedBy()));
-        sb.append(String.format(Locale.ROOT, "Added: %,d   Removed: %,d   Changed: %,d   Same: %,d   Duplicate keys: %,d%n",
+        sb.append(String.format(Locale.ROOT, "Added: %,d   Removed: %,d   Changed: %,d   Same: %,d   Key repeats: %,d%n",
                 count(DiffStatus.ADDED), count(DiffStatus.REMOVED), count(DiffStatus.CHANGED), count(DiffStatus.SAME),
                 duplicateKeys));
         Map<Integer, Integer> per = changesPerColumn();

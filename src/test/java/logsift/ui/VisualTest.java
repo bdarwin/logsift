@@ -6028,9 +6028,31 @@ class VisualTest {
         assertTrue(onEdt(tab::suggestionForTest).startsWith("Suggested: order_id — unique and filled in"),
                 onEdt(tab::suggestionForTest));
         assertEquals("Use order_id as Key", onEdt(() -> tab.useSuggestedForTest().getText()));
+        assertFalse(onEdt(tab::repeatsTileShownForTest), "no key: no key can repeat, no tile");
         settle();
         shot("106g-csv-compare-suggested-key");
+        // a key that isn't unique: its repeats are explained with an example from the files
+        onEdt(() -> {
+            tab.setKeysForTest(List.of("customer"));
+            return null;
+        });
+        logsift.core.diff.TableDiffResult byOrder = onEdt(tab::result);
+        onEdt(() -> {
+            tab.runCompare();
+            return null;
+        });
+        waitForNewResult(tab, byOrder, "comparing by customer");
+        assertTrue(onEdt(tab::repeatsTileShownForTest));
+        assertTrue(onEdt(tab::result).duplicateKeys() > 0);
+        String tip = onEdt(tab::repeatsTipForTest);
+        assertTrue(tip.matches("(?s).*For example, customer <b>customer \\d+</b> is on \\d+ rows of orders-monday.csv and \\d+ rows?"
+                + " of orders-tuesday.csv.*"), tip);
+        assertTrue(tip.contains("tick another key column too"), tip);
+        assertTrue(onEdt(tab::statusText).contains(" key repeats"), onEdt(tab::statusText));
+        settle();
+        shot("106h-csv-compare-key-repeats");
         useSuggestedKey(tab);
+        assertTrue(onEdt(tab::repeatsTipForTest).contains("None here: every order_id is on one row in each file"));
         assertEquals(List.of("order_id"), onEdt(tab::keysForTest), "one click: the suggested key");
         assertNull(onEdt(tab::useSuggestedForTest), "the suggestion is in use: no button");
         assertEquals("Compare: orders-monday.csv ↔ orders-tuesday.csv", onEdt(tab::title));
@@ -6417,8 +6439,32 @@ class VisualTest {
         shot("107b-compare-tab-results");
 
         // + Leave Out: a column's changes don't count; it is still shown, gray, at the end
+        // the keys' list: right below its button, with what is ticked, and a filter
+        ColumnPicker keyList = onEdt(tab::openKeyPickerForTest);
+        assertTrue(onEdt(keyList::isShowingForTest));
+        assertEquals(List.of("sku", "name", "stock"), onEdt(keyList::shownForTest));
         onEdt(() -> {
-            tab.leaveOutForTest("stock");
+            keyList.closeForTest();
+            return null;
+        });
+        assertTrue(onEdt(tab::result) == r, "nothing changed: not compared again");
+        // the list of columns to leave out: filter, Enter ticks the match, closing compares
+        ColumnPicker outList = onEdt(tab::openLeaveOutPickerForTest);
+        assertEquals(List.of("name", "stock"), onEdt(outList::shownForTest), "keys can't be left out");
+        onEdt(() -> {
+            outList.setFilterForTest("sto");
+            return null;
+        });
+        assertEquals(List.of("stock"), onEdt(outList::shownForTest));
+        onEdt(() -> {
+            outList.enterForTest();
+            return null;
+        });
+        settle();
+        shotOf(onEdt(outList::popupForTest), "107h-compare-leave-out-list");
+        assertTrue(onEdt(tab::result) == r, "not compared while the list is open");
+        onEdt(() -> {
+            outList.closeForTest();
             return null;
         });
         waitForNewResult(tab, r, "comparing without stock");

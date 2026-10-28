@@ -13,8 +13,8 @@ public enum DiffStatus {
     ADDED("added", "+"),
     /** Only on the left (the older side). */
     REMOVED("removed", "−"),
-    /** Its key is in a file more than once: listed on its own, never matched. */
-    DUPLICATE("duplicate key", "‼");
+    /** Its key is on more than one row of a file: listed on its own, never paired at random. */
+    DUPLICATE("key repeats", "‼");
 
     private final String label;
     private final String symbol;

@@ -37,15 +37,15 @@ A key is what makes a row the same row in both files: an order number, a user ID
 
 - **No key at first:** a comparison starts without a key, with rows lined up in file order (see *No key* below), so nothing is chosen for you.
 - **Suggested key:** Logsift looks for a column, or two or three together, whose values are filled in and different on every row of both files (the first 20,000 rows of big files), and prefers names like *id*, *key*, *…_id* and *code*. **Use order_id as Key**, next to the keys, uses it in one click; hover it for why (*Suggested: order_id — unique and filled in on every row of both files*). Once in use, *✓ suggested* follows the key.
-- **Change it:** ✕ on a key removes it, **+ Key ▾** adds a column (several make a key together). Each change compares again at once. The keys you chose stay when you drop or swap files, if the new files have those columns.
+- **Change it:** ✕ on a key removes it. **Choose ▾** next to the keys opens a list of the columns right below it: tick the key columns (several make a key together), type in **filter columns** to find one in a wide file (Enter ticks the first match), **Clear** unticks them all. When the list closes (click outside or press Escape), it compares again, once. The keys you chose stay when you drop or swap files, if the new files have those columns.
 - **No key:** rows are lined up in file order, as a text diff lines up lines: equal rows match, a row changed in place shows as changed, and rows added or removed in between show as such. **Ignore row order** instead matches equal rows wherever they are (only whole rows: nothing is "changed").
-- **Duplicate keys:** a key found more than once in a file can't be matched. All its rows, in both files, are listed as **duplicate key**, never matched to one at random.
+- **Key repeats:** a key value on more than one row of a file (*ORD-7* twice) can't be paired one to one, so all its rows, in both files, are listed as **‼ key repeats** and not compared, never paired at random. Usually it means the key isn't unique: tick another key column too, to tell the rows apart. Or a file has a row twice (exported twice). Hover the tile for an example from your files. Without a key, nothing can repeat and the tile isn't shown.
 
 ## Columns
 
 Columns are matched **by name**, whatever their case or the spaces around them (*Price* and *price *). A column only one file has is said once above the table (*Column region only in the right file*), not as a change on every row.
 
-- **Leave a column out:** on the keys' row, under the right file, **Not compared:** lists the columns left out of the comparison. **+ Leave Out ▾** adds one, for example a *last updated* column that always differs, and ✕ compares it again. Each change compares again at once. A column left out doesn't make a row changed; it is still shown at the end of the table, in gray, as *(not compared)*.
+- **Leave a column out:** on the keys' row, under the right file, **Not compared:** lists the columns left out of the comparison. **Choose ▾** next to it opens the same kind of list, with a filter: tick the columns to leave out, for example a *last updated* column that always differs. ✕ on one compares it again. It compares again when the list closes. A column left out doesn't make a row changed; it is still shown at the end of the table, in gray, as *(not compared)*.
 - **Columns ▾** (above the table) only changes what the table **shows**: untick a column to hide it (it is still compared), **Show All Columns** to bring them back. **Pair Columns by Hand…** compares a column with one of another name (*cost* in the left file with *price* in the right).
 
 ## Options
@@ -70,7 +70,7 @@ After changing options, **Compare** in the options' row stands out in the accent
 | **− removed (only left)** | <span class="sw" style="background:#DC2626"></span> red | A key only in the left file |
 | **≠ changed** | <span class="sw" style="background:#D97706"></span> amber | The same key with different values |
 | **= same** | <span class="sw" style="background:#9CA3AF"></span> gray | The same key, the same values: unchanged rows |
-| **‼ duplicate keys** | <span class="sw" style="background:#8B5CF6"></span> purple | Keys found more than once in a file (and how many rows have them) |
+| **‼ key repeats** | <span class="sw" style="background:#8B5CF6"></span> purple | Key values on more than one row of a file (and how many rows have them): not paired, not compared. Shown only with a key |
 
 **Changes per column**, on the left, says how many rows changed in each column (*price: 1,204 rows*), most first. Click one to show only those rows; **All columns** shows them all again.
 
@@ -82,8 +82,8 @@ After changing options, **Compare** in the options' row stands out in the accent
 **The table** (unified) has a row per key: its **Status** (the symbol and the word, in the tile's colour), **Line (left → right)** in each file, the key columns (*(key)* after their name) and the compared columns.
 
 - A **changed value** shows as <span style="color:#B91C1C"><s>old</s></span> → <span style="color:#15803D">**new**</span>: the old value struck through in red, the new one in bold green, on a light amber cell (in dark mode lighter red <span class="sw" style="background:#F87171"></span>, green <span class="sw" style="background:#4ADE80"></span> and a dark amber cell). Hover a value for both in full. A line break in a value shows as ⏎.
-- **Added** rows are on a light green background with green values, **removed** rows on a light red one with red values, **duplicate key** rows on a light purple one.
-- **Show** picks the rows: *All differences* (the default: everything but the same rows), *Changed*, *Added*, *Removed*, *Duplicate keys*, *Same* (only the unchanged rows), *Everything* (all rows, the same ones too). **search in results** keeps the rows with that text in a value (any case).
+- **Added** rows are on a light green background with green values, **removed** rows on a light red one with red values, **key repeats** rows on a light purple one.
+- **Show** picks the rows: *All differences* (the default: everything but the same rows), *Changed*, *Added*, *Removed*, *Key repeats*, *Same* (only the unchanged rows), *Everything* (all rows, the same ones too). **search in results** keeps the rows with that text in a value (any case).
 - **▲ ▼** (Shift+F7 / F7) go to the previous and next difference; it says *difference 3 of 120*.
 - **Double-click** a row to open its line in the right file (the left one for a removed row). Right-click for either file.
 
@@ -98,7 +98,7 @@ After changing options, **Compare** in the options' row stands out in the accent
 ## Limits
 
 - Big files are fine: only each row's place in the file and a few hashes are kept in memory, and rows are read again when shown. Two files of a million rows each compare in a few seconds, with about 50 MB of memory kept.
-- The key suggestion looks at the first 20,000 rows of each file. A key that repeats later shows up as duplicate keys.
+- The key suggestion looks at the first 20,000 rows of each file. A key that repeats later shows up under key repeats.
 - Values are compared as text unless both are numbers; dates are text (*2026-01-02* and *02/01/2026* differ).
 - Without a key, rows changed in place are paired in order within a run of changes; if many rows moved, choose a key.
 - Changing a file while it is compared isn't noticed: compare again.
