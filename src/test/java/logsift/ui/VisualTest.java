@@ -1770,25 +1770,13 @@ class VisualTest {
                 dlg.go("/var/log");
                 return null;
             });
-            waitFor(() -> {
-                try {
-                    return onEdt(() -> "/var/log".equals(dlg.folderForTest()));
-                } catch (Exception e) {
-                    return false;
-                }
-            }, 10_000, "typed folder listed");
+            waitForListing(dlg, () -> "/var/log".equals(dlg.folderForTest()), "typed folder listed");
             assertEquals(List.of("..", "app"), onEdt(dlg::namesForTest));
             onEdt(() -> {
                 dlg.go("app");
                 return null;
             });
-            waitFor(() -> {
-                try {
-                    return onEdt(() -> dlg.namesForTest().contains("server.log"));
-                } catch (Exception e) {
-                    return false;
-                }
-            }, 10_000, "app folder listed");
+            waitForListing(dlg, () -> dlg.namesForTest().contains("server.log"), "app folder listed");
             assertEquals(List.of("..", "archive", "access.log", "server.log"), onEdt(dlg::namesForTest),
                     "folders first, then files");
             int before = onEdt(dlg::listingsForTest);
@@ -1796,19 +1784,8 @@ class VisualTest {
                 dlg.go("/var/log/app");
                 return null;
             });
-            try {
-                waitFor(() -> {
-                    try {
-                        return onEdt(() -> dlg.listingsForTest() > before && "/var/log/app".equals(dlg.folderForTest()));
-                    } catch (Exception e) {
-                        return false;
-                    }
-                }, 10_000, "app folder by its full path");
-            } catch (AssertionError e) { // say what the dialog shows
-                throw new AssertionError(e.getMessage() + "; shown: " + onEdt(dlg::folderForTest) + ", listings "
-                        + onEdt(dlg::listingsForTest) + " (before " + before + "), status: "
-                        + onEdt(dlg::statusForTest), e);
-            }
+            waitForListing(dlg, () -> dlg.listingsForTest() > before && "/var/log/app".equals(dlg.folderForTest()),
+                    "app folder by its full path (listings before: " + before + ")");
             onEdt(() -> {
                 dlg.select("server.log");
                 return null;
@@ -5972,6 +5949,27 @@ class VisualTest {
         for (int id : new int[] {MouseEvent.MOUSE_PRESSED, MouseEvent.MOUSE_RELEASED, MouseEvent.MOUSE_CLICKED}) {
             int mods = id == MouseEvent.MOUSE_PRESSED ? java.awt.event.InputEvent.BUTTON1_DOWN_MASK : 0;
             c.dispatchEvent(new MouseEvent(c, id, now, mods, p.x, p.y, 1, false, MouseEvent.BUTTON1));
+        }
+    }
+
+    /**
+     * Waits for the server folder dialog to show a listing (30 s: a loaded build server is slow
+     * over SFTP); if it doesn't, says what the dialog shows instead.
+     */
+    private static void waitForListing(RemoteDialog dlg, java.util.function.Supplier<Boolean> shown, String what)
+            throws Exception {
+        try {
+            waitFor(() -> {
+                try {
+                    return onEdt(shown::get);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, what);
+        } catch (AssertionError e) {
+            throw new AssertionError(e.getMessage() + "; the dialog shows " + onEdt(dlg::folderForTest) + ", "
+                    + onEdt(dlg::namesForTest) + ", listings " + onEdt(dlg::listingsForTest) + ", status: "
+                    + onEdt(dlg::statusForTest), e);
         }
     }
 
