@@ -44,12 +44,24 @@ public final class Numbers {
         }
     }
 
+    /** Where a measurement comes from. */
+    public enum Source {
+        /** A number in a kind of message. */
+        MESSAGE,
+        /** A column of numbers. */
+        COLUMN,
+        /** How many rows have one value of a column, per stretch of time. */
+        ROWS
+    }
+
     /**
      * One measurement over time. {@code name}: the message with the measured part as {@code #}
-     * ("order … placed in # ms"); points sorted by line, at most {@link #MAX_POINTS}.
+     * ("order … placed in # ms"), or a column ("duration_ms", "Host = web-1"); points sorted by
+     * line, at most {@link #MAX_POINTS}. {@code how}: a few words on what it is ("rows per minute"),
+     * or "".
      */
     public record Series(String name, MessageStats.Template template, int column, Unit unit, long[] lines,
-                         long[] times, double[] values, long count) {
+                         long[] times, double[] values, long count, Source source, String how) {
         public int size() {
             return values.length;
         }
@@ -255,7 +267,7 @@ public final class Numbers {
                 continue; // mostly not numbers
             }
             out.add(new Series(name(parts, col[0]), t, col[0], unit[0], Arrays.copyOf(ls, k), Arrays.copyOf(ts, k),
-                    Arrays.copyOf(vs, k), all.length));
+                    Arrays.copyOf(vs, k), all.length, Source.MESSAGE, ""));
         }
         return out;
     }
@@ -270,6 +282,18 @@ public final class Numbers {
             sb.append(parts[i]);
         }
         return Insights.display(sb.toString());
+    }
+
+    /** Whether the values (nearly) only go up: a row number, an offset, a clock, not a measurement. */
+    static boolean mostlyRising(Series s) {
+        double[] v = s.values();
+        int rising = 0;
+        for (int i = 1; i < v.length; i++) {
+            if (v[i] >= v[i - 1]) {
+                rising++;
+            }
+        }
+        return v.length > 1 && rising >= (v.length - 1) * 0.9;
     }
 
     /** Times when a measurement was far above usual (at least 3× its median, for a while). */

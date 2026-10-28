@@ -119,7 +119,11 @@ public final class Insights {
         if (timed) {
             List<Numbers.Spike> spikes = new ArrayList<>();
             for (Numbers.Series s : m.numbers()) {
-                spikes.addAll(Numbers.spikes(s));
+                // busy times are the timeline's business; a column that only goes up is no measurement
+                if (s.source() == Numbers.Source.MESSAGE
+                        || s.source() == Numbers.Source.COLUMN && !Numbers.mostlyRising(s)) {
+                    spikes.addAll(Numbers.spikes(s));
+                }
             }
             spikes.sort(Comparator.comparingDouble((Numbers.Spike x) -> x.median() / x.usual()).reversed());
             for (Numbers.Spike sp : spikes.subList(0, Math.min(2, spikes.size()))) {

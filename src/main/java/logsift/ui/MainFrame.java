@@ -59,8 +59,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final JPanel center = new JPanel(new CardLayout());
     private final JLabel status = new JLabel(" ");
     private final JLabel statusRight = new JLabel(" ");
-    private final javax.swing.JButton formatButton = new javax.swing.JButton();
-    private javax.swing.JPopupMenu formatPopup;
     private final JButton updateButton = new JButton();
     /** What the window shows with nothing open. */
     private final StartPage.Host startHost = new StartPage.Host() {
@@ -394,7 +392,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         Path abs = path.toAbsolutePath().normalize();
         for (int i = 0; i < tabs.getTabCount(); i++) {
             if (tabs.getComponentAt(i) instanceof LogTab lt && lt.path().equals(abs)) {
-                tabs.setSelectedIndex(i);
+                if (restore.takesSelection(abs)) {
+                    tabs.setSelectedIndex(i);
+                }
                 if (!isOwnCopy(abs)) {
                     AppState.addRecent(abs);
                 }
@@ -427,7 +427,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void openReal(Path read, Path abs, java.nio.charset.Charset forced,
                           java.util.function.Consumer<LogTab> then) {
         if (!opening.add(abs)) {
-            return; // already on its way
+            restore.finished(abs); // already on its way (opened by hand): that open selects it
+            return;
         }
         java.util.concurrent.CompletableFuture<Opened> f = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             try {
@@ -468,6 +469,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             opening.remove(abs);
+            restore.finished(abs);
         }
     }
 
@@ -492,6 +494,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         cancel.addActionListener(e -> {
             cancelled.set(true);
             opening.remove(abs);
+            restore.finished(abs);
             dlg.dispose();
         });
         dlg.setVisible(true);
@@ -526,11 +529,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    /** Files from the last session: if they are gone now, say nothing. */
-    private final java.util.Set<Path> quietOpen = new java.util.HashSet<>();
+    /**
+     * Files from the last session still on their way: if they are gone now, say nothing, and
+     * only the one that was selected takes the selection when it opens.
+     */
+    private final SessionRestore restore = new SessionRestore();
 
     private void showOpenError(Path abs, Throwable e) {
-        if (quietOpen.remove(abs)) {
+        if (restore.finished(abs)) {
             status.setText("Not reopened (missing): " + abs);
             return;
         }
@@ -542,7 +548,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** UTF-16 logs are read through a UTF-8 copy that follows the original. */
     private void openUtf16(Path abs, Path read, java.nio.charset.Charset cs,
                            java.util.function.Consumer<LogTab> then) {
-        ProgressDialog.run(this, "Converting " + abs.getFileName() + " from " + cs.name() + "…",
+        String message = "Converting " + abs.getFileName() + " from " + cs.name() + "…";
+        ProgressDialog.run(this, message,
                 (progress, cancelled) -> {
                     Path dir = Files.createTempDirectory("logsift-utf16-");
                     dir.toFile().deleteOnExit();
@@ -562,10 +569,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         }
                     } catch (IOException e) {
                         mirror.close();
+                        restore.finished(abs);
                         JOptionPane.showMessageDialog(this, "Cannot open " + abs + ":\n" + e.getMessage(),
                                 "Open", JOptionPane.ERROR_MESSAGE);
                     }
-                });
+                }, e -> {
+                    restore.finished(abs);
+                    JOptionPane.showMessageDialog(this, message + " failed: " + e.getMessage(), "Logsift",
+                            JOptionPane.ERROR_MESSAGE);
+                }, () -> restore.finished(abs));
     }
 
     /** Shows a new log tab with the current view settings and the file's remembered state. */
@@ -582,7 +594,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tabs.addTab(tab.title(), tab);
         int idx = tabs.getTabCount() - 1;
         tabs.setToolTipTextAt(idx, abs.toString());
-        tabs.setSelectedIndex(idx);
+        if (restore.takesSelection(abs)) {
+            tabs.setSelectedIndex(idx);
+        }
         if (!isOwnCopy(abs)) {
             logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
             Path dirOf = in != null ? in.zip().getParent() : abs.getParent();
@@ -631,11 +645,41 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             SwingUtilities.getWindowAncestor(list).pack();
         });
         JPanel panel = new JPanel(new BorderLayout(0, 8));
-        panel.add(new JLabel("<html>Merge these logs into one, in time order.<br>"
-                + "Each line gets a label like &lt;node1&gt; showing where it came from.</html>"),
-                BorderLayout.NORTH);
+        JLabel how = new JLabel(" ");
+        panel.add(how, BorderLayout.NORTH);
         panel.add(new javax.swing.JScrollPane(list), BorderLayout.CENTER);
         panel.add(add, BorderLayout.SOUTH);
+        // say what the merge will do, for the files ticked now (reading their first lines)
+        Runnable explain = () -> {
+            List<Path> on = new ArrayList<>();
+            for (javax.swing.JCheckBox b : boxes) {
+                if (b.isSelected()) {
+                    on.add((Path) b.getClientProperty("path"));
+                }
+            }
+            Thread t = new Thread(() -> {
+                String text = mergeExplanation(on);
+                SwingUtilities.invokeLater(() -> {
+                    how.setText(text);
+                    mergeExplanationForTest = text;
+                });
+            }, "logsift-merge-plan");
+            t.setDaemon(true);
+            t.start();
+        };
+        list.addContainerListener(new java.awt.event.ContainerAdapter() {
+            @Override
+            public void componentAdded(java.awt.event.ContainerEvent e) {
+                if (e.getChild() instanceof javax.swing.JCheckBox b) {
+                    b.addActionListener(a -> explain.run());
+                }
+                explain.run();
+            }
+        });
+        for (javax.swing.JCheckBox b : boxes) {
+            b.addActionListener(a -> explain.run());
+        }
+        explain.run();
         panel.setPreferredSize(new Dimension(560, 300));
         if (JOptionPane.showConfirmDialog(this, panel, "Merge Files by Time",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) {
@@ -1806,6 +1850,40 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         t.mainView().focusView();
     }
 
+    volatile String mergeExplanationForTest;
+
+    /** What merging these files does, for the merge dialog (reads their first lines). */
+    static String mergeExplanation(List<Path> files) {
+        String logs = "<html>Merge these logs into one, in time order.<br>"
+                + "Each line gets a label like &lt;node1&gt; showing where it came from.</html>";
+        try {
+            if (files.size() >= 2 && logsift.core.CsvMerger.allCsv(files)) {
+                List<String> labels = logsift.core.LogMerger.labels(files);
+                List<logsift.core.LogMerger.Source> sources = new ArrayList<>();
+                for (int i = 0; i < files.size(); i++) {
+                    sources.add(new logsift.core.LogMerger.Source(files.get(i), labels.get(i)));
+                }
+                logsift.core.CsvMerger.Plan plan = logsift.core.CsvMerger.plan(sources);
+                return "<html>These are CSV files: they become one CSV with " + plan.columns().size()
+                        + " columns (matched by name) and a <b>" + plan.sourceColumn() + "</b> column with each row's file.<br>"
+                        + (plan.order() == logsift.core.CsvMerger.Order.BY_TIME
+                                ? "Every file has times: rows go in time order."
+                                : "Rows go one file after the other, in this order ("
+                                        + String.join(", ", plan.untimed()) + (plan.untimed().size() == 1 ? " has" : " have")
+                                        + " no times).")
+                        + "</html>";
+            }
+            if (logsift.core.CsvMerger.someCsv(files)) {
+                return "<html>Some of these are CSV files and some are logs: they are merged as logs, in time order,"
+                        + "<br>each line labelled like &lt;node1&gt;, so the CSV files won't show as columns."
+                        + "<br>Merge the CSV files on their own to get one CSV.</html>";
+            }
+        } catch (IOException | RuntimeException e) {
+            // not readable now: the merge will say why
+        }
+        return logs;
+    }
+
     /** Merges logs by timestamp into a new tab (in the background, with progress). */
     public void mergeFiles(List<Path> files) {
         List<String> labels = logsift.core.LogMerger.labels(files);
@@ -1820,7 +1898,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         cancel.addActionListener(e -> cancelled.set(true));
         JPanel p = new JPanel(new BorderLayout(8, 8));
         p.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        p.add(new JLabel("Merging " + files.size() + " logs by time…"), BorderLayout.NORTH);
+        p.add(new JLabel("Merging " + files.size() + " files…"), BorderLayout.NORTH);
         p.add(bar, BorderLayout.CENTER);
         p.add(cancel, BorderLayout.EAST);
         dlg.setContentPane(p);
@@ -1829,6 +1907,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         dlg.setVisible(true);
         Thread t = new Thread(() -> {
             try {
+                if (logsift.core.CsvMerger.allCsv(files)) {
+                    mergeCsv(files, sources, dlg, bar, cancelled);
+                    return;
+                }
                 Path dir = Files.createTempDirectory("logsift-merge-");
                 dir.toFile().deleteOnExit();
                 Path out = dir.resolve("merged-" + files.size() + "-logs.log");
@@ -1861,6 +1943,36 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }, "logsift-merge-start");
         t.setDaemon(true);
         t.start();
+    }
+
+    /** CSV files merged into one CSV (on the merge's thread); it opens as a CSV tab. */
+    private void mergeCsv(List<Path> files, List<logsift.core.LogMerger.Source> sources, javax.swing.JDialog dlg,
+                          JProgressBar bar, java.util.concurrent.atomic.AtomicBoolean cancelled) throws IOException {
+        Path dir = Files.createTempDirectory("logsift-merge-");
+        dir.toFile().deleteOnExit();
+        Path out = dir.resolve("merged-" + files.size() + "-files.csv");
+        out.toFile().deleteOnExit();
+        logsift.core.CsvMerger m = logsift.core.CsvMerger.merge(sources, out,
+                f -> SwingUtilities.invokeLater(() -> bar.setValue((int) (f * 1000))), cancelled::get);
+        SwingUtilities.invokeLater(() -> {
+            dlg.dispose();
+            if (cancelled.get()) {
+                m.close();
+                return;
+            }
+            openFile(out, java.nio.charset.StandardCharsets.UTF_8, tab -> {
+                tab.addCloseHook(m::close);
+                int i = tabs.indexOfComponent(tab);
+                tabs.setTitleAt(i, "Merged (" + files.size() + " CSV files)");
+                StringBuilder tip = new StringBuilder("<html>");
+                for (logsift.core.LogMerger.Source s : sources) {
+                    tip.append(s.label()).append(": ").append(s.path()).append("<br>");
+                }
+                tabs.setToolTipTextAt(i, tip.append(m.plan().order() == logsift.core.CsvMerger.Order.BY_TIME
+                        ? "rows in time order" : "rows one file after the other").append("</html>").toString());
+                m.follow(500);
+            });
+        });
     }
 
     /** Opens a new Folder Search tab (folder null = the current file's folder or the last one). */
@@ -2112,7 +2224,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }, e -> {
             opening.remove(abs);
             showOpenError(abs, e);
-        }, () -> opening.remove(abs));
+        }, () -> {
+            opening.remove(abs);
+            restore.finished(abs);
+        });
     }
 
     private UrlDialog urlDialog;
@@ -2271,26 +2386,18 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** Opens the files that were open last time (each with its filters and position). */
     public void restoreSession() {
         AppState.Session s = AppState.lastSession();
-        java.util.function.Consumer<LogTab> select = t -> SwingUtilities.invokeLater(() -> {
-            if (tabs.indexOfComponent(t) >= 0) {
-                tabs.setSelectedComponent(t);
-            }
-        });
-        for (int i = 0; i < s.files().size(); i++) {
+        List<Path> files = s.files().stream().map(f -> f.toAbsolutePath().normalize()).toList();
+        // files open in the background and finish in any order: only the selected one selects
+        restore.start(files, s.selected());
+        for (Path p : files) {
             // no existence check here: on an unreachable share it could hang; opening handles it
-            Path p = s.files().get(i).toAbsolutePath().normalize();
-            quietOpen.add(p);
-            openFile(p, null, i == s.selected() ? select.andThen(t -> quietOpen.remove(p))
-                    : t -> quietOpen.remove(p));
+            openFile(p, null, t -> restore.finished(p));
         }
     }
 
-    javax.swing.JButton formatButtonForTest() {
-        return formatButton;
-    }
-
-    javax.swing.JPopupMenu formatPopupForTest() {
-        return formatPopup;
+    /** Whether files of the last session are still being reopened. */
+    boolean isRestoringSessionForTest() {
+        return !restore.isDone();
     }
 
     public LogTab currentTab() {
@@ -2339,17 +2446,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         right.setOpaque(false);
         right.add(statusRight, BorderLayout.CENTER);
         right.add(progress, BorderLayout.EAST);
-        formatButton.putClientProperty("JButton.buttonType", "borderless");
-        formatButton.setFocusable(false);
-        formatButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
-        formatButton.setVisible(false);
-        formatButton.addActionListener(e -> {
-            javax.swing.JPopupMenu popup = new javax.swing.JPopupMenu();
-            fillFormatMenu(popup);
-            formatPopup = popup;
-            popup.show(formatButton, 0, -popup.getPreferredSize().height);
-        });
-        right.add(formatButton, BorderLayout.WEST);
         updateButton.putClientProperty("JButton.buttonType", "borderless");
         updateButton.setFont(updateButton.getFont().deriveFont(Font.BOLD));
         updateButton.setForeground(new Color(0x2563EB));
@@ -2492,8 +2588,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 () -> PREFS.getBoolean("stripes", true), e -> setStripes(!PREFS.getBoolean("stripes", true))));
         view.addSeparator();
         JMenu format = submenu("Log Format", "braces");
-        onOpen(format, () -> fillFormatMenu(format));
-        fillFormatMenu(format);
+        onOpen(format, () -> fillFormatMenu(format, currentTab()));
+        fillFormatMenu(format, currentTab());
         view.add(format);
         JMenu encoding = submenu("Encoding", "languages");
         encoding.add(item("Detect Automatically", null, e -> reopenWithEncoding(null)));
@@ -2965,10 +3061,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    private void fillFormatMenu(JComponent menu) {
+    @Override
+    public void fillFormatMenu(LogTab tab, javax.swing.JPopupMenu menu) {
+        fillFormatMenu(menu, tab);
+    }
+
+    /** The formats to read a log with ({@code t}: that log, or null). */
+    private void fillFormatMenu(JComponent menu, LogTab t) {
         Runnable separator = () -> menu.add(new javax.swing.JPopupMenu.Separator());
         menu.removeAll();
-        LogTab t = currentTab();
         String choice = t == null ? null : t.formatChoice();
         logsift.core.LogFormat now = t == null ? null : t.logFormat();
         javax.swing.ButtonGroup group = new javax.swing.ButtonGroup();
@@ -2977,9 +3078,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     java.util.Objects.equals(choice, name));
             mi.setEnabled(t != null);
             mi.addActionListener(e -> {
-                LogTab cur = currentTab();
-                if (cur != null) {
-                    cur.setFormatChoice(name);
+                if (t != null) {
+                    t.setFormatChoice(name);
                 }
             });
             group.add(mi);
@@ -3001,7 +3101,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         radio.accept("JSON lines", "JSON lines");
         radio.accept("CSV (header row, columns by , ; tab or |)", logsift.core.LogFormat.CSV);
         separator.run();
-        JMenuItem create = item("New Format from This Log…", null, e -> newFormatFromCurrentLog());
+        JMenuItem create = item("New Format from This Log…", null, e -> {
+            if (t != null) {
+                defineFormat(t);
+            }
+        });
         create.setEnabled(t != null);
         menu.add(create);
         menu.add(item("Edit Log Formats…", null, e -> showSettings(SettingsDialog.FORMATS)));
@@ -3223,12 +3327,6 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void refreshStatus() {
         LogTab t = currentTab();
         updateReloadButton(t);
-        String fmt = t == null || tabs.getSelectedComponent() != t ? "" : t.formatName();
-        formatButton.setVisible(!fmt.isEmpty());
-        formatButton.setText("Format: " + fmt + " \u25BE");
-        formatButton.setToolTipText(t != null && t.formatChoice() != null
-                ? "Lines are read as \u201c" + fmt + "\u201d (chosen for this file). Click to change."
-                : "Lines are read as \u201c" + fmt + "\u201d (detected). Click if that is wrong.");
         if (tabs.getSelectedComponent() instanceof GcTab gt) {
             setTitle(gt.title() + " — " + logsift.core.Channel.appName());
             status.setText(gt.statusText());

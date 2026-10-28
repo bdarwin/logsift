@@ -257,7 +257,7 @@ final class ValuesTreePanel extends JPanel {
         column.setRenderer(new javax.swing.DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(javax.swing.JList<?> l, Object v, int i, boolean sel, boolean f) {
-                return super.getListCellRendererComponent(l, v == null ? "" : title((String) v), i, sel, f);
+                return super.getListCellRendererComponent(l, v == null ? "" : title(format, (String) v), i, sel, f);
             }
         });
         if (f == null || column.getItemCount() == 0) {
@@ -267,6 +267,11 @@ final class ValuesTreePanel extends JPanel {
             return;
         }
         count();
+    }
+
+    /** A CSV's column as written ("order_id"); else "logger" → "Loggers". */
+    static String title(LogFormat f, String column) {
+        return f != null && f.isCsv() ? f.displayName(column) : title(column);
     }
 
     /** "logger" → "Loggers", "class" → "Classes". */
@@ -471,7 +476,10 @@ final class ValuesTreePanel extends JPanel {
         if (values == null) {
             return;
         }
-        String what = title(hiddenColumn == null ? "value" : hiddenColumn).toLowerCase(Locale.ROOT);
+        LogFormat f = format;
+        String what = f != null && f.isCsv() && hiddenColumn != null
+                ? (values.valueCount() == 1 ? "value in " : "values in ") + f.displayName(hiddenColumn)
+                : title(hiddenColumn == null ? "value" : hiddenColumn).toLowerCase(Locale.ROOT);
         footer.setText(hidden.isEmpty() ? String.format("%,d %s", values.valueCount(), what)
                 : String.format("%,d of %,d lines shown", values.shownLines(), values.root().total()));
         showAll.setVisible(!hidden.isEmpty());

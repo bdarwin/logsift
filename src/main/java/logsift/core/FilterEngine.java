@@ -20,8 +20,12 @@ import logsift.core.FilterResult.Lines;
  */
 public final class FilterEngine implements AutoCloseable {
 
-    /** One active filter: its letter and what it searches for. */
-    public record Spec(char id, SearchQuery query) {}
+    /** One active filter: its letter and what it searches for (in the whole line, or in a column). */
+    public record Spec(char id, SearchQuery query, ColumnFilter column) {
+        public Spec(char id, SearchQuery query) {
+            this(id, query, null);
+        }
+    }
 
     /** Called on a background thread whenever {@link #result()} changed. */
     public interface Listener {
@@ -30,6 +34,7 @@ public final class FilterEngine implements AutoCloseable {
 
     private final LogDocument doc;
     private final Map<Character, SearchSession> sessions = new LinkedHashMap<>();
+    private final Map<Character, Spec> specs = new HashMap<>(); // what each session searches for
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private final ExecutorService combiner =
             Executors.newSingleThreadExecutor(LogDocument.daemon("logsift-filter"));
@@ -76,9 +81,9 @@ public final class FilterEngine implements AutoCloseable {
      * @throws java.util.regex.PatternSyntaxException if a query has an invalid regex
      */
     public synchronized void configure(List<Spec> specs, Formula formula) {
-        Map<Character, SearchQuery> wanted = new LinkedHashMap<>();
+        Map<Character, Spec> wanted = new LinkedHashMap<>();
         for (Spec s : specs) {
-            wanted.put(s.id(), s.query());
+            wanted.put(s.id(), s);
         }
         if (formula != null) {
             for (char c : formula.refs()) {
@@ -87,21 +92,27 @@ public final class FilterEngine implements AutoCloseable {
                 }
             }
         }
-        for (SearchQuery q : wanted.values()) {
-            q.toPattern(); // validate before changing anything
+        for (Spec s : wanted.values()) {
+            if (s.column() == null) {
+                s.query().toPattern(); // validate before changing anything
+            }
         }
         boolean changed = !java.util.Objects.equals(formula, this.formula);
         for (var it = sessions.entrySet().iterator(); it.hasNext(); ) {
             var e = it.next();
-            if (!e.getValue().query().equals(wanted.get(e.getKey()))) {
+            if (!this.specs.get(e.getKey()).equals(wanted.get(e.getKey()))) {
                 e.getValue().close();
                 it.remove();
+                this.specs.remove(e.getKey());
                 changed = true;
             }
         }
         for (var e : wanted.entrySet()) {
             if (!sessions.containsKey(e.getKey())) {
-                SearchSession s = new SearchSession(doc, e.getValue());
+                Spec spec = e.getValue();
+                SearchSession s = spec.column() == null ? new SearchSession(doc, spec.query())
+                        : new SearchSession(doc, spec.query(), spec.column().matcher(doc.charset()));
+                this.specs.put(e.getKey(), spec);
                 s.addListener(new SearchSession.Listener() {
                     @Override
                     public void updated(SearchSession ss) {
@@ -547,6 +558,7 @@ public final class FilterEngine implements AutoCloseable {
         doc.removeListener(docListener);
         sessions.values().forEach(SearchSession::close);
         sessions.clear();
+        specs.clear();
         if (continuations != null) {
             continuations.close();
         }

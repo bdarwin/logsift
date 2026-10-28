@@ -16,9 +16,9 @@ description: Messages you may see in Logsift, what they mean, and what to do.
 
 **The Reload button turned amber: *Reload (+1.2 MB)* or *Reload (file replaced)*.** The file changed on disk and Reload Automatically is off. Press **F5**, or turn on **Reload ▾ → Reload Automatically** (Follow turns it on too).
 
-**The log has no colours, no timeline or no columns.** Logsift doesn't know its layout. Click **Format: …** in the status bar to pick one, or **Define Its Format…** (see [Settings](settings.md#log-formats)). Level colours in the plain view need the words ERROR, WARN and so on in capitals; your own format's level column works with any spelling.
+**The log has no colours, no timeline or no columns.** Logsift doesn't know its layout. Click **Format: …▾** in the log's bar to pick one, or **Define Its Format…** (see [Settings](settings.md#log-formats)). Level colours in the plain view need the words ERROR, WARN and so on in capitals; your own format's level column works with any spelling.
 
-**Logsift picked the wrong format.** Click **Format: …▾** in the status bar and choose another for that file (it is remembered), or **Plain text**.
+**Logsift picked the wrong format.** Click **Format: …▾** in the log's bar and choose another for that file (it is remembered), or **Plain text**.
 
 **Odd characters (Ã©, �).** The file isn't in the encoding Logsift detected. Use **View → Encoding**, or set **Text that isn't UTF-8** in [Settings](settings.md).
 

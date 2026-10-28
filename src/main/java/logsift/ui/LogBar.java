@@ -27,8 +27,9 @@ import logsift.core.LogDocument;
 
 /**
  * The bar at the top of each log: Find, the filters that are on (as chips: click one to turn it
- * off, ✕ to remove it), how the log is shown (wrap, columns, tree, timeline), and Follow and
- * Reload. Each log keeps its own; the last choice is the default for logs opened next.
+ * off, ✕ to remove it), the format its lines are read with, how the log is shown (wrap,
+ * columns, tree, timeline), and Follow and Reload. Each log keeps its own; the last choice is the
+ * default for logs opened next.
  */
 final class LogBar extends JPanel {
 
@@ -48,6 +49,21 @@ final class LogBar extends JPanel {
     };
     private final JToggleButton matchingOnly = new JToggleButton("Matching only");
     private final JLabel result = new JLabel();
+    /** "Format: CSV ▾": how lines are read; click to choose another format for this file. */
+    private final JButton format = new JButton(Icons.of("braces")) {
+        @Override
+        public Dimension getMinimumSize() {
+            // a narrow window: "CSV ▾" (see doLayout), cut shorter only when even that doesn't fit
+            return new Dimension(compactFormat ? Math.min(getPreferredSize().width, 90) : 56,
+                    super.getMinimumSize().height);
+        }
+
+        @Override
+        public Dimension getMaximumSize() {
+            return getPreferredSize();
+        }
+    };
+    private JPopupMenu formatMenu;
     private final JToggleButton follow = new JToggleButton("Follow", Icons.follow());
     private final JToggleButton wrap = new JToggleButton(Icons.wrap());
     private final JToggleButton columns = new JToggleButton(Icons.columns());
@@ -141,12 +157,21 @@ final class LogBar extends JPanel {
             m.show(reloadMenu, reloadMenu.getWidth() - m.getPreferredSize().width, reloadMenu.getHeight());
         });
 
+        flat(format);
+        format.setVisible(false);
+        format.addActionListener(e -> {
+            JPopupMenu m = new JPopupMenu();
+            tab.fillFormatMenu(m);
+            formatMenu = m;
+            m.show(format, 0, format.getHeight());
+        });
+
         view(wrap, "Wrap long lines (" + (MainFrame.isMac() ? "⌥Z" : "Alt+Z") + ")", "wrap", tab::setWrap);
         view(columns, "Show lines as columns: time, level, thread, logger, message ("
                 + (MainFrame.isMac() ? "⇧⌘K" : "Ctrl+Shift+K") + ")", "columns", tab::setColumnsVisible);
         view(tree, "Tree of loggers (threads, components…) on the left: hide or show their lines ("
                 + (MainFrame.isMac() ? "⇧⌘B" : "Ctrl+Shift+B") + ")", "valuesTree", tab::setValuesTreeVisible);
-        view(timeline, "Timeline: lines over time, errors in red; click it to jump to a time", "timeline",
+        view(timeline, TIMELINE_TIP, "timeline",
                 tab::setTimelineVisible);
 
         add(find);
@@ -157,6 +182,8 @@ final class LogBar extends JPanel {
         add(matchingOnly);
         add(Box.createHorizontalGlue());
         add(result);
+        add(format);
+        add(formatSeparator);
         add(wrap);
         add(columns);
         add(tree);
@@ -167,6 +194,12 @@ final class LogBar extends JPanel {
         add(reloadMenu);
         update();
         syncView();
+    }
+
+    private static final String TIMELINE_TIP = "Timeline: lines over time, errors in red; click it to jump to a time";
+
+    JToggleButton timelineButtonForTest() {
+        return timeline;
     }
 
     /** A view toggle: for this log, and remembered as the default for logs opened next. */
@@ -182,6 +215,8 @@ final class LogBar extends JPanel {
     private static void remember(String pref, boolean on) {
         AppState.prefs().putBoolean(pref, on);
     }
+
+    private final JComponent formatSeparator = separator();
 
     private static JComponent separator() {
         javax.swing.JSeparator s = new javax.swing.JSeparator(javax.swing.SwingConstants.VERTICAL);
@@ -199,7 +234,65 @@ final class LogBar extends JPanel {
         tree.setEnabled(tab.hasTree());
         timeline.setSelected(tab.isTimelineWanted());
         timeline.setEnabled(tab.hasTimes());
+        timeline.setToolTipText(tab.hasTimes() ? TIMELINE_TIP
+                : "No times in this file, so no timeline (a table without a time column)");
         autoReload.setSelected(tab.isAutoReload());
+        updateFormat();
+    }
+
+    /** Shows the format the log's lines are read with ("Format: CSV ▾"). */
+    void updateFormat() {
+        String name = tab.formatName();
+        boolean show = !name.isEmpty();
+        format.setVisible(show);
+        formatSeparator.setVisible(show);
+        if (!show) {
+            return;
+        }
+        formatName = shortName(name);
+        String text = (compactFormat ? "" : "Format: ") + formatName + " ▾";
+        if (!text.equals(format.getText())) {
+            format.setText(text);
+            revalidate();
+        }
+        format.setToolTipText(tab.formatChoice() != null
+                ? "Lines are read as “" + name + "” (chosen for this file). Click to change."
+                : "Lines are read as “" + name + "” (detected). Click if that is wrong.");
+    }
+
+    private String formatName = "";
+    private boolean compactFormat; // a narrow window: "CSV ▾" without "Format: "
+
+    @Override
+    public void doLayout() {
+        if (format.isVisible() && !formatName.isEmpty()) {
+            // would everything fit with "Format: " in front of the name?
+            int prefix = format.getFontMetrics(format.getFont()).stringWidth("Format: ");
+            int chipsRoom = chips.getComponentCount() > 1 ? 160 : 0; // keep a chip or two in sight
+            int full = getPreferredSize().width + (compactFormat ? prefix : 0) - chips.getPreferredSize().width
+                    + chipsRoom;
+            boolean compact = full > getWidth();
+            if (compact != compactFormat) {
+                compactFormat = compact;
+                format.setText((compact ? "" : "Format: ") + formatName + " ▾");
+            }
+        }
+        super.doLayout();
+    }
+
+    /** "logback / log4j" for "logback / log4j (time level [thread] logger - message)". */
+    static String shortName(String name) {
+        int paren = name.indexOf(" (");
+        String s = paren > 0 ? name.substring(0, paren) : name;
+        return s.length() > 24 ? s.substring(0, 23) + "…" : s;
+    }
+
+    JButton formatButtonForTest() {
+        return format;
+    }
+
+    JPopupMenu formatMenuForTest() {
+        return formatMenu;
     }
 
     /** The view toggles' states, for tests: wrap, columns, tree, timeline, auto reload. */
@@ -222,7 +315,8 @@ final class LogBar extends JPanel {
         StringBuilder sig = new StringBuilder();
         for (FilterDef d : fp.filters()) {
             sig.append(d.id).append(d.action).append(d.enabled).append(d.swatch).append(d.regex)
-                    .append(d.matchCase).append(d.wholeWord).append(d.text).append('\u0000');
+                    .append(d.matchCase).append(d.wholeWord).append(d.text).append(d.column).append(d.op)
+                    .append('\u0000');
         }
         sig.append(fp.levelWords()).append(tab.timeRangeText()).append(tab.treeHiddenCount());
         matchingOnly.setSelected(tab.isMatchingOnly());
@@ -297,11 +391,12 @@ final class LogBar extends JPanel {
             case HIDE -> "Hide";
             case MARK -> "Color";
         };
-        String text = what + ": " + d.text;
+        String text = what + ": " + d.label(tab::columnName);
         if (text.length() > 48) {
             text = text.substring(0, 46) + "…";
         }
         String tip = "<html>Filter " + d.id + ": " + d.action.tip.toLowerCase(java.util.Locale.ROOT)
+                + (d.column != null ? " (in its " + tab.columnName(d.column) + " column)" : "")
                 + (d.regex ? " (regex)" : "") + (d.matchCase ? " (match case)" : "")
                 + "<br>Click to turn it " + (d.enabled ? "off" : "on") + "; right-click for more.</html>";
         Chip c = new Chip(d.color() == null ? null : d.color().mark(), text, d.enabled, tip,

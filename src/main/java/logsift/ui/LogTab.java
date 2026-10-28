@@ -49,6 +49,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         /** Opens Log Formats with a new format made from this log's lines. */
         default void defineFormat(LogTab tab) {}
 
+        /** Fills the menu of formats to read this log with (the log's bar shows it). */
+        default void fillFormatMenu(LogTab tab, javax.swing.JPopupMenu menu) {}
+
         /** The user closed the tree of loggers (for every log). */
         default void setValuesTree(boolean on) {}
 
@@ -114,6 +117,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private RequestPanel request; // made the first time a request is followed
     private final ExceptionsPanel exceptions;
     private final MetricsPanel metrics;
+    private final ProfilePanel profile;
+    private boolean profileAsked; // the user opened Profile for a log that isn't CSV
     private int insightsGeneration = -1;
     private final Bookmarks bookmarks;
     private final BookmarksPanel bookmarksPanel;
@@ -320,6 +325,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         insights = new InsightsPanel(insightsHost());
         exceptions = new ExceptionsPanel(exceptionsHost());
         metrics = new MetricsPanel(metricsHost());
+        profile = new ProfilePanel(profileHost());
         bookmarks = new Bookmarks(this.path, doc::fileSize);
         bookmarkGeneration = doc.generation();
         bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
@@ -355,6 +361,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             if (bottom.getSelectedComponent() == metrics && metrics.metrics() == null
                     && !metrics.isRunning() && !insights.isRunning()) {
                 metrics.start();
+            }
+            if (bottom.getSelectedComponent() == profile) {
+                profile.showing();
             }
         });
         bottom.setPreferredSize(new Dimension(400, 210));
@@ -504,6 +513,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     void setFormatChoice(String name) {
         formatChoice = name;
         redetect();
+        syncLogBar();
+    }
+
+    /** The menu of formats for this log (from its bar). */
+    void fillFormatMenu(javax.swing.JPopupMenu menu) {
+        host.fillFormatMenu(this, menu);
     }
 
     /** Works out the layout again (after the user's formats changed). */
@@ -544,6 +559,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
         }
         applyColumns();
+        updateProfileTab();
+        filterPanel.columnsChanged();
+        if (filterPanel.filters().stream().anyMatch(d -> d.column != null)) {
+            filtersChanged(); // filters on a column use the format
+        }
         treePanel.setFormat(lf);
         updateTreeVisible();
         filterPanel.setEntryFormatInfo(entryFormat == null ? null : entryFormat.name());
@@ -569,7 +589,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         host.tabStatusChanged(this);
     }
 
-    /** The name of the format lines are read with (for the status bar). */
+    /** The name of the format lines are read with (for the log's bar). */
     String formatName() {
         if (logFormat != null) {
             return logFormat.name();
@@ -798,7 +818,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 for (FilterDef d : filterPanel.filters()) {
                     SearchSession fs = d.isActive() && d.color() != null ? engine.session(d.id) : null;
                     if (fs != null) {
-                        other.add(new OverviewBar.MarkSet("Filter " + d.id + " “" + d.text + "”",
+                        other.add(new OverviewBar.MarkSet("Filter " + d.id + " “" + d.label(LogTab.this::columnName) + "”",
                                 d.color().mark(), OverviewBar.of(fs.hits())));
                     }
                 }
@@ -1162,6 +1182,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         boolean follow = main.isFollow();
         matchingOnly = on;
         main.setSource(on ? matchingLines : allLines);
+        profileFiltersChanged();
         if (follow) {
             main.setFollow(true);
         } else if (line >= 0) {
@@ -1172,6 +1193,47 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     // ---------------------------------------------------------------- filters
 
+    /** A filter's search in its column (null: in the whole line). */
+    private logsift.core.ColumnFilter columnFilter(FilterDef d, SearchQuery q) {
+        if (d.column == null) {
+            return null;
+        }
+        logsift.core.LogFormat f = logFormat;
+        if (f == null) {
+            throw new IllegalArgumentException("This log has no columns: its format has none");
+        }
+        return new logsift.core.ColumnFilter(f, d.column, d.op, q);
+    }
+
+    /** A column's name on screen: a CSV's as written in its header, else with a capital. */
+    @Override
+    public String columnName(String column) {
+        logsift.core.LogFormat f = logFormat;
+        return f != null ? f.displayName(column)
+                : column.isEmpty() ? column : column.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + column.substring(1);
+    }
+
+    /** The columns of the log's format (for filters on one column). */
+    @Override
+    public List<String> columns() {
+        logsift.core.LogFormat f = logFormat;
+        return f == null ? List.of() : f.columns();
+    }
+
+    /** Adds a filter on one column's value and shows only (or hides) its rows. */
+    void filterByColumn(String column, logsift.core.ColumnFilter.Op op, String value, FilterDef.Action action) {
+        FilterDef d = filterPanel.addFilter(value, action, column, op);
+        if (d != null && action != FilterDef.Action.MARK) {
+            setMatchingOnly(true);
+        }
+    }
+
+    /** Opens Filters with a new filter on this column, ready for its text. */
+    void addColumnFilter(String column) {
+        showFilters();
+        filterPanel.addEmptyFilter(column);
+    }
+
     @Override
     public void filtersChanged() {
         List<FilterEngine.Spec> specs = new ArrayList<>();
@@ -1180,18 +1242,22 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         for (FilterDef d : filterPanel.filters()) {
             d.error = null;
             SearchQuery q = d.query();
+            logsift.core.ColumnFilter inColumn = null;
             if (q != null) {
                 try {
                     q.toPattern();
+                    inColumn = columnFilter(d, q);
                 } catch (PatternSyntaxException e) {
                     d.error = "Invalid regular expression: " + e.getDescription();
+                } catch (IllegalArgumentException e) {
+                    d.error = e.getMessage(); // no such column, or not a number
                 }
             }
             filterPanel.refreshRow(d);
             if (!d.isActive()) {
                 continue;
             }
-            specs.add(new FilterEngine.Spec(d.id, q));
+            specs.add(new FilterEngine.Spec(d.id, q, inColumn));
             if (d.action == FilterDef.Action.SHOW) {
                 shows.add(d.id);
             } else if (d.action == FilterDef.Action.HIDE) {
@@ -1509,8 +1575,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 }
                 step.accept("Grouping messages…");
                 long n = doc.lineCount();
-                logsift.core.MessageStats.Result m = logsift.core.MessageStats.analyze(doc, entryFormat, 0,
-                        Long.MAX_VALUE, null, cancel::get, progress);
+                logsift.core.MessageStats.Result m = logsift.core.MessageStats.analyze(doc, entryFormat, logFormat,
+                        0, Long.MAX_VALUE, null, cancel::get, progress);
                 if (cancel.get()) {
                     return null;
                 }
@@ -1595,13 +1661,93 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         };
     }
 
+    // ---------------------------------------------------------------- profile
+
+    ProfilePanel profilePanel() {
+        return profile;
+    }
+
+    /** The Profile tab: there for a CSV file, or when asked for (other logs with columns). */
+    private void updateProfileTab() {
+        logsift.core.LogFormat f = logFormat;
+        boolean want = f != null && (f.isCsv() || profileAsked);
+        int at = bottom.indexOfComponent(profile);
+        if (want && at < 0) {
+            bottom.insertTab("Profile", null, profile, "What each column holds, with a chart",
+                    bottom.indexOfComponent(metrics) + 1);
+        } else if (!want && at >= 0) {
+            profile.cancel();
+            bottom.remove(profile);
+        }
+    }
+
+    /** Shows the Profile of the columns (the tab is added for a log that isn't CSV). */
+    void showProfile() {
+        profileAsked = true;
+        updateProfileTab();
+        if (bottom.indexOfComponent(profile) >= 0) {
+            setBottomCollapsed(false);
+            bottom.setSelectedComponent(profile);
+        }
+    }
+
+    private ProfilePanel.Host profileHost() {
+        return new ProfilePanel.Host() {
+            @Override
+            public logsift.core.ColumnProfile.Result analyze(AtomicBoolean cancel,
+                                                             java.util.function.DoubleConsumer progress) {
+                while (doc.isIndexing() || detectedGeneration != doc.generation()) {
+                    if (cancel.get() || closed) {
+                        return null;
+                    }
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+                logsift.core.LogFormat f = logFormat;
+                if (f == null) {
+                    return null;
+                }
+                FilterResult r = filterResult;
+                java.util.function.LongPredicate include = matchingOnly && r.isFiltering() ? r::contains : null;
+                return logsift.core.ColumnProfile.analyze(f, doc.lineCount(), doc::readLines, include,
+                        java.time.Year.now().getValue(), () -> cancel.get() || closed, progress);
+            }
+
+            @Override
+            public void filter(String column, logsift.core.ColumnFilter.Op op, String text) {
+                filterByColumn(column, op, text, FilterDef.Action.SHOW);
+            }
+
+            @Override
+            public boolean timesClickable(String column) {
+                return column.equals("time") && timeFormat != null;
+            }
+
+            @Override
+            public boolean timeRange(String column, long from, long to) {
+                if (!timesClickable(column)) {
+                    return false;
+                }
+                selectTimeRange(from, to);
+                return true;
+            }
+        };
+    }
+
     // ---------------------------------------------------------------- metrics
 
     MetricsPanel metricsPanel() {
         return metrics;
     }
 
-    /** Durations of things that start and end, and numbers in messages (null if cancelled). */
+    /**
+     * Durations of things that start and end, numbers in messages, and the log's columns of
+     * numbers and of a few values (null if cancelled).
+     */
     logsift.core.Metrics measure(logsift.core.MessageStats.Result m, java.util.function.BooleanSupplier stop) {
         java.util.function.BooleanSupplier halt = () -> stop.getAsBoolean() || closed;
         return logsift.core.LogAnalysis.metrics(doc, () -> entryFormat, timeFormat, logFormat, m, halt);
@@ -1624,7 +1770,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 }
                 step.accept("Grouping messages…");
                 logsift.core.MessageStats.Result m = messages.result() != null ? messages.result()
-                        : logsift.core.MessageStats.analyze(doc, entryFormat, 0, Long.MAX_VALUE, null, cancel::get, null);
+                        : logsift.core.MessageStats.analyze(doc, entryFormat, logFormat, 0, Long.MAX_VALUE, null,
+                                cancel::get, null);
                 if (cancel.get()) {
                     return null;
                 }
@@ -1718,7 +1865,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 boolean filtered = onlyFiltered && r.isFiltering();
                 long from = filtered ? r.windowStart() : 0;
                 long to = filtered ? r.windowEnd() : Long.MAX_VALUE;
-                return logsift.core.MessageStats.analyze(doc, entryFormat, from, to,
+                return logsift.core.MessageStats.analyze(doc, entryFormat, logFormat, from, to,
                         filtered ? r::contains : null, cancel::get, progress);
             }
 
@@ -1779,8 +1926,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         for (FilterDef d : filterPanel.filters()) {
             FilterDef.Swatch s = d.color();
             if (s != null && d.isActive()) {
-                rules.add(new HighlightRule("Filter " + d.id, d.query().toPattern(),
-                        null, s.light(), null, s.dark()));
+                logsift.core.ColumnFilter cf = null;
+                try {
+                    cf = columnFilter(d, d.query());
+                } catch (IllegalArgumentException e) {
+                    continue; // not active
+                }
+                rules.add(new HighlightRule("Filter " + d.id, cf == null ? d.query().toPattern() : null,
+                        cf == null ? null : cf.lineTest(), null, s.light(), null, s.dark()));
             }
         }
 
@@ -1872,7 +2025,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         updateFilterStatus();
         main.overviewChanged();
+        profileFiltersChanged();
         host.tabStatusChanged(this);
+    }
+
+    /** Tells the Profile which rows it should show now (the filters' when Matching only). */
+    private void profileFiltersChanged() {
+        FilterResult r = filterResult;
+        if (profile != null && (!matchingOnly || !r.isFiltering() || r.isComplete())) {
+            profile.filtersChanged(matchingOnly && r.isFiltering() ? "v" + r.version() : "");
+        }
     }
 
     private void updateFilterStatus() {
@@ -1973,6 +2135,23 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 mi.addActionListener(e -> addFilter(sel, a));
                 menu.add(mi);
             }
+        }
+        LogView.Cell cell = view.popupCell();
+        if (cell != null && !cell.column().equals("message") && !cell.column().equals("fields")
+                && !cell.value().isBlank() && cell.value().length() <= 80) {
+            String col = columnName(cell.column());
+            String v = cell.value().strip();
+            String shown = col + " = " + (v.length() > 40 ? v.substring(0, 40) + "…" : v);
+            JMenuItem only = new JMenuItem("Show Only Rows Where " + shown, Icons.of("filter"));
+            only.setToolTipText("Adds a filter on the " + col + " column");
+            only.addActionListener(e -> filterByColumn(cell.column(), logsift.core.ColumnFilter.Op.EQUALS, v,
+                    FilterDef.Action.SHOW));
+            menu.add(only);
+            JMenuItem hide = new JMenuItem("Hide Rows Where " + shown, Icons.of("eye-off"));
+            hide.setToolTipText("Adds a filter on the " + col + " column");
+            hide.addActionListener(e -> filterByColumn(cell.column(), logsift.core.ColumnFilter.Op.EQUALS, v,
+                    FilterDef.Action.HIDE));
+            menu.add(hide);
         }
         if (sourceLabels != null) {
             menu.addSeparator();
@@ -2513,10 +2692,18 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         JPopupMenu m = new JPopupMenu();
         if (col != null) {
-            String title = col.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + col.substring(1);
+            String title = columnName(col);
             JMenuItem count = new JMenuItem("Count Values in " + title + "…", Icons.of("chart-column"));
             count.addActionListener(a -> countValues(col));
             m.add(count);
+            JMenuItem prof = new JMenuItem("Profile of the Columns", Icons.of("chart-column"));
+            prof.setToolTipText("What each column holds, with a chart (the Profile tab below)");
+            prof.addActionListener(a -> showProfile());
+            m.add(prof);
+            JMenuItem filter = new JMenuItem("Filter by " + title + "…", Icons.of("filter"));
+            filter.setToolTipText("A filter that looks only in this column: contains, =, or > < for numbers");
+            filter.addActionListener(a -> addColumnFilter(col));
+            m.add(filter);
             if (!col.equals("message")) {
                 JMenuItem hide = new JMenuItem("Hide " + title + " Column", Icons.of("eye-off"));
                 hide.addActionListener(a -> setColumnHidden(col, true));
@@ -2529,11 +2716,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         m.add(label);
         java.util.Set<String> hidden = hiddenColumns();
         for (String c : layout.format().columns()) {
-            if (c.equals("message") || (c.equals("source") && sourceLabels == null)) {
+            if (c.equals("message") || (c.equals("source") && sourceLabels == null && !layout.format().isCsv())) {
                 continue;
             }
             javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(
-                    c.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + c.substring(1), !hidden.contains(c));
+                    columnName(c), !hidden.contains(c));
             item.addActionListener(a -> setColumnHidden(c, !item.isSelected()));
             m.add(item);
         }
@@ -2592,7 +2779,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     /** Shows only (or hides) lines whose column has this exact value. */
-    void filterByValue(String value, FilterDef.Action action) {
+    void filterByValue(String column, String value, FilterDef.Action action) {
+        if (column != null && columns().contains(column) && !value.isBlank()) {
+            filterByColumn(column, logsift.core.ColumnFilter.Op.EQUALS, value, action);
+            return;
+        }
         addFilter(value, action);
         if (action != FilterDef.Action.MARK) {
             setMatchingOnly(true);
@@ -3099,6 +3290,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         insights.cancel();
         exceptions.cancel();
         metrics.cancel();
+        profile.cancel();
         if (request != null) {
             request.cancel();
         }

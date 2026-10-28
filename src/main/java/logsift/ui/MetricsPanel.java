@@ -234,13 +234,13 @@ final class MetricsPanel extends JPanel {
             items.add(new Item(k.name(), "took (" + k.matchedBy() + ")", k, null));
         }
         for (Numbers.Series s : m.numbers()) {
-            items.add(new Item(s.name(), "", null, s));
+            items.add(new Item(s.name(), s.how(), null, s));
         }
         itemModel.fireTableDataChanged();
         int spans = m.spans().kinds().size();
         int nums = m.numbers().size();
         long open = m.spans().kinds().stream().mapToLong(Spans.Kind::unfinishedCount).sum();
-        summary.setText(m.isEmpty() ? "No durations or numbers found in the messages."
+        summary.setText(m.isEmpty() ? "No durations or numbers found in the messages or columns."
                 : (spans > 0 ? spans + (spans == 1 ? " kind of thing that starts and ends" : " kinds of things that start and end") : "")
                         + (spans > 0 && nums > 0 ? "   ·   " : "")
                         + (nums > 0 ? nums + (nums == 1 ? " number" : " numbers") + " over time" : "")
@@ -248,7 +248,8 @@ final class MetricsPanel extends JPanel {
         if (!items.isEmpty()) {
             itemTable.setRowSelectionInterval(0, 0);
         } else {
-            chart.clear("Nothing measured: no messages that start and end, or report a duration, size or count.");
+            chart.clear("Nothing measured: no messages that start and end, or report a duration, size or count,"
+                    + " and no columns of numbers.");
             examples.clear();
             exampleModel.fireTableDataChanged();
         }
@@ -307,9 +308,12 @@ final class MetricsPanel extends JPanel {
             Numbers.Series s = it.series();
             chart.show(s.times(), s.values(), s.lines(), s.unit(), new long[0], new long[0]);
             for (int i : s.largest(50)) {
-                examples.add(new Example(s.lines()[i], s.times()[i], s.unit().format(s.values()[i]), ""));
+                String v = s.unit().format(s.values()[i]);
+                examples.add(new Example(s.lines()[i], s.times()[i],
+                        s.source() == Numbers.Source.ROWS ? v + (v.equals("1") ? " row" : " rows") : v, ""));
             }
-            exampleTitle.setText("The largest" + (s.size() < s.count() ? " (every " + (s.count() / s.size())
+            exampleTitle.setText(s.source() == Numbers.Source.ROWS ? "The busiest (" + s.how() + ")"
+                    : "The largest" + (s.size() < s.count() ? " (every " + (s.count() / s.size())
                     + "th line is charted)" : ""));
         }
         exampleModel.fireTableDataChanged();
@@ -399,7 +403,10 @@ final class MetricsPanel extends JPanel {
             String how = it.how().isEmpty() ? "" : " <span style='color:#8A8F98'>" + it.how() + "</span>";
             super.getTableCellRendererComponent(t, "<html><nobr>" + (it.span() != null ? "<b>" + name + "</b>" : name)
                     + how + "</nobr></html>", sel, focus, row, col);
-            setIcon(Icons.of(it.span() != null ? "timer" : "activity", Theme.gutterForeground(), 14));
+            setIcon(Icons.of(it.span() != null ? "timer"
+                    : it.series().source() == Numbers.Source.ROWS ? "chart-column"
+                    : it.series().source() == Numbers.Source.COLUMN ? "columns-3" : "activity",
+                    Theme.gutterForeground(), 14));
             setToolTipText(it.span() != null ? "From “" + logsift.core.Insights.display(it.span().start().text())
                     + "” to “" + logsift.core.Insights.display(it.span().end().text()) + "”" : it.name());
             return this;

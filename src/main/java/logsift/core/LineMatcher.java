@@ -16,6 +16,11 @@ abstract sealed class LineMatcher {
         boolean hit(long line);
     }
 
+    /** A check of one line, {@code buf[start, end)} (end excludes the newline). */
+    interface LineCheck {
+        boolean matches(byte[] buf, int start, int end);
+    }
+
     static LineMatcher of(SearchQuery q) {
         return of(q, java.nio.charset.StandardCharsets.UTF_8);
     }
@@ -115,7 +120,7 @@ abstract sealed class LineMatcher {
          * Reports lines containing the text. If {@code confirm} is given, a line is only
          * reported when it also passes that check (used for regex confirmation).
          */
-        void scanCandidates(byte[] buf, int len, long firstLine, Regex confirm, HitSink sink,
+        void scanCandidates(byte[] buf, int len, long firstLine, LineCheck confirm, HitSink sink,
                             BooleanSupplier cancelled) {
             int lineStart = 0;
             long line = firstLine;
@@ -203,8 +208,67 @@ abstract sealed class LineMatcher {
         }
     }
 
+    /**
+     * A column's value checked on each line that has the format (a {@link ColumnFilter}); with
+     * a literal, only lines containing it are split.
+     */
+    static final class InColumn extends LineMatcher implements LineCheck {
+        private final LogFormat format;
+        private final String column;
+        private final java.util.function.Predicate<String> test;
+        private final Literal literal;
+        private final java.nio.charset.Charset cs;
+
+        InColumn(LogFormat format, String column, java.util.function.Predicate<String> test, Literal literal,
+                 java.nio.charset.Charset cs) {
+            this.format = format;
+            this.column = column;
+            this.test = test;
+            this.literal = literal;
+            this.cs = cs;
+        }
+
+        boolean matchesLine(String line) {
+            String v = line == null ? null : format.value(line, column);
+            return v != null && test.test(v);
+        }
+
+        @Override
+        public boolean matches(byte[] buf, int start, int end) {
+            if (end > start && buf[end - 1] == '\r') {
+                end--;
+            }
+            return matchesLine(new String(buf, start, end - start, cs));
+        }
+
+        @Override
+        void scan(byte[] buf, int len, long firstLine, HitSink sink, BooleanSupplier cancelled) {
+            if (literal != null) {
+                literal.scanCandidates(buf, len, firstLine, this, sink, cancelled);
+                return;
+            }
+            int pos = 0;
+            long line = firstLine;
+            while (pos < len) {
+                int nl = ByteScan.indexOf(buf, pos, len, (byte) '\n');
+                int end = nl < 0 ? len : nl;
+                if (matches(buf, pos, end) && !sink.hit(line)) {
+                    return;
+                }
+                if (nl < 0) {
+                    return;
+                }
+                pos = nl + 1;
+                line++;
+                if ((line & 4095) == 0 && cancelled.getAsBoolean()) {
+                    return;
+                }
+            }
+        }
+    }
+
     /** Regular expression search, one decoded line at a time. */
-    static final class Regex extends LineMatcher {
+    static final class Regex extends LineMatcher implements LineCheck {
         private final Pattern pattern;
         private final java.nio.charset.Charset cs;
         private Matcher matcher; // per scan; a Regex instance is used by one thread
@@ -215,7 +279,8 @@ abstract sealed class LineMatcher {
         }
 
         /** Whether the line {@code buf[start, end)} (end excludes the newline) matches. */
-        boolean matches(byte[] buf, int start, int end) {
+        @Override
+        public boolean matches(byte[] buf, int start, int end) {
             if (end > start && buf[end - 1] == '\r') {
                 end--;
             }

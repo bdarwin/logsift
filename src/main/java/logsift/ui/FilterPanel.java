@@ -43,6 +43,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import logsift.core.ColumnFilter;
 
 /**
  * The list of filters below the log: each has a letter, Show / Hide / Mark, a pattern, a color
@@ -64,10 +65,22 @@ final class FilterPanel extends JPanel {
 
         /** "Clear all" was pressed: filters are gone; also clear what the owner keeps (time range). */
         default void clearAllFilters() {}
+
+        /** A column's name on screen. */
+        default String columnName(String column) {
+            return column.isEmpty() ? column : column.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + column.substring(1);
+        }
+
+        /** The columns of the log's format, for filters on one column (empty: none). */
+        default List<String> columns() {
+            return List.of();
+        }
     }
 
     static final int MAX_FILTERS = 26;
     private static final int TYPING_DELAY_MS = 450;
+    /** In the "where to look" list: the whole line. */
+    private static final String LINE = "Line";
 
     private final Listener listener;
     private final List<FilterDef> defs = new ArrayList<>();
@@ -389,6 +402,14 @@ final class FilterPanel extends JPanel {
 
     /** Adds a filter; returns null if all 26 letters are in use. */
     FilterDef addFilter(String text, FilterDef.Action action) {
+        return addFilter(text, action, null, ColumnFilter.Op.CONTAINS);
+    }
+
+    /**
+     * Adds a filter that looks in one column ({@code column} null: in the whole line). A value
+     * compared whole ({@code =}) matches case. Returns null if all 26 letters are in use.
+     */
+    FilterDef addFilter(String text, FilterDef.Action action, String column, ColumnFilter.Op op) {
         if (defs.size() >= MAX_FILTERS) {
             JOptionPane.showMessageDialog(this, "At most " + MAX_FILTERS + " filters.");
             return null;
@@ -396,12 +417,35 @@ final class FilterPanel extends JPanel {
         FilterDef d = new FilterDef(freeLetter());
         d.text = text;
         d.action = action;
+        d.column = column;
+        d.op = op;
+        d.matchCase = column != null && op == ColumnFilter.Op.EQUALS;
         d.swatch = action == FilterDef.Action.HIDE ? -1 : nextSwatch();
         defs.add(d);
         rebuildRows();
         listener.filtersChanged();
         return d;
     }
+
+    /** Adds a filter on a column with no text yet, and puts the cursor in it. */
+    void addEmptyFilter(String column) {
+        FilterDef d = addFilter("", FilterDef.Action.SHOW, column, ColumnFilter.Op.CONTAINS);
+        if (d != null) {
+            Row r = rows.get(defs.indexOf(d));
+            SwingUtilities.invokeLater(() -> r.field.requestFocusInWindow());
+        }
+    }
+
+    /** The log's columns changed (its format was found): the rows offer them. */
+    void columnsChanged() {
+        List<String> now = listener.columns();
+        if (!now.equals(shownColumns)) {
+            shownColumns = List.copyOf(now);
+            rebuildRows();
+        }
+    }
+
+    private List<String> shownColumns = List.of();
 
     private char freeLetter() {
         for (char c = 'A'; c <= 'Z'; c++) {
@@ -507,6 +551,9 @@ final class FilterPanel extends JPanel {
         final JCheckBox enabled = new JCheckBox();
         final JLabel badge = new JLabel();
         final JComboBox<FilterDef.Action> action = new JComboBox<>(FilterDef.Action.values());
+        /** Where to look: "Line" (all of it), or one of the log's columns. */
+        final JComboBox<String> in = new JComboBox<>();
+        final JComboBox<ColumnFilter.Op> op = new JComboBox<>(ColumnFilter.Op.values());
         final JTextField field = new JTextField();
         final JToggleButton matchCase = MainFrame.toggle("Aa", "Match case");
         final JToggleButton wholeWord = MainFrame.toggle("W", "Whole word");
@@ -541,6 +588,49 @@ final class FilterPanel extends JPanel {
             action.setToolTipText("Show: keep matching lines · Hide: remove them · Mark: only color");
             action.addActionListener(e -> {
                 d.action = (FilterDef.Action) action.getSelectedItem();
+                listener.filtersChanged();
+            });
+
+            List<String> cols = new ArrayList<>(listener.columns());
+            if (d.column != null && !cols.contains(d.column)) {
+                cols.add(d.column); // kept from another format: shown, and marked as an error
+            }
+            in.addItem(LINE);
+            for (String c : cols) {
+                in.addItem(c);
+            }
+            in.setRenderer(new javax.swing.DefaultListCellRenderer() {
+                @Override
+                public Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
+                                                              boolean selected, boolean focus) {
+                    String v = String.valueOf(value);
+                    String shown = v.equals(LINE) || v.isEmpty() ? v : listener.columnName(v);
+                    return super.getListCellRendererComponent(list, shown, index, selected, focus);
+                }
+            });
+            in.setSelectedItem(d.column == null ? LINE : d.column);
+            in.setMaximumSize(new Dimension(130, 30));
+            in.setToolTipText("Where to look: the whole line, or one column of the log's format");
+            in.setVisible(cols.size() > 0);
+            in.addActionListener(e -> {
+                String c = (String) in.getSelectedItem();
+                d.column = c == null || c.equals(LINE) ? null : c;
+                if (d.column == null) {
+                    d.op = ColumnFilter.Op.CONTAINS;
+                    op.setSelectedItem(d.op);
+                }
+                op.setVisible(d.column != null);
+                revalidate();
+                listener.filtersChanged();
+            });
+            op.setSelectedItem(d.op);
+            op.setMaximumSize(new Dimension(96, 30));
+            op.setVisible(d.column != null);
+            op.setToolTipText("<html>contains: the value contains the text<br>= : the whole value is the text"
+                    + "<br>&gt; &lt; : the value is a number above or below it (7 ms, 1.5 s and 2 KB compare too)"
+                    + "<br>between: a number from the first to the second, as in 10..20</html>");
+            op.addActionListener(e -> {
+                d.op = (ColumnFilter.Op) op.getSelectedItem();
                 listener.filtersChanged();
             });
 
@@ -608,6 +698,9 @@ final class FilterPanel extends JPanel {
             add(Box.createHorizontalStrut(6));
             add(action);
             add(Box.createHorizontalStrut(6));
+            add(in);
+            add(op);
+            add(Box.createHorizontalStrut(in.isVisible() ? 6 : 0));
             add(field);
             add(Box.createHorizontalStrut(4));
             add(color);
@@ -671,6 +764,8 @@ final class FilterPanel extends JPanel {
             boolean on = d.enabled;
             field.setEnabled(on);
             action.setEnabled(on);
+            in.setEnabled(on);
+            op.setEnabled(on);
             badge.setEnabled(on);
             badge.repaint();
         }
@@ -830,6 +925,10 @@ final class FilterPanel extends JPanel {
             p.setProperty(k + "wholeWord", Boolean.toString(d.wholeWord));
             p.setProperty(k + "enabled", Boolean.toString(d.enabled));
             p.setProperty(k + "alert", Boolean.toString(d.alert));
+            if (d.column != null) {
+                p.setProperty(k + "column", d.column);
+                p.setProperty(k + "op", d.op.name());
+            }
         }
         return p;
     }
@@ -866,6 +965,12 @@ final class FilterPanel extends JPanel {
             d.wholeWord = Boolean.parseBoolean(p.getProperty(k + "wholeWord"));
             d.enabled = Boolean.parseBoolean(p.getProperty(k + "enabled", "true"));
             d.alert = Boolean.parseBoolean(p.getProperty(k + "alert", "false"));
+            d.column = p.getProperty(k + "column");
+            try {
+                d.op = ColumnFilter.Op.valueOf(p.getProperty(k + "op", "CONTAINS"));
+            } catch (IllegalArgumentException e) {
+                d.op = ColumnFilter.Op.CONTAINS; // from a newer version
+            }
             loaded.add(d);
         }
         defs.clear();

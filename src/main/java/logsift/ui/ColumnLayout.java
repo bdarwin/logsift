@@ -26,7 +26,8 @@ final class ColumnLayout {
         List<String> names = format.columns();
         int message = names.indexOf("message");
         for (int i = 0; i < names.size(); i++) {
-            if (i == message || (!showSource && names.get(i).equals("source"))) {
+            // a merged log's labels; a CSV's own column called "source" always shows
+            if (i == message || (!showSource && !format.isCsv() && names.get(i).equals("source"))) {
                 continue;
             }
             if (hide.contains(names.get(i))) {
@@ -131,7 +132,6 @@ final class ColumnLayout {
     }
 
     String title(int col) {
-        String n = format.columns().get(col);
-        return n.substring(0, 1).toUpperCase(Locale.ROOT) + n.substring(1);
+        return format.displayName(format.columns().get(col));
     }
 }

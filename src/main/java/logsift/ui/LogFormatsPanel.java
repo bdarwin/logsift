@@ -474,7 +474,7 @@ final class LogFormatsPanel extends JPanel {
             note.setText("<html>" + (names.isEmpty() ? "No new formats" : "Created " + names.size() + " format"
                     + (names.size() == 1 ? "" : "s") + ": " + esc(String.join(", ", names)))
                     + (skipped > 0 ? " (" + skipped + " already here)" : "") + ". Each log uses the one that fits it; "
-                    + "change it with the Format button in the status bar.</html>");
+                    + "change it with the Format button in the log's bar.</html>");
         }
         return true;
     }

@@ -275,6 +275,28 @@ public final class LogFormat {
         {"logger", "logger_name", "loggername", "category"},
         {"message", "msg"}};
 
+    /**
+     * How a column is named on screen: for CSV the header's name as written ("order_id",
+     * "timestamp"), else the column with a capital ("Thread").
+     */
+    public String displayName(String column) {
+        List<String> names = headerNames();
+        int i = columns.indexOf(column);
+        if (names != null && i >= 0 && !names.get(i).isEmpty()) {
+            return names.get(i);
+        }
+        return column.isEmpty() ? column : column.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + column.substring(1);
+    }
+
+    /** CSV: the header's names as written, one per column (null for other formats). */
+    public List<String> headerNames() {
+        if (header == null) {
+            return null;
+        }
+        List<String> names = Csv.split(header, delimiter, null).stream().map(String::strip).toList();
+        return names.size() == columns.size() ? names : null;
+    }
+
     /** True for CSV (columns from the header row, not a regex). */
     public boolean isCsv() {
         return delimiter != 0;

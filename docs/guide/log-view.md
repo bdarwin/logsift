@@ -10,10 +10,10 @@ description: Lines and columns, level colours, line numbers and marks, the highl
 
 From top to bottom, a log tab has:
 
-- **The log's bar:** **Find**, **Filters**, **Clear All** and the chips of the filters that are on, on the left; the line count and the view buttons on the right.
+- **The log's bar:** **Find**, **Filters**, **Clear All** and the chips of the filters that are on, on the left; the line count, the format and the view buttons on the right.
 - **The [timeline](timeline.md):** how much was logged over time.
 - **The lines**, with line numbers on the left and the **highlight bar** on the right. A **tree of loggers** can sit on the left.
-- **The bottom panel** with its tabs: Filters, Insights, Exceptions, Metrics, Find results, Messages, Bookmarks, Details (and Request once you follow one). **Ctrl+J** (⌘J), the ▾ button, or a double-click on a tab folds or opens it.
+- **The bottom panel** with its tabs: Filters, Insights, Exceptions, Metrics, Profile (for CSV files), Find results, Messages, Bookmarks, Details (and Request once you follow one). **Ctrl+J** (⌘J), the ▾ button, or a double-click on a tab folds or opens it.
 - **The status bar.**
 
 ## Level colours
@@ -49,7 +49,7 @@ In the **Columns** view the row keeps these colours, and the **Level** cell is c
 
 Drag to select. Double-click selects a word; triple-click, or a click on the line number, the whole line. Shift+click extends. **Ctrl+C** copies (with nothing selected, the current line). **Ctrl+A** selects all.
 
-Right-click a line for: Copy, **Bookmark This Line**, **Follow** its request ID, **Open … in Editor** (on a stack line), **Show Thread "…" in Threads**, **Show Only Lines of Thread "…"**, **Open the Heap Dump** (on an out-of-memory line); with text selected, **Find All**, **Show / Hide / Mark lines with "…"**.
+Right-click a line for: Copy, **Bookmark This Line**, **Follow** its request ID, **Open … in Editor** (on a stack line), **Show Thread "…" in Threads**, **Show Only Lines of Thread "…"**, **Open the Heap Dump** (on an out-of-memory line); with text selected, **Find All**, **Show / Hide / Mark lines with "…"**. In the Columns view, right-click a value for **Show Only Rows Where Host = web-1** and **Hide Rows Where Host = web-1** (see [Filters on a column](filters.md#filters-on-a-column)).
 
 ## The highlight bar
 
@@ -69,6 +69,7 @@ Right: the count (*1,234 of 50,000 lines*), then:
 
 | Button | Does |
 |---|---|
+| **Format: …▾** | How the lines are read, for example *Format: CSV ▾* or *Format: logback / log4j ▾*. Click it to choose another format for this file (it is remembered), **Plain text**, **New Format from This Log…** or **Edit Log Formats…**. The same list is in **View → Log Format**. In a narrow window it shows just the name (*CSV ▾*); hover it for the whole name |
 | Wrap | Wrap long lines (Alt+Z, ⌥Z) |
 | Columns | Show lines as columns (Ctrl+Shift+K) |
 | Tree | The tree of loggers (Ctrl+Shift+B) |
@@ -83,7 +84,7 @@ These apply to this log, and your last choice becomes the default for the next l
 
 Left: the file (or `sftp user@host:/path`, or the web address), its size, the number of lines and how fast it was indexed. Then, when it applies: *• 1.2 MB more on disk: Reload (F5) to see it*, *• the file was replaced on disk*, or the state of a remote connection (*⚡ …*). A blue button appears when a new version of Logsift is out.
 
-Right: **Format: …▾** (how lines are read; click it if it is wrong), *MATCHING ONLY*, the line number (*Ln 1,234*), the current line's time, *FOLLOW*, the text encoding, and the memory Logsift uses.
+Right: *MATCHING ONLY*, the line number (*Ln 1,234*), the current line's time, *FOLLOW*, the text encoding, and the memory Logsift uses.
 
 ## Columns
 
@@ -92,7 +93,8 @@ Right: **Format: …▾** (how lines are read; click it if it is wrong), *MATCHI
 ![Parsed columns with top messages below](../screenshots/columns-and-messages.png)
 
 - Drag a header edge to resize a column.
-- Right-click a header: **Count Values in …** (every value with its number of lines; double-click one, or **Show Only**, to see its lines, or **Hide** them), **Hide … Column**, tick columns on and off, **Show All Columns**. *N columns hidden ▾* at the right of the header shows which; hidden columns are remembered for each format.
+- Right-click a header: **Count Values in …** (every value with its number of lines; double-click one, or **Show Only**, to see its rows, or **Hide** them), **Filter by …** (a filter that looks only in that column, see [Filters on a column](filters.md#filters-on-a-column)), **Profile of the Columns** (the [Profile](profile.md) tab), **Hide … Column**, tick columns on and off, **Show All Columns**.
+- Right-click a value: **Show Only Rows Where Host = web-1** or **Hide Rows Where Host = web-1**. *N columns hidden ▾* at the right of the header shows which; hidden columns are remembered for each format.
 - When Logsift doesn't know the layout, it says *"Logsift doesn't know this log's layout, so it can't show it as columns"* and offers **Define Its Format…** (see [Settings](settings.md#log-formats)).
 
 ## JSON logs
@@ -113,7 +115,11 @@ The **Details** tab shows the current entry in full (a line with its stack trace
 
 ## CSV files
 
-A `.csv` or `.tsv` file is read as a table: the header row names the columns, and rows are split by comma, semicolon, tab or `|`, with quoted fields handled. Columns named like a time, level, thread, logger or message (`timestamp`, `severity`, `msg`…) are used as such: the timeline uses the time column, and levels colour the rows. Other columns appear in the tree beside the log. Other files are read as CSV when they clearly are one, or choose **CSV** in the status bar's format menu.
+A `.csv` or `.tsv` file is read as a table: the header row names the columns, and rows are split by comma, semicolon, tab or `|`, with quoted fields handled. Columns named like a time, level, thread, logger or message (`timestamp`, `severity`, `msg`…) are used as such: the timeline uses the time column, and levels colour the rows. Other columns appear in the tree beside the log. Other files are read as CSV when they clearly are one, or choose **CSV** in **Format: …▾** in the log's bar.
+
+- In the Columns view the header row isn't shown as a row: its names are the column titles. Line numbers are those of the file, so the first row is line 2. The titles are the header's names as written (*order_id*, *timestamp*), in the tree, the filters and their chips too. Logsift still knows which column holds the time, level, thread, logger or message (*timestamp*, *severity*, *msg*…): hover such a title to see it. The plain view shows the header line as it is.
+- Right-click a value to show only (or hide) the rows with it, or a column title for **Filter by …**: see [Filters on a column](filters.md#filters-on-a-column).
+- The [Profile](profile.md) tab shows what each column holds, with a chart per column. The **Messages** tab groups rows by the message column (a table without one has no messages to group). The [Metrics](metrics.md#columns) tab charts the columns of numbers, and how many rows each value of a column like *host* or *status* has over time.
 
 ![A CSV file from inside a zip, shown as columns, with its hosts in the tree](../screenshots/csv.png)
 
@@ -134,7 +140,7 @@ The **Bookmarks** tab lists them: **Line**, **Time**, **Note** (type a note ther
 
 ## Merged logs
 
-A log made with **File → Merge Files by Time…** starts each line with a label like `<node2-app>` and a coloured stripe at the far left. See [Compare and merge](compare.md#merge-logs-by-time).
+A log made with **File → Merge Files by Time…** starts each line with a label like `<node2-app>` and a coloured stripe at the far left. See [Compare and merge](compare.md#merge-logs-by-time). CSV files merge into one CSV with a Source column instead: see [Merge CSV files](compare.md#merge-csv-files).
 
 ## Text encodings
 

@@ -1472,6 +1472,8 @@ class VisualTest {
             return m;
         });
         try {
+            // the session holds files from earlier tests too; some (in a zip) open in the background
+            waitForRestore(second);
             LogTab restored = onEdt(second::currentTab);
             assertEquals(incident.toAbsolutePath().normalize(), restored.document().path(), "selected tab");
             waitFor(() -> {
@@ -1488,6 +1490,70 @@ class VisualTest {
                 second.dispose();
                 return null;
             });
+        }
+    }
+
+    /** Waits until every file of the last session has opened (or failed to) in this window. */
+    private static void waitForRestore(MainFrame m) throws InterruptedException {
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !m.isRestoringSessionForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "session restored");
+    }
+
+    /** Restores this session in a new window; returns the selected tab's file once all are open. */
+    private static Path restoredSelection(List<Path> files, int selected) throws Exception {
+        MainFrame m = onEdt(() -> {
+            // on the EDT: after the last window's own save of its session when it closed
+            AppState.saveSession(files, selected);
+            MainFrame f = new MainFrame();
+            f.setSize(900, 600);
+            f.setVisible(true);
+            f.restoreSession();
+            return f;
+        });
+        try {
+            waitForRestore(m);
+            settle();
+            return onEdt(() -> {
+                assertEquals(files.size(), m.tabsForTest().getTabCount(), "all tabs open");
+                return m.currentTab() == null ? null : m.currentTab().path();
+            });
+        } finally {
+            onEdt(() -> {
+                m.dispose();
+                return null;
+            });
+        }
+    }
+
+    @Test
+    @Order(21)
+    void sessionRestoreSelectsSavedTabWhateverOpensLast() throws Exception {
+        Path a = dir.resolve("session-a.log").toAbsolutePath().normalize();
+        Path b = dir.resolve("session-b.log").toAbsolutePath().normalize();
+        Path gz = dir.resolve("session-slow.log.gz").toAbsolutePath().normalize();
+        Files.writeString(a, "2026-10-21 10:00:00 INFO [main] a\n");
+        Files.writeString(b, "2026-10-21 10:00:00 INFO [main] b\n");
+        try (var o = new java.util.zip.GZIPOutputStream(Files.newOutputStream(gz))) {
+            o.write("2026-10-21 10:00:00 INFO [main] packed\n".getBytes(StandardCharsets.UTF_8));
+        }
+        // a .gz is always unpacked in the background, so it opens after the plain files
+        assertEquals(a, restoredSelection(List.of(gz, a, b), 1), "selected file opens before a packed one");
+        assertEquals(b, restoredSelection(List.of(a, b, gz), 1), "packed file last in the session");
+        assertEquals(gz, restoredSelection(List.of(a, gz, b), 1), "the selected file is the slow one");
+        // every file slow (a network drive): they finish in any order, each with "Opening…"
+        System.setProperty("logsift.openWaitMs", "50");
+        System.setProperty("logsift.testOpenDelayMs", "600");
+        try {
+            assertEquals(a, restoredSelection(List.of(b, a, gz), 1), "all files slow");
+            assertEquals(b, restoredSelection(List.of(gz, a, b), 2), "all files slow, last selected");
+        } finally {
+            System.setProperty("logsift.openWaitMs", "10000");
+            System.clearProperty("logsift.testOpenDelayMs");
         }
     }
 
@@ -1729,13 +1795,19 @@ class VisualTest {
                 dlg.go("/var/log/app");
                 return null;
             });
-            waitFor(() -> {
-                try {
-                    return onEdt(() -> dlg.listingsForTest() > before && "/var/log/app".equals(dlg.folderForTest()));
-                } catch (Exception e) {
-                    return false;
-                }
-            }, 10_000, "app folder by its full path");
+            try {
+                waitFor(() -> {
+                    try {
+                        return onEdt(() -> dlg.listingsForTest() > before && "/var/log/app".equals(dlg.folderForTest()));
+                    } catch (Exception e) {
+                        return false;
+                    }
+                }, 10_000, "app folder by its full path");
+            } catch (AssertionError e) { // say what the dialog shows
+                throw new AssertionError(e.getMessage() + "; shown: " + onEdt(dlg::folderForTest) + ", listings "
+                        + onEdt(dlg::listingsForTest) + " (before " + before + "), status: "
+                        + onEdt(dlg::statusForTest), e);
+            }
             onEdt(() -> {
                 dlg.select("server.log");
                 return null;
@@ -2254,29 +2326,29 @@ class VisualTest {
         assertTrue(onEdt(() -> tab.entryFormat().startsEntry("21.10.26 10:00:13.000|I|Http|x")));
         assertTrue(!onEdt(() -> tab.entryFormat().startsEntry("    at com.acme.Pay.charge(Pay.java:12)")));
 
-        // the status bar shows the format; clicking it picks another for this file
+        // the log's bar shows the format; clicking it picks another for this file
         waitFor(() -> {
             try {
-                return onEdt(() -> frame.formatButtonForTest().isShowing()
-                        && frame.formatButtonForTest().getText().contains("orders"));
+                return onEdt(() -> tab.logBar().formatButtonForTest().isShowing()
+                        && tab.logBar().formatButtonForTest().getText().equals("Format: orders ▾"));
             } catch (Exception e) {
                 return false;
             }
-        }, 10_000, "format in the status bar");
+        }, 10_000, "format in the log's bar");
         onEdt(() -> {
-            frame.formatButtonForTest().doClick();
+            tab.logBar().formatButtonForTest().doClick();
             return null;
         });
         settle();
-        shot("46b-format-from-status-bar");
+        shot("46b-format-from-log-bar");
         // choosing a format by hand is remembered for the file
         onEdt(() -> {
-            for (java.awt.Component c : frame.formatPopupForTest().getComponents()) {
+            for (java.awt.Component c : tab.logBar().formatMenuForTest().getComponents()) {
                 if (c instanceof javax.swing.JMenuItem mi && mi.getText().equals(logsift.core.Formats.PLAIN)) {
                     mi.doClick();
                 }
             }
-            frame.formatPopupForTest().setVisible(false);
+            tab.logBar().formatMenuForTest().setVisible(false);
             return null;
         });
         waitFor(() -> {
@@ -3773,6 +3845,112 @@ class VisualTest {
         assertEquals(List.of(), onEdt(() -> csvTab.logBar().chipTexts()));
         assertTrue(!onEdt(() -> csvTab.logBar().clearAllLitForTest()), "nothing left to clear");
 
+        // the header row is named by the strip above the columns, not shown again as a row
+        onEdt(() -> {
+            csvTab.mainView().goToRow(0, true);
+            return null;
+        });
+        assertEquals(1, (int) onEdt(() -> csvTab.mainView().selectedRow()), "line 1 is the header: line 2");
+        assertTrue(onEdt(() -> csvTab.mainView().textAtForTest(0)).startsWith("2026-10-21 10:00:00,ERROR,web-1"),
+                onEdt(() -> csvTab.mainView().textAtForTest(0)));
+        // the format is in the log's bar
+        assertEquals("Format: CSV ▾", onEdt(() -> csvTab.logBar().formatButtonForTest().getText()));
+        assertTrue(onEdt(() -> csvTab.logBar().formatButtonForTest().isShowing()));
+        // right-click a host: show only the rows of that host (a filter on the Host column)
+        int hostX = onEdt(() -> csvTab.mainView().xForCellForTest("Host"));
+        int rowY = onEdt(() -> csvTab.mainView().yForRowForTest(3));
+        assertEquals(new LogView.Cell("Host", "web-3"), onEdt(() -> csvTab.mainView().cellAt(hostX, rowY)));
+        javax.swing.JPopupMenu cellMenu = onEdt(() -> {
+            javax.swing.JPopupMenu m = csvTab.mainView().menuForTest(hostX, rowY);
+            m.show(csvTab.mainView().canvasForTest(), hostX, rowY);
+            return m;
+        });
+        settle();
+        onEdt(() -> {
+            for (java.awt.Component c : cellMenu.getComponents()) {
+                if (c instanceof javax.swing.JMenuItem mi && mi.getText().equals("Show Only Rows Where Host = web-3")) {
+                    mi.doClick();
+                }
+            }
+            cellMenu.setVisible(false);
+            return null;
+        });
+        waitForFilter(csvTab);
+        assertEquals(List.of("Show: Host = web-3"), onEdt(() -> csvTab.logBar().chipTexts()));
+        assertEquals(133, onEdt(() -> csvTab.filterResultForTest().matchCount()), "web-3's rows, not the header");
+        assertTrue(onEdt(csvTab::isMatchingOnly));
+        // a filter on one column from the column's menu: User contains "u1" (u1, u10…u19)
+        onEdt(() -> {
+            csvTab.addColumnFilter("User");
+            FilterDef d = csvTab.filterPanel().filters().get(1);
+            d.text = "u1";
+            csvTab.filterPanel().setFilterAction(d, FilterDef.Action.SHOW);
+            csvTab.filterPanel().setFormula("A AND B");
+            return null;
+        });
+        waitForFilter(csvTab);
+        // web-3 rows are i % 3 == 2; users u1, u10..u19 are i % 40 in {1, 10..19}
+        long expected = java.util.stream.IntStream.range(0, 400)
+                .filter(i -> i % 3 == 2 && (i % 40 == 1 || (i % 40 >= 10 && i % 40 <= 19))).count();
+        assertEquals(expected, (long) onEdt(() -> csvTab.filterResultForTest().matchCount()));
+        assertEquals(List.of("Show: Host = web-3", "Show: User contains u1"), onEdt(() -> csvTab.logBar().chipTexts()));
+        settle();
+        shot("74d-csv-column-filters");
+        // the metrics of a CSV: numbers in its messages, and rows per stretch of time for each host
+        onEdt(() -> {
+            setBottomFor(csvTab, csvTab.metricsPanel());
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> csvTab.metricsPanel().metrics() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the CSV's metrics");
+        List<String> measured = onEdt(() -> csvTab.metricsPanel().metrics().numbers().stream()
+                .map(logsift.core.Numbers.Series::name).toList());
+        assertTrue(measured.contains("Host = web-1") && measured.stream().anyMatch(n -> n.contains("took # ms")),
+                measured.toString());
+        onEdt(() -> {
+            int row = 0;
+            for (MetricsPanel.Item it : csvTab.metricsPanel().itemListForTest()) {
+                if (it.name().equals("Host = web-1")) {
+                    break;
+                }
+                row++;
+            }
+            csvTab.metricsPanel().itemsForTest().setRowSelectionInterval(row, row);
+            return null;
+        });
+        settle();
+        shot("74e-csv-metrics");
+        // a narrow window: the log's bar still fits, the format's name is cut short
+        onEdt(() -> {
+            frame.setSize(820, 860);
+            frame.validate();
+            return null;
+        });
+        settle();
+        onEdt(() -> {
+            LogBar bar = csvTab.logBar();
+            java.awt.Component lastOne = bar.getComponent(bar.getComponentCount() - 1);
+            assertTrue(lastOne.getX() + lastOne.getWidth() <= bar.getWidth(), "Reload ▾ in the window");
+            assertTrue(bar.formatButtonForTest().isShowing() && bar.formatButtonForTest().getWidth() >= 50,
+                    "the format button stays");
+            assertEquals("CSV ▾", bar.formatButtonForTest().getText(), "without “Format: ”");
+            return null;
+        });
+        shot("74f-narrow-window");
+        onEdt(() -> {
+            frame.setSize(1400, 860);
+            frame.validate();
+            csvTab.logBar().clearAllButtonForTest().doClick();
+            return null;
+        });
+        waitForFilter(csvTab);
+        assertEquals(List.of(), onEdt(() -> csvTab.logBar().chipTexts()));
+
         // like any log: bookmarks are remembered, and it opens again by its name (recent files, sessions)
         onEdt(() -> {
             csvTab.mainView().goToRow(26, true);
@@ -5054,6 +5232,309 @@ class VisualTest {
             System.clearProperty("logsift.noKnownHosts");
             server.stop(true);
         }
+    }
+
+    @Test
+    @Order(50)
+    void tableCsvProfile() throws Exception {
+        // a table, not a log: no time column; an ID, categories, numbers, yes/no and free text
+        StringBuilder sb = new StringBuilder("order_id,country,amount_eur,weight_kg,paid,size_bytes,note\n");
+        String[] countries = {"DE", "FR", "NL", "DE", "DE", "IT", "ES", "DE", "FR", "PL"};
+        Random rnd = new Random(7);
+        for (int i = 0; i < 2000; i++) {
+            double amount = Math.round(Math.exp(2 + rnd.nextGaussian() * 0.6) * 100) / 100.0;
+            sb.append(String.format(java.util.Locale.ROOT, "A-%05d,%s,%.2f,%d,%s,%d,%s%n", i, countries[rnd.nextInt(10)],
+                    amount, 1 + rnd.nextInt(5), rnd.nextInt(5) == 0 ? "no" : "yes",
+                    (long) Math.pow(10, 2 + rnd.nextInt(5)) + rnd.nextInt(900),
+                    i % 7 == 0 ? "\"Leave it with the neighbour, number " + (i % 40) + ", please\"" : ""));
+        }
+        Path csv = dir.resolve("orders-table.csv");
+        Files.writeString(csv, sb.toString());
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.openFiles(List.of(csv));
+            return null;
+        });
+        LogTab tab = waitForTab("orders-table.csv");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the table's columns");
+        // a CSV's columns are named as in its header, everywhere
+        assertEquals("order_id", onEdt(() -> tab.mainView().columns().title(0)));
+        assertEquals("amount_eur", onEdt(() -> tab.columnName("amount_eur")));
+        assertEquals("order_id", onEdt(() -> ValuesTreePanel.title(tab.logFormat(), "order_id")));
+        // no times: no timeline, and its button says why
+        assertTrue(!onEdt(tab::hasTimes));
+        assertTrue(!onEdt(() -> tab.timeline().isVisible()));
+        assertTrue(!onEdt(() -> tab.logBar().timelineButtonForTest().isEnabled()));
+        assertTrue(onEdt(() -> tab.logBar().timelineButtonForTest().getToolTipText()).startsWith("No times in this file"));
+        // the Profile tab: a card per column with its kind and a chart
+        ProfilePanel pp = onEdt(tab::profilePanel);
+        javax.swing.JSplitPane split = onEdt(() -> {
+            setBottomFor(tab, pp);
+            javax.swing.JSplitPane sp = (javax.swing.JSplitPane) SwingUtilities.getAncestorOfClass(
+                    javax.swing.JSplitPane.class, SwingUtilities.getAncestorOfClass(JTabbedPane.class, pp));
+            sp.setDividerLocation(260); // room for the cards
+            return sp;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the profile");
+        Map<String, logsift.core.ColumnProfile.Kind> kinds = new LinkedHashMap<>();
+        onEdt(() -> {
+            pp.result().columns().forEach(c -> kinds.put(c.title(), c.kind()));
+            return null;
+        });
+        assertEquals(List.of("ID", "category", "number", "category", "yes / no", "number", "text"),
+                kinds.values().stream().map(k -> k.label).toList(), kinds.toString());
+        assertEquals(2000, onEdt(() -> pp.result().rows()), "rows, not the header");
+        assertTrue(onEdt(() -> pp.result().columns().get(5).logScale()), "sizes over orders of magnitude");
+        assertEquals(7, onEdt(() -> pp.cardsForTest().size()));
+        settle();
+        shot("103-table-profile");
+        // click a value: a filter on that column; the profile then counts the rows the filters keep
+        onEdt(() -> {
+            pp.cardsForTest().get(1).chart.clickForTest(0); // the most frequent country
+            return null;
+        });
+        waitForFilter(tab);
+        String top = onEdt(() -> pp.result().columns().get(1).bars().get(0).label());
+        assertEquals("DE", top);
+        assertEquals(List.of("Show: country = DE"), onEdt(() -> tab.logBar().chipTexts()), "named as in the file");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning() && pp.result().filtered());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the profile of the filtered rows");
+        long des = onEdt(() -> tab.filterResultForTest().matchCount());
+        assertEquals(des, (long) onEdt(() -> pp.result().rows()));
+        assertEquals(1, (long) onEdt(() -> pp.result().columns().get(1).distinct()));
+        assertTrue(onEdt(pp::summaryForTest).contains("only the rows the filters keep"));
+        // a histogram bucket: a "between" filter on the amounts
+        long barCount = onEdt(() -> {
+            ProfilePanel.ColumnCard amount = pp.cardsForTest().get(2);
+            int biggest = 0;
+            List<logsift.core.ColumnProfile.Bar> bars = amount.column.bars();
+            for (int i = 1; i < bars.size(); i++) {
+                biggest = bars.get(i).count() > bars.get(biggest).count() ? i : biggest;
+            }
+            amount.chart.clickForTest(biggest);
+            return bars.get(biggest).count();
+        });
+        waitForFilter(tab);
+        List<String> chips = onEdt(() -> tab.logBar().chipTexts());
+        assertEquals(2, chips.size(), chips.toString());
+        assertTrue(chips.get(1).startsWith("Show: amount_eur between ") && chips.get(1).contains("..<"),
+                chips.toString());
+        onEdt(() -> {
+            tab.filterPanel().setFormula("A AND B");
+            return null;
+        });
+        waitForFilter(tab);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning() && pp.result().rows()
+                        == tab.filterResultForTest().matchCount());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the profile follows the filters");
+        assertEquals(barCount, (long) onEdt(() -> tab.filterResultForTest().matchCount()),
+                "the bar's rows, no more (a value on an edge is in one bar)");
+        settle();
+        shot("103b-table-profile-filtered");
+        // dark mode
+        onEdt(() -> {
+            tab.logBar().clearAllButtonForTest().doClick();
+            frame.toggleDark();
+            return null;
+        });
+        waitForFilter(tab);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning() && !pp.result().filtered());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the whole table again");
+        settle();
+        shot("103c-table-profile-dark");
+        onEdt(() -> {
+            frame.toggleDark();
+            return null;
+        });
+        // Metrics and Insights work without times
+        onEdt(() -> {
+            setBottomFor(tab, tab.metricsPanel());
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.metricsPanel().metrics() != null && !tab.metricsPanel().isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the table's metrics");
+        List<String> measured = onEdt(() -> tab.metricsPanel().metrics().numbers().stream()
+                .map(logsift.core.Numbers.Series::name).toList());
+        assertTrue(measured.contains("amount_eur") && measured.contains("size_bytes"), measured.toString());
+        assertTrue(measured.stream().noneMatch(n -> n.contains(" = ")), "no rows per minute without times");
+        onEdt(() -> {
+            tab.metricsPanel().itemsForTest().setRowSelectionInterval(0, 0);
+            return null;
+        });
+        settle();
+        shot("103d-table-metrics-no-times");
+        onEdt(() -> {
+            setBottomFor(tab, tab.insightsPanel());
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.insightsPanel().report() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the table's insights");
+        assertTrue(onEdt(() -> tab.insightsPanel().report().findings().stream()
+                .noneMatch(f -> f.kind() == logsift.core.Insights.Kind.NOISE)), "rows of values are no messages");
+        settle();
+        shot("103e-table-insights-no-times");
+        onEdt(() -> {
+            setBottomFor(tab, tab.messagesPanel());
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.messagesPanel().statusForTest().startsWith("This table has no message column"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "Messages says why it is empty");
+        onEdt(() -> {
+            split.setDividerLocation(split.getHeight() - 240);
+            return null;
+        });
+    }
+
+    @Test
+    @Order(51)
+    void mergeCsvFiles() throws Exception {
+        // three exports of one shop: one has an extra column, one uses ; between fields
+        Path box = Files.createDirectories(dir.resolve("csv-merge"));
+        StringBuilder eu = new StringBuilder("time,host,status,duration_ms\n");
+        StringBuilder us = new StringBuilder("time,host,status,duration_ms,region\n");
+        StringBuilder ap = new StringBuilder("Time;Host;Status;Duration_ms\n");
+        Random rnd = new Random(3);
+        for (int i = 0; i < 300; i++) {
+            String t = String.format("2026-10-21 10:%02d:%02d", i / 60 % 60, i % 60);
+            int ms = 20 + rnd.nextInt(200);
+            switch (i % 3) {
+                case 0 -> eu.append(String.format("%s,eu-%d,%d,%d%n", t, i % 2 + 1, i % 40 == 0 ? 500 : 200, ms));
+                case 1 -> us.append(String.format("%s,us-%d,%d,%d,\"us-east, zone %d\"%n", t, i % 2 + 1,
+                        i % 25 == 1 ? 404 : 200, ms, i % 3));
+                default -> ap.append(String.format("%s;ap-1;%d;%d%n", t, 200, ms));
+            }
+        }
+        Path a = box.resolve("shop-eu.csv");
+        Path b = box.resolve("shop-us.csv");
+        Path c = box.resolve("shop-ap.csv");
+        Files.writeString(a, eu);
+        Files.writeString(b, us);
+        Files.writeString(c, ap);
+        String how = MainFrame.mergeExplanation(List.of(a, b, c));
+        assertTrue(how.contains("These are CSV files") && how.contains("time order"), how);
+        // CSV files and a log together: merged as logs, and the dialog says so
+        assertTrue(MainFrame.mergeExplanation(List.of(a, dir.resolve("shop-requests.log"))).contains("merged as logs"));
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.mergeFiles(List.of(a, b, c));
+            return null;
+        });
+        LogTab tab = waitForTab("merged-3-files.csv");
+        assertEquals("Merged (3 CSV files)", onEdt(() -> frame.tabsForTest().getTitleAt(
+                frame.tabsForTest().indexOfComponent(tab))));
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null && tab.timeIndex() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the merged CSV's columns");
+        logsift.core.LogFormat f = onEdt(tab::logFormat);
+        assertTrue(f.isCsv());
+        assertEquals(List.of("source", "time", "host", "status", "duration_ms", "region"), f.columns());
+        assertEquals(301, onEdt(() -> tab.document().lineCount()), "one header and every row");
+        String first = onEdt(() -> tab.document().line(1));
+        assertTrue(first.startsWith("shop-eu,2026-10-21 10:00:00,eu-1,500,") && first.endsWith(","),
+                "the first row, by time, region empty: " + first);
+        assertTrue(onEdt(() -> tab.document().line(2)).startsWith("shop-us,2026-10-21 10:00:01,us-2,404,"));
+        assertTrue(onEdt(() -> tab.document().line(2)).endsWith(",\"us-east, zone 1\""), "quoted again");
+        // the tree splits by source
+        ValuesTreePanel tree = tab.valuesTree();
+        waitFor(() -> tree.isShowing() && tree.valuesForTest() != null && !tree.isCountingForTest(), 20_000,
+                "the tree of sources");
+        assertEquals(List.of("shop-ap", "shop-eu", "shop-us"),
+                tree.valuesForTest().root().children().stream().map(n -> n.label()).sorted().toList());
+        settle();
+        shot("104-csv-merge");
+        // the Profile has the sources as a category
+        ProfilePanel pp = onEdt(tab::profilePanel);
+        onEdt(() -> {
+            setBottomFor(tab, pp);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.result() != null && !pp.isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the merged CSV's profile");
+        assertEquals(logsift.core.ColumnProfile.Kind.CATEGORY, onEdt(() -> pp.result().columns().get(0).kind()));
+        assertEquals(3, (long) onEdt(() -> pp.result().columns().get(0).distinct()));
+        settle();
+        shot("104b-csv-merge-profile");
+        // rows written to a source later are added, in the merged columns
+        Files.writeString(c, "2026-10-21 11:00:00;ap-9;503;999\n", java.nio.file.StandardOpenOption.APPEND);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.document().lineCount() == 302);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the new row followed");
+        assertEquals("shop-ap,2026-10-21 11:00:00,ap-9,503,999,", onEdt(() -> tab.document().line(301)));
+        // tables without times: one file after the other
+        Path t1 = box.resolve("stock-berlin.csv");
+        Path t2 = box.resolve("stock-paris.csv");
+        Files.writeString(t1, "sku,qty\nA-1,5\nA-2,7\n");
+        Files.writeString(t2, "qty;sku;aisle\n3;B-1;4\n");
+        assertTrue(MainFrame.mergeExplanation(List.of(t1, t2)).contains("one file after the other"));
+        onEdt(() -> {
+            frame.mergeFiles(List.of(t1, t2));
+            return null;
+        });
+        LogTab stock = waitForTab("merged-2-files.csv");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> stock.logFormat() != null && stock.document().lineCount() == 4);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the merged tables");
+        assertEquals(List.of("source,sku,qty,aisle", "stock-berlin,A-1,5,", "stock-berlin,A-2,7,", "stock-paris,B-1,3,4"),
+                onEdt(() -> java.util.stream.LongStream.range(0, 4).mapToObj(l -> stock.document().line(l)).toList()));
     }
 
     private LogTab waitForTab(String title) throws Exception {

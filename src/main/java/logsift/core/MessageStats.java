@@ -43,8 +43,16 @@ public final class MessageStats {
         }
     }
 
-    /** The result: templates by count (most first), and how many lines were counted. */
-    public record Result(List<Template> templates, long lines, long millis, boolean truncated) {}
+    /**
+     * The result: templates by count (most first), and how many lines were counted.
+     * {@code noMessageColumn}: a table (a CSV without a message column), so nothing was counted.
+     */
+    public record Result(List<Template> templates, long lines, long millis, boolean truncated,
+                         boolean noMessageColumn) {
+        public Result(List<Template> templates, long lines, long millis, boolean truncated) {
+            this(templates, lines, millis, truncated, false);
+        }
+    }
 
     static final String WILDCARD = "<*>";
     private static final int MAX_TEMPLATES_PER_RANGE = 50_000;
@@ -61,8 +69,24 @@ public final class MessageStats {
     public static Result analyze(LogDocument doc, EntryFormat entries, long from, long to,
                                  LongPredicate include, BooleanSupplier cancelled,
                                  java.util.function.DoubleConsumer progress) {
+        return analyze(doc, entries, null, from, to, include, cancelled, progress);
+    }
+
+    /**
+     * Like {@link #analyze(LogDocument, EntryFormat, long, long, LongPredicate, BooleanSupplier,
+     * java.util.function.DoubleConsumer)}; for a CSV with a message column ({@code format}), only
+     * the message of each row is counted (not the row's other fields), and a message keeps the
+     * most severe level of its rows instead of being counted once per level.
+     */
+    public static Result analyze(LogDocument doc, EntryFormat entries, LogFormat format, long from, long to,
+                                 LongPredicate include, BooleanSupplier cancelled,
+                                 java.util.function.DoubleConsumer progress) {
         long start = System.nanoTime();
-        Raw raw = countRaw(doc, entries, from, to, include, cancelled, progress);
+        if (format != null && format.isCsv() && !format.columns().contains("message")) {
+            return new Result(List.of(), 0, 0, false, true); // rows of values: no messages to group
+        }
+        LogFormat csv = format != null && format.isCsv() ? format : null;
+        Raw raw = countRaw(doc, entries, csv, from, to, include, cancelled, progress);
         if (raw.cancelled) {
             return new Result(List.of(), raw.lines, 0, true);
         }
@@ -75,6 +99,13 @@ public final class MessageStats {
     record Raw(Map<String, Stat> stats, long lines, boolean truncated, boolean cancelled) {}
 
     static Raw countRaw(LogDocument doc, EntryFormat entries, long from, long to,
+                        LongPredicate include, BooleanSupplier cancelled,
+                        java.util.function.DoubleConsumer progress) {
+        return countRaw(doc, entries, null, from, to, include, cancelled, progress);
+    }
+
+    /** {@code csv}: a CSV format whose message column is counted instead of the whole line, or null. */
+    static Raw countRaw(LogDocument doc, EntryFormat entries, LogFormat csv, long from, long to,
                         LongPredicate include, BooleanSupplier cancelled,
                         java.util.function.DoubleConsumer progress) {
         LineIndex.Snapshot s = doc.snapshot();
@@ -102,7 +133,7 @@ public final class MessageStats {
                         long sb = doc.lineStart(s, a);
                         long eb = doc.lineStart(s, b);
                         inFlight.add(LogDocument.WORKERS.submit(
-                                () -> scan(doc, a, sb, eb, entries, include, cancelled)));
+                                () -> scan(doc, a, sb, eb, entries, csv, include, cancelled)));
                         lo = hi;
                     }
                     chunk++;
@@ -148,6 +179,14 @@ public final class MessageStats {
         long count;
         long first;
         long last;
+        String level; // CSV: the most severe level of its rows (null: from the text)
+
+        /** Keeps the more severe of two levels. */
+        void level(String l) {
+            if (l != null && (level == null || rank(l) < rank(level))) {
+                level = l;
+            }
+        }
 
         Stat(long line) {
             count = 1;
@@ -159,7 +198,18 @@ public final class MessageStats {
             count += o.count;
             first = Math.min(first, o.first);
             last = Math.max(last, o.last);
+            level(o.level);
         }
+    }
+
+    /** 0 for FATAL, the most severe; LEVELS.length for none. */
+    private static int rank(String level) {
+        for (int i = 0; i < LEVELS.length; i++) {
+            if (LEVELS[i].equals(level)) {
+                return i;
+            }
+        }
+        return LEVELS.length;
     }
 
     private record Local(Map<String, Stat> stats, long lines, long endLine, boolean truncated) {}
@@ -167,8 +217,10 @@ public final class MessageStats {
     private static final ThreadLocal<byte[]> BUFFERS = ThreadLocal.withInitial(() -> new byte[0]);
 
     private static Local scan(LogDocument doc, long firstLine, long startByte, long endByte,
-                              EntryFormat entries, LongPredicate include,
+                              EntryFormat entries, LogFormat csv, LongPredicate include,
                               BooleanSupplier cancelled) {
+        int msgCol = csv == null ? -1 : csv.columns().indexOf("message");
+        int levelCol = csv == null ? -1 : csv.columns().indexOf("level");
         int len = (int) Math.min(endByte - startByte, 256L * 1024 * 1024);
         byte[] buf = BUFFERS.get();
         if (buf.length < len) {
@@ -194,16 +246,34 @@ public final class MessageStats {
                 end--;
             }
             boolean head = entries == null || entries.startsEntry(buf, pos, end);
+            String rowLevel = null;
+            byte[] src = buf;
+            int a = pos;
+            int b = Math.min(end, pos + MAX_LINE_BYTES);
+            if (csv != null && head && end > pos) {
+                // a CSV row: its message only (the header and pieces of a quoted value are no rows)
+                String[] cells = csv.split(new String(buf, pos, end - pos, doc.charset()), null);
+                head = cells != null && cells[msgCol] != null;
+                if (head) {
+                    src = cells[msgCol].getBytes(doc.charset());
+                    a = 0;
+                    b = Math.min(src.length, MAX_LINE_BYTES);
+                    rowLevel = levelCol < 0 ? null : Levels.normalize(cells[levelCol]);
+                }
+            }
             if (head && end > pos && (include == null || include.test(line))) {
-                int tl = template(buf, pos, Math.min(end, pos + MAX_LINE_BYTES), tmp);
+                int tl = template(src, a, b, tmp);
                 // bytes kept as Latin-1 chars here (fast); decoded as UTF-8 at the end
                 String key = new String(tmp, 0, tl, StandardCharsets.ISO_8859_1);
                 Stat st = stats.get(key);
                 if (st != null) {
                     st.count++;
                     st.last = line;
+                    st.level(rowLevel);
                 } else if (stats.size() < MAX_TEMPLATES_PER_RANGE) {
-                    stats.put(key, new Stat(line));
+                    Stat ns = new Stat(line);
+                    ns.level(rowLevel);
+                    stats.put(key, ns);
                 } else {
                     truncated = true;
                 }
@@ -332,6 +402,7 @@ public final class MessageStats {
                     Stat copy = new Stat(st.first);
                     copy.count = st.count;
                     copy.last = st.last;
+                    copy.level = st.level;
                     mergedStats.add(copy);
                 } else {
                     String[] m = merged.get(into);
@@ -346,7 +417,8 @@ public final class MessageStats {
             for (int m = 0; m < merged.size(); m++) {
                 String text = String.join(" ", merged.get(m));
                 Stat st = mergedStats.get(m);
-                out.add(new Template(text, levelOf(text), st.count, st.first, st.last));
+                out.add(new Template(text, st.level != null ? st.level : levelOf(text), st.count, st.first,
+                        st.last));
             }
         }
         out.sort(Comparator.comparingLong((Template t) -> -t.count()).thenComparing(Template::text));

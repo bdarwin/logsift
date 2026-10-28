@@ -147,13 +147,19 @@ public final class LogAnalysis implements AutoCloseable {
     }
 
     /**
-     * Durations of things that start and end, and numbers in messages (null if stopped).
-     * {@code ef} is asked for at each message kind, as it may change meanwhile.
+     * Durations of things that start and end, numbers in messages, and the log's columns of
+     * numbers and of a few values (null if stopped). {@code ef} is asked for at each message
+     * kind, as it may change meanwhile.
      */
     public static Metrics metrics(LogDocument doc, java.util.function.Supplier<EntryFormat> ef, TimeFormat tf,
                                   LogFormat lf, MessageStats.Result m, BooleanSupplier stop) {
-        return Metrics.analyze(m.templates(), (t, c) -> templateLines(doc, ef.get(), t, stop),
+        Metrics me = Metrics.analyze(m.templates(), (t, c) -> templateLines(doc, ef.get(), t, stop),
                 RequestTrace.reader(doc::line, tf, lf), stop);
+        if (me == null || stop.getAsBoolean()) {
+            return null;
+        }
+        java.util.List<Numbers.Series> cols = ColumnMetrics.analyze(lf, doc.lineCount(), doc::line, tf, stop);
+        return stop.getAsBoolean() ? null : me.withColumns(cols);
     }
 
     /** The time of the last line that has one (near the end), or {@link TimeFormat#NONE}. */
@@ -280,8 +286,8 @@ public final class LogAnalysis implements AutoCloseable {
     public synchronized MessageStats.Result messages(BooleanSupplier stop, DoubleConsumer progress)
             throws InterruptedException {
         if (messages == null && awaitReady(stop)) {
-            MessageStats.Result m = MessageStats.analyze(doc, formats.entries(), 0, Long.MAX_VALUE, null,
-                    stop, progress);
+            MessageStats.Result m = MessageStats.analyze(doc, formats.entries(), formats.columns(), 0,
+                    Long.MAX_VALUE, null, stop, progress);
             if (!stop.getAsBoolean()) {
                 messages = m;
             }
