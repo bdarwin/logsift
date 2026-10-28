@@ -124,6 +124,16 @@ val mcpStartScripts by tasks.registering(CreateStartScripts::class) {
     classpath = tasks.startScripts.get().classpath
     defaultJvmOpts = listOf("-Xmx2g", "-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED", "-Djava.awt.headless=true")
 }
+// ZGC needs Windows 10 1803 / Server 2019 or later: Java won't start with it on Server 2016 or
+// Windows 10 LTSB 1607. The Windows start scripts use G1, which runs everywhere.
+listOf(tasks.startScripts, mcpStartScripts).forEach { t ->
+    t.configure {
+        doLast {
+            val bat = outputDir!!.resolve(applicationName + ".bat")
+            bat.writeText(bat.readText().replace("-XX:+UseZGC", "-XX:+UseG1GC"))
+        }
+    }
+}
 distributions {
     main {
         contents {

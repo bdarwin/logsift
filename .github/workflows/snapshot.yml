@@ -91,18 +91,22 @@ jobs:
           NAME=Logsift-$LABEL-${{ matrix.target }}
           # A beta: its own settings, window and app name; no installers or file associations,
           # so it never replaces or takes over from the normal Logsift.
-          BETA=(); MCP_PROPS=packaging/mcp/launcher.properties
+          # ZGC needs Windows 10 1803 / Server 2019 or later (Java won't start with it on Server 2016):
+          # Windows uses G1, which runs on every Windows that Java 21 supports.
+          case "${{ matrix.target }}" in windows-*) GC=-XX:+UseG1GC ;; *) GC=-XX:+UseZGC ;; esac
+          BETA=(); MCP_PROPS=build/mcp-launcher.properties
+          sed "s/-XX:+UseZGC/$GC/" packaging/mcp/launcher.properties > "$MCP_PROPS"
+          grep -q -- "$GC" "$MCP_PROPS"
           if [[ "$LABEL" == beta-* ]]; then
             BETA=(--java-options -Dlogsift.channel=beta)
-            MCP_PROPS=build/mcp-beta.properties
-            sed 's/^java-options=/java-options=-Dlogsift.channel=beta /' packaging/mcp/launcher.properties > "$MCP_PROPS"
+            sed -i.bak 's/^java-options=/java-options=-Dlogsift.channel=beta /' "$MCP_PROPS"
             grep -q 'logsift.channel=beta' "$MCP_PROPS"
           fi
           # splash screen, shown by the launcher before Java starts
           cp packaging/splash/splash.png packaging/splash/splash@2x.png build/install/logsift/lib/
           COMMON=(--name Logsift --input build/install/logsift/lib
                   --main-jar "logsift-$VERSION.jar" --main-class logsift.ui.LogsiftApp
-                  --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
+                  --java-options "-Xmx2g $GC --enable-native-access=ALL-UNNAMED"
                   --java-options '-splash:$APPDIR/splash.png'
                   --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets,jdk.attach,java.management,java.management.rmi,jdk.naming.rmi,jdk.jfr,jdk.management.jfr
                   --add-launcher "logsift-mcp=$MCP_PROPS" ${BETA[@]+"${BETA[@]}"}
@@ -155,6 +159,31 @@ jobs:
               ;;
           esac
           ls -l dist
+
+      - name: The launchers' garbage collector (ZGC doesn't start on Windows Server 2016)
+        run: |
+          set -euo pipefail
+          n=0
+          while IFS= read -r c; do # names may have spaces ("Logsift Beta.app")
+            n=$((n + 1))
+            echo "$c"
+            case "${{ matrix.target }}" in
+              windows-*)
+                if grep -q 'UseZGC' "$c"; then echo "ZGC in a Windows launcher: $c"; exit 1; fi
+                grep -q 'UseG1GC' "$c" || { echo "no G1 in $c"; exit 1; } ;;
+              *)
+                grep -q 'UseZGC' "$c" || { echo "no ZGC in $c"; exit 1; } ;;
+            esac
+          done < <(find pkg -name '*.cfg' -path '*app*')
+          [ "$n" -ge 2 ] || { echo "expected the Logsift and logsift-mcp launchers, found $n"; exit 1; }
+          # the zip that runs on any Java: its .bat scripts are for Windows too
+          for b in build/install/logsift/bin/*.bat; do
+            if grep -q 'UseZGC' "$b"; then echo "ZGC in $b"; exit 1; fi
+            grep -q 'UseG1GC' "$b" || { echo "no G1 in $b"; exit 1; }
+          done
+          for sh in build/install/logsift/bin/logsift build/install/logsift/bin/logsift-mcp; do
+            grep -q 'UseZGC' "$sh" || { echo "no ZGC in $sh"; exit 1; }
+          done
 
       - name: Try logsift-mcp in the app (a coding agent's first requests)
         run: |
