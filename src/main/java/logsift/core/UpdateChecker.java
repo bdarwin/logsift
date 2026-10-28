@@ -18,6 +18,19 @@ public final class UpdateChecker {
 
     public static final String LATEST = "https://api.github.com/repos/bdarwin/logsift/releases/latest";
 
+    /** Where a version's download page is; the link is always made here, never taken from the answer. */
+    static final String RELEASES = "https://github.com/bdarwin/logsift/releases/tag/v";
+
+    /** The download page of a version (the list of releases for anything but a plain version number). */
+    public static String page(String version) {
+        return isPlainVersion(version) ? RELEASES + version : "https://github.com/bdarwin/logsift/releases";
+    }
+
+    /** 1.4.0, 2.0.0-beta.1: digits and dots, and maybe a short suffix; nothing that could change a link. */
+    static boolean isPlainVersion(String v) {
+        return v != null && v.matches("\\d{1,4}(\\.\\d{1,6}){0,3}(-[0-9A-Za-z.]{1,20})?");
+    }
+
     /** The latest published release. */
     public record Release(String version, String url) {}
 
@@ -30,10 +43,29 @@ public final class UpdateChecker {
         return u.isBlank() || u.equals("none") ? null : u;
     }
 
-    /** The latest release, or empty if it could not be read. */
+    /**
+     * The latest release, or empty if it could not be read. Certificates are trusted when Java or
+     * this computer trusts them (a company proxy's usually is); if not, the check is made again
+     * without checking the certificate. That is safe here: only a version number is read, and the
+     * download page is always GitHub's (see {@link #RELEASES}).
+     */
     public static Optional<Release> latest(String url) throws IOException {
         System.setProperty("java.net.useSystemProxies", "true"); // office proxies
+        try {
+            return latest(url, false);
+        } catch (IOException e) {
+            if (!Tls.isTrustProblem(e)) {
+                throw e;
+            }
+            return latest(url, true);
+        }
+    }
+
+    private static Optional<Release> latest(String url, boolean anyCertificate) throws IOException {
         HttpURLConnection c = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        if (c instanceof javax.net.ssl.HttpsURLConnection https) {
+            Tls.apply(https, anyCertificate);
+        }
         c.setConnectTimeout(5000);
         c.setReadTimeout(5000);
         c.setRequestProperty("Accept", "application/vnd.github+json");
@@ -51,14 +83,17 @@ public final class UpdateChecker {
         }
     }
 
-    /** Reads {@code tag_name} and {@code html_url} from GitHub's release JSON. */
+    /**
+     * Reads {@code tag_name} from GitHub's release JSON. Only a plain version number is taken
+     * (1.4.0, 2.0.0-beta.1); the page to open is made from it, not read from the answer.
+     */
     static Optional<Release> parse(String json) {
         String tag = field(json, "tag_name");
-        String url = field(json, "html_url");
-        if (tag == null || url == null) {
+        if (tag == null) {
             return Optional.empty();
         }
-        return Optional.of(new Release(tag.startsWith("v") ? tag.substring(1) : tag, url));
+        String v = tag.startsWith("v") ? tag.substring(1) : tag;
+        return isPlainVersion(v) ? Optional.of(new Release(v, page(v))) : Optional.empty();
     }
 
     private static String field(String json, String name) {

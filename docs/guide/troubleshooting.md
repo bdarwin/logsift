@@ -86,6 +86,8 @@ The question about the server's key says *REMOTE HOST IDENTIFICATION HAS CHANGED
 
 ## FAQ
 
+**Check for Updates fails behind a company proxy (PKIX, certificate).** Logsift trusts the certificates this computer trusts, and if the proxy's certificate still isn't trusted it checks without checking the certificate. Only the version number is read, and **Download** always opens GitHub's page for that version, so nothing else is taken from the proxy's answer.
+
 **Does Logsift send my logs anywhere?** No. Its only network connections are the daily update check (turn it off with **Help → Check for Updates Automatically**) and the servers you choose: SSH servers, JMX ports and web addresses.
 
 **How big a file can it open?** Logs of 10 GB and more open in seconds. The index costs about 12 MB per 100 million lines, and a single line over 256 MB is only searched in its first 256 MB.

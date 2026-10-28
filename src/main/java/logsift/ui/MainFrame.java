@@ -247,7 +247,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         String known = PREFS.get("updates.latest", null);
         if (known != null && logsift.core.Version.isNewer(known, logsift.core.Version.current())) {
-            showUpdate(known, PREFS.get("updates.url", updateUrl)); // known from an earlier check
+            showUpdate(known, logsift.core.UpdateChecker.page(known)); // known from an earlier check
         }
         long last = PREFS.getLong("updates.lastCheck", 0);
         if (System.currentTimeMillis() - last > 24L * 3600 * 1000) {
