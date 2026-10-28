@@ -1464,6 +1464,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 try {
                     t = main.textOf(sel, MAX_DETAIL_ROWS);
                 } catch (RuntimeException ex) {
+                    logsift.core.Problems.unexpected(ex); // a bug, if not a read failure
                     return;
                 }
                 String title = rows == 1
@@ -1491,6 +1492,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             try {
                 e = logsift.core.EntryFormat.around(doc, ef, line, 1000);
             } catch (RuntimeException ex) {
+                logsift.core.Problems.unexpected(ex); // a bug, if not a read failure
                 e = null;
             }
             logsift.core.EntryFormat.Entry entry = e;
@@ -2790,6 +2792,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     }
                 }
             } catch (RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read failure
                 // no offer then
             } finally {
                 dumpsChecking = false;
@@ -2818,6 +2821,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     });
                 }
             } catch (IOException | RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read failure
                 // no offer then
             }
         }, "logsift-dump-check");

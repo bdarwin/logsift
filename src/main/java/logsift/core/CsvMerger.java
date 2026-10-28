@@ -169,6 +169,7 @@ public final class CsvMerger implements AutoCloseable {
                     Files.newOutputStream(out, StandardOpenOption.APPEND), 1 << 16)) {
                 mergeAvailable(os, 0, null, () -> closed);
             } catch (IOException | RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a source rotating
                 // a source may be rotating right now; try again next time
             }
         }, millis, millis, TimeUnit.MILLISECONDS);

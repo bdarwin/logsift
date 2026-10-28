@@ -94,6 +94,7 @@ final class HeapTreemap extends JPanel {
             try {
                 b = dump.map(focus);
             } catch (Exception e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 b = new Box(focus, dump.retained(focus), "Could not read it: " + e.getMessage(), null, 1, List.of());
             }
             Box fb = b;

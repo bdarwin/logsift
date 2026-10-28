@@ -206,6 +206,7 @@ final class ExceptionsPanel extends JPanel {
             try {
                 r = host.analyze(cancel, p -> SwingUtilities.invokeLater(() -> bar.setValue((int) (p * 1000))));
             } catch (RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 error = e.getMessage();
             }
             Exceptions.Result done = r;

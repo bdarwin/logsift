@@ -483,6 +483,7 @@ public final class LogDocument implements Closeable {
         try {
             indexTo(source.size());
         } catch (RuntimeException | IOException e) {
+            logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
             fail(e);
         } finally {
             indexing = false;

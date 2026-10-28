@@ -60,7 +60,7 @@ In `~/.logsift` (your home folder):
 | `formats.properties` | Your log formats |
 | `files/` | What each log remembers: filters, position, view |
 | `bookmarks/` | Bookmarks and their notes |
-| `errors.log` | Unexpected errors (Help → Open Error Log) |
+| `errors.log` | Unexpected errors, every session (Help → Open Error Log; this session's in Help → Show Errors…) |
 | `stdin/` | Piped output, kept a week |
 | `heap-index/` | Indexes of big heap dumps, removed when their tab closes |
 | `agent.properties` | Settings → Agents: what is masked, which folders agents may read |

@@ -122,6 +122,7 @@ final class SourceOpener {
                 try {
                     file = get();
                 } catch (Exception e) {
+                    logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                     file = null;
                 }
                 if (file != null) {

@@ -160,6 +160,7 @@ final class ProfilePanel extends JPanel {
             try {
                 r = host.analyze(cancel, p -> SwingUtilities.invokeLater(() -> bar.setValue((int) (p * 100))));
             } catch (RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 error = e.getMessage();
             }
             ColumnProfile.Result done = r;

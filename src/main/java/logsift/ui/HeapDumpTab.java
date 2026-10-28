@@ -255,6 +255,9 @@ final class HeapDumpTab extends JPanel {
             } catch (CancellationException e) {
                 SwingUtilities.invokeLater(() -> failed("Cancelled."));
             } catch (Exception | OutOfMemoryError e) {
+                if (!(e instanceof OutOfMemoryError)) { // running out of memory is said in the tab
+                    logsift.core.Problems.unexpected(e); // a bug, if not a read failure
+                }
                 SwingUtilities.invokeLater(() -> failed("Could not read this heap dump: " + e.getMessage()));
             }
         }, "logsift-heap-dump");
@@ -627,6 +630,9 @@ final class HeapDumpTab extends JPanel {
             } catch (CancellationException e) {
                 // closed
             } catch (Exception | OutOfMemoryError e) {
+                if (!(e instanceof OutOfMemoryError)) { // running out of memory is said in the tab
+                    logsift.core.Problems.unexpected(e); // a bug, if not a read failure
+                }
                 SwingUtilities.invokeLater(() -> wasteWorking.setText("Could not work it out: " + e.getMessage()));
             }
         }, "logsift-heap-waste");
@@ -852,6 +858,7 @@ final class HeapDumpTab extends JPanel {
             try {
                 text = whyHtml(d, v);
             } catch (Exception e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read failure
                 text = "<p>Could not read it: " + esc(String.valueOf(e.getMessage())) + "</p>";
             }
             String done = text;

@@ -78,7 +78,18 @@ The question about the server's key says *REMOTE HOST IDENTIFICATION HAS CHANGED
 
 ## When something goes wrong
 
-**A window says *Something went wrong*.** Logsift hit an unexpected error; you can keep working. **Copy Details** or **Report on GitHub** (no log contents are included). Errors are also written to `~/.logsift/errors.log` (**Help → Open Error Log**).
+**A window says *Something went wrong*.** Logsift hit an unexpected error; you can keep working. **Copy Details** or **Report on GitHub** (no log contents are included). Errors are also written to `~/.logsift/errors.log` (**Help → Open Error Log**). The window opens for the first error of a session, and whenever Logsift runs out of memory; later errors only count in the status bar.
+
+**The status bar says *⚠ 2 errors*.** In <span class="sw" style="background:#B45309"></span> amber at the right: Logsift hit that many unexpected errors this session (a bug in Logsift, not in your log). A view may not have updated: if something looks wrong, reopen the file. Click it, or **Help → Show Errors…**, for the list: when each happened, a line about it, and the details of the one selected.
+
+![The errors of this session: two errors, the details of the newest, and Report on GitHub](../screenshots/errors-window.png)
+
+- **Report on GitHub** opens a new issue with the details filled in. They are a stack trace and the versions of Logsift, Java and your system. Check the text before sending: an error's message can quote part of a log line.
+- **Copy Details** copies them, to send another way.
+- **Open errors.log** opens the file with every error, also from earlier sessions.
+- **Clear** hides the count until the next error (errors.log keeps them).
+
+The same error again counts once. Failures that aren't bugs, like a file that can't be read or a server that doesn't answer, are said where they happen and don't count here.
 
 **Logsift ran out of memory.** Close some tabs or searches and try again.
 

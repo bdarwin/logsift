@@ -347,6 +347,7 @@ public final class FolderSearch implements AutoCloseable {
                 }
             }
         } catch (IOException | RuntimeException e) {
+            logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
             filesSkipped.incrementAndGet();
             errors.add(file + ": " + e.getMessage());
         } finally {

@@ -78,7 +78,7 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 - **Help → Documentation** opens the [user guide](https://bdarwin.github.io/logsift/guide/) (its pages are in [docs/guide](docs/guide/index.md)). The GC tab's **What do these mean?** opens its [GC page](https://bdarwin.github.io/logsift/guide/gc.html).
 - **Help → Keyboard Shortcuts** (Ctrl+/ or ⌘/) lists every shortcut. **Help → Report a Bug** opens a GitHub issue with your version and system filled in.
 - **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the status bar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
-- **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub**. Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).
+- **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub** (for the first error of a session; later ones count in the status bar, *⚠ 2 errors*, and Help → Show Errors… lists them). Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).
 - Logsift never sends your logs anywhere. Its only other network connections are to servers you choose: SSH servers, JMX ports, and web addresses you open. If you connect a [coding agent](#coding-agents-github-copilot), what Logsift answers it goes on to the agent's AI provider: the agent sends it, not Logsift.
 
 ## Screenshots

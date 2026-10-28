@@ -82,6 +82,7 @@ public final class LogMerger implements AutoCloseable {
                     Files.newOutputStream(out, StandardOpenOption.APPEND), 1 << 16)) {
                 mergeAvailable(os, 0, null, () -> closed);
             } catch (IOException | RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 // a source may be rotating right now; try again next time
             }
         }, millis, millis, TimeUnit.MILLISECONDS);

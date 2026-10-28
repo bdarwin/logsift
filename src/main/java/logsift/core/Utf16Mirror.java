@@ -62,6 +62,7 @@ public final class Utf16Mirror implements AutoCloseable {
             try {
                 update();
             } catch (IOException | RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 // the source may be rotating; try again
             }
         }, millis, millis, TimeUnit.MILLISECONDS);

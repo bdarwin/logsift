@@ -295,6 +295,7 @@ final class ValuesTreePanel extends JPanel {
             try {
                 r = ColumnStats.count(doc, f, col, () -> gen != generation);
             } catch (RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 r = null;
             }
             ColumnStats.Result result = r;

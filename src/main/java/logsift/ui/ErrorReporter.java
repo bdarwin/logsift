@@ -27,8 +27,10 @@ import javax.swing.SwingUtilities;
 import logsift.core.Version;
 
 /**
- * Unexpected errors: written to {@code ~/.logsift/errors.log} and shown in a small window with
- * the details, a Copy button and a link to report it. Logsift keeps running.
+ * Unexpected errors: written to {@code ~/.logsift/errors.log}, counted in the status bar
+ * ("⚠ 2 errors", see {@link #session()}), and the first of a session (or running out of memory)
+ * shown in a small window with the details, a Copy button and a link to report it. Logsift
+ * keeps running.
  */
 final class ErrorReporter {
     private ErrorReporter() {}
@@ -38,15 +40,46 @@ final class ErrorReporter {
     private static int more;
     private static JLabel moreLabel;
 
-    /** Catches errors from every thread (including the UI thread). */
+    private static final SessionErrors SESSION = new SessionErrors();
+
+    /** This session's errors (for the status bar and the errors window). */
+    static SessionErrors session() {
+        return SESSION;
+    }
+
+    /**
+     * Catches errors from every thread (including the UI thread), and the bugs background work
+     * reports ({@link logsift.core.Problems}).
+     */
     static void install() {
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> report(e));
+        logsift.core.Problems.setSink(ErrorReporter::report);
+    }
+
+    /** Reports an error if it is a bug; expected failures (a missing file…) are left to the caller. */
+    static void unexpected(Throwable e) {
+        logsift.core.Problems.unexpected(e);
     }
 
     static void report(Throwable e) {
         String details = details(e);
+        int before = SESSION.total();
+        if (!SESSION.add(e, details, LocalDateTime.now())) {
+            return; // the same error again: logged and counted once
+        }
         log(details);
-        SwingUtilities.invokeLater(() -> show(e, details));
+        if (SessionErrors.popsUp(e, before)) {
+            SwingUtilities.invokeLater(() -> show(e, details));
+        }
+    }
+
+    /** A new session, for tests: no errors yet, so the next one pops up. */
+    static void resetForTest() {
+        SESSION.reset();
+        if (open != null) {
+            open.dispose();
+            open = null;
+        }
     }
 
     static String details(Throwable e) {

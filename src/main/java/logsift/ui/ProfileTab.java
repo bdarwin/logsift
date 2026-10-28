@@ -592,6 +592,7 @@ final class ProfileTab extends JPanel {
                     }
                 }), cancel::get);
             } catch (IOException | RuntimeException ex) {
+                logsift.core.Problems.unexpected(ex); // a bug, if not a read or connection failure
                 error = ex.getMessage() == null ? ex.toString() : ex.getMessage();
             }
             List<Profile> done = p;

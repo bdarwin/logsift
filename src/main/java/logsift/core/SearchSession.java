@@ -223,6 +223,7 @@ public final class SearchSession implements AutoCloseable {
             running = false;
             doc.requestRefresh();
         } catch (RuntimeException e) {
+            logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
             running = false;
             for (Listener l : listeners) {
                 l.failed(this, e);

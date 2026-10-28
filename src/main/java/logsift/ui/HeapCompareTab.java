@@ -164,6 +164,9 @@ final class HeapCompareTab extends JPanel {
                 closeAll(x, y);
                 SwingUtilities.invokeLater(() -> failed("Cancelled."));
             } catch (Exception | OutOfMemoryError e) {
+                if (!(e instanceof OutOfMemoryError)) { // running out of memory is said in the tab
+                    logsift.core.Problems.unexpected(e); // a bug, if not a read failure
+                }
                 closeAll(x, y);
                 SwingUtilities.invokeLater(() -> failed("Could not compare them: " + e.getMessage()));
             }

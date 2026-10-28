@@ -5890,6 +5890,84 @@ class VisualTest {
         });
     }
 
+    @Test
+    @Order(54)
+    void unexpectedErrorsAreCountedAndListed() throws Exception {
+        onEdt(() -> {
+            ErrorReporter.resetForTest(); // a new session: no errors yet
+            frame.setSize(1400, 860);
+            return null;
+        });
+        assertTrue(!onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors: no indicator");
+        // Help → Show Errors… with none
+        onEdt(() -> {
+            frame.showErrors();
+            return null;
+        });
+        waitFor(() -> ErrorsDialog.openForTest() != null, 10_000, "the errors window");
+        assertTrue(onEdt(ErrorsDialog::headForTest).contains("No errors this session"));
+        onEdt(() -> {
+            ErrorsDialog.openForTest().dispose();
+            return null;
+        });
+        // the first error of a session pops up, and the status bar counts it
+        onEdt(() -> {
+            ErrorReporter.report(new IllegalStateException("First unexpected error (test)"));
+            return null;
+        });
+        waitFor(() -> ErrorReporter.openForTest() != null, 10_000, "the error window");
+        settle();
+        assertEquals("⚠ 1 error", onEdt(() -> frame.errorsButtonForTest().getText()));
+        assertTrue(onEdt(() -> frame.errorsButtonForTest().isVisible()));
+        onEdt(() -> {
+            ErrorReporter.openForTest().dispose();
+            return null;
+        });
+        // a later error only counts: no window
+        onEdt(() -> {
+            for (int i = 0; i < 2; i++) { // the same error twice, from the same place
+                ErrorReporter.report(new IllegalArgumentException("Second unexpected error (test)"));
+            }
+            return null;
+        });
+        settle();
+        assertTrue(ErrorReporter.openForTest() == null, "no pop-up for the second error");
+        assertEquals("⚠ 2 errors", onEdt(() -> frame.errorsButtonForTest().getText()), "the same error counts once");
+        settle();
+        shot("106-errors-indicator");
+        // the button opens the list
+        onEdt(() -> {
+            frame.errorsButtonForTest().doClick();
+            return null;
+        });
+        waitFor(() -> ErrorsDialog.openForTest() != null, 10_000, "the errors window");
+        settle();
+        assertTrue(onEdt(ErrorsDialog::headForTest).contains("2 errors in this session"));
+        assertTrue(onEdt(ErrorsDialog::headForTest).contains("Check the text before sending"));
+        shotOf(onEdt(() -> ErrorsDialog.openForTest().getRootPane()), "106b-errors-window");
+        assertTrue(Files.readString(Path.of(System.getProperty("logsift.home"), "errors.log"))
+                .contains("Second unexpected error (test)"), "logged to errors.log (the test's own home)");
+        // Clear hides the indicator until the next error
+        onEdt(() -> {
+            ErrorsDialog.clickForTest("Clear");
+            return null;
+        });
+        assertTrue(ErrorsDialog.openForTest() == null);
+        assertTrue(!onEdt(() -> frame.errorsButtonForTest().isVisible()), "cleared");
+        onEdt(() -> {
+            ErrorReporter.report(new IllegalStateException("Third unexpected error (test)"));
+            return null;
+        });
+        assertEquals("⚠ 1 error", onEdt(() -> frame.errorsButtonForTest().getText()));
+        assertTrue(ErrorReporter.openForTest() == null, "not the first of the session: no pop-up");
+        // leave the window as it was for the tests after this one
+        onEdt(() -> {
+            ErrorReporter.resetForTest();
+            return null;
+        });
+        assertTrue(!onEdt(() -> frame.errorsButtonForTest().isVisible()));
+    }
+
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {
             try {

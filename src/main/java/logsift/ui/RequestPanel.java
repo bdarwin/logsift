@@ -308,6 +308,7 @@ final class RequestPanel extends JPanel {
             try {
                 r = host.follow(value, threads, where, dir, inArchives, cancel);
             } catch (RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 error = e.getMessage();
             }
             RequestTrace.Trace done = r;

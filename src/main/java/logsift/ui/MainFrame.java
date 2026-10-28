@@ -1907,6 +1907,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         + "<br>Merge the CSV files on their own to get one CSV.</html>";
             }
         } catch (IOException | RuntimeException e) {
+            logsift.core.Problems.unexpected(e); // a bug, if not a read failure
             // not readable now: the merge will say why
         }
         return logs;
@@ -1962,6 +1963,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     });
                 });
             } catch (IOException | RuntimeException e) {
+                logsift.core.Problems.unexpected(e); // a bug, if not a read failure
                 SwingUtilities.invokeLater(() -> {
                     dlg.dispose();
                     JOptionPane.showMessageDialog(this, "Cannot merge: " + e.getMessage(), "Merge",
@@ -2107,6 +2109,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 try {
                     entries = get();
                 } catch (Exception e) {
+                    logsift.core.Problems.unexpected(e); // a bug, if not a read failure
                     status.setText(" ");
                     showOpenError(zip, e.getCause() != null ? e.getCause() : e);
                     return;
@@ -2187,6 +2190,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     tab.setEntries(r.files(), r.capped());
                     SwingUtilities.invokeLater(tab::focusTree);
                 } catch (Exception e) {
+                    logsift.core.Problems.unexpected(e); // a bug, if not a read failure
                     if (tabs.indexOfComponent(tab) >= 0) {
                         tabs.remove(tab);
                         updateEmptyState();
@@ -2588,6 +2592,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         right.setOpaque(false);
         right.add(statusRight, BorderLayout.CENTER);
         right.add(progress, BorderLayout.EAST);
+        // "⚠ 2 errors": this session's unexpected errors, to see and report
+        errorsButton.putClientProperty("JButton.buttonType", "borderless");
+        errorsButton.setFont(errorsButton.getFont().deriveFont(Font.BOLD));
+        errorsButton.setFocusable(false);
+        errorsButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
+        errorsButton.setToolTipText("Logsift hit unexpected errors in this session: see them, and report them");
+        errorsButton.addActionListener(e -> showErrors());
+        right.add(errorsButton, BorderLayout.WEST);
+        ErrorReporter.session().addListener(() -> SwingUtilities.invokeLater(this::updateErrorsButton));
+        updateErrorsButton();
         updateButton.putClientProperty("JButton.buttonType", "borderless");
         updateButton.setFont(updateButton.getFont().deriveFont(Font.BOLD));
         updateButton.setForeground(new Color(0x2563EB));
@@ -2602,6 +2616,25 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         p.add(left, BorderLayout.CENTER);
         p.add(right, BorderLayout.EAST);
         return p;
+    }
+
+    private final JButton errorsButton = new JButton();
+
+    /** Shows "⚠ 2 errors" while this session has errors (not cleared); hidden when there are none. */
+    private void updateErrorsButton() {
+        int n = ErrorReporter.session().count();
+        errorsButton.setVisible(n > 0);
+        errorsButton.setText("⚠ " + SessionErrors.countText(n));
+        errorsButton.setForeground(Theme.isDark() ? new Color(0xF5C451) : new Color(0xB45309));
+    }
+
+    JButton errorsButtonForTest() {
+        return errorsButton;
+    }
+
+    /** This session's errors in a window (Help → Show Errors…). */
+    void showErrors() {
+        ErrorsDialog.show(this, this::openErrorLog);
     }
 
     private JMenuBar buildMenus() {
@@ -2814,6 +2847,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         help.addSeparator();
         help.add(item("Report a Bug or Suggest a Feature…", "bug", null,
                 e -> HelpSupport.browse(this, HelpSupport.bugReportUrl(null, null))));
+        help.add(item("Show Errors…", "triangle-alert", null, e -> showErrors()));
         help.add(item("Open Error Log", "file-warning", null, e -> openErrorLog()));
         help.addSeparator();
         help.add(item("Check for Updates…", "circle-arrow-down", null, e -> checkForUpdates(true)));
