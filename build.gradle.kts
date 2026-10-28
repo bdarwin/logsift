@@ -135,7 +135,7 @@ distributions {
 // Fast unit tests (no UI windows).
 tasks.test {
     useJUnitPlatform {
-        excludeTags("visual")
+        excludeTags("visual", "perf")
     }
     maxHeapSize = "1g"
     systemProperty("logsift.prefs", "/logsift-test/ui")
@@ -144,6 +144,26 @@ tasks.test {
     // GuideLinksTest checks the user guide's links and pictures: run it again when they change
     inputs.dir("docs/guide").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("docs/screenshots").withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+// Slow measurements (a million-row CSV compare):  ./gradlew perfTest
+val perfTest by tasks.registering(Test::class) {
+    description = "Measures time and memory of slow operations (not part of the build)."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags("perf")
+    }
+    // -PperfHeap=256m checks it fits in less
+    maxHeapSize = (project.findProperty("perfHeap") ?: "1g").toString()
+    systemProperty("logsift.prefs", "/logsift-test/ui")
+    systemProperty("logsift.updateUrl", "none")
+    systemProperty("logsift.home", layout.buildDirectory.dir("test-home").get().asFile.absolutePath)
+    testLogging {
+        showStandardStreams = true
+    }
+    outputs.upToDateWhen { false }
 }
 
 // Visual tests: generate large log files, open them in the real UI,

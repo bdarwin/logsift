@@ -7,11 +7,11 @@ import java.util.List;
  * Splits one CSV line into fields: a field may be quoted ({@code "a, b"}), with {@code ""}
  * for a quote inside. Spaces around a quoted field are allowed.
  */
-final class Csv {
+public final class Csv {
     private Csv() {}
 
     /** How many fields a line has (a quote left open takes the rest of the line). */
-    static int fieldCount(String line, char delimiter) {
+    public static int fieldCount(String line, char delimiter) {
         return split(line, delimiter, null).size();
     }
 
@@ -19,7 +19,7 @@ final class Csv {
      * The fields of a line, unquoted. {@code starts} (or null) receives where each field's text
      * begins in the line, as far as it has room.
      */
-    static List<String> split(String line, char delimiter, int[] starts) {
+    public static List<String> split(String line, char delimiter, int[] starts) {
         List<String> out = new ArrayList<>();
         int i = 0;
         int len = line.length();

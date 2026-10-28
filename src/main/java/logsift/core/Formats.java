@@ -100,7 +100,7 @@ public final class Formats {
     }
 
     /** A file named like CSV or TSV (also rotated, or a copy with a number). */
-    static boolean isCsvName(String fileName) {
+    public static boolean isCsvName(String fileName) {
         return fileName != null && fileName.toLowerCase(java.util.Locale.ROOT)
                 .matches(".*\\.(csv|tsv|psv)(\\.\\d+)?$");
     }
