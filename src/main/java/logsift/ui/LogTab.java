@@ -2278,7 +2278,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             l.setIcon(filtered ? Icons.of("filter", Theme.uiColor("Component.accentColor",
                     new java.awt.Color(0x2563EB)), 12) : null);
         }
-        l.setToolTipText(filtered ? TabScope.FOLLOWS : null);
+        // on the tab, not the label: a label with a tooltip catches the clicks meant for the tab
+        bottom.setToolTipTextAt(bottom.indexOfComponent(c), filtered ? TabScope.FOLLOWS : null);
     }
 
     /** Shows which tabs count only the lines the filters keep (markers and strips), as things are now. */

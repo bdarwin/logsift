@@ -4628,6 +4628,17 @@ class VisualTest {
         String strip = "Only the 225 of " + String.format("%,d", onEdt(() -> tab.document().lineCount()))
                 + " lines the filters keep";
         assertEquals("marked | " + strip, onEdt(() -> tab.scopeForTest(mp)));
+        // a click on a marked tab's name selects it (the title must not catch the click)
+        for (java.awt.Component target : List.of(tab.messagesPanel(), mp, tab.messagesPanel(), mp)) {
+            onEdt(() -> {
+                clickTabTitle(tab.bottomTabsForTest(), target);
+                return null;
+            });
+            assertEquals(target, onEdt(() -> tab.bottomTabsForTest().getSelectedComponent()),
+                    "a click on the tab's name selects it");
+        }
+        assertEquals(TabScope.FOLLOWS, onEdt(() -> tab.bottomTabsForTest().getToolTipTextAt(
+                tab.bottomTabsForTest().indexOfComponent(mp))), "the tab says why it is marked");
         assertEquals("plain | null", onEdt(() -> tab.scopeForTest(tab.messagesPanel())));
         assertEquals("plain | null", onEdt(() -> tab.scopeForTest(tab.results())));
         // a Find All while the log shows only the filtered lines finds in those: marked too
@@ -5941,6 +5952,26 @@ class VisualTest {
             return onEdt(() -> tab.detailsPanel().textForTest()).replace("\r\n", "\n");
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    /**
+     * Clicks the middle of a tab's title the way the mouse does: the press goes to the deepest
+     * component there that listens to the mouse (a title that listens would keep it from the tabs).
+     */
+    private static void clickTabTitle(javax.swing.JTabbedPane tabs, java.awt.Component tab) {
+        java.awt.Rectangle r = tabs.getBoundsAt(tabs.indexOfComponent(tab));
+        int x = r.x + r.width / 2;
+        int y = r.y + r.height / 2;
+        java.awt.Component c = SwingUtilities.getDeepestComponentAt(tabs, x, y);
+        while (c != null && c != tabs && c.getMouseListeners().length == 0) {
+            c = c.getParent();
+        }
+        java.awt.Point p = SwingUtilities.convertPoint(tabs, x, y, c);
+        long now = System.currentTimeMillis();
+        for (int id : new int[] {MouseEvent.MOUSE_PRESSED, MouseEvent.MOUSE_RELEASED, MouseEvent.MOUSE_CLICKED}) {
+            int mods = id == MouseEvent.MOUSE_PRESSED ? java.awt.event.InputEvent.BUTTON1_DOWN_MASK : 0;
+            c.dispatchEvent(new MouseEvent(c, id, now, mods, p.x, p.y, 1, false, MouseEvent.BUTTON1));
         }
     }
 
