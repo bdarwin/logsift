@@ -37,6 +37,9 @@ final class ResultsPanel extends JPanel {
         /** Groups were added, removed or updated (titles, highlights, marks). */
         void resultsChanged();
 
+        /** Another search was selected. */
+        default void currentChanged() {}
+
         void extendPopup(LogView view, JPopupMenu menu);
     }
 
@@ -282,6 +285,7 @@ final class ResultsPanel extends JPanel {
 
     private void updateTarget() {
         FindGroup g = current();
+        host.currentChanged();
         within.setEnabled(g != null);
         target.setText(g == null ? "Find All results appear here (newest on top)"
                 : "in “" + g.title() + "”");

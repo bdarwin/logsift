@@ -53,6 +53,9 @@ final class MessagesPanel extends JPanel {
         void findAll(MessageStats.Template t);
 
         void filter(List<MessageStats.Template> ts, FilterDef.Action action);
+
+        /** New counts are shown (of the whole log, or of the filtered lines). */
+        default void resultShown() {}
     }
 
     private final Host host;
@@ -163,6 +166,20 @@ final class MessagesPanel extends JPanel {
         return result != null && !resultFiltered;
     }
 
+    /** Whether the result counts only the filtered lines (its "Filtered lines" choice). */
+    boolean isFilteredResult() {
+        return result != null && resultFiltered;
+    }
+
+    /** Counts the whole log again (from the banner's link). */
+    void countWholeLog() {
+        if (scope.getSelectedIndex() != 0) {
+            scope.setSelectedIndex(0); // starts counting
+        } else {
+            start();
+        }
+    }
+
     private boolean resultFiltered;
 
     JTable tableForTest() {
@@ -211,6 +228,7 @@ final class MessagesPanel extends JPanel {
         analyze.setText("Analyze again");
         result = r;
         model.refilter();
+        host.resultShown();
         if (r.noMessageColumn()) {
             status.setText("This table has no message column, so there are no messages to group."
                     + " See the Profile tab for what its columns hold.");

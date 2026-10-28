@@ -345,6 +345,17 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.addTab(bookmarks.size() == 0 ? "Bookmarks" : "Bookmarks (" + bookmarks.size() + ")",
                 bookmarksPanel);
         bottom.addTab("Details", details);
+        // which tabs follow the filters: a marker on their title and a strip on top while they do
+        for (java.awt.Component c : List.of(metrics, results, messages)) {
+            titleLabel(c);
+        }
+        for (java.awt.Component c : List.of(insights, exceptions, bookmarksPanel)) {
+            bottom.setToolTipTextAt(bottom.indexOfComponent(c), TabScope.WHOLE);
+        }
+        metricsBanner = ScopeBanner.install(metrics, "Show all lines", () -> setMatchingOnly(false));
+        profileBanner = ScopeBanner.install(profile, "Show all lines", () -> setMatchingOnly(false));
+        messagesBanner = ScopeBanner.install(messages, "Count all lines", messages::countWholeLog);
+        resultsBanner = ScopeBanner.install(results, "Find in all lines", this::findCurrentInAllLines);
         bottom.addChangeListener(e -> {
             updateDetails();
             if (bottom.getSelectedComponent() == messages && messages.result() == null
@@ -1219,6 +1230,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         matchingOnly = on;
         main.setSource(on ? matchingLines : allLines);
         profileFiltersChanged();
+        updateScope();
         if (follow) {
             main.setFollow(true);
         } else if (line >= 0) {
@@ -1711,7 +1723,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 long problems = r == null ? 0 : r.problems();
                 bottom.setTitleAt(i, problems == 0 ? "Insights" : "Insights (" + problems + ")");
                 bottom.setIconAt(i, problems == 0 ? null : Icons.of("circle-alert", new java.awt.Color(0xDC2626), 14));
-                bottom.setToolTipTextAt(i, r == null ? null : r.summary());
+                bottom.setToolTipTextAt(i, r == null ? TabScope.WHOLE : r.summary() + " · " + TabScope.WHOLE);
             }
         };
     }
@@ -1730,6 +1742,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (want && at < 0) {
             bottom.insertTab("Profile", null, profile, "What each column holds, with a chart",
                     bottom.indexOfComponent(metrics) + 1);
+            titleLabel(profile);
+            updateScope();
         } else if (!want && at >= 0) {
             profile.cancel();
             bottom.remove(profile);
@@ -2049,6 +2063,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private MessagesPanel.Host messagesHost() {
         return new MessagesPanel.Host() {
             @Override
+            public void resultShown() {
+                updateScope();
+            }
+
+            @Override
             public logsift.core.MessageStats.Result analyze(boolean onlyFiltered,
                     AtomicBoolean cancel, java.util.function.DoubleConsumer progress) {
                 FilterResult r = filterResult;
@@ -2219,6 +2238,91 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         host.tabStatusChanged(this);
     }
 
+    // ---------------------------------------------------------------- which tabs follow the filters
+
+    private ScopeBanner metricsBanner;
+    private ScopeBanner profileBanner;
+    private ScopeBanner messagesBanner;
+    private ScopeBanner resultsBanner;
+    private final java.util.Map<java.awt.Component, JLabel> tabTitles = new java.util.HashMap<>();
+
+    /** A tab title with room for the filter marker after the name. */
+    private void titleLabel(java.awt.Component c) {
+        int i = bottom.indexOfComponent(c);
+        JLabel l = new JLabel(bottom.getTitleAt(i));
+        l.setHorizontalTextPosition(javax.swing.SwingConstants.LEADING); // the icon after the name
+        l.setIconTextGap(4);
+        tabTitles.put(c, l);
+        bottom.setTabComponentAt(i, l);
+    }
+
+    private void setBottomTitle(java.awt.Component c, String title) {
+        int i = bottom.indexOfComponent(c);
+        if (i >= 0) {
+            bottom.setTitleAt(i, title);
+            JLabel l = tabTitles.get(c);
+            if (l != null) {
+                l.setText(title);
+            }
+        }
+    }
+
+    /** Marks a tab's title while it counts only the filtered lines. */
+    private void markTab(java.awt.Component c, boolean filtered) {
+        JLabel l = tabTitles.get(c);
+        if (l == null || bottom.indexOfComponent(c) < 0) {
+            return;
+        }
+        boolean was = l.getIcon() != null;
+        if (was != filtered) {
+            l.setIcon(filtered ? Icons.of("filter", Theme.uiColor("Component.accentColor",
+                    new java.awt.Color(0x2563EB)), 12) : null);
+        }
+        l.setToolTipText(filtered ? TabScope.FOLLOWS : null);
+    }
+
+    /** Shows which tabs count only the lines the filters keep (markers and strips), as things are now. */
+    void updateScope() {
+        if (metricsBanner == null) {
+            return;
+        }
+        FilterResult r = filterResult;
+        String text = TabScope.bannerText(r.matchCount(), doc.lineCount());
+        boolean follow = TabScope.followsMatchingOnly(matchingOnly, r.isFiltering());
+        markTab(metrics, follow);
+        metricsBanner.show(follow ? text : null);
+        markTab(profile, follow);
+        profileBanner.show(follow ? text : null);
+        boolean msgs = messages.isFilteredResult() && r.isFiltering();
+        markTab(messages, msgs);
+        messagesBanner.show(msgs ? text : null);
+        FindGroup g = results.current();
+        boolean finds = g != null && g.inFiltered() && r.isFiltering();
+        markTab(results, finds);
+        resultsBanner.show(finds ? text : null);
+    }
+
+    /** Whether a bottom tab is marked as counting only the filtered lines, and its strip's text (tests). */
+    String scopeForTest(java.awt.Component c) {
+        JLabel l = tabTitles.get(c);
+        ScopeBanner b = c == metrics ? metricsBanner : c == profile ? profileBanner : c == messages ? messagesBanner
+                : c == results ? resultsBanner : null;
+        return (l != null && l.getIcon() != null ? "marked" : "plain") + " | " + (b == null ? null : b.textForTest());
+    }
+
+    ScopeBanner bannerForTest(java.awt.Component c) {
+        return c == metrics ? metricsBanner : c == profile ? profileBanner : c == messages ? messagesBanner
+                : c == results ? resultsBanner : null;
+    }
+
+    /** Runs the selected search again over every line (from the Find results strip). */
+    private void findCurrentInAllLines() {
+        FindGroup g = results.current();
+        if (g != null) {
+            results.add(g.query, null);
+        }
+    }
+
     /** Tells the Profile which rows it should show now (the filters' when Matching only). */
     private void profileFiltersChanged() {
         FilterResult r = filterResult;
@@ -2228,6 +2332,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (metrics != null && (!matchingOnly || !r.isFiltering() || r.isComplete())) {
             metrics.filtersChanged(matchingOnly && r.isFiltering() ? "v" + r.version() : "");
         }
+        updateScope();
     }
 
     private void updateFilterStatus() {
@@ -3201,12 +3306,18 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public void currentChanged() {
+                updateScope();
+            }
+
+            @Override
             public void resultsChanged() {
                 updateSearchHighlights();
                 int n = results.groups().size();
-                bottom.setTitleAt(bottom.indexOfComponent(results),
+                setBottomTitle(results,
                         n == 0 ? "Find results" : n == 1 ? String.format("Find results (%,d)",
                                 results.groups().get(0).count()) : "Find results (" + n + " searches)");
+                updateScope();
                 host.tabStatusChanged(LogTab.this);
             }
 

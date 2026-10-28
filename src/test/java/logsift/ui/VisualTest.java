@@ -4622,10 +4622,57 @@ class VisualTest {
         });
         settle();
         shot("81b-metrics-filtered");
+        // the tabs say which follow the filters: a marker on the title and a strip on top
+        String strip = "Only the 225 of " + String.format("%,d", onEdt(() -> tab.document().lineCount()))
+                + " lines the filters keep";
+        assertEquals("marked | " + strip, onEdt(() -> tab.scopeForTest(mp)));
+        assertEquals("plain | null", onEdt(() -> tab.scopeForTest(tab.messagesPanel())));
+        assertEquals("plain | null", onEdt(() -> tab.scopeForTest(tab.results())));
+        // a Find All while the log shows only the filtered lines finds in those: marked too
         onEdt(() -> {
-            tab.setMatchingOnly(false);
+            frame.findAll(new SearchQuery("placed", true, false, false));
             return null;
         });
+        waitForSearch(tab);
+        assertEquals("marked | " + strip, onEdt(() -> tab.scopeForTest(tab.results())));
+        settle();
+        shot("81c-find-results-filtered");
+        onEdt(() -> {
+            frame.toggleDark();
+            setBottomFor(tab, mp);
+            return null;
+        });
+        settle();
+        shot("81d-metrics-filtered-dark");
+        onEdt(() -> {
+            frame.toggleDark();
+            frame.setSize(820, 860);
+            frame.validate();
+            return null;
+        });
+        settle();
+        assertEquals("marked | " + strip, onEdt(() -> tab.scopeForTest(mp)), "a narrow window keeps the marker");
+        shot("81e-filtered-narrow-window");
+        onEdt(() -> {
+            frame.setSize(1400, 860);
+            frame.validate();
+            return null;
+        });
+        // "Show all lines" in the strip turns Matching only off: no markers, no strips
+        onEdt(() -> {
+            tab.bannerForTest(mp).clickForTest();
+            return null;
+        });
+        assertTrue(!onEdt(tab::isMatchingOnly));
+        assertEquals("plain | null", onEdt(() -> tab.scopeForTest(mp)));
+        assertTrue(onEdt(() -> tab.scopeForTest(tab.results())).startsWith("marked"),
+                "the search kept to the filtered lines");
+        onEdt(() -> {
+            tab.bannerForTest(tab.results()).clickForTest(); // Find in all lines
+            return null;
+        });
+        waitForSearch(tab);
+        assertEquals("plain | null", onEdt(() -> tab.scopeForTest(tab.results())));
         waitFor(() -> {
             try {
                 return onEdt(() -> mp.metrics() != null && !mp.isRunning() && !mp.metrics().filtered());

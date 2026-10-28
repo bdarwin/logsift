@@ -87,6 +87,23 @@ A column filter shows as a chip like *Show: Host = web-1*. Lines that aren't row
 
 The count on the right says *65,361 of 1,832,469 lines* (with context lines: *… matching, … shown*). It adds *in the selected time range* or *some levels hidden* when those apply.
 
+## Which tabs follow the filters
+
+Some tabs below the log count only the lines the filters keep; the others always look at the whole log.
+
+| Tab | Follows the filters |
+|---|---|
+| **Metrics** | With **Matching only** on and filters (or a time range) set |
+| **Profile** | With **Matching only** on and filters (or a time range) set |
+| **Messages** | When its list says **Filtered lines** instead of **Whole file** |
+| **Find results** | A search run while Matching only was on finds in the filtered lines, and keeps to them (its header says *in filtered lines*) |
+| **Insights**, **Exceptions**, **Bookmarks** | Never: always the whole log (hover the tab) |
+| **Details**, **Request** | Show one entry or one request, as they are in the file |
+
+How to tell: while a tab counts only the filtered lines, a <span class="sw" style="background:#2563EB"></span> blue filter icon follows its name (hover it: *Counts only the lines the filters keep*), and a strip in a pale blue (dark blue in dark mode) at the top of the tab says *Only the 225 of 2,099 lines the filters keep*. Its link goes back to every line: **Show all lines** (Metrics, Profile) turns Matching only off, **Count all lines** (Messages) counts the whole file, **Find in all lines** (Find results) runs the selected search again over every line.
+
+![Find results and Metrics marked with the filter icon, and the strip at the top of Find results](../screenshots/tabs-filtered.png)
+
 ## Levels: E W I D T
 
 The **E W I D T** buttons show only some levels, together with your other filters: errors (ERROR, FATAL, SEVERE, CRITICAL), warnings (WARN, WARNING), info (INFO, NOTICE), debug (DEBUG), trace (TRACE). All on means no level filtering. Turn off I, D and T to see just errors and warnings, stack traces included. With your own log format, its level column is used instead.
