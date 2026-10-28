@@ -100,13 +100,19 @@ final class CsvCompareTab extends JPanel {
             return Side.of(dropped);
         }
 
-        /** Shown at the end of the files' row (the Compare tab's ▸ Files), or null. */
-        default JComponent leading() {
+        /** The file browsers Choose Files shows in place of the table (the Compare tab's), or null. */
+        default JComponent drawer() {
             return null;
         }
 
-        /** Change… on a side: true if the host lets people choose the file (else a file dialog opens). */
-        default boolean changeFile(int side) {
+        /** The file browsers were shown or hidden. */
+        default void drawerShown(boolean on) {}
+
+        /**
+         * Compare clicked while the file browsers are shown: true if the host takes it (other files
+         * were chosen, and are being read).
+         */
+        default boolean compareChosen() {
             return false;
         }
     }
@@ -163,7 +169,13 @@ final class CsvCompareTab extends JPanel {
     private final JProgressBar progress = new JProgressBar(0, 1000);
     private final JLabel status = new JLabel(" ");
     // what it found
-    private final Tile[] tiles = new Tile[5];
+    // the files, above the table, and the file browsers in the table's place
+    private final JPanel fileRow = new JPanel();
+    private final javax.swing.JToggleButton filesButton = new javax.swing.JToggleButton();
+    private boolean drawerOpen;
+    private JSplitPane sideSplit;
+    private boolean optionsChanged;
+    private String doneText = " ";
     private final JLabel notes = new JLabel(" ");
     private final DefaultListModel<ColumnCount> columnModel = new DefaultListModel<>();
     private final JList<ColumnCount> columnList = new JList<>(columnModel);
@@ -225,33 +237,12 @@ final class CsvCompareTab extends JPanel {
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
         top.setBorder(BorderFactory.createEmptyBorder(6, 10, 2, 10));
 
-        JPanel halves = new JPanel(new GridLayout(1, 2, 12, 0));
-        halves.add(fileBox(0));
-        halves.add(fileBox(1));
-        JPanel filesRow = new JPanel(new BorderLayout(8, 0));
-        filesRow.add(halves, BorderLayout.CENTER);
-        JComponent lead = host.leading();
-        if (lead != null) {
-            filesRow.add(lead, BorderLayout.EAST);
-        }
-        filesRow.setAlignmentX(LEFT_ALIGNMENT);
-        top.add(filesRow);
-        top.add(Box.createVerticalStrut(4));
-
-        // the keys under the left file, the columns left out under the right one: one row
+        // the keys on the left, the columns left out on the right: one row
         JPanel pick = new JPanel(new GridLayout(1, 2, 12, 0));
         pick.add(keyChips);
         pick.add(ignoreChips);
         pick.setAlignmentX(LEFT_ALIGNMENT);
-        if (lead != null) {
-            JPanel shifted = new JPanel(new BorderLayout(8, 0));
-            shifted.add(Box.createHorizontalStrut(lead.getPreferredSize().width), BorderLayout.EAST);
-            shifted.add(pick, BorderLayout.CENTER);
-            shifted.setAlignmentX(LEFT_ALIGNMENT);
-            top.add(shifted);
-        } else {
-            top.add(pick);
-        }
+        top.add(pick);
 
         JPanel options = new JPanel(new WrapLayout(FlowLayout.LEFT, 6, 2));
         options.setAlignmentX(LEFT_ALIGNMENT);
@@ -270,7 +261,13 @@ final class CsvCompareTab extends JPanel {
         tolerance.getDocument().addDocumentListener(onChange(this::stale));
         toleranceUnit.setMaximumSize(toleranceUnit.getPreferredSize());
         compare.setToolTipText("Compare the files with these keys and options");
-        compare.addActionListener(e -> runCompare());
+        compare.addActionListener(e -> {
+            if (drawerOpen && host.compareChosen()) {
+                return; // other files: they are read, then compared
+            }
+            showDrawer(false);
+            runCompare();
+        });
         cancel.addActionListener(e -> {
             if (running != null) {
                 running.set(true);
@@ -294,53 +291,105 @@ final class CsvCompareTab extends JPanel {
         options.add(status);
         top.add(options);
 
-        JPanel tileRow = new JPanel(new GridLayout(1, 0, 10, 0));
-        tileRow.setBorder(BorderFactory.createEmptyBorder(6, 0, 4, 0));
-        tileRow.setAlignmentX(LEFT_ALIGNMENT);
-        tiles[0] = new Tile(DiffStatus.ADDED, "added (only right)", new Color(0x16A34A), 2);
-        tiles[1] = new Tile(DiffStatus.REMOVED, "removed (only left)", new Color(0xDC2626), 3);
-        tiles[2] = new Tile(DiffStatus.CHANGED, "changed", new Color(0xD97706), 1);
-        tiles[3] = new Tile(DiffStatus.SAME, "same", new Color(0x9CA3AF), 5);
-        tiles[4] = new Tile(DiffStatus.DUPLICATE, "key repeats", new Color(0x8B5CF6), 4);
-        for (Tile t : tiles) {
-            tileRow.add(t);
-        }
-        top.add(tileRow);
         notes.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
         notes.setAlignmentX(LEFT_ALIGNMENT);
+        notes.setVisible(false);
         top.add(notes);
         return top;
     }
 
+    /** A file's name and what it is, on one line (the right one starts with ⇄ to swap). */
     private JComponent fileBox(int side) {
         JPanel p = new JPanel(new BorderLayout(6, 0));
         p.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 3, 0, 0, side == 0 ? new Color(0xDC2626) : new Color(0x16A34A)),
-                BorderFactory.createEmptyBorder(2, 8, 2, 4)));
-        fileName[side].setFont(fileName[side].getFont().deriveFont(Font.BOLD, fileName[side].getFont().getSize2D() + 1));
+                BorderFactory.createEmptyBorder(1, 6, 1, 4)));
+        fileName[side].setFont(fileName[side].getFont().deriveFont(Font.BOLD));
         fileInfo[side].setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
-        JPanel text = new JPanel(new GridLayout(2, 1));
+        JPanel text = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         text.add(fileName[side]);
+        text.add(Box.createHorizontalStrut(8));
         text.add(fileInfo[side]);
         p.add(text, BorderLayout.CENTER);
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
-        JButton change = new JButton("Change…");
-        change.setToolTipText("Compare another file on this side (or drop one here)");
-        change.addActionListener(e -> chooseFile(side));
-        buttons.add(change);
         if (side == 1) {
             JButton swap = new JButton("⇄");
             swap.setToolTipText("Swap left and right");
+            swap.putClientProperty("JButton.buttonType", "toolBarButton");
             swap.addActionListener(e -> swap());
-            buttons.add(swap, 0);
+            p.add(swap, BorderLayout.WEST);
+            swapButton = swap;
         }
-        p.add(buttons, BorderLayout.EAST);
+        p.setMinimumSize(new Dimension(0, 0));
         return p;
     }
 
+    private JButton swapButton;
+
+    /**
+     * The files' row: the left file's name over the left half of the table (side by side: over
+     * the left table, up to the divider), the right one's over the right half, and Choose Files at
+     * the end, where it stays when the file browsers are shown.
+     */
+    private final class FileRowLayout implements java.awt.LayoutManager {
+        @Override
+        public void addLayoutComponent(String name, Component c) {}
+
+        @Override
+        public void removeLayoutComponent(Component c) {}
+
+        @Override
+        public Dimension preferredLayoutSize(java.awt.Container p) {
+            java.awt.Insets in = p.getInsets();
+            int h = 0;
+            int w = 0;
+            for (Component c : p.getComponents()) {
+                if (c.isVisible()) {
+                    h = Math.max(h, c.getPreferredSize().height);
+                    w += c.getPreferredSize().width;
+                }
+            }
+            return new Dimension(w + in.left + in.right, h + in.top + in.bottom);
+        }
+
+        @Override
+        public Dimension minimumLayoutSize(java.awt.Container p) {
+            Dimension d = preferredLayoutSize(p);
+            return new Dimension(0, d.height);
+        }
+
+        @Override
+        public void layoutContainer(java.awt.Container p) {
+            java.awt.Insets in = p.getInsets();
+            int w = p.getWidth() - in.left - in.right;
+            int h = p.getHeight() - in.top - in.bottom;
+            Component left = p.getComponent(0);
+            Component right = p.getComponent(1);
+            Component button = p.getComponent(2);
+            int bw = button.isVisible() ? button.getPreferredSize().width : 0;
+            int leftW;
+            int rightX;
+            if (sideBySide && !drawerOpen && sideSplit != null && sideSplit.getWidth() > 0) {
+                leftW = sideSplit.getDividerLocation();
+                rightX = leftW + sideSplit.getDividerSize();
+            } else {
+                leftW = (w - DRAWER_GAP) / 2;
+                rightX = leftW + DRAWER_GAP;
+            }
+            left.setBounds(in.left, in.top, Math.max(0, leftW), h);
+            int rightEnd = w - (bw > 0 ? bw + 6 : 0);
+            right.setBounds(in.left + rightX, in.top, Math.max(0, rightEnd - rightX), h);
+            int bh = button.getPreferredSize().height;
+            button.setBounds(in.left + w - bw, in.top + (h - bh) / 2, bw, bh);
+        }
+    }
+
+    /** The gap between the two file browsers (and the files' names over them). */
+    static final int DRAWER_GAP = 12;
+
     private JComponent center() {
         JPanel bar = new JPanel(new WrapLayout(FlowLayout.LEFT, 6, 2));
-        show.setToolTipText("Which rows to show");
+        show.setToolTipText("Which rows to show, with how many there are");
+        show.setRenderer(new ShowRenderer());
         show.addActionListener(e -> {
             if (sideBySide) {
                 sideShow = show.getSelectedIndex();
@@ -352,11 +401,8 @@ final class CsvCompareTab extends JPanel {
             } else {
                 unifiedShow = show.getSelectedIndex();
             }
-            for (Tile t : tiles) {
-                if (t != null) {
-                    t.showState();
-                }
-            }
+            show.setToolTipText(show.getSelectedIndex() == 4 && result != null ? repeatsTip(result)
+                    : "Which rows to show, with how many there are");
             refilter();
         });
         search.putClientProperty("JTextField.placeholderText", "search in results");
@@ -405,9 +451,9 @@ final class CsvCompareTab extends JPanel {
         table.setRowHeight(table.getRowHeight() + 4);
         table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
         table.setDefaultRenderer(Object.class, new Renderer());
-        table.getSelectionModel().setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.getSelectionModel().addListSelectionListener(e -> updatePosition());
         table.addMouseListener(rowMouse(table, -1));
+        cellSelection(table, -1);
         JScrollPane tableScroll = new JScrollPane(table);
         tableScroll.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0,
                 Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY)));
@@ -417,8 +463,21 @@ final class CsvCompareTab extends JPanel {
         tableScroll.getViewport().addChangeListener(e -> strips.forEach(Component::repaint));
         viewCards.add(unified, "unified");
         viewCards.add(sideView(), "side");
+        fileRow.setLayout(new FileRowLayout());
+        fileRow.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createMatteBorder(1, 0, 0, 0,
+                Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY)), BorderFactory.createEmptyBorder(2, 0, 2, 6)));
+        fileRow.add(fileBox(0));
+        fileRow.add(fileBox(1));
+        filesButton.setToolTipText("Choose other files: a file browser for each side, in the table's place");
+        filesButton.addActionListener(e -> showDrawer(filesButton.isSelected()));
+        filesButton.setVisible(host.drawer() != null);
+        fileRow.add(filesButton);
+        showDrawerButton();
+        JPanel north = new JPanel(new BorderLayout());
+        north.add(bar, BorderLayout.NORTH);
+        north.add(fileRow, BorderLayout.SOUTH);
         JPanel right = new JPanel(new BorderLayout());
-        right.add(bar, BorderLayout.NORTH);
+        right.add(north, BorderLayout.NORTH);
         right.add(viewCards, BorderLayout.CENTER);
         setSideBySide(sideBySide);
 
@@ -485,28 +544,26 @@ final class CsvCompareTab extends JPanel {
             t.setDefaultRenderer(Object.class, new SideRenderer(s));
             t.setSelectionModel(table.getSelectionModel()); // one selection for every view
             t.addMouseListener(rowMouse(t, s));
+            cellSelection(t, s);
             scrolls[s] = new JScrollPane(t);
-            scrolls[s].setBorder(BorderFactory.createMatteBorder(1, s == 1 ? 1 : 0, 0, 0,
+            scrolls[s].setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0,
                     Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY)));
-            JLabel head = new JLabel((s == 0 ? "Left: " : "Right: ") + sides[s].name());
-            head.setFont(head.getFont().deriveFont(Font.BOLD));
-            sideHeads[s] = head;
         }
         // one vertical scroll for both
         scrolls[1].getVerticalScrollBar().setModel(scrolls[0].getVerticalScrollBar().getModel());
         scrolls[0].setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
         scrolls[1].setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
-        JPanel[] halves = new JPanel[2];
-        for (int s = 0; s < 2; s++) {
-            halves[s] = new JPanel(new BorderLayout());
-            sideHeads[s].setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(0, 3, 0, 0, s == 0 ? new Color(0xDC2626) : new Color(0x16A34A)),
-                    BorderFactory.createEmptyBorder(3, 6, 3, 4)));
-            halves[s].add(sideHeads[s], BorderLayout.NORTH);
-            halves[s].add(scrolls[s], BorderLayout.CENTER);
-        }
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, halves[0], halves[1]);
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, scrolls[0], scrolls[1]);
         split.setResizeWeight(0.5);
+        sideSplit = split;
+        // the files' names follow the divider
+        split.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY, e -> fileRow.revalidate());
+        split.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                fileRow.revalidate();
+            }
+        });
         split.setBorder(BorderFactory.createEmptyBorder());
         scrolls[0].getViewport().addChangeListener(e -> strips.forEach(Component::repaint));
         JPanel view = new JPanel(new BorderLayout());
@@ -516,8 +573,408 @@ final class CsvCompareTab extends JPanel {
         return view;
     }
 
-    private final JLabel[] sideHeads = new JLabel[2];
     private JButton columnsButton;
+
+    // ---------------------------------------------------------------- the file browsers
+
+    /** Shows the file browsers in the table's place (or the table again). */
+    void showDrawer(boolean on) {
+        JComponent d = host.drawer();
+        if (d == null) {
+            return;
+        }
+        if (on && d.getParent() != viewCards) {
+            viewCards.add(d, "files");
+        }
+        drawerOpen = on;
+        showDrawerButton();
+        views.show(viewCards, on ? "files" : sideBySide ? "side" : "unified");
+        if (!on) {
+            highlightCompare(compare, optionsChanged);
+            if (running == null && result != null) {
+                status.setForeground(optionsChanged ? Theme.uiColor("Component.accentColor", new Color(0x2563EB))
+                        : Theme.uiColor("Label.disabledForeground", Color.GRAY));
+                status.setText(optionsChanged ? "Changed: press Compare" : doneText);
+            }
+        }
+        fileRow.revalidate();
+        fileRow.repaint();
+        host.drawerShown(on);
+    }
+
+    private void showDrawerButton() {
+        filesButton.setSelected(drawerOpen);
+        // one width for both labels, so the button doesn't move
+        filesButton.setPreferredSize(null);
+        int w = 0;
+        for (boolean open : new boolean[] {false, true}) {
+            filesButton.setText(open ? "Close Files" : "Choose Files");
+            filesButton.setIcon(Icons.of(open ? "x" : "folder-open"));
+            w = Math.max(w, filesButton.getPreferredSize().width);
+        }
+        filesButton.setText(drawerOpen ? "Close Files" : "Choose Files");
+        filesButton.setIcon(Icons.of(drawerOpen ? "x" : "folder-open"));
+        filesButton.setPreferredSize(new Dimension(w, filesButton.getPreferredSize().height));
+    }
+
+    /**
+     * What the file browsers have chosen, while they are shown: Compare stands out when it is
+     * other files than these, and the status says what Compare will do.
+     */
+    void filesChosen(boolean other, String text) {
+        if (!drawerOpen || running != null) {
+            return;
+        }
+        highlightCompare(compare, other || optionsChanged);
+        status.setForeground(other ? Theme.uiColor("Component.accentColor", new Color(0x2563EB))
+                : Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        status.setText(text);
+    }
+
+    boolean isDrawerOpen() {
+        return drawerOpen;
+    }
+
+    javax.swing.JToggleButton filesButtonForTest() {
+        return filesButton;
+    }
+
+    /** Where the right file's name starts, and where the right table starts (side by side), in the tab. */
+    int[] fileRowSplitForTest() {
+        Component right = fileRow.getComponent(1);
+        int nameX = SwingUtilities.convertPoint(fileRow, right.getX(), 0, this).x;
+        Component t = sideSplit.getRightComponent();
+        int tableX = SwingUtilities.convertPoint(sideSplit, t.getX(), 0, this).x;
+        return new int[] {nameX, tableX};
+    }
+
+    // ---------------------------------------------------------------- Show, with counts
+
+    /** Show's list: the symbol in its colour, the name, and how many rows. */
+    private final class ShowRenderer extends javax.swing.DefaultListCellRenderer {
+        @Override
+        public Component getListCellRendererComponent(javax.swing.JList<?> l, Object v, int i, boolean sel, boolean f) {
+            int at = i >= 0 ? i : show.getSelectedIndex();
+            super.getListCellRendererComponent(l, showHtml(at, sel), i, sel, f);
+            setToolTipText(at == 4 && result != null ? repeatsTip(result) : null);
+            return this;
+        }
+    }
+
+    private static final DiffStatus[] SHOW_STATUS = {null, DiffStatus.CHANGED, DiffStatus.ADDED, DiffStatus.REMOVED,
+        DiffStatus.DUPLICATE, DiffStatus.SAME, null};
+    private static final String[] SHOW_NAME = {"All differences", "Changed", "Added (only right)", "Removed (only left)",
+        "Key repeats", "Same", "Everything"};
+
+    /** How many rows a Show entry has, or -1 before a result. */
+    private int showCount(int at) {
+        TableDiffResult r = result;
+        if (r == null || at < 0) {
+            return -1;
+        }
+        return switch (at) {
+            case 0 -> r.size() - r.count(DiffStatus.SAME);
+            case 6 -> r.size();
+            default -> r.count(SHOW_STATUS[at]);
+        };
+    }
+
+    /** A Show entry as text: "+ Added (only right)  6". */
+    String showText(int at) {
+        DiffStatus st = SHOW_STATUS[at];
+        int n = showCount(at);
+        boolean noKey = at == 4 && result != null && result.spec().keys().isEmpty();
+        return (st != null ? st.symbol() + " " : "") + SHOW_NAME[at]
+                + (noKey ? "  (with a key)" : n >= 0 ? String.format(Locale.ROOT, "  %,d", n) : "");
+    }
+
+    private String showHtml(int at, boolean sel) {
+        if (at < 0 || at >= SHOW_NAME.length) {
+            return "";
+        }
+        DiffStatus st = SHOW_STATUS[at];
+        int n = showCount(at);
+        boolean noKey = at == 4 && result != null && result.spec().keys().isEmpty();
+        String dim = hex(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        StringBuilder b = new StringBuilder("<html><nobr>");
+        if (st != null) {
+            Color c = switch (st) {
+                case ADDED -> addedColor();
+                case REMOVED -> removedColor();
+                case CHANGED -> changedColor();
+                case DUPLICATE -> duplicateColor();
+                case SAME -> Theme.gutterForeground();
+            };
+            b.append(sel ? "<b>" : "<b><font color='" + hex(c) + "'>").append(esc(st.symbol()))
+                    .append(sel ? "</b>" : "</font></b>").append("&nbsp;");
+        } else {
+            b.append("&nbsp;&nbsp;&nbsp;");
+        }
+        b.append(noKey && !sel ? "<font color='" + dim + "'>" + SHOW_NAME[at] + "</font>" : SHOW_NAME[at]);
+        if (noKey) {
+            b.append(sel ? "&nbsp;&nbsp;(with a key)" : "&nbsp;&nbsp;<font color='" + dim + "'>(with a key)</font>");
+        } else if (n >= 0) {
+            String num = String.format(Locale.ROOT, "%,d", n);
+            b.append("&nbsp;&nbsp;").append(sel ? num : "<font color='" + dim + "'>" + num + "</font>");
+        }
+        return b.append("</nobr></html>").toString();
+    }
+
+    // ---------------------------------------------------------------- selecting cells, rows and columns
+
+    /**
+     * Cells, rows and columns can be selected as in a spreadsheet: click a cell, drag or
+     * Shift-click for a range, Cmd/Ctrl-click to add; a click on the status or line selects whole
+     * rows, one on a column's title the whole column. Cmd/Ctrl+C copies what is selected.
+     */
+    private void cellSelection(JTable t, int side) {
+        t.setCellSelectionEnabled(true);
+        t.getSelectionModel().setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+        t.getColumnModel().getSelectionModel().setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+        t.getTableHeader().setReorderingAllowed(false);
+        t.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (!SwingUtilities.isLeftMouseButton(e)) {
+                    return;
+                }
+                int col = t.columnAtPoint(e.getPoint());
+                if (col >= 0 && col < rowHeads(t, side)) {
+                    selectAllColumns(); // the status or line: whole rows
+                } else {
+                    other(t).forEach(o -> o.getColumnModel().getSelectionModel().clearSelection());
+                }
+                repaintTables();
+            }
+        });
+        t.addMouseMotionListener(new MouseAdapter() {
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                int col = t.columnAtPoint(e.getPoint());
+                if (col >= 0 && col < rowHeads(t, side) && t.getColumnModel().getSelectionModel().getAnchorSelectionIndex()
+                        < rowHeads(t, side)) {
+                    selectAllColumns();
+                }
+            }
+        });
+        javax.swing.table.JTableHeader header = t.getTableHeader();
+        header.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                int col = header.columnAtPoint(e.getPoint());
+                if (col < 0 || !SwingUtilities.isLeftMouseButton(e) || t.getRowCount() == 0
+                        || header.getCursor().getType() == Cursor.E_RESIZE_CURSOR) {
+                    return;
+                }
+                selectColumn(t, col, e.isShiftDown(), e.isControlDown() || e.isMetaDown());
+            }
+        });
+        header.addMouseMotionListener(new MouseAdapter() {
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                int col = header.columnAtPoint(e.getPoint());
+                if (col >= 0 && header.getCursor().getType() != Cursor.E_RESIZE_CURSOR && t.getRowCount() > 0) {
+                    selectColumn(t, col, true, false);
+                }
+            }
+        });
+        javax.swing.table.TableCellRenderer base = header.getDefaultRenderer();
+        header.setDefaultRenderer((tb, v, sel, focus, row, col) -> {
+            Component c = base.getTableCellRendererComponent(tb, v, sel, focus, row, col);
+            boolean on = tb.isColumnSelected(col) && tb.getSelectedRowCount() > 0;
+            boolean whole = on && tb.getSelectedRowCount() == tb.getRowCount();
+            c.setForeground(on ? Theme.uiColor("Component.accentColor", new Color(0x2563EB))
+                    : Theme.uiColor("TableHeader.foreground", Theme.foreground()));
+            c.setFont(whole ? header.getFont().deriveFont(Font.BOLD) : header.getFont());
+            return c;
+        });
+        t.getColumnModel().getSelectionModel().addListSelectionListener(e -> header.repaint());
+        t.getSelectionModel().addListSelectionListener(e -> header.repaint());
+        t.getActionMap().put("copy", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                copySelection(t, side, false);
+            }
+        });
+        t.getActionMap().put("selectAll", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (t.getRowCount() > 0) {
+                    t.setRowSelectionInterval(0, t.getRowCount() - 1);
+                    selectAllColumns();
+                }
+            }
+        });
+    }
+
+    /** The columns that head a row: the status and line(s). */
+    private int rowHeads(JTable t, int side) {
+        return side < 0 ? 2 : sideModels[side].fixedColumns();
+    }
+
+    private List<JTable> other(JTable t) {
+        List<JTable> out = new ArrayList<>();
+        for (JTable o : List.of(table, sideTables[0], sideTables[1])) {
+            if (o != t) {
+                out.add(o);
+            }
+        }
+        return out;
+    }
+
+    private void selectAllColumns() {
+        for (JTable o : List.of(table, sideTables[0], sideTables[1])) {
+            if (o.getColumnCount() > 0) {
+                o.setColumnSelectionInterval(0, o.getColumnCount() - 1);
+            }
+        }
+        repaintTables();
+    }
+
+    private void repaintTables() {
+        for (JTable o : List.of(table, sideTables[0], sideTables[1])) {
+            o.repaint();
+            o.getTableHeader().repaint();
+        }
+    }
+
+    /** A column's title clicked: the whole column (Shift: up to it, Cmd/Ctrl: added or taken away). */
+    private void selectColumn(JTable t, int col, boolean extend, boolean toggle) {
+        ListSelectionModel cm = t.getColumnModel().getSelectionModel();
+        int lead = table.getSelectionModel().getLeadSelectionIndex();
+        t.setRowSelectionInterval(0, t.getRowCount() - 1);
+        if (lead >= 0 && lead < t.getRowCount()) {
+            // keep the row people were on as the lead, so the table doesn't jump
+            table.getSelectionModel().addSelectionInterval(lead, lead);
+        }
+        int anchor = cm.getAnchorSelectionIndex();
+        if (extend && anchor >= 0) {
+            cm.setSelectionInterval(anchor, col);
+        } else if (toggle) {
+            if (cm.isSelectedIndex(col)) {
+                cm.removeSelectionInterval(col, col);
+            } else {
+                cm.addSelectionInterval(col, col);
+            }
+        } else {
+            cm.setSelectionInterval(col, col);
+        }
+        other(t).forEach(o -> o.getColumnModel().getSelectionModel().clearSelection());
+        repaintTables();
+    }
+
+    /** Selects a row, every column (F7, the strip, a new result). */
+    private void selectRow(int row) {
+        table.setRowSelectionInterval(row, row);
+        selectAllColumns();
+    }
+
+    /**
+     * The selected cells as tab-separated text, a line per row, as the table shows them (a changed
+     * value as old → new). Whole columns come with their titles.
+     */
+    String selectionText(JTable t, int side, boolean titles) {
+        TableDiffResult r = result;
+        int[] rows = t.getSelectedRows();
+        int[] cols = t.getSelectedColumns();
+        if (r == null || rows.length == 0) {
+            return "";
+        }
+        if (cols.length == 0) {
+            cols = java.util.stream.IntStream.range(0, t.getColumnCount()).toArray();
+        }
+        StringBuilder b = new StringBuilder();
+        if (titles || rows.length == t.getRowCount() && rows.length > 1) {
+            for (int i = 0; i < cols.length; i++) {
+                b.append(i > 0 ? "\t" : "").append(t.getColumnName(cols[i]));
+            }
+            b.append('\n');
+        }
+        for (int row : rows) {
+            if (row >= shown.length) {
+                continue;
+            }
+            for (int i = 0; i < cols.length; i++) {
+                String v = side < 0 ? cellText(row, cols[i]) : sideText(r, side, shown[row], cols[i]);
+                b.append(i > 0 ? "\t" : "").append(v.replace('\t', ' ').replace('\n', ' '));
+            }
+            b.append('\n');
+        }
+        return b.toString();
+    }
+
+    private void copySelection(JTable t, int side, boolean titles) {
+        String text = selectionText(t, side, titles);
+        if (text.isEmpty()) {
+            return;
+        }
+        try {
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                    .setContents(new java.awt.datatransfer.StringSelection(text), null);
+            int cells = t.getSelectedRowCount() * Math.max(1, t.getSelectedColumnCount());
+            position.setText(String.format(Locale.ROOT, "Copied %,d %s", cells, cells == 1 ? "cell" : "cells"));
+        } catch (RuntimeException e) {
+            // no clipboard here
+        }
+    }
+
+    /** How a selected cell looks: its colour shows through a tint of the accent colour. */
+    static Color selectedBackground(Color bg, boolean cellSelected, boolean rowOnly) {
+        Color a = Theme.uiColor("Component.accentColor", new Color(0x2563EB));
+        double f = cellSelected ? (Theme.isDark() ? 0.42 : 0.26) : rowOnly ? (Theme.isDark() ? 0.14 : 0.07) : 0;
+        if (f == 0) {
+            return bg;
+        }
+        return new Color((int) Math.round(bg.getRed() * (1 - f) + a.getRed() * f),
+                (int) Math.round(bg.getGreen() * (1 - f) + a.getGreen() * f),
+                (int) Math.round(bg.getBlue() * (1 - f) + a.getBlue() * f));
+    }
+
+    private static javax.swing.border.Border leadBorder() {
+        Color a = Theme.uiColor("Component.accentColor", new Color(0x2563EB));
+        return BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(a, 1),
+                BorderFactory.createEmptyBorder(0, 1, 0, 1));
+    }
+
+    private static final javax.swing.border.Border CELL_PAD = BorderFactory.createEmptyBorder(1, 2, 1, 2);
+
+    /** The colours and border of a cell, selected or not (both views). */
+    private void paintCell(javax.swing.JLabel c, JTable t, int row, int col, Color bg, Color fg) {
+        boolean cell = t.isCellSelected(row, col);
+        // the row people are on is tinted faintly (not when whole columns are selected)
+        boolean rowSel = t.isRowSelected(row) && t.getSelectedRowCount() < t.getRowCount();
+        c.setBackground(selectedBackground(bg, cell, rowSel && !cell));
+        c.setForeground(fg != null ? fg : Theme.foreground());
+        boolean lead = cell && t.getSelectionModel().getLeadSelectionIndex() == row
+                && t.getColumnModel().getSelectionModel().getLeadSelectionIndex() == col
+                && t.getColumnModel().getSelectionModel().getMinSelectionIndex()
+                    == t.getColumnModel().getSelectionModel().getMaxSelectionIndex()
+                && t.getSelectedRowCount() == 1;
+        c.setBorder(lead ? leadBorder() : CELL_PAD);
+    }
+
+    String selectionTextForTest(int side) {
+        JTable t = side < 0 ? table : sideTables[side];
+        return selectionText(t, side, false);
+    }
+
+    void selectColumnForTest(int side, int col, boolean extend) {
+        selectColumn(side < 0 ? table : sideTables[side], col, extend, false);
+    }
+
+    void selectCellForTest(int side, int row, int col, boolean extend) {
+        JTable t = side < 0 ? table : sideTables[side];
+        t.changeSelection(row, col, false, extend);
+        if (col < rowHeads(t, side)) {
+            selectAllColumns();
+        } else {
+            other(t).forEach(o -> o.getColumnModel().getSelectionModel().clearSelection());
+        }
+    }
+
+    JTable sideTableForTest(int side) {
+        return sideTables[side];
+    }
 
     private void setSideBySide(boolean on) {
         sideBySide = on;
@@ -526,7 +983,10 @@ final class CsvCompareTab extends JPanel {
             show.setSelectedIndex(want); // the selected row stays selected if it is still shown
         }
         (on ? sideButton : unifiedButton).setSelected(true);
-        views.show(viewCards, on ? "side" : "unified");
+        if (!drawerOpen) {
+            views.show(viewCards, on ? "side" : "unified");
+        }
+        fileRow.revalidate();
         try {
             AppState.prefs().putBoolean("compareSideBySide", on);
         } catch (RuntimeException e) {
@@ -568,124 +1028,7 @@ final class CsvCompareTab extends JPanel {
     }
 
     /**
-     * A number with what it counts, drawn as a button: filled in its colour while its rows are
-     * in the table, plain when they aren't. A click shows only those rows; a click on the one
-     * shown alone goes back to all differences.
-     */
-    private final class Tile extends JPanel {
-        final DiffStatus status;
-        final JLabel big = new JLabel("–");
-        final JLabel small = new JLabel();
-        final String label;
-        final Color line;
-        final int showIndex;
-        private boolean hovered;
-        private String tip;
-
-        Tile(DiffStatus status, String label, Color line, int showIndex) {
-            super(new BorderLayout());
-            this.status = status;
-            this.label = label;
-            this.line = line;
-            this.showIndex = showIndex;
-            setOpaque(false);
-            setBorder(BorderFactory.createEmptyBorder(3, 12, 3, 8));
-            big.setFont(big.getFont().deriveFont(Font.BOLD, big.getFont().getSize2D() + 5f));
-            small.setText(status.symbol() + " " + label);
-            add(big, BorderLayout.NORTH);
-            add(small, BorderLayout.SOUTH);
-            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            addMouseListener(new MouseAdapter() {
-                @Override
-                public void mouseClicked(MouseEvent e) {
-                    show.setSelectedIndex(isOnly() ? 0 : showIndex);
-                }
-
-                @Override
-                public void mouseEntered(MouseEvent e) {
-                    hovered = true;
-                    repaint();
-                }
-
-                @Override
-                public void mouseExited(MouseEvent e) {
-                    hovered = false;
-                    repaint();
-                }
-            });
-            showState();
-        }
-
-        /** Whether its rows are in the table now. */
-        boolean isOn() {
-            return statuses().contains(status);
-        }
-
-        /** Whether only its rows are. */
-        boolean isOnly() {
-            return show.getSelectedIndex() == showIndex;
-        }
-
-        /** Its look and tooltip for what the table shows now. */
-        void showState() {
-            boolean on = isOn();
-            big.setForeground(on ? Theme.foreground() : Theme.uiColor("Label.disabledForeground", Color.GRAY));
-            small.setForeground(on ? Theme.foreground() : Theme.uiColor("Label.disabledForeground", Color.GRAY));
-            String what = isOnly() ? "Showing only these rows: click for all differences"
-                    : on ? "These rows are shown: click to show only them" : "Click to show only these rows";
-            super.setToolTipText(tip == null ? what
-                    : tip.replace("</html>", "<br><br>" + what + "</html>"));
-            repaint();
-        }
-
-        @Override
-        public void setToolTipText(String text) {
-            tip = text;
-            showState();
-        }
-
-        @Override
-        protected void paintComponent(Graphics g) {
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            int w = getWidth();
-            int h = getHeight();
-            boolean on = isOn();
-            boolean dark = Theme.isDark();
-            int alpha = (on ? (isOnly() ? 70 : 34) : 0) + (hovered ? 22 : 0);
-            if (alpha > 0) {
-                g2.setColor(new Color(line.getRed(), line.getGreen(), line.getBlue(), dark ? alpha + 10 : alpha));
-                g2.fillRoundRect(0, 0, w - 1, h - 1, 10, 10);
-            }
-            g2.setColor(on ? line : Theme.uiColor("Component.borderColor", new Color(0xD1D5DB)));
-            g2.setStroke(new BasicStroke(isOnly() ? 2f : 1f));
-            g2.drawRoundRect(1, 1, w - 3, h - 3, 10, 10);
-            g2.setColor(line);
-            g2.fillRoundRect(4, 6, 4, h - 12, 4, 4);
-            g2.dispose();
-            super.paintComponent(g);
-        }
-
-        void set(TableDiffResult r) {
-            if (r == null) {
-                big.setText("–");
-                return;
-            }
-            if (status == DiffStatus.DUPLICATE) {
-                // only a key can repeat: without one (rows in file order) the tile isn't shown
-                setVisible(!r.spec().keys().isEmpty());
-                big.setText(String.format(Locale.ROOT, "%,d", r.duplicateKeys()));
-                small.setText(status.symbol() + " " + label + (r.count(status) > 0
-                        ? String.format(Locale.ROOT, " · %,d rows", r.count(status)) : ""));
-                setToolTipText(repeatsTip(r));
-            } else {
-                big.setText(String.format(Locale.ROOT, "%,d", r.count(status)));
-            }
-        }
-    }
-
-    /**
-     * What the key-repeats tile means, with an example from these files: "SKU-7 is on 2 rows of
+     * What key repeats are, with an example from these files: "SKU-7 is on 2 rows of
      * stock.csv and 1 of stock-today.csv".
      */
     String repeatsTip(TableDiffResult r) {
@@ -717,11 +1060,12 @@ final class CsvCompareTab extends JPanel {
     }
 
     String repeatsTipForTest() {
-        return tiles[4].getToolTipText();
+        return repeatsTip(result);
     }
 
-    boolean repeatsTileShownForTest() {
-        return tiles[4].isVisible();
+    /** Whether Show offers key repeats (only a key can repeat). */
+    boolean repeatsOfferedForTest() {
+        return result != null && !result.spec().keys().isEmpty();
     }
 
     // ---------------------------------------------------------------- the files and keys
@@ -750,14 +1094,10 @@ final class CsvCompareTab extends JPanel {
             }
             TableDiffResult r = result;
             String rows = r == null ? "" : String.format(Locale.ROOT, "%,d rows · ", s == 0 ? r.leftRows() : r.rightRows());
-            fileInfo[s].setText(rows + f.header().size() + " columns · " + sep + " · " + f.charset().displayName()
-                    + (size >= 0 ? " · " + MainFrame.humanBytes(size) : ""));
+            fileInfo[s].setText(rows + f.header().size() + " columns" + (size >= 0 ? " · " + MainFrame.humanBytes(size) : ""));
+            fileInfo[s].setToolTipText(sep + " · " + f.charset().displayName());
         }
-        for (int s = 0; s < 2; s++) {
-            if (sideHeads[s] != null) {
-                sideHeads[s].setText((s == 0 ? "Left: " : "Right: ") + sides[s].name());
-            }
-        }
+        fileRow.revalidate();
         host.titleChanged(this);
     }
 
@@ -1076,27 +1416,12 @@ final class CsvCompareTab extends JPanel {
     /** Settings changed since the last comparison. */
     private void stale() {
         if (running == null && result != null) {
+            optionsChanged = true;
             status.setText("Changed: press Compare");
             status.setForeground(Theme.uiColor("Component.accentColor", new Color(0x2563EB)));
             highlightCompare(compare, true);
         }
         ignoreOrder.setEnabled(keys.isEmpty());
-    }
-
-    private void chooseFile(int side) {
-        if (host.changeFile(side)) {
-            return;
-        }
-        FileDialog fd = new FileDialog(SwingUtilities.getWindowAncestor(this) instanceof java.awt.Frame f ? f : null,
-                "Compare With", FileDialog.LOAD);
-        Path dir = sides[side].open().getParent();
-        if (dir != null) {
-            fd.setDirectory(dir.toString());
-        }
-        fd.setVisible(true);
-        if (fd.getFile() != null) {
-            replace(List.of(Path.of(fd.getDirectory(), fd.getFile())), side);
-        }
     }
 
     private void swap() {
@@ -1364,10 +1689,11 @@ final class CsvCompareTab extends JPanel {
         toClose.clear();
         status.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
         status.setText(String.format(Locale.ROOT, "%s · %,d ms", r.matchedBy(), r.millis()));
-        for (Tile t : tiles) {
-            t.set(r);
-        }
+        show.repaint();
+        doneText = status.getText();
+        optionsChanged = false;
         List<String> n = r.notes();
+        notes.setVisible(!n.isEmpty());
         notes.setText(n.isEmpty() ? " " : String.join(" · ", n));
         notes.setToolTipText(n.isEmpty() ? null : "<html>" + String.join("<br>", n.stream().map(CsvCompareTab::esc).toList())
                 + "</html>");
@@ -1385,7 +1711,7 @@ final class CsvCompareTab extends JPanel {
         }
         refilter();
         if (shown.length > 0) {
-            table.setRowSelectionInterval(0, 0);
+            selectRow(0);
         }
     }
 
@@ -1518,7 +1844,7 @@ final class CsvCompareTab extends JPanel {
                     }
                 }
             }
-            table.setRowSelectionInterval(row, row);
+            selectRow(row);
             scrollTo(row);
         }
 
@@ -1595,7 +1921,7 @@ final class CsvCompareTab extends JPanel {
         int at = table.getSelectedRow();
         int to = forward ? nav.next(at) : nav.previous(at < 0 ? shown.length : at);
         if (to >= 0) {
-            table.setRowSelectionInterval(to, to);
+            selectRow(to);
             scrollTo(to);
         }
         updatePosition();
@@ -1640,9 +1966,22 @@ final class CsvCompareTab extends JPanel {
         if (row < 0 || r == null) {
             return;
         }
-        table.setRowSelectionInterval(row, row);
+        int col = table.columnAtPoint(e.getPoint());
+        if (!table.isCellSelected(row, Math.max(0, col))) {
+            table.changeSelection(row, Math.max(0, col), false, false);
+        }
         int item = shown[row];
         JPopupMenu m = new JPopupMenu();
+        int view = table == this.table ? -1 : table == sideTables[0] ? 0 : 1;
+        JMenuItem copy = new JMenuItem("Copy", Icons.of("copy"));
+        copy.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_C,
+                java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
+        copy.addActionListener(a -> copySelection(table, view, false));
+        m.add(copy);
+        JMenuItem copyTitles = new JMenuItem("Copy with Column Titles");
+        copyTitles.addActionListener(a -> copySelection(table, view, true));
+        m.add(copyTitles);
+        m.addSeparator();
         for (int s = 0; s < 2; s++) {
             long line = s == 0 ? r.leftLine(item) : r.rightLine(item);
             JMenuItem it = new JMenuItem(line < 0 ? "Not in " + sides[s].name()
@@ -2028,10 +2367,7 @@ final class CsvCompareTab extends JPanel {
             super.getTableCellRendererComponent(t, text, sel, focus, row, col);
             setHorizontalAlignment(align);
             setFont(bold ? t.getFont().deriveFont(Font.BOLD) : t.getFont());
-            if (!sel) {
-                setBackground(bg);
-                setForeground(fg != null ? fg : Theme.foreground());
-            }
+            paintCell(this, t, row, col, bg, fg);
             setToolTipText(has && text.length() > 30 ? text : null);
             return this;
         }
@@ -2105,6 +2441,7 @@ final class CsvCompareTab extends JPanel {
                 case ADDED -> Theme.pick(new Color(0xECFDF3), new Color(0x1B2D21));
                 case REMOVED -> Theme.pick(new Color(0xFEF2F2), new Color(0x33201F));
                 case DUPLICATE -> Theme.pick(new Color(0xF5F3FF), new Color(0x2A2440));
+                case CHANGED -> Theme.pick(new Color(0xFFFBEB), new Color(0x2B271B));
                 default -> row % 2 == 1 ? Theme.stripe() : Theme.background();
             };
             int align = SwingConstants.LEADING;
@@ -2128,9 +2465,7 @@ final class CsvCompareTab extends JPanel {
                     text = "<html><nobr><span style='color:" + hex(removedColor()) + "'><s>"
                             + esc(shortText(r.leftValue(item, pair))) + "</s></span> → <span style='color:"
                             + hex(addedColor()) + "'><b>" + esc(shortText(r.rightValue(item, pair))) + "</b></span></nobr></html>";
-                    if (!sel) {
-                        bg = Theme.pick(new Color(0xFFF4DB), new Color(0x3A3018));
-                    }
+                    bg = Theme.pick(new Color(0xFDE5A8), new Color(0x4A3A12));
                 } else {
                     String a = r.leftRow(item) >= 0 ? r.leftValue(item, pair) : r.rightValue(item, pair);
                     text = shortText(a);
@@ -2147,10 +2482,7 @@ final class CsvCompareTab extends JPanel {
             setHorizontalAlignment(align);
             setFont(col == 0 ? t.getFont().deriveFont(Font.BOLD) : model.isKey(col) ? t.getFont().deriveFont(Font.BOLD)
                     : t.getFont());
-            if (!sel) {
-                setBackground(bg);
-                setForeground(fg != null ? fg : Theme.foreground());
-            }
+            paintCell(this, t, row, col, bg, fg);
             setToolTipText(html ? "left: " + cellLeft(r, item, col) + "  →  right: " + cellRight(r, item, col) : null);
             return this;
         }
@@ -2215,34 +2547,9 @@ final class CsvCompareTab extends JPanel {
         return position.getText();
     }
 
-    String tileTextForTest(DiffStatus s) {
-        for (Tile t : tiles) {
-            if (t.status == s) {
-                return t.big.getText() + " " + t.small.getText();
-            }
-        }
-        return null;
-    }
-
-    /** The tiles lit: those whose rows the table shows. */
-    List<DiffStatus> tilesOnForTest() {
-        List<DiffStatus> out = new ArrayList<>();
-        for (Tile t : tiles) {
-            if (t.isVisible() && t.isOn()) {
-                out.add(t.status);
-            }
-        }
-        return out;
-    }
-
-    void clickTileForTest(DiffStatus s) {
-        for (Tile t : tiles) {
-            if (t.status == s) {
-                for (java.awt.event.MouseListener l : t.getMouseListeners()) {
-                    l.mouseClicked(new MouseEvent(t, MouseEvent.MOUSE_CLICKED, 0, 0, 5, 5, 1, false));
-                }
-            }
-        }
+    /** Show's entry for these rows, as text: "+ Added (only right)  6". */
+    String showTextForTest(int at) {
+        return showText(at);
     }
 
     List<String> columnCountsForTest() {
@@ -2358,6 +2665,10 @@ final class CsvCompareTab extends JPanel {
 
     void openRowForTest(int row) {
         openRow(row, -1);
+    }
+
+    JButton compareButtonForTest() {
+        return compare;
     }
 
     Side sideForTest(int s) {

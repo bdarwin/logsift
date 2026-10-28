@@ -279,6 +279,12 @@ final class SettingsDialog extends JDialog {
         add(p, l, f, "Check files for changes", poll);
         note(p, l, f, "Less often uses less power with many open files, or files on network drives.");
 
+        String[] twoValues = {"ask", "compare", "tabs"};
+        JComboBox<String> two = new JComboBox<>(new String[] {"Ask each time", "Compare them", "Open each in a tab"});
+        two.setSelectedIndex(java.util.Arrays.asList(twoValues).indexOf(MainFrame.twoFilesDropped()));
+        two.addActionListener(e -> PREFS.put("dropTwoFiles", twoValues[two.getSelectedIndex()]));
+        add(p, l, f, "Two files dropped", two);
+
         JCheckBox session = check("Reopen the files that were open last time", PREFS.getBoolean("restoreSession", true),
                 on -> PREFS.putBoolean("restoreSession", on));
         add(p, l, f, "At start", session);

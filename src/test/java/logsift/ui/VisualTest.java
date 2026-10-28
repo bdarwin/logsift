@@ -6028,7 +6028,8 @@ class VisualTest {
         assertTrue(onEdt(tab::suggestionForTest).startsWith("Suggested: order_id — unique and filled in"),
                 onEdt(tab::suggestionForTest));
         assertEquals("Use order_id as Key", onEdt(() -> tab.useSuggestedForTest().getText()));
-        assertFalse(onEdt(tab::repeatsTileShownForTest), "no key: no key can repeat, no tile");
+        assertFalse(onEdt(tab::repeatsOfferedForTest), "no key: no key can repeat");
+        assertEquals("‼ Key repeats  (with a key)", onEdt(() -> tab.showTextForTest(4)));
         settle();
         shot("106g-csv-compare-suggested-key");
         // a key that isn't unique: its repeats are explained with an example from the files
@@ -6042,7 +6043,7 @@ class VisualTest {
             return null;
         });
         waitForNewResult(tab, byOrder, "comparing by customer");
-        assertTrue(onEdt(tab::repeatsTileShownForTest));
+        assertTrue(onEdt(tab::repeatsOfferedForTest));
         assertTrue(onEdt(tab::result).duplicateKeys() > 0);
         String tip = onEdt(tab::repeatsTipForTest);
         assertTrue(tip.matches("(?s).*For example, customer <b>customer \\d+</b> is on \\d+ rows of orders-monday.csv and \\d+ rows?"
@@ -6062,8 +6063,11 @@ class VisualTest {
         assertEquals(removed, r.count(logsift.core.diff.DiffStatus.REMOVED));
         assertEquals(changed, r.count(logsift.core.diff.DiffStatus.CHANGED));
         assertEquals(same, r.count(logsift.core.diff.DiffStatus.SAME));
-        assertEquals("6 + added (only right)", onEdt(() -> tab.tileTextForTest(logsift.core.diff.DiffStatus.ADDED)));
-        assertEquals(changed + " ≠ changed", onEdt(() -> tab.tileTextForTest(logsift.core.diff.DiffStatus.CHANGED)));
+        // Show's list has the counts
+        assertEquals("+ Added (only right)  6", onEdt(() -> tab.showTextForTest(2)));
+        assertEquals("≠ Changed  " + changed, onEdt(() -> tab.showTextForTest(1)));
+        assertEquals("All differences  " + (6 + removed + changed), onEdt(() -> tab.showTextForTest(0)));
+        assertEquals("Everything  " + r.size(), onEdt(() -> tab.showTextForTest(6)));
         assertTrue(r.notes().contains("Column region only in the right file (orders-tuesday.csv)"), r.notes().toString());
         assertEquals(6 + removed + changed, onEdt(tab::shownForTest).length, "all differences shown");
         settle();
@@ -6088,28 +6092,13 @@ class VisualTest {
             tab.clickColumnForTest(0);
             return null;
         });
-        // a tile shows its rows
+        // Show: only the rows added
         onEdt(() -> {
-            tab.clickTileForTest(logsift.core.diff.DiffStatus.ADDED);
+            tab.showForTest().setSelectedIndex(2);
             return null;
         });
         assertEquals(6, onEdt(tab::shownForTest).length);
         assertEquals("Added", onEdt(() -> tab.showForTest().getSelectedItem()));
-        assertEquals(List.of(logsift.core.diff.DiffStatus.ADDED), onEdt(tab::tilesOnForTest), "only its tile is lit");
-        settle();
-        shot("106i-csv-compare-tile-on");
-        // a click on the tile shown alone goes back to all differences
-        onEdt(() -> {
-            tab.clickTileForTest(logsift.core.diff.DiffStatus.ADDED);
-            return null;
-        });
-        assertEquals("All differences", onEdt(() -> tab.showForTest().getSelectedItem()));
-        assertFalse(onEdt(tab::tilesOnForTest).contains(logsift.core.diff.DiffStatus.SAME), "same rows aren't shown");
-        assertTrue(onEdt(tab::tilesOnForTest).contains(logsift.core.diff.DiffStatus.CHANGED));
-        onEdt(() -> {
-            tab.clickTileForTest(logsift.core.diff.DiffStatus.ADDED);
-            return null;
-        });
         onEdt(() -> {
             tab.showForTest().setSelectedIndex(6); // everything
             return null;
@@ -6439,7 +6428,8 @@ class VisualTest {
         CsvCompareTab tab = waitForCompare(null);
         assertFalse(onEdt(ct::chooserShownForTest), "the browsers fold away for the results");
         assertFalse(onEdt(ct::compareHighlightedForTest), "compared: nothing to click");
-        assertTrue(onEdt(() -> ct.filesInlineForTest().isShowing()), "▸ Files in the comparison's row");
+        assertTrue(onEdt(() -> ct.filesButtonForTest().isShowing()), "Choose Files in the comparison's row");
+        assertEquals("Choose Files", onEdt(() -> ct.filesButtonForTest().getText()));
         assertEquals("Compare: stock.csv ↔ stock-today.csv",
                 onEdt(() -> frame.tabsForTest().getTitleAt(frame.tabsForTest().getSelectedIndex())));
         assertEquals(List.of(), onEdt(tab::keysForTest), "no key chosen by default");
@@ -6533,6 +6523,42 @@ class VisualTest {
             return null;
         });
         assertTrue(onEdt(() -> again.status(tab.shownForTest()[tab.tableForTest().getSelectedRow()]).isDifference()));
+        // the right file's name starts where the right table does, and follows the divider
+        settle();
+        int[] at0 = onEdt(tab::fileRowSplitForTest);
+        assertTrue(Math.abs(at0[0] - at0[1]) <= 1, "names over their tables: " + at0[0] + " vs " + at0[1]);
+
+        // cells, rows and columns can be selected; Cmd/Ctrl+C copies them
+        onEdt(() -> {
+            tab.selectCellForTest(0, 2, 2, false); // left table, row 3, sku
+            tab.selectCellForTest(0, 3, 3, true);  // to row 4, name
+            return null;
+        });
+        String twoByTwo = onEdt(() -> tab.selectionTextForTest(0));
+        assertEquals(2, twoByTwo.split("\n").length, twoByTwo);
+        assertEquals(2, twoByTwo.split("\n")[0].split("\t", -1).length, twoByTwo);
+        assertEquals(0, onEdt(() -> tab.sideTableForTest(1).getSelectedColumnCount()),
+                "a cell on the left: nothing selected on the right");
+        settle();
+        shot("107j-compare-cells-selected");
+        onEdt(() -> {
+            tab.selectColumnForTest(0, 4, false); // the stock column, every row
+            return null;
+        });
+        String column = onEdt(() -> tab.selectionTextForTest(0));
+        assertEquals(onEdt(() -> tab.shownForTest().length) + 1, column.split("\n").length, "with its title");
+        assertEquals("stock", column.split("\n")[0]);
+        settle();
+        shot("107k-compare-column-selected");
+        onEdt(() -> {
+            tab.selectCellForTest(1, 4, 0, false); // the line on the right: the whole row, both sides
+            return null;
+        });
+        assertEquals(onEdt(() -> tab.sideTableForTest(0).getColumnCount()),
+                onEdt(() -> tab.sideTableForTest(0).getSelectedColumnCount()));
+        assertEquals(onEdt(() -> tab.sideTableForTest(1).getColumnCount()),
+                onEdt(() -> tab.sideTableForTest(1).getSelectedColumnCount()));
+        assertEquals(4, onEdt(() -> tab.selectionTextForTest(1).split("\t", -1).length));
         assertEquals(List.of("Status", "Line", "sku (key)", "name", "stock"), onEdt(() -> tab.sideColumnsForTest(0)));
         assertEquals(List.of("Line", "sku (key)", "name", "stock"), onEdt(() -> tab.sideColumnsForTest(1)));
         int[] sideShown = onEdt(tab::shownForTest);
@@ -6608,12 +6634,19 @@ class VisualTest {
             return null;
         });
 
-        // Files shows the browsers again, above the results
+        // Choose Files shows the browsers again, in the table's place; the button stays where it is
+        java.awt.Point closedAt = onEdt(() -> SwingUtilities.convertPoint(ct.filesButtonForTest(), 0, 0, ct));
         onEdt(() -> {
-            ct.filesInlineForTest().doClick();
+            ct.filesButtonForTest().doClick();
             return null;
         });
         assertTrue(onEdt(ct::chooserShownForTest));
+        settle();
+        assertEquals("Close Files", onEdt(() -> ct.filesButtonForTest().getText()));
+        java.awt.Point openAt = onEdt(() -> SwingUtilities.convertPoint(ct.filesButtonForTest(), 0, 0, ct));
+        assertEquals(closedAt, openAt, "the button doesn't move");
+        assertTrue(onEdt(() -> ct.navigatorForTest(0).isShowing()), "the browsers are shown");
+        assertFalse(onEdt(() -> tab.tableForTest().isShowing()), "in the table's place");
         assertFalse(onEdt(ct::compareHighlightedForTest), "the same files: nothing new to compare");
         onEdt(() -> {
             ct.navigatorForTest(1).reveal(inZip);
@@ -6621,9 +6654,73 @@ class VisualTest {
         });
         waitForNavigator(onEdt(() -> ct.navigatorForTest(1)), inZip);
         assertTrue(onEdt(ct::compareHighlightedForTest), "another file chosen: Compare stands out");
-        assertTrue(onEdt(tab::isShowing), "the results stay below");
         settle();
         shot("107c-compare-tab-files-again");
+        // Close Files: the table again, the same comparison
+        logsift.core.diff.TableDiffResult kept = onEdt(tab::result);
+        onEdt(() -> {
+            ct.filesButtonForTest().doClick();
+            return null;
+        });
+        assertFalse(onEdt(ct::chooserShownForTest));
+        assertTrue(onEdt(() -> tab.tableForTest().isShowing()));
+        assertTrue(onEdt(tab::result) == kept, "closing the browsers doesn't compare");
+        assertFalse(onEdt(ct::compareHighlightedForTest));
+        // the other file chosen, then Compare: it compares that file, keeping the key
+        onEdt(() -> {
+            ct.filesButtonForTest().doClick();
+            return null;
+        });
+        onEdt(() -> {
+            tab.compareButtonForTest().doClick();
+            return null;
+        });
+        waitForNewResult(tab, kept, "comparing the other file");
+        assertFalse(onEdt(ct::chooserShownForTest), "compared: the table again");
+        assertEquals(inZip, onEdt(() -> tab.sideForTest(1).open()));
+        assertEquals(List.of("sku"), onEdt(tab::keysForTest), "the key is kept");
+
+        // two files dropped on the window: compare them, or open each in a tab (asked, unless chosen)
+        Path other = box.resolve("stock-copy.csv");
+        Files.writeString(other, "sku,name,stock\nSKU-01,item 1,3\n");
+        List<String> asked = new ArrayList<>();
+        int tabs0 = onEdt(() -> frame.tabsForTest().getTabCount());
+        onEdt(() -> {
+            frame.askTwoFiles = (a, b) -> {
+                asked.add(a.getFileName() + " " + b.getFileName());
+                return null; // cancelled
+            };
+            frame.droppedTwo(right, other);
+            return null;
+        });
+        assertEquals(List.of("stock-today.csv stock-copy.csv"), asked);
+        assertEquals(tabs0, onEdt(() -> frame.tabsForTest().getTabCount()), "cancelled: nothing opens");
+        onEdt(() -> {
+            frame.askTwoFiles = (a, b) -> "tabs";
+            frame.droppedTwo(right, other);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.tabsForTest().getTabCount() == tabs0 + 2);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "two tabs");
+        onEdt(() -> {
+            frame.askTwoFiles = (a, b) -> "compare";
+            frame.droppedTwo(right, other);
+            return null;
+        });
+        CsvCompareTab dropped = waitForCompare(tab);
+        assertEquals(other, onEdt(() -> dropped.sideForTest(1).open()));
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(compareTabOf(dropped)));
+            frame.closeTab(frame.tabsForTest().getTabCount() - 1);
+            frame.closeTab(frame.tabsForTest().getTabCount() - 1);
+            frame.tabsForTest().setSelectedComponent(ct);
+            return null;
+        });
         onEdt(() -> {
             frame.closeTab(frame.tabsForTest().indexOfComponent(ct));
             return null;

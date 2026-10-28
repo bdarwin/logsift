@@ -19,13 +19,14 @@ The **Compare** tab has a **file browser on each side**: **Left (older)** and **
 - **Drop a file** on a side to choose it there; drop two files at once to fill both sides.
 - **⇄ Swap** swaps the two sides.
 
-When the comparison opens, the browsers fold away to make room. **▸ Files** (at the end of the files' row) shows them again above the results, to choose other files; **Change…** next to a file name does the same. Choosing other files makes **Compare** stand out in the accent colour until you click it.
+When the comparison opens, the browsers make room for the results. The files' names are in one row right above the table (*Left: stock.csv · 40 rows · 3 columns · 730 B*; hover the details for the separator and encoding), with **⇄** to swap them and **Choose Files** at the end. **Choose Files** shows the two browsers in the table's place, each under its file's name; the button becomes **✕ Close Files**, in the same spot, and takes you back to the table. Choosing other files makes **Compare** stand out in the accent colour: click it to compare them, keeping your keys and options. Double-clicking a file in a browser does the same.
 
 Other ways in:
 
 - **A CSV tab:** the compare button in the log's bar (the two arrows next to *Format: CSV*) opens a Compare tab with that file on the left, the right side open at the same folder.
 - **A folder's or a zip's tab:** select two files (Ctrl-click, ⌘-click on macOS) and click **Compare**.
-- **Drag and drop on a comparison:** drop a file on the left or right half of the results to compare another file on that side; an outline shows where it will land. Drop two files at once to replace both. Files dropped anywhere else on the window open as logs, as always.
+- **Drag and drop on a comparison:** drop a file on the left or right half of the results to compare another file on that side; an outline shows where it will land. Drop two files at once to replace both.
+- **Two files dropped on the window** (anywhere else): Logsift asks whether to **Compare** them or **Open in Two Tabs**. Tick *Don't ask again* to always do the same; **Settings → General → Two files dropped** changes it back. One file, three or more, or a folder open as always.
 
 If a file can't be compared (it isn't CSV or TSV), the tab says why next to **Compare**.
 
@@ -39,7 +40,7 @@ A key is what makes a row the same row in both files: an order number, a user ID
 - **Suggested key:** Logsift looks for a column, or two or three together, whose values are filled in and different on every row of both files (the first 20,000 rows of big files), and prefers names like *id*, *key*, *…_id* and *code*. **Use order_id as Key**, next to the keys, uses it in one click; hover it for why (*Suggested: order_id — unique and filled in on every row of both files*). Once in use, *✓ suggested* follows the key.
 - **Change it:** ✕ on a key removes it. **Choose ▾** next to the keys opens a list of the columns right below it: tick the key columns (several make a key together), type in **filter columns** to find one in a wide file (Enter ticks the first match), **Clear** unticks them all. When the list closes (click outside or press Escape), it compares again, once. The keys you chose stay when you drop or swap files, if the new files have those columns.
 - **No key:** rows are lined up in file order, as a text diff lines up lines: equal rows match, a row changed in place shows as changed, and rows added or removed in between show as such. **Ignore row order** instead matches equal rows wherever they are (only whole rows: nothing is "changed").
-- **Key repeats:** a key value on more than one row of a file (*ORD-7* twice) can't be paired one to one, so all its rows, in both files, are listed as **‼ key repeats** and not compared, never paired at random. Usually it means the key isn't unique: tick another key column too, to tell the rows apart. Or a file has a row twice (exported twice). Hover the tile for an example from your files. Without a key, nothing can repeat and the tile isn't shown.
+- **Key repeats:** a key value on more than one row of a file (*ORD-7* twice) can't be paired one to one, so all its rows, in both files, are listed as **‼ key repeats** and not compared, never paired at random. Usually it means the key isn't unique: tick another key column too, to tell the rows apart. Or a file has a row twice (exported twice). Hover *Key repeats* in the **Show** list for an example from your files. Without a key, nothing can repeat: the list says *(with a key)*.
 
 ## Columns
 
@@ -62,15 +63,17 @@ After changing options, **Compare** in the options' row stands out in the accent
 
 ## What it shows
 
-**Tiles** count the rows. They work as buttons: a tile is filled in its colour while its rows are in the table, and plain while they aren't. Click one to show only those rows (its border gets thicker); click it again to go back to all differences.
+**Show** (above the table) picks the rows, and says how many there are of each, with its symbol in its colour:
 
-| Tile | Colour | Means |
+| Show | Colour | Means |
 |---|---|---|
-| **+ added (only right)** | <span class="sw" style="background:#16A34A"></span> green | A key only in the right file |
-| **− removed (only left)** | <span class="sw" style="background:#DC2626"></span> red | A key only in the left file |
-| **≠ changed** | <span class="sw" style="background:#D97706"></span> amber | The same key with different values |
-| **= same** | <span class="sw" style="background:#9CA3AF"></span> gray | The same key, the same values: unchanged rows |
-| **‼ key repeats** | <span class="sw" style="background:#8B5CF6"></span> purple | Key values on more than one row of a file (and how many rows have them): not paired, not compared. Shown only with a key |
+| **All differences** | | Everything but the same rows (the default) |
+| **≠ Changed** | <span class="sw" style="background:#D97706"></span> amber | The same key with different values |
+| **+ Added (only right)** | <span class="sw" style="background:#16A34A"></span> green | A key only in the right file |
+| **− Removed (only left)** | <span class="sw" style="background:#DC2626"></span> red | A key only in the left file |
+| **‼ Key repeats** | <span class="sw" style="background:#8B5CF6"></span> purple | Key values on more than one row of a file: not paired, not compared. Only with a key |
+| **= Same** | <span class="sw" style="background:#9CA3AF"></span> gray | The same key, the same values: unchanged rows |
+| **Everything** | | All rows |
 
 **Changes per column**, on the left, says how many rows changed in each column (*price: 1,204 rows*), most first. Click one to show only those rows; **All columns** shows them all again.
 
@@ -81,11 +84,12 @@ After changing options, **Compare** in the options' row stands out in the accent
 
 Next to the scroll bar, a **strip of marks** shows where the differences are among the rows shown: green added, red removed, amber changed, purple key repeats, with a box for the part on screen. Click or drag on it to go to the difference there. Switching views or **Show** keeps the selected row when it is still shown.
 
-**The table** (unified) has a row per key: its **Status** (the symbol and the word, in the tile's colour), **Line (left → right)** in each file, the key columns (*(key)* after their name) and the compared columns.
+**The table** (unified) has a row per key: its **Status** (the symbol and the word, in its colour), **Line (left → right)** in each file, the key columns (*(key)* after their name) and the compared columns.
 
 - A **changed value** shows as <span style="color:#B91C1C"><s>old</s></span> → <span style="color:#15803D">**new**</span>: the old value struck through in red, the new one in bold green, on a light amber cell (in dark mode lighter red <span class="sw" style="background:#F87171"></span>, green <span class="sw" style="background:#4ADE80"></span> and a dark amber cell). Hover a value for both in full. A line break in a value shows as ⏎.
 - **Added** rows are on a light green background with green values, **removed** rows on a light red one with red values, **key repeats** rows on a light purple one.
-- **Show** picks the rows: *All differences* (the default: everything but the same rows), *Changed*, *Added*, *Removed*, *Key repeats*, *Same* (only the unchanged rows), *Everything* (all rows, the same ones too). **search in results** keeps the rows with that text in a value (any case).
+- **search in results** keeps the rows with that text in a value (any case).
+- **Selecting**, as in a spreadsheet: click a cell; drag, or Shift-click, for a range; Ctrl-click (⌘-click on macOS) to add cells. Click a **Status** or **Line** cell to select whole rows (side by side: on both sides), or a **column's title** for the whole column (Shift-click a second title for the columns between). Selected cells keep their colours under a tint of the accent colour, and the column titles of the selection turn the accent colour. **Ctrl+C** (⌘C) copies the selection as tab-separated text, ready to paste in a spreadsheet: a changed value as *old → new*, whole columns with their titles. Right-click → **Copy with Column Titles** adds the titles for any selection; Ctrl+A selects everything.
 - **▲ ▼** (Shift+F7 / F7) go to the previous and next difference; it says *difference 3 of 120*.
 - **Double-click** a row to open its line in the right file (the left one for a removed row). Right-click for either file.
 

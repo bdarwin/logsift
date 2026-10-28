@@ -3826,6 +3826,47 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return System.getProperty("os.name", "").toLowerCase().contains("mac");
     }
 
+    /** What to do with two files dropped on the window: "ask", "compare" or "tabs" (Settings). */
+    static String twoFilesDropped() {
+        String v = AppState.prefs().get("dropTwoFiles", "ask");
+        return v.equals("compare") || v.equals("tabs") ? v : "ask";
+    }
+
+    /** Asks what to do with two files dropped (tests answer instead): "compare", "tabs", or null to cancel. */
+    java.util.function.BiFunction<Path, Path, String> askTwoFiles = this::askTwoFiles;
+
+    /** Two files dropped on the window: compare them, or open each in its own tab (asked, unless chosen in Settings). */
+    void droppedTwo(Path a, Path b) {
+        String what = twoFilesDropped();
+        if (what.equals("ask")) {
+            what = askTwoFiles.apply(a, b);
+        }
+        if ("compare".equals(what)) {
+            openCompare(a, b);
+        } else if ("tabs".equals(what)) {
+            openFile(a);
+            openFile(b);
+        }
+    }
+
+    private String askTwoFiles(Path a, Path b) {
+        javax.swing.JCheckBox remember = new javax.swing.JCheckBox("Don't ask again (Settings → General changes it)");
+        JPanel p = new JPanel(new BorderLayout(0, 10));
+        p.add(new JLabel("<html><b>Two files dropped</b><br><br>" + esc(a.getFileName().toString()) + "<br>"
+                + esc(b.getFileName().toString()) + "<br><br>Compare them, or open each in its own tab?</html>"),
+                BorderLayout.CENTER);
+        p.add(remember, BorderLayout.SOUTH);
+        Object[] options = {"Compare", "Open in Two Tabs", "Cancel"};
+        int got = JOptionPane.showOptionDialog(this, p, "Two Files", JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE, Icons.of("git-compare", Theme.uiColor("Component.accentColor",
+                        new java.awt.Color(0x2563EB)), 32), options, options[0]);
+        String what = got == 0 ? "compare" : got == 1 ? "tabs" : null;
+        if (what != null && remember.isSelected()) {
+            AppState.prefs().put("dropTwoFiles", what);
+        }
+        return what;
+    }
+
     /** Accepts files dropped on the window. */
     private final class FileDropHandler extends TransferHandler {
         @Override
@@ -3839,6 +3880,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 @SuppressWarnings("unchecked")
                 List<File> files = (List<File>) s.getTransferable()
                         .getTransferData(DataFlavor.javaFileListFlavor);
+                if (files.size() == 2 && files.get(0).isFile() && files.get(1).isFile()) {
+                    droppedTwo(files.get(0).toPath(), files.get(1).toPath());
+                    return true;
+                }
                 for (File f : files) {
                     if (f.isDirectory()) {
                         openFolder(f.toPath()); // a dropped folder: its files, in a tab

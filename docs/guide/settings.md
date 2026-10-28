@@ -19,6 +19,7 @@ description: Every Logsift setting with its default, log formats, source folders
 | **Dark mode** | off | Also View → Dark Mode |
 | **Text that isn't UTF-8** | Windows-1252 | How to read files that aren't UTF-8 or UTF-16 (Latin-1, Cyrillic, Shift_JIS, EUC-JP, GB18030, Big5, EUC-KR, KOI8-R…). View → Encoding changes it for one file |
 | **Check files for changes** | Twice a second | Less often uses less power with many open files, or files on network drives |
+| **Two files dropped** | Ask each time | Two files dropped on the window: ask, compare them, or open each in its own tab |
 | **At start: Reopen the files that were open last time** | on | Reopens the last session when Logsift starts without a file |
 | **Check for new versions once a day** | on | Asks GitHub for the latest version number only; nothing about you or your logs is sent. A button appears in the status bar when a new version is out |
 

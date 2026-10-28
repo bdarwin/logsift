@@ -22,8 +22,8 @@ import logsift.core.diff.CsvFile;
 
 /**
  * The Compare tab: a file browser on each side (folders, zips, and zips inside zips) to choose
- * the two files, and Compare. The comparison opens below; the browsers then fold away (Files
- * shows them again). CSV and TSV files are compared as tables.
+ * the two files, and Compare. The comparison then takes the tab; its Choose Files shows the
+ * browsers again in the table's place. CSV and TSV files are compared as tables.
  */
 final class FileCompareTab extends JPanel {
 
@@ -46,16 +46,12 @@ final class FileCompareTab extends JPanel {
         new FileNavigator("Left (older)", new Color(0xDC2626)),
         new FileNavigator("Right (newer)", new Color(0x16A34A))
     };
-    private final JPanel chooser = new JPanel(new BorderLayout());
+    /** The two browsers: in the tab before the first comparison, then in the comparison's place for the table. */
+    private final JPanel sides = new JPanel(new GridLayout(1, 2, CsvCompareTab.DRAWER_GAP, 0));
     private final JButton compare = new JButton("Compare", Icons.of("git-compare"));
     private final JButton swap = new JButton("⇄ Swap");
-    private final JButton files = new JButton();
-    /** ▸ Files in the comparison's own file row, when the bar above is folded away. */
-    private final JButton filesInline = new JButton("▸ Files", Icons.of("folder-open"));
-    private JPanel bar;
+    private final JPanel bar;
     private final JLabel status = new JLabel(" ");
-    private final JPanel results = new JPanel(new BorderLayout());
-    private final JSplitPane split;
     private CsvCompareTab csv;
     private int generation;
     private boolean busy;
@@ -64,11 +60,9 @@ final class FileCompareTab extends JPanel {
         super(new BorderLayout());
         this.host = host;
 
-        JPanel sides = new JPanel(new GridLayout(1, 2, 12, 0));
-        sides.setBorder(BorderFactory.createEmptyBorder(8, 10, 6, 10));
+        sides.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
         sides.add(nav[0]);
         sides.add(nav[1]);
-        chooser.add(sides, BorderLayout.CENTER);
         for (FileNavigator n : nav) {
             n.onSelect(i -> updateButtons());
             n.onOpen(i -> {
@@ -79,33 +73,28 @@ final class FileCompareTab extends JPanel {
         }
 
         bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-        filesInline.setToolTipText("Show the file browsers, to choose other files");
-        filesInline.putClientProperty("JButton.buttonType", "borderless");
-        filesInline.addActionListener(e -> showChooser(true));
         bar.setBorder(BorderFactory.createEmptyBorder(4, 6, 2, 6));
-        files.setToolTipText("Show or hide the file browsers");
-        files.putClientProperty("JButton.buttonType", "borderless");
-        files.addActionListener(e -> showChooser(!chooser.isVisible()));
         swap.setToolTipText("Swap left and right");
         swap.addActionListener(e -> swapSides());
         compare.setToolTipText("Compare the file chosen on the left with the one on the right");
         compare.addActionListener(e -> runCompare());
         compare.putClientProperty("JButton.buttonType", "default");
-        bar.add(files);
         bar.add(swap);
         bar.add(compare);
         bar.add(status);
         add(bar, BorderLayout.NORTH);
 
-        JLabel hint = new JLabel("<html><div style='text-align:center'>Choose a file on each side and click Compare."
-                + "<br>CSV and TSV files are compared as tables: rows are matched by key columns, in any order."
-                + "<br>Files can be dropped on a side too.</div></html>", SwingConstants.CENTER);
+        JLabel hint = new JLabel("Choose a file on each side and click Compare. CSV and TSV files are compared as"
+                + " tables: rows are matched by key columns, in any order. Files can be dropped on a side too.");
         hint.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
-        results.add(hint, BorderLayout.CENTER);
-        split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, chooser, results);
-        split.setResizeWeight(1);
-        split.setBorder(BorderFactory.createEmptyBorder());
-        add(split, BorderLayout.CENTER);
+        hint.setBorder(BorderFactory.createEmptyBorder(0, 10, 6, 10));
+        JPanel first = new JPanel(new BorderLayout());
+        JPanel pad = new JPanel(new BorderLayout());
+        pad.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10));
+        pad.add(sides, BorderLayout.CENTER);
+        first.add(pad, BorderLayout.CENTER);
+        first.add(hint, BorderLayout.SOUTH);
+        add(first, BorderLayout.CENTER);
 
         FileDrop.install(this, dropTarget, (JComponent) nav[0].treeForTest().getParent().getParent(),
                 (JComponent) nav[1].treeForTest().getParent().getParent(), nav[0].treeForTest(), nav[1].treeForTest(),
@@ -122,7 +111,6 @@ final class FileCompareTab extends JPanel {
         } else if (start != null) {
             nav[1].reveal(start);
         }
-        showChooser(true);
         updateButtons();
         if (left != null && right != null) {
             compareWhenRevealed(left, right);
@@ -167,30 +155,19 @@ final class FileCompareTab extends JPanel {
         }
     }
 
+    /** Shows the file browsers (before the first comparison they always are). */
     private void showChooser(boolean on) {
-        chooser.setVisible(on);
-        // with the browsers folded, the comparison's own bar has Compare (and Swap)
-        bar.setVisible(on || csv == null);
-        filesInline.setVisible(!on);
-        if (on) {
-            SwingUtilities.invokeLater(() -> {
-                for (FileNavigator n : nav) {
-                    n.scrollToSelected();
-                }
-            });
+        if (csv != null) {
+            csv.showDrawer(on);
         }
-        files.setText(on ? "▾ Files" : "▸ Files");
-        files.setIcon(Icons.of("folder-open"));
-        if (on) {
-            if (csv == null) {
-                split.setResizeWeight(1);
-                split.resetToPreferredSizes();
-            } else if (split.getHeight() > 0) {
-                split.setDividerLocation(0.45);
+    }
+
+    private void scrollBrowsers() {
+        SwingUtilities.invokeLater(() -> {
+            for (FileNavigator n : nav) {
+                n.scrollToSelected();
             }
-        }
-        revalidate();
-        repaint();
+        });
     }
 
     private void updateButtons() {
@@ -198,9 +175,9 @@ final class FileCompareTab extends JPanel {
         FileBrowse.Item b = nav[1].selected();
         boolean ok = a != null && b != null && a.isFile() && b.isFile();
         compare.setEnabled(ok && !busy);
+        boolean other = ok && csv != null && !chosenAreCompared();
         // new files chosen (or none compared yet): Compare stands out
-        CsvCompareTab.highlightCompare(compare, ok && !busy
-                && (csv == null || !a.path().equals(csv.sideForTest(0).open()) || !b.path().equals(csv.sideForTest(1).open())));
+        CsvCompareTab.highlightCompare(compare, ok && !busy && (csv == null || other));
         if (!busy) {
             status.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
             if (a != null && b != null && !a.isFile() && !b.isFile() && a.kind() == b.kind()) {
@@ -214,6 +191,18 @@ final class FileCompareTab extends JPanel {
                 status.setText(a.name() + " ↔ " + b.name());
             }
         }
+        if (csv != null) {
+            csv.filesChosen(other, !ok ? status.getText() : other ? a.name() + " ↔ " + b.name() + ": press Compare"
+                    : "These files are compared: choose others");
+        }
+    }
+
+    /** Whether the files chosen are the ones compared. */
+    private boolean chosenAreCompared() {
+        FileBrowse.Item a = nav[0].selected();
+        FileBrowse.Item b = nav[1].selected();
+        return csv != null && a != null && b != null && a.path().equals(csv.sideForTest(0).open())
+                && b.path().equals(csv.sideForTest(1).open());
     }
 
     private void swapSides() {
@@ -259,6 +248,16 @@ final class FileCompareTab extends JPanel {
         FileBrowse.Item a = nav[0].selected();
         FileBrowse.Item b = nav[1].selected();
         if (a == null || b == null || !a.isFile() || !b.isFile()) {
+            return;
+        }
+        if (csv != null) {
+            if (chosenAreCompared()) {
+                csv.showDrawer(false);
+            } else {
+                // the comparison reads the other files, keeping its keys and options
+                csv.showDrawer(false);
+                csv.drop(List.of(a.path(), b.path()), FileDrop.BOTH);
+            }
             return;
         }
         compare(a.path(), b.path());
@@ -318,10 +317,10 @@ final class FileCompareTab extends JPanel {
             csv.close();
         }
         csv = new CsvCompareTab(a, b, fa, fb, csvHost);
-        results.removeAll();
-        results.add(csv, BorderLayout.CENTER);
-        split.setResizeWeight(0);
-        showChooser(false);
+        removeAll();
+        add(csv, BorderLayout.CENTER);
+        revalidate();
+        repaint();
         host.titleChanged(this);
     }
 
@@ -349,14 +348,26 @@ final class FileCompareTab extends JPanel {
         }
 
         @Override
-        public JComponent leading() {
-            return filesInline;
+        public JComponent drawer() {
+            return sides;
         }
 
         @Override
-        public boolean changeFile(int side) {
-            showChooser(true);
-            nav[side].treeForTest().requestFocusInWindow();
+        public void drawerShown(boolean on) {
+            if (on) {
+                scrollBrowsers();
+                updateButtons();
+            }
+        }
+
+        @Override
+        public boolean compareChosen() {
+            FileBrowse.Item a = nav[0].selected();
+            FileBrowse.Item b = nav[1].selected();
+            if (a == null || b == null || !a.isFile() || !b.isFile() || chosenAreCompared()) {
+                return false;
+            }
+            runCompare();
             return true;
         }
     };
@@ -401,21 +412,18 @@ final class FileCompareTab extends JPanel {
         return compare;
     }
 
-    JButton filesButtonForTest() {
-        return files;
+    /** Choose Files in the comparison's row (after the first comparison). */
+    javax.swing.AbstractButton filesButtonForTest() {
+        return csv == null ? null : csv.filesButtonForTest();
     }
 
-    /** ▸ Files in the comparison's row (shown while the browsers are folded away). */
-    JButton filesInlineForTest() {
-        return filesInline;
-    }
-
+    /** Whether Compare stands out: the tab's before the first comparison, then the comparison's. */
     boolean compareHighlightedForTest() {
-        return CsvCompareTab.isHighlighted(compare);
+        return csv == null ? CsvCompareTab.isHighlighted(compare) : csv.compareHighlightedForTest();
     }
 
     boolean chooserShownForTest() {
-        return chooser.isVisible();
+        return csv == null || csv.isDrawerOpen();
     }
 
     String chooserStatusForTest() {
