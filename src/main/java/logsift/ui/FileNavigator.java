@@ -203,7 +203,9 @@ final class FileNavigator extends JPanel {
     private void select(FileBrowse.Item item) {
         selected = item;
         if (item != null) {
-            pathField.setText(item.path().toString());
+            if (!pathField.isFocusOwner()) { // never over what someone is typing
+                pathField.setText(item.path().toString());
+            }
             info.setText(item.kind() == FileBrowse.Kind.FILE
                     ? (item.size() >= 0 ? bytes(item.size()) : "") + (item.inZip() ? " · in a zip" : "")
                     : item.kind() == FileBrowse.Kind.ZIP ? "a zip: open it to choose a file in it" : "a folder");

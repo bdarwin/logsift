@@ -135,7 +135,12 @@ class FileDropTest {
     void pathFieldsStillTakeText(@TempDir Path dir) throws Exception {
         FileCompareTab t = edt(() -> new FileCompareTab(null, null, dir, HOST));
         try {
+            waitForSelected(t, 1, dir); // the browser has opened its folder (and written its path)
             JTextField f = edt(() -> t.navigatorForTest(1).pathFieldForTest());
+            edt(() -> {
+                f.selectAll(); // the folder's path: replaced by what is pasted
+                return null;
+            });
             assertTrue(edt(() -> drop(f, new StringSelection("/typed/x.csv"))), "text is pasted as before");
             assertEquals("/typed/x.csv", edt(f::getText));
         } finally {
