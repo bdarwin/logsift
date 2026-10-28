@@ -22,6 +22,7 @@ public final class LogsiftApp {
     private static final List<Path> pending = new ArrayList<>(); // files that arrive before the window
 
     public static void main(String[] args) throws IOException {
+        logsift.core.Channel.apply(); // a beta keeps its own settings and window
         List<Path> files = new ArrayList<>();
         boolean stdin = false;
         for (String a : args) {
@@ -55,7 +56,7 @@ public final class LogsiftApp {
         ErrorReporter.install();
         if (MainFrame.isMac()) {
             System.setProperty("apple.laf.useScreenMenuBar", "true");
-            System.setProperty("apple.awt.application.name", "Logsift");
+            System.setProperty("apple.awt.application.name", logsift.core.Channel.appName());
         }
         installDesktopHandlers();
         // Dock icon on macOS when run from Gradle or a jar (the packaged app has its own)
