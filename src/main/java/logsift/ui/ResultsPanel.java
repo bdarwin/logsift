@@ -123,6 +123,12 @@ final class ResultsPanel extends JPanel {
             }
         });
         view.setPopupExtender((v, menu) -> extendPopup(menu));
+        // a middle click on a search's header closes that search
+        view.setMiddleClick(row -> {
+            if (row < rowCount && view.source().folded(row) != null) {
+                close(groups.get(groupIndex(row)));
+            }
+        });
         add(view, BorderLayout.CENTER);
         updateTarget();
     }

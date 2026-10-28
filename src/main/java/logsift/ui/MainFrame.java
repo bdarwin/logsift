@@ -135,6 +135,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tabs.putClientProperty("JTabbedPane.tabCloseCallback",
                 (java.util.function.IntConsumer) this::closeTab);
         tabs.putClientProperty("JTabbedPane.scrollButtonsPolicy", "asNeeded");
+        // a middle click on a tab closes it, as its ✕ does (not on the empty strip)
+        tabs.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                int i = tabs.indexAtLocation(e.getX(), e.getY());
+                if (MiddleClick.closes(e, i)) {
+                    closeTab(i);
+                }
+            }
+        });
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         // + after the tabs: the start page in a tab (open a log, a folder, a JVM...)
         JButton plus = new JButton(Icons.of("plus"));

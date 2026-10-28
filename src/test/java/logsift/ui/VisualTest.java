@@ -5662,6 +5662,110 @@ class VisualTest {
                 onEdt(() -> java.util.stream.LongStream.range(0, 4).mapToObj(l -> stock.document().line(l)).toList()));
     }
 
+    @Test
+    @Order(52)
+    void middleClickClosesTabs() throws Exception {
+        Path box = Files.createDirectories(dir.resolve("middle-click"));
+        List<Path> files = new ArrayList<>();
+        for (String n : List.of("one.log", "two.log", "three.log")) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 50; i++) {
+                sb.append(String.format("2026-10-21 10:00:%02d.000 INFO  [main] c.a.App - %s step %d%n", i, n, i));
+            }
+            Path p = box.resolve(n);
+            Files.writeString(p, sb);
+            files.add(p);
+        }
+        onEdt(() -> {
+            files.forEach(frame::openFile);
+            return null;
+        });
+        waitForTab("three.log");
+        JTabbedPane tabs = onEdt(frame::tabsForTest);
+        int two = onEdt(() -> {
+            for (int i = 0; i < tabs.getTabCount(); i++) {
+                if (tabs.getComponentAt(i) instanceof LogTab t && t.title().equals("two.log")) {
+                    return i;
+                }
+            }
+            return -1;
+        });
+        assertTrue(two >= 0);
+        int before = onEdt(tabs::getTabCount);
+        // something to remember about two.log: a bookmark
+        onEdt(() -> {
+            tabs.setSelectedIndex(two);
+            LogTab t = (LogTab) tabs.getComponentAt(two);
+            t.mainView().goToRow(7, true);
+            t.toggleBookmark();
+            return null;
+        });
+        java.awt.Component right = onEdt(() -> tabs.getComponentAt(two + 1));
+        // a middle click on the empty strip does nothing
+        onEdt(() -> {
+            java.awt.Rectangle last = tabs.getBoundsAt(tabs.getTabCount() - 1);
+            int x = Math.min(tabs.getWidth() - 5, last.x + last.width + 3);
+            if (tabs.indexAtLocation(x, last.y + last.height / 2) < 0) {
+                tabs.dispatchEvent(new MouseEvent(tabs, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                        InputEvent.BUTTON2_DOWN_MASK, x, last.y + last.height / 2, 1, false, MouseEvent.BUTTON2));
+            }
+            return null;
+        });
+        assertEquals(before, (int) onEdt(tabs::getTabCount), "nothing closed");
+        // a middle click on two.log's tab closes it, like its ✕
+        onEdt(() -> {
+            java.awt.Rectangle r = tabs.getBoundsAt(two);
+            tabs.dispatchEvent(new MouseEvent(tabs, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                    InputEvent.BUTTON2_DOWN_MASK, r.x + r.width / 3, r.y + r.height / 2, 1, false, MouseEvent.BUTTON2));
+            return null;
+        });
+        assertEquals(before - 1, (int) onEdt(tabs::getTabCount));
+        assertTrue(onEdt(() -> {
+            for (int i = 0; i < tabs.getTabCount(); i++) {
+                if (tabs.getComponentAt(i) instanceof LogTab t && t.title().equals("two.log")) {
+                    return false;
+                }
+            }
+            return true;
+        }), "two.log closed");
+        assertEquals(right, onEdt(tabs::getSelectedComponent), "the neighbour is selected, as with the ✕");
+        assertTrue(AppState.loadFileState(files.get(1).toAbsolutePath().normalize()).toString().contains("7"),
+                "its state (the bookmark) was saved");
+        onEdt(() -> {
+            frame.openFile(files.get(1));
+            return null;
+        });
+        LogTab again = waitForTab("two.log");
+        assertEquals(java.util.Set.of(7L), onEdt(() -> again.bookmarks().all().keySet()), "the bookmark is back");
+        // in Find results, a middle click on a search's header closes that search
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("step 1", true, false, false));
+            return null;
+        });
+        waitForSearch(again);
+        onEdt(() -> {
+            frame.findAll(new SearchQuery("step 2", true, false, false));
+            return null;
+        });
+        waitForSearch(again);
+        assertEquals(2, (int) onEdt(() -> again.results().groups().size()));
+        onEdt(() -> {
+            LogView v = again.results().view();
+            int y = v.yForRowForTest(0);
+            v.canvasForTest().dispatchEvent(new MouseEvent(v.canvasForTest(), MouseEvent.MOUSE_PRESSED,
+                    System.currentTimeMillis(), InputEvent.BUTTON2_DOWN_MASK, 40, y, 1, false, MouseEvent.BUTTON2));
+            return null;
+        });
+        assertEquals(1, (int) onEdt(() -> again.results().groups().size()), "the top search closed");
+        assertEquals("step 1", onEdt(() -> again.results().groups().get(0).query.text()));
+        onEdt(() -> {
+            for (Path p : files) {
+                frame.closeFile(p);
+            }
+            return null;
+        });
+    }
+
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {
             try {

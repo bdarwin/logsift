@@ -43,7 +43,7 @@ Every search gets its own colour, in the log, on the highlight bar, and as a dot
 - Click a header (or press Enter, ← or →) to fold or open it. **Fold all** / **Unfold all** do every search.
 - **F3** / **Shift+F3** step through the selected search's hits.
 - Running a search you already have moves it back to the top.
-- **Close** removes the selected search (Shift+Esc), **Close all** every one.
+- **Close** removes the selected search (Shift+Esc), **Close all** every one. A middle click on a search's header closes it too.
 - The header says how the search ran: *(regex, match case, whole word)*, how long it took, and *(limit reached)* when there were too many hits to list.
 
 **Search within results:** select a search (or any of its lines), type in **Search in these results** and press Enter. A nested search like *"ERROR › timeout"* appears under it, showing only the lines that match both. You can keep narrowing. Closing a search also closes the searches nested in it.

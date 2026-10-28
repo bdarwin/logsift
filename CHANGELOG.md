@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Middle click closes a tab:** a middle click on a tab closes it, as its ✕ does (what the log remembers is saved). In Find results, a middle click on a search's header closes that search.
 - **Check for updates behind a company proxy:** the update check failed with a PKIX error where a proxy replaces GitHub's certificate. It now trusts the certificates this computer trusts (Windows' and macOS' own stores), as Open URL does, and if the certificate still isn't trusted it checks without it. Only the version number is read from the answer; the download page Logsift opens is always GitHub's page of that version.
 - **Which tabs follow the filters:** a tab below the log that counts only the lines the filters keep (Metrics and Profile with Matching only, Messages with *Filtered lines*, a Find All made in the filtered lines) shows a filter icon after its name and a strip on top, *Only the 225 of 2,099 lines the filters keep*, with a link back to every line. Insights, Exceptions and Bookmarks say on their tab that they always cover the whole log.
 - **Metrics follow the filters:** with Matching only on, the Metrics tab counts only the lines the filters keep (things that start and end by their start line, numbers by their line) and says so; turn Matching only off for the whole log. Changing filters doesn't read the log again. Insights still look at the whole log.

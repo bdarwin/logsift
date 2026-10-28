@@ -312,6 +312,19 @@ public final class LogView extends JPanel {
         return new int[] {shownLines[shownLine[0]].row, shownLines[shownLine[shownCount - 1]].row};
     }
 
+    /** Runs for the row under a middle click (for example to close a search in Find results). */
+    void setMiddleClick(java.util.function.IntConsumer onRow) {
+        canvas.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                int row = rowAt(e.getY());
+                if (MiddleClick.closes(e, row)) {
+                    onRow.accept(row);
+                }
+            }
+        });
+    }
+
     /** Lets the owner add items to the right-click menu. */
     public void setPopupExtender(BiConsumer<LogView, JPopupMenu> extender) {
         this.popupExtender = extender;

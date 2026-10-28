@@ -21,7 +21,7 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Merge files by time | Ctrl+Shift+M |
 | Compare with another log | Ctrl+Shift+D |
 | Export lines shown by filters | Ctrl+Shift+E |
-| Close the tab | Ctrl+W |
+| Close the tab | Ctrl+W, or a middle click on the tab |
 | Quit | Ctrl+Q (⌘Q on macOS) |
 | Settings | Ctrl+, |
 
