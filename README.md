@@ -56,7 +56,8 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 
 ## Opening logs
 
-- **Files:** File → Open, or drag files onto the window. On Windows, right-click a file or folder → **Open with Logsift** (a folder opens a search in it); Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does. On macOS, use Open With or drop files on the Dock icon. If Logsift is already running, files open in the same window.
+- **Files:** File → Open, or drag files onto the window. On Windows, right-click a file or folder → **Open with Logsift** (a folder opens as a tab of its files); Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does. On macOS, use Open With or drop files on the Dock icon. If Logsift is already running, files open in the same window.
+- **Folders:** File → Open Folder… (or drop a folder on the window) shows a folder's files in a tab, as a tree with sizes, like a zip's: filter them by name, open files as logs, **Merge by Time**, and **Find in all files** (Ctrl+F in that tab) searches the folder. **Refresh** lists the files again; a very big folder shows its first 20,000 files.
 - **Zip and .gz files:** a `.zip` (File → Open, drag and drop, Recent files) opens as a tab showing its folders and files as a tree, also the files of zips inside it, with their sizes and a filter. Double-click a file (or select several and press **Open**) to open it as a log; **Merge by Time** merges the selected logs; **Find in all files** (Ctrl+F in the zip's tab) searches every file in it, whatever it is called. A zip with one file opens that file right away, and a `.gz` file opens directly. A file from a zip is named by its place in it (`bundle.zip/logs/app.log`) and behaves like any log: its bookmarks, filters and format are remembered, and it is in Recent files and the last session. It is unpacked to a temporary copy once, when first opened.
 - **Web addresses:** File → Open URL… (Ctrl+Shift+U) takes one or more `http`/`https` addresses, one per line, with an optional user and password or token (sent as a Bearer token). One address opens in a tab; several are downloaded into one temporary folder and searched together. A `.zip` or `.gz` download is unpacked as above. The file is a copy: it doesn't follow the server's file as it grows. Certificates count as trusted when Java or this computer trusts them (Windows' and macOS's own stores, where a company proxy's certificate usually is); when neither does, Logsift asks whether to open it anyway without checking, once or always for that server.
 - **WSL (Windows):** File → Open from WSL… opens your Linux home folder. Windows reaches WSL files directly (`\\wsl.localhost\Ubuntu\…`), so they open and follow like any other file, without SSH.
@@ -150,7 +151,7 @@ Make a test log:
 
 ## Folder search
 
-**File → Search in Folder…** (Ctrl+Shift+F, ⇧⌘F on macOS), or drop a folder on the window, opens a search tab:
+**File → Search in Folder…** (Ctrl+Shift+F, ⇧⌘F on macOS), or **Find in all files** in a folder's tab, opens a search tab:
 
 - Pick a folder, file name patterns (`*.log;*.txt`), and whether to include subfolders and archives.
 - Rotated logs count as the log they came from: `*.log` also finds `app.log.1`, `app.log.2026-10-21`, `app.log.2.gz`, and `.log` files inside any `.zip`, also inside zips and `.gz` files within a zip (up to 5 levels deep).

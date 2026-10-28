@@ -5766,6 +5766,142 @@ class VisualTest {
         });
     }
 
+    @Test
+    @Order(53)
+    void openFolderShowsItsFiles() throws Exception {
+        // a folder of logs: a subfolder with a .gz and a zip, and a CSV in another
+        Path box = dir.resolve("folder-tab");
+        if (Files.exists(box)) {
+            try (var walk = Files.walk(box)) {
+                for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.delete(p);
+                }
+            }
+        }
+        Files.createDirectories(box.resolve("sub"));
+        Files.createDirectories(box.resolve("data"));
+        StringBuilder app = new StringBuilder();
+        StringBuilder api = new StringBuilder();
+        for (int i = 0; i < 120; i++) {
+            app.append(String.format("2026-10-21 10:%02d:%02d.000 INFO  [main] c.a.App - app step %d%n", i / 60, i % 60, i));
+            api.append(String.format("2026-10-21 10:%02d:%02d.500 WARN  [http-1] c.a.Api - api step %d%n", i / 60, i % 60, i));
+        }
+        Files.writeString(box.resolve("app.log"), app);
+        Files.writeString(box.resolve("api.log"), api);
+        try (var gz = new java.util.zip.GZIPOutputStream(Files.newOutputStream(box.resolve("sub/old.log.gz")))) {
+            gz.write(app.toString().replace("app step", "old step").getBytes(StandardCharsets.UTF_8));
+        }
+        try (var z = new java.util.zip.ZipOutputStream(Files.newOutputStream(box.resolve("sub/bundle.zip")))) {
+            z.putNextEntry(new java.util.zip.ZipEntry("node1.log"));
+            z.write(app.toString().replace("app step", "node step").getBytes(StandardCharsets.UTF_8));
+            z.putNextEntry(new java.util.zip.ZipEntry("node2.log"));
+            z.write(api.toString().getBytes(StandardCharsets.UTF_8));
+        }
+        Files.writeString(box.resolve("data/orders.csv"), "time,host\n2026-10-21 10:00:00,web-1\n2026-10-21 10:00:01,web-2\n");
+        onEdt(() -> {
+            frame.openFolder(box);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentArchiveTabForTest() != null && frame.currentArchiveTabForTest().isFolder()
+                        && !frame.currentArchiveTabForTest().rowsForTest().isEmpty());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the folder's tab");
+        ArchiveTab ft = onEdt(frame::currentArchiveTabForTest);
+        assertEquals(List.of("data", "  orders.csv", "sub", "  bundle.zip", "  old.log.gz", "api.log", "app.log"),
+                onEdt(ft::rowsForTest), "folders first, then files; a zip is a file here");
+        assertTrue(onEdt(ft::summaryForTest).startsWith("5 files, "), onEdt(ft::summaryForTest));
+        assertEquals("folder-tab", onEdt(() -> frame.tabsForTest().getTitleAt(frame.tabsForTest().indexOfComponent(ft))));
+        assertTrue(AppState.recentFiles().contains(box.toAbsolutePath().normalize()), "a recent folder");
+        settle();
+        shot("105-folder-tab");
+        // the name filter
+        onEdt(() -> {
+            ft.setFilterForTest("log");
+            return null;
+        });
+        assertEquals(List.of("sub/old.log.gz", "api.log", "app.log"), onEdt(ft::shownForTest));
+        settle();
+        shot("105b-folder-filtered");
+        // open a file: a log tab
+        onEdt(() -> {
+            ft.selectForTest("api.log");
+            ft.openSelected();
+            return null;
+        });
+        LogTab apiTab = waitForTab("api.log");
+        assertEquals(box.resolve("api.log").toAbsolutePath().normalize(), onEdt(apiTab::path));
+        // dropping the folder again (or Open with on it) selects its tab
+        onEdt(() -> {
+            frame.openFiles(List.of(box));
+            return null;
+        });
+        assertEquals(ft, onEdt(() -> frame.tabsForTest().getSelectedComponent()));
+        // merge two files by time (a .gz too: unpacked first)
+        onEdt(() -> {
+            ft.selectForTest("app.log", "sub/old.log.gz");
+            ft.mergeButtonForTest().doClick();
+            return null;
+        });
+        LogTab merged = waitForTab("merged-2-logs.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> merged.document().lineCount() == 240 && !merged.document().isIndexing());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the merged lines");
+        // the .gz unpacked; at the same time, the files in the tree's order (sub/ first)
+        assertTrue(onEdt(() -> merged.document().line(0)).startsWith("<old> 2026-10-21 10:00:00.000"),
+                onEdt(() -> merged.document().line(0)));
+        assertTrue(onEdt(() -> merged.document().line(1)).startsWith("<app> 2026-10-21 10:00:00.000"),
+                onEdt(() -> merged.document().line(1)));
+        // find in all files: a folder search over the folder, inside the .gz and the zip too
+        onEdt(() -> {
+            frame.tabsForTest().setSelectedComponent(ft);
+            ft.setFindForTest("step 7");
+            ft.runFindForTest();
+            return null;
+        });
+        FolderSearchTab fs = onEdt(() -> (FolderSearchTab) frame.tabsForTest().getSelectedComponent());
+        logsift.core.FolderSearch search = onEdt(fs::search);
+        assertTrue(search.awaitDone(30_000));
+        assertEquals(box.toString(), onEdt(fs::folderForTest));
+        // "step 7" and "step 7x" (70-79) in: app, api, old (.gz), node1 and node2 (zip): 11 lines each
+        assertEquals(55L, search.totalHits());
+        // Refresh lists new files
+        Files.writeString(box.resolve("new.log"), "2026-10-21 11:00:00.000 INFO  [main] c.a.App - new\n");
+        onEdt(() -> {
+            frame.tabsForTest().setSelectedComponent(ft);
+            ft.setFilterForTest("");
+            ft.refreshButtonForTest().doClick();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> ft.rowsForTest().contains("new.log"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the new file listed");
+        // a narrow window: the folder's bar still fits
+        onEdt(() -> {
+            frame.setSize(820, 860);
+            frame.validate();
+            return null;
+        });
+        settle();
+        shot("105c-folder-narrow");
+        onEdt(() -> {
+            frame.setSize(1400, 860);
+            frame.validate();
+            return null;
+        });
+    }
+
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {
             try {

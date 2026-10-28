@@ -15,7 +15,7 @@ With nothing open, Logsift shows a start page. With logs open, **+** after the t
 | Button | Opens |
 |---|---|
 | **Open Log…** | Files, zips, `.gz` (Ctrl+O) |
-| **Open Folder…** | A [folder search](folder-search.md): every log in it, zips too (Ctrl+Shift+F) |
+| **Open Folder…** | A folder's files in a tab (below) |
 | **Open Remote…** | A log on another machine over SSH (Ctrl+Shift+O) |
 | **Open URL…** | A log on a web server (Ctrl+Shift+U) |
 | **Attach to a JVM…** | Threads, profiles, heap of a running Java program (Ctrl+Shift+J); see [JVM connections](jvm.md) |
@@ -23,17 +23,30 @@ With nothing open, Logsift shows a start page. With logs open, **+** after the t
 | **Open Thread Dump…** | `jstack`, `jcmd` or `kill -3` output; see [Thread dumps](threads.md) |
 | **Open Profile…** | A JFR recording or saved stacks; see [Profiling](profiling.md) |
 
-Below them, **Recent**: **Reopen last session** and your last files. On macOS the shortcuts use ⌘ instead of Ctrl.
+Under them, **Search in Folder…** (Ctrl+Shift+F) searches every log in a folder, zips too: see [Folder search](folder-search.md). Below that, **Recent**: **Reopen last session** and your last files and folders. On macOS the shortcuts use ⌘ instead of Ctrl.
 
 ## Files
 
 - **File → Open…** (Ctrl+O), or drag files onto the window. A file that is already open is just selected.
-- **Windows:** right-click a file or folder → **Open with Logsift** (a folder opens a search in it). Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does.
+- **Windows:** right-click a file or folder → **Open with Logsift** (a folder opens as a tab of its files, below). Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does.
 - **macOS:** Open With, or drop files on the Dock icon.
 - **One window:** if Logsift is already running, files open in the same window.
 - **File → Open Recent** lists the last 15 files. **File → Reopen Last Session** reopens the logs that were open last time; Logsift also does that at start (you can turn it off in [Settings](settings.md)). Each file remembers its filters, formula, level buttons, Matching only and position.
 
 A big file shows its first lines at once and is indexed in the background; the status bar says *indexing…*, then *indexed in N ms*. A file on a slow network or cloud drive shows *Waiting for the file…* with **Cancel**.
+
+## Folders
+
+**File → Open Folder…** (or the start page's **Open Folder…**, dropping a folder on the window, or **Open with Logsift** on a folder) shows a folder's files in a tab, as a tree with their sizes: subfolders first, then files. It works like a zip's tab:
+
+![A folder's files as a tree: a subfolder with a .gz and a zip, a CSV, and two logs](../screenshots/folder-tab.png)
+
+- **Filter files by name** narrows the tree.
+- Double-click a file (or select several and press **Open**) to open it as a log. A `.zip` opens as its own tab, a `.gz` directly.
+- **Merge by Time** merges the selected files (`.gz` files are unpacked first; CSV files make one CSV, see [Merge CSV files](compare.md#merge-csv-files)).
+- **Find in all files** (Ctrl+F in the folder's tab) is a [folder search](folder-search.md) of the folder and its subfolders, inside zips and `.gz` files too, whatever the files are called.
+- **Refresh** lists the files again. A very big folder (a home folder, `/var/log`) is listed in the background and shows its first 20,000 files; the tab then says so. Folders that can't be read are left out.
+- The folder is in **Open Recent** and on the start page; it isn't reopened with the last session.
 
 ## Zips and .gz files
 

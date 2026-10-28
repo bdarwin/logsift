@@ -69,10 +69,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         @Override
         public void openFolder() {
-            Path dir = FolderSearchTab.chooseFolder(MainFrame.this, PREFS.get("lastDir", null));
-            if (dir != null) {
-                openFolderSearch(dir, null);
-            }
+            openFolderDialog();
+        }
+
+        @Override
+        public void searchFolder() {
+            openFolderSearch(null);
         }
 
         @Override
@@ -228,7 +230,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     public void openFiles(List<Path> files) {
         for (Path p : files) {
             if (Files.isDirectory(p)) {
-                openFolderSearch(p); // a folder (Open with Logsift on a folder): search in it
+                openFolder(p); // a folder (Open with Logsift on a folder): its files, in a tab
             } else {
                 openFile(p);
             }
@@ -446,6 +448,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 if (testDelay > 0) {
                     Thread.sleep(testDelay);
                 }
+                if (Files.isDirectory(read)) {
+                    throw new FolderNotFile(); // a folder (from Recent files): its tab instead
+                }
                 if (!Files.isRegularFile(read)) {
                     throw new IOException("Not a file (or not reachable): " + abs);
                 }
@@ -545,7 +550,20 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
      */
     private final SessionRestore restore = new SessionRestore();
 
+    /** Thrown when what was opened as a file is a folder. */
+    private static final class FolderNotFile extends IOException {
+        FolderNotFile() {
+            super("a folder");
+        }
+    }
+
     private void showOpenError(Path abs, Throwable e) {
+        Throwable c = e instanceof java.io.UncheckedIOException u ? u.getCause() : e;
+        if (c instanceof FolderNotFile) {
+            restore.finished(abs);
+            openFolder(abs);
+            return;
+        }
         if (restore.finished(abs)) {
             status.setText("Not reopened (missing): " + abs);
             return;
@@ -2127,6 +2145,120 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }.execute();
     }
 
+    /** Asks for a folder and shows its files in a tab. */
+    void openFolderDialog() {
+        Path dir = FolderSearchTab.chooseFolder(this, PREFS.get("lastDir", null));
+        if (dir != null) {
+            openFolder(dir);
+        }
+    }
+
+    /**
+     * A folder's files as a tab (as a zip's are): a tree with sizes, a name filter, Open, Merge by
+     * Time and Find in all files. The files are listed in the background, at most
+     * {@link logsift.core.FolderListing#MAX_FILES}.
+     */
+    void openFolder(Path folder) {
+        Path dir = folder.toAbsolutePath().normalize();
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof ArchiveTab at && at.isFolder() && at.zip().equals(dir)) {
+                tabs.setSelectedIndex(i);
+                return;
+            }
+        }
+        ArchiveTab tab = new ArchiveTab(dir, true, folderHost);
+        tabs.addTab(tab.title(), Icons.of("folder-open"), tab);
+        int i = tabs.getTabCount() - 1;
+        tabs.setToolTipTextAt(i, dir.toString());
+        tabs.setSelectedIndex(i);
+        updateEmptyState();
+        AppState.addRecent(dir);
+        PREFS.put("lastDir", dir.toString());
+        listFolder(tab);
+    }
+
+    /** Lists a folder tab's files (again), in the background. */
+    private void listFolder(ArchiveTab tab) {
+        Path dir = tab.zip();
+        status.setText("Reading " + dir + "…");
+        new javax.swing.SwingWorker<logsift.core.FolderListing.Result, Void>() {
+            @Override
+            protected logsift.core.FolderListing.Result doInBackground() throws Exception {
+                return logsift.core.FolderListing.list(dir, logsift.core.FolderListing.MAX_FILES,
+                        () -> tabs.indexOfComponent(tab) < 0); // closed meanwhile: stop
+            }
+
+            @Override
+            protected void done() {
+                status.setText(" ");
+                try {
+                    logsift.core.FolderListing.Result r = get();
+                    tab.setEntries(r.files(), r.capped());
+                    SwingUtilities.invokeLater(tab::focusTree);
+                } catch (Exception e) {
+                    if (tabs.indexOfComponent(tab) >= 0) {
+                        tabs.remove(tab);
+                        updateEmptyState();
+                        showOpenError(dir, e.getCause() != null ? e.getCause() : e);
+                    }
+                }
+            }
+        }.execute();
+    }
+
+    private final ArchiveTab.Host folderHost = new ArchiveTab.Host() {
+        @Override
+        public void openEntries(Path dir, List<logsift.core.Archives.Entry> entries) {
+            for (logsift.core.Archives.Entry e : entries) {
+                openFile(dir.resolve(e.name()));
+            }
+        }
+
+        @Override
+        public void mergeEntries(Path dir, List<logsift.core.Archives.Entry> entries) {
+            // zips hold several files: not merged; .gz files are unpacked first (once)
+            List<logsift.core.Archives.Entry> files = entries.stream()
+                    .filter(e -> !logsift.core.Archives.isZip(e.fileName())).toList();
+            if (files.size() < 2) {
+                return;
+            }
+            ProgressDialog.run(MainFrame.this, "Unpacking…", (progress, cancelled) -> {
+                List<Path> paths = new ArrayList<>();
+                for (int i = 0; i < files.size(); i++) {
+                    int at = i;
+                    Path p = dir.resolve(files.get(i).name());
+                    if (logsift.core.Archives.isGzip(p)) {
+                        p = unpack(p, null, files.get(i).size(), f -> progress.accept((at + f) / files.size()),
+                                cancelled);
+                        if (p == null) {
+                            return null;
+                        }
+                    }
+                    paths.add(p);
+                }
+                return paths;
+            }, paths -> {
+                if (paths != null) {
+                    mergeFiles(paths);
+                }
+            });
+        }
+
+        @Override
+        public void searchArchive(Path dir, String text) {
+            FolderSearchTab t = openFolderSearch(dir, text == null || text.isEmpty() ? null : text);
+            t.setFileNames(""); // every file, as the box says
+            if (text != null && !text.isEmpty()) {
+                t.search(dir, "", new SearchQuery(text, false, false, false));
+            }
+        }
+
+        @Override
+        public void refresh(ArchiveTab tab) {
+            listFolder(tab);
+        }
+    };
+
     private final ArchiveTab.Host archiveHost = new ArchiveTab.Host() {
         @Override
         public void openEntries(Path zip, List<logsift.core.Archives.Entry> entries) {
@@ -2488,6 +2620,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         // ---- File: opening things, then making things from files, then leaving
         JMenu file = menu("File");
         file.add(item("Open…", "folder-open", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU), e -> openDialog()));
+        file.add(item("Open Folder…", "folder", null, e -> openFolderDialog()));
         JMenu recent = submenu("Open Recent", "history");
         onOpen(recent, () -> {
             recent.removeAll();
@@ -3506,7 +3639,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                         .getTransferData(DataFlavor.javaFileListFlavor);
                 for (File f : files) {
                     if (f.isDirectory()) {
-                        openFolderSearch(f.toPath()); // a dropped folder: search in it
+                        openFolder(f.toPath()); // a dropped folder: its files, in a tab
                     } else {
                         openFile(f.toPath());
                     }

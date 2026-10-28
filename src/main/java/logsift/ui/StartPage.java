@@ -32,6 +32,9 @@ final class StartPage extends JPanel {
 
         void openFolder();
 
+        /** Searches every log in a folder (Search in Folder). */
+        default void searchFolder() {}
+
         void openRemote();
 
         void attachJvm();
@@ -78,8 +81,7 @@ final class StartPage extends JPanel {
         JPanel grid = new JPanel(new GridLayout(2, 4, 12, 12));
         grid.setOpaque(false);
         grid.add(action("folder-open", "Open Log…", m + "O", "Files, zips, .gz", host::openLogs));
-        grid.add(action("folder-search", "Open Folder…", sm + "F", "Search every log in it, zips too",
-                host::openFolder));
+        grid.add(action("folder-open", "Open Folder…", null, "Its files: open, merge, find in all", host::openFolder));
         grid.add(action("server", "Open Remote…", sm + "O", "A log on another machine (SSH)", host::openRemote));
         grid.add(action("globe", "Open URL…", sm + "U", "A log on a web server", host::openUrl));
         grid.add(action("cpu", "Attach to a JVM…", sm + "J", "Threads, profiles, heap, its logs",
@@ -90,7 +92,16 @@ final class StartPage extends JPanel {
                 host::openThreadDump));
         grid.add(action("flame", "Open Profile…", null, "A JFR recording, or saved stacks", host::openProfile));
         col.add(left(grid));
-        col.add(Box.createVerticalStrut(26));
+        col.add(Box.createVerticalStrut(10));
+        // searching a folder without opening it: the same as File → Search in Folder…
+        searchFolder.setText("<html>Or <u>Search in Folder…</u> (" + sm + "F): every log in a folder, zips too</html>");
+        searchFolder.putClientProperty("JButton.buttonType", "borderless");
+        searchFolder.setForeground(Theme.uiColor("Component.accentColor", new Color(0x2563EB)));
+        searchFolder.setFocusable(false);
+        searchFolder.setIcon(Icons.of("folder-search", Theme.uiColor("Component.accentColor", new Color(0x2563EB)), 16));
+        searchFolder.addActionListener(e -> host.searchFolder());
+        col.add(left(searchFolder));
+        col.add(Box.createVerticalStrut(16));
 
         recent.setOpaque(false);
         recent.setLayout(new BoxLayout(recent, BoxLayout.Y_AXIS));
@@ -181,6 +192,12 @@ final class StartPage extends JPanel {
             out.add(b.getText().replaceAll("<[^>]+>", "|").replaceAll("\\|+", "|").split("\\|")[1]);
         }
         return out;
+    }
+
+    private final JButton searchFolder = new JButton();
+
+    JButton searchFolderForTest() {
+        return searchFolder;
     }
 
     JButton actionForTest(String name) {

@@ -31,8 +31,9 @@ import javax.swing.tree.TreeSelectionModel;
 import logsift.core.Archives;
 
 /**
- * A zip file as a tab: its folders and files, and the zips inside it, as a tree. Files open as
- * logs (with everything a log has); several can be merged by time, or all searched.
+ * A zip file, or a folder, as a tab: its folders and files (and, in a zip, the zips inside it) as
+ * a tree. Files open as logs (with everything a log has); several can be merged by time, or all
+ * searched. In a folder, zips are files: opening one opens its own tab.
  */
 final class ArchiveTab extends JPanel {
 
@@ -44,6 +45,9 @@ final class ArchiveTab extends JPanel {
 
         /** Searches every file of the zip for {@code text} (empty: just opens the search). */
         void searchArchive(Path zip, String text);
+
+        /** Lists the folder's files again (folder tabs only). */
+        default void refresh(ArchiveTab tab) {}
     }
 
     /** A folder, a zip inside the zip, or a file. */
@@ -58,7 +62,8 @@ final class ArchiveTab extends JPanel {
         }
     }
 
-    private final Path zip;
+    private final Path zip;   // the zip, or the folder
+    private final boolean folder;
     private final Host host;
     private final JTextField filter = new JTextField(22);
     private final JTextField find = new JTextField(28);
@@ -69,8 +74,14 @@ final class ArchiveTab extends JPanel {
     private List<Archives.Entry> entries = List.of();
 
     ArchiveTab(Path zip, Host host) {
+        this(zip, false, host);
+    }
+
+    /** {@code folder}: a folder's files rather than a zip's. */
+    ArchiveTab(Path zip, boolean folder, Host host) {
         super(new BorderLayout());
         this.zip = zip;
+        this.folder = folder;
         this.host = host;
         tree.setRootVisible(false);
         tree.setShowsRootHandles(true);
@@ -133,8 +144,8 @@ final class ArchiveTab extends JPanel {
         find.putClientProperty("JTextField.placeholderText", "Find in all files (Enter)");
         find.putClientProperty("JTextField.showClearButton", true);
         find.putClientProperty("JTextField.leadingIcon", Icons.find());
-        find.setToolTipText("Search every file in this zip, also in zips and .gz files inside it ("
-                + (MainFrame.isMac() ? "⌘F" : "Ctrl+F") + ")");
+        find.setToolTipText("Search every file in this " + (folder ? "folder and its subfolders" : "zip")
+                + ", also in zips and .gz files inside it (" + (MainFrame.isMac() ? "⌘F" : "Ctrl+F") + ")");
         find.addActionListener(e -> host.searchArchive(zip, find.getText()));
         JButton search = new JButton("Search");
         search.setToolTipText(find.getToolTipText());
@@ -145,7 +156,8 @@ final class ArchiveTab extends JPanel {
         top.setBorder(BorderFactory.createEmptyBorder(8, 10, 6, 10));
         JPanel first = new JPanel(new BorderLayout(8, 0));
         JPanel title = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        JLabel name = new JLabel(zip.getFileName().toString(), Icons.of("folder-archive"), JLabel.LEFT);
+        JLabel name = new JLabel(title(), Icons.of(folder ? "folder-open" : "folder-archive"), JLabel.LEFT);
+        name.setToolTipText(zip.toString());
         name.setFont(name.getFont().deriveFont(java.awt.Font.BOLD));
         title.add(name);
         summary.setForeground(Theme.uiColor("Label.disabledForeground", java.awt.Color.GRAY));
@@ -159,6 +171,13 @@ final class ArchiveTab extends JPanel {
         actions.add(filter);
         actions.add(open);
         actions.add(merge);
+        if (folder) {
+            JButton refresh = new JButton("Refresh", Icons.reload());
+            refresh.setToolTipText("List the folder's files again");
+            refresh.addActionListener(e -> host.refresh(this));
+            actions.add(refresh);
+            refreshButton = refresh;
+        }
         top.add(first);
         top.add(actions);
 
@@ -176,21 +195,34 @@ final class ArchiveTab extends JPanel {
         updateButtons();
     }
 
+    private JButton refreshButton;
+
     Path zip() {
         return zip;
     }
 
+    /** A folder's tab (not a zip's). */
+    boolean isFolder() {
+        return folder;
+    }
+
     String title() {
-        return zip.getFileName().toString();
+        return zip.getFileName() == null ? zip.toString() : zip.getFileName().toString();
     }
 
     void setEntries(List<Archives.Entry> list) {
+        setEntries(list, false);
+    }
+
+    /** The files to show; {@code capped}: a big folder, of which only the first are listed. */
+    void setEntries(List<Archives.Entry> list, boolean capped) {
         entries = List.copyOf(list);
-        long files = list.stream().filter(e -> !Archives.isZip(e.fileName())).count();
-        long size = list.stream().filter(e -> !Archives.isZip(e.fileName()) && e.size() > 0)
+        long files = list.stream().filter(e -> folder || !Archives.isZip(e.fileName())).count();
+        long size = list.stream().filter(e -> (folder || !Archives.isZip(e.fileName())) && e.size() > 0)
                 .mapToLong(Archives.Entry::size).sum();
-        summary.setText(String.format("%,d file%s, %s unpacked", files, files == 1 ? "" : "s",
-                MainFrame.humanBytes(size)));
+        summary.setText(String.format("%,d file%s, %s%s%s", files, files == 1 ? "" : "s",
+                MainFrame.humanBytes(size), folder ? "" : " unpacked",
+                capped ? " · only the first " + String.format("%,d", files) + " (a big folder)" : ""));
         rebuild();
         if (tree.getRowCount() > 0) {
             for (int r = 0; r < tree.getRowCount(); r++) {
@@ -226,7 +258,7 @@ final class ArchiveTab extends JPanel {
         DefaultMutableTreeNode root = new DefaultMutableTreeNode();
         Map<String, DefaultMutableTreeNode> nodes = new LinkedHashMap<>();
         for (Archives.Entry e : entries) {
-            boolean isZip = Archives.isZip(e.fileName());
+            boolean isZip = !folder && Archives.isZip(e.fileName()); // in a folder, a zip is a file to open
             if (!isZip && !f.isEmpty() && !e.label().toLowerCase(Locale.ROOT).contains(f)) {
                 continue;
             }
@@ -367,6 +399,10 @@ final class ArchiveTab extends JPanel {
         filter.setText(text);
     }
 
+    JButton refreshButtonForTest() {
+        return refreshButton;
+    }
+
     String summaryForTest() {
         return summary.getText();
     }
@@ -392,7 +428,8 @@ final class ArchiveTab extends JPanel {
                 String gray = sel ? "" : " style='color:gray'";
                 setText("<html>" + esc(it.name()) + (size.isEmpty() ? "" : "<span" + gray + ">" + size + "</span>")
                         + "</html>");
-                setIcon(it.zip() ? zipIcon : it.isFile() ? fileIcon : folderIcon);
+                setIcon(it.zip() || it.isFile() && Archives.isZip(it.name()) ? zipIcon
+                        : it.isFile() ? fileIcon : folderIcon);
             }
             return this;
         }

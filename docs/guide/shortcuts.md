@@ -17,6 +17,7 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Open files | Ctrl+O |
 | Open a remote log (SFTP) | Ctrl+Shift+O |
 | Open a web address | Ctrl+Shift+U |
+| Open a folder's files | File → Open Folder… (no shortcut) |
 | Search in a folder | Ctrl+Shift+F |
 | Merge files by time | Ctrl+Shift+M |
 | Compare with another log | Ctrl+Shift+D |

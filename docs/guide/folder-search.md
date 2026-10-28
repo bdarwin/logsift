@@ -6,7 +6,7 @@ description: Searching every file in a folder, inside zips and .gz files too, an
 
 # Folder search
 
-**File → Search in Folder…** (Ctrl+Shift+F, ⇧⌘F on macOS), dropping a folder on the window, or the folder button in the find bar opens a search tab.
+**File → Search in Folder…** (Ctrl+Shift+F, ⇧⌘F on macOS), **Search in Folder…** on the start page, **Find in all files** in a folder's tab, or the folder button in the find bar opens a search tab. (Dropping a folder on the window opens a tab of its files: see [Folders](opening-logs.md#folders).)
 
 ![Folder search across .log, .gz and .zip files](../screenshots/folder-search.png)
 
