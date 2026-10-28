@@ -29,6 +29,7 @@ public final class McpMain {
     private McpMain() {}
 
     public static void main(String[] args) throws Exception {
+        logsift.core.Channel.apply();
         System.setProperty("java.awt.headless", "true");
         if (args.length == 1 && (args[0].equals("--version") || args[0].equals("-v"))) {
             System.out.println("logsift-mcp " + logsift.core.Version.current());

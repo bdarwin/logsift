@@ -124,7 +124,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     static volatile boolean exitOnClose;
 
     public MainFrame() {
-        super("Logsift");
+        super(logsift.core.Channel.appName());
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         setIconImages(logsift.tools.IconGenerator.windowIcons());
         setSize(PREFS.getInt("width", 1280), PREFS.getInt("height", 820));
@@ -3328,56 +3328,56 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         LogTab t = currentTab();
         updateReloadButton(t);
         if (tabs.getSelectedComponent() instanceof GcTab gt) {
-            setTitle(gt.title() + " — Logsift");
+            setTitle(gt.title() + " — " + logsift.core.Channel.appName());
             status.setText(gt.statusText());
             statusRight.setText(memory());
             progress.setVisible(false);
             return;
         }
         if (tabs.getSelectedComponent() instanceof HeapDumpTab hd) {
-            setTitle(hd.title() + " — Logsift");
+            setTitle(hd.title() + " — " + logsift.core.Channel.appName());
             status.setText(hd.statusText());
             statusRight.setText(memory());
             progress.setVisible(false);
             return;
         }
         if (tabs.getSelectedComponent() instanceof HeapCompareTab hc) {
-            setTitle(hc.title() + " — Logsift");
+            setTitle(hc.title() + " — " + logsift.core.Channel.appName());
             status.setText(hc.statusText());
             statusRight.setText(memory());
             progress.setVisible(false);
             return;
         }
         if (tabs.getSelectedComponent() instanceof HeapTab ht) {
-            setTitle(ht.title() + " — Logsift");
+            setTitle(ht.title() + " — " + logsift.core.Channel.appName());
             status.setText(ht.statusText());
             statusRight.setText(memory());
             progress.setVisible(false);
             return;
         }
         if (tabs.getSelectedComponent() instanceof ProfileTab pt) {
-            setTitle(pt.title() + " — Logsift");
+            setTitle(pt.title() + " — " + logsift.core.Channel.appName());
             status.setText(pt.statusText());
             statusRight.setText(memory());
             progress.setVisible(false);
             return;
         }
         if (tabs.getSelectedComponent() instanceof ThreadsTab th) {
-            setTitle(th.title() + " — Logsift");
+            setTitle(th.title() + " — " + logsift.core.Channel.appName());
             status.setText(th.statusText());
             statusRight.setText(memory());
             progress.setVisible(false);
             return;
         }
         if (tabs.getSelectedComponent() instanceof CompareTab ct) {
-            setTitle(ct.title() + " — Logsift");
+            setTitle(ct.title() + " — " + logsift.core.Channel.appName());
             status.setText(" ");
             statusRight.setText(memory());
             progress.setVisible(false);
             return;
         }
         if (tabs.getSelectedComponent() instanceof FolderSearchTab f) {
-            setTitle(f.title() + " — Logsift");
+            setTitle(f.title() + " — " + logsift.core.Channel.appName());
             status.setText(f.statusText());
             statusRight.setText(memory());
             progress.setVisible(f.isSearching());
@@ -3388,11 +3388,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             status.setText(" ");
             statusRight.setText(memory());
             progress.setVisible(false);
-            setTitle("Logsift");
+            setTitle(logsift.core.Channel.appName());
             return;
         }
         LogDocument d = t.document();
-        setTitle(d.path().getFileName() + " — Logsift");
+        setTitle(d.path().getFileName() + " — " + logsift.core.Channel.appName());
         StringBuilder sb = new StringBuilder();
         long size = d.fileSize();
         if (!t.path().equals(d.path())) {

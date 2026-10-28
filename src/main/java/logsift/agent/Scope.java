@@ -20,7 +20,7 @@ public final class Scope {
     private static final List<String> SECRET_DIRS = List.of(".ssh", ".aws", ".gnupg", ".kube", ".azure",
             ".config/gcloud", ".config/gh", ".docker", ".password-store", ".gradle/gradle.properties",
             ".m2/settings.xml", ".m2/settings-security.xml", ".netrc", ".git-credentials", ".npmrc", ".pypirc",
-            "Library/Keychains", ".logsift");
+            "Library/Keychains", ".logsift", ".logsift-beta");
 
     /** Names of files that hold keys. */
     private static final List<String> SECRET_SUFFIXES = List.of(".pem", ".key", ".p12", ".pfx", ".jks",

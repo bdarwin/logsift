@@ -1,11 +1,13 @@
 # Builds and tests on every OS, packages a self-contained app (Java runtime included)
 # for each platform, and publishes them: pushes to main update the rolling "snapshot"
-# pre-release; a version tag (v1.2.3, matching build.gradle.kts) publishes that release.
+# pre-release; a version tag (v1.2.3, matching build.gradle.kts) publishes that release;
+# a beta/NAME branch publishes a "beta-NAME" pre-release of "Logsift Beta", which installs
+# next to Logsift with its own settings (~/.logsift-beta).
 name: snapshot
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'beta/**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -81,10 +83,21 @@ jobs:
               echo "Tag $GITHUB_REF_NAME does not match version $VERSION in build.gradle.kts"; exit 1
             fi
             LABEL=$VERSION
+          elif [[ "$GITHUB_REF_NAME" == beta/* ]]; then
+            LABEL=beta-${GITHUB_REF_NAME#beta/}
           else
             LABEL=snapshot
           fi
           NAME=Logsift-$LABEL-${{ matrix.target }}
+          # A beta: its own settings, window and app name; no installers or file associations,
+          # so it never replaces or takes over from the normal Logsift.
+          BETA=(); MCP_PROPS=packaging/mcp/launcher.properties
+          if [[ "$LABEL" == beta-* ]]; then
+            BETA=(--java-options -Dlogsift.channel=beta)
+            MCP_PROPS=build/mcp-beta.properties
+            sed 's/^java-options=/java-options=-Dlogsift.channel=beta /' packaging/mcp/launcher.properties > "$MCP_PROPS"
+            grep -q 'logsift.channel=beta' "$MCP_PROPS"
+          fi
           # splash screen, shown by the launcher before Java starts
           cp packaging/splash/splash.png packaging/splash/splash@2x.png build/install/logsift/lib/
           COMMON=(--name Logsift --input build/install/logsift/lib
@@ -92,12 +105,21 @@ jobs:
                   --java-options "-Xmx2g -XX:+UseZGC --enable-native-access=ALL-UNNAMED"
                   --java-options '-splash:$APPDIR/splash.png'
                   --add-modules java.base,java.desktop,java.prefs,java.logging,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets,jdk.attach,java.management,java.management.rmi,jdk.naming.rmi,jdk.jfr,jdk.management.jfr
-                  --add-launcher logsift-mcp=packaging/mcp/launcher.properties
+                  --add-launcher "logsift-mcp=$MCP_PROPS" ${BETA[@]+"${BETA[@]}"}
                   --vendor bdarwin --description "Viewer for very large log files")
           mkdir -p dist
           ASSOC=(--file-associations packaging/file-associations/log.properties)
           case "${{ matrix.target }}" in
             macos-*)
+              if [ ${#BETA[@]} -gt 0 ]; then
+                jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.icns \
+                  --mac-package-identifier io.github.bdarwin.logsift.beta --mac-package-name "Logsift Beta" "${COMMON[@]}"
+                mv pkg/Logsift.app "pkg/Logsift Beta.app"
+                jpackage --type dmg --dest dist --app-image "pkg/Logsift Beta.app" --name "Logsift Beta" --app-version "$VERSION"
+                mv dist/*.dmg "dist/$NAME.dmg"
+                ls -l dist
+                exit 0
+              fi
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.icns "${ASSOC[@]}" "${COMMON[@]}"
               packaging/macos-file-types.sh pkg/Logsift.app
               jpackage --type dmg --dest dist --app-image pkg/Logsift.app --name Logsift --app-version "$VERSION"
@@ -106,6 +128,7 @@ jobs:
             windows-*)
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.ico "${COMMON[@]}"
               pwsh -NoProfile -Command "Compress-Archive -Path pkg/Logsift -DestinationPath dist/$NAME.zip"
+              if [ ${#BETA[@]} -gt 0 ]; then ls -l dist; exit 0; fi
               # Installer: per user (no admin rights needed), Start menu entry, "Open with Logsift"
               # on files and folders (not taking over .log files). jpackage can't add that, so its
               # installer script is built once, patched, and used for the real build.
@@ -121,7 +144,9 @@ jobs:
             linux-*)
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.png "${COMMON[@]}"
               tar -C pkg -czf "dist/$NAME.tar.gz" Logsift
-              if [ "${{ matrix.target }}" = linux-x64 ]; then
+              if [ "${{ matrix.target }}" = linux-x64 ] && [ ${#BETA[@]} -gt 0 ]; then
+                cp "build/distributions/logsift-$VERSION.zip" "dist/Logsift-$LABEL-any-java21.zip"
+              elif [ "${{ matrix.target }}" = linux-x64 ]; then
                 jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut --icon packaging/icons/logsift.png "${ASSOC[@]}" "${COMMON[@]}"
                 mv dist/*.deb "dist/$NAME.deb"
                 # Plain zip that runs anywhere with Java 21+ installed.
@@ -135,7 +160,7 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ matrix.target }}" in
-            macos-*) MCP=pkg/Logsift.app/Contents/MacOS/logsift-mcp ;;
+            macos-*) MCP=$(ls -d pkg/*.app | head -1)/Contents/MacOS/logsift-mcp ;;
             windows-*) MCP=pkg/Logsift/logsift-mcp.exe ;;
             linux-*) MCP=pkg/Logsift/bin/logsift-mcp ;;
           esac
@@ -160,7 +185,7 @@ jobs:
           rm -rf mcp-try mcp-out.txt
 
       - name: Try the Windows installer (install, check, uninstall)
-        if: matrix.target == 'windows-x64'
+        if: matrix.target == 'windows-x64' && !startsWith(github.ref_name, 'beta/')
         shell: pwsh
         run: |
           $msi = Get-ChildItem dist/*.msi | Select-Object -First 1
@@ -194,7 +219,7 @@ jobs:
           path: dist/*
 
   release:
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/beta/'))
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -221,8 +246,30 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
             --title "Logsift $V" --notes-file "$NOTES"
 
+      - name: Publish beta release
+        if: startsWith(github.ref, 'refs/heads/beta/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          B=beta-${GITHUB_REF_NAME#beta/}
+          gh release delete "$B" --cleanup-tag --yes || true
+          gh release create "$B" dist/* --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "Logsift Beta: ${GITHUB_REF_NAME#beta/}" \
+            --notes "Beta build of branch $GITHUB_REF_NAME (commit ${GITHUB_SHA::7}, $(date -u '+%Y-%m-%d %H:%M UTC')).
+
+          **Logsift Beta** installs and runs next to Logsift: it has its own settings (\`~/.logsift-beta\`) and its own window, and doesn't register file types. Its \`logsift-mcp\` is inside it too.
+
+          | File | For |
+          |---|---|
+          | \`Logsift-$B-macos-arm64.dmg\` / \`-macos-x64.dmg\` | macOS: drag **Logsift Beta** to Applications. If it says the app is damaged, run \`xattr -dr com.apple.quarantine \"/Applications/Logsift Beta.app\"\` |
+          | \`Logsift-$B-windows-x64.zip\` / \`-windows-arm64.zip\` | Windows: unzip anywhere, run \`Logsift\\Logsift.exe\` |
+          | \`Logsift-$B-linux-x64.tar.gz\` / \`-linux-arm64.tar.gz\` | Linux: unpack, run \`Logsift/bin/Logsift\` |
+          | \`Logsift-$B-any-java21.zip\` | Any OS with Java 21+: run \`bin/logsift\` (its own settings only when started with \`-Dlogsift.channel=beta\`, see JAVA_OPTS) |"
+
       - name: Publish snapshot release
-        if: github.ref_type != 'tag'
+        if: github.ref_type != 'tag' && !startsWith(github.ref, 'refs/heads/beta/')
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
