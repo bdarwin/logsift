@@ -144,4 +144,40 @@ class ColumnProfileTest {
             assertTrue(!MessageStats.analyze(doc, null, 0, Long.MAX_VALUE, null, () -> false, null).templates().isEmpty());
         }
     }
+
+    @Test
+    void aBarsFilterKeepsExactlyItsRows() {
+        // values right on the bucket edges, decimals like 0.3, sizes over orders of magnitude, units in values
+        List<String> lines = new ArrayList<>();
+        lines.add("id,amount,ratio,size_bytes,took,neg");
+        java.util.Random rnd = new java.util.Random(5);
+        for (int i = 0; i < 3000; i++) {
+            String amount = i % 3 == 0 ? Integer.toString(i % 101) : String.format(java.util.Locale.ROOT, "%.2f",
+                    rnd.nextDouble() * 100);
+            String ratio = java.math.BigDecimal.valueOf(i % 31).movePointLeft(1).toPlainString(); // 0.0 .. 3.0
+            long size = (long) Math.pow(10, i % 7) * (i % 3 + 1); // 1, 2, 3 × a power of ten: on the edges too
+            String took = i % 2 == 0 ? (i % 50) * 100 + " ms" : (i % 7) / 2.0 + " s";
+            lines.add(i + "," + amount + "," + ratio + "," + size + "," + took + "," + (i % 41 - 20));
+        }
+        ColumnProfile.Result r = profile(lines);
+        LogFormat f = LogFormat.detectCsv(lines.subList(0, 100), true);
+        for (String name : List.of("amount", "ratio", "size_bytes", "took", "neg")) {
+            ColumnProfile.Column c = col(r, name);
+            assertEquals(ColumnProfile.Kind.NUMBER, c.kind(), name);
+            long inBars = 0;
+            for (int i = 0; i < c.bars().size(); i++) {
+                ColumnFilter cf = new ColumnFilter(f, name, ColumnFilter.Op.BETWEEN,
+                        SearchQuery.literal(ColumnProfile.filterText(c, i)));
+                java.util.function.Predicate<String> test = cf.lineTest();
+                long kept = lines.stream().skip(1).filter(test).count();
+                assertEquals(c.bars().get(i).count(), kept, name + " bar " + i + " " + ColumnProfile.filterText(c, i));
+                inBars += kept;
+            }
+            assertEquals(3000, inBars, name + ": every row in exactly one bar");
+        }
+        assertTrue(col(r, "size_bytes").logScale());
+        assertTrue(ColumnProfile.filterText(col(r, "amount"), 0).contains("..<"));
+        String last = ColumnProfile.filterText(col(r, "amount"), col(r, "amount").bars().size() - 1);
+        assertTrue(last.contains("..") && !last.contains("..<"), last);
+    }
 }

@@ -391,12 +391,12 @@ final class LogBar extends JPanel {
             case HIDE -> "Hide";
             case MARK -> "Color";
         };
-        String text = what + ": " + d.label();
+        String text = what + ": " + d.label(tab::columnName);
         if (text.length() > 48) {
             text = text.substring(0, 46) + "…";
         }
         String tip = "<html>Filter " + d.id + ": " + d.action.tip.toLowerCase(java.util.Locale.ROOT)
-                + (d.column != null ? " (in its " + d.column + " column)" : "")
+                + (d.column != null ? " (in its " + tab.columnName(d.column) + " column)" : "")
                 + (d.regex ? " (regex)" : "") + (d.matchCase ? " (match case)" : "")
                 + "<br>Click to turn it " + (d.enabled ? "off" : "on") + "; right-click for more.</html>";
         Chip c = new Chip(d.color() == null ? null : d.color().mark(), text, d.enabled, tip,

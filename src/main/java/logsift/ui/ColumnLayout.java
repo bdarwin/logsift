@@ -132,7 +132,6 @@ final class ColumnLayout {
     }
 
     String title(int col) {
-        String n = format.columns().get(col);
-        return n.substring(0, 1).toUpperCase(Locale.ROOT) + n.substring(1);
+        return format.displayName(format.columns().get(col));
     }
 }

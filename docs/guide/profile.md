@@ -6,7 +6,7 @@ description: The Profile tab for tables (CSV files): each column's kind, its val
 
 # Profile
 
-A CSV file is often a table, not a log. The **Profile** tab (below the log, next to Metrics) shows what each column holds: one card per column, with its kind, how many values it has, and a small chart. It is there for every CSV or TSV file; for another log with columns, right-click a column title → **Profile of the Columns**. Click **Refresh** to read the columns again after the file grew.
+A CSV file is often a table, not a log. Its columns are named as in its header row, here and everywhere else (the column titles, the tree, filters and their chips, Metrics). The **Profile** tab (below the log, next to Metrics) shows what each column holds: one card per column, with its kind, how many values it has, and a small chart. It is there for every CSV or TSV file; for another log with columns, right-click a column title → **Profile of the Columns**. Click **Refresh** to read the columns again after the file grew.
 
 ![The Profile of a table: an ID column, countries, amounts as a histogram, yes / no, sizes in buckets ×10, and notes](../screenshots/profile.png)
 
@@ -43,8 +43,8 @@ A histogram's buckets are round numbers (0–5, 5–10, …). When a column's nu
 
 ## Filtering by a click
 
-- Click a value (a category, yes / no, an ID): a filter **Show: Country = DE** is added on that column, and the log shows only those rows.
-- Click a histogram bar: a filter **Show: Amount_eur between 5..10** (both ends included).
+- Click a value (a category, yes / no, an ID): a filter **Show: country = DE** is added on that column, and the log shows only those rows.
+- Click a histogram bar: a filter **Show: amount_eur between 5..<10**. A value on an edge (10) belongs to the next bar, so the filter keeps exactly the rows the bar counts; the last bar includes the largest value (*95..100*).
 - Click a bar of rows over time, for the log's own time column: only that time range is shown.
 
 These are [filters on a column](filters.md#filters-on-a-column): they show as chips and can be changed in the Filters tab. With **Matching only** on, the Profile counts only the rows the filters keep (*… · only the rows the filters keep*), and follows the filters as they change.

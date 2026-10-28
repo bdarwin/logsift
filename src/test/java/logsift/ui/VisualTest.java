@@ -5191,6 +5191,10 @@ class VisualTest {
                 return false;
             }
         }, 20_000, "the table's columns");
+        // a CSV's columns are named as in its header, everywhere
+        assertEquals("order_id", onEdt(() -> tab.mainView().columns().title(0)));
+        assertEquals("amount_eur", onEdt(() -> tab.columnName("amount_eur")));
+        assertEquals("order_id", onEdt(() -> ValuesTreePanel.title(tab.logFormat(), "order_id")));
         // no times: no timeline, and its button says why
         assertTrue(!onEdt(tab::hasTimes));
         assertTrue(!onEdt(() -> tab.timeline().isVisible()));
@@ -5232,7 +5236,7 @@ class VisualTest {
         waitForFilter(tab);
         String top = onEdt(() -> pp.result().columns().get(1).bars().get(0).label());
         assertEquals("DE", top);
-        assertEquals(List.of("Show: Country = DE"), onEdt(() -> tab.logBar().chipTexts()));
+        assertEquals(List.of("Show: country = DE"), onEdt(() -> tab.logBar().chipTexts()), "named as in the file");
         waitFor(() -> {
             try {
                 return onEdt(() -> pp.result() != null && !pp.isRunning() && pp.result().filtered());
@@ -5245,7 +5249,7 @@ class VisualTest {
         assertEquals(1, (long) onEdt(() -> pp.result().columns().get(1).distinct()));
         assertTrue(onEdt(pp::summaryForTest).contains("only the rows the filters keep"));
         // a histogram bucket: a "between" filter on the amounts
-        onEdt(() -> {
+        long barCount = onEdt(() -> {
             ProfilePanel.ColumnCard amount = pp.cardsForTest().get(2);
             int biggest = 0;
             List<logsift.core.ColumnProfile.Bar> bars = amount.column.bars();
@@ -5253,12 +5257,13 @@ class VisualTest {
                 biggest = bars.get(i).count() > bars.get(biggest).count() ? i : biggest;
             }
             amount.chart.clickForTest(biggest);
-            return null;
+            return bars.get(biggest).count();
         });
         waitForFilter(tab);
         List<String> chips = onEdt(() -> tab.logBar().chipTexts());
         assertEquals(2, chips.size(), chips.toString());
-        assertTrue(chips.get(1).startsWith("Show: Amount_eur between "), chips.toString());
+        assertTrue(chips.get(1).startsWith("Show: amount_eur between ") && chips.get(1).contains("..<"),
+                chips.toString());
         onEdt(() -> {
             tab.filterPanel().setFormula("A AND B");
             return null;
@@ -5272,7 +5277,8 @@ class VisualTest {
                 return false;
             }
         }, 30_000, "the profile follows the filters");
-        assertTrue(onEdt(() -> pp.result().rows()) > 0);
+        assertEquals(barCount, (long) onEdt(() -> tab.filterResultForTest().matchCount()),
+                "the bar's rows, no more (a value on an edge is in one bar)");
         settle();
         shot("103b-table-profile-filtered");
         // dark mode

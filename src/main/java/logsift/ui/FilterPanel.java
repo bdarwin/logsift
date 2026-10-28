@@ -66,6 +66,11 @@ final class FilterPanel extends JPanel {
         /** "Clear all" was pressed: filters are gone; also clear what the owner keeps (time range). */
         default void clearAllFilters() {}
 
+        /** A column's name on screen. */
+        default String columnName(String column) {
+            return column.isEmpty() ? column : column.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + column.substring(1);
+        }
+
         /** The columns of the log's format, for filters on one column (empty: none). */
         default List<String> columns() {
             return List.of();
@@ -600,8 +605,7 @@ final class FilterPanel extends JPanel {
                 public Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
                                                               boolean selected, boolean focus) {
                     String v = String.valueOf(value);
-                    String shown = v.equals(LINE) || v.isEmpty() ? v
-                            : v.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + v.substring(1);
+                    String shown = v.equals(LINE) || v.isEmpty() ? v : listener.columnName(v);
                     return super.getListCellRendererComponent(list, shown, index, selected, focus);
                 }
             });

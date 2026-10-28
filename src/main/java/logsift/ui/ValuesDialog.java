@@ -45,7 +45,7 @@ final class ValuesDialog {
 
     static void show(LogTab tab, LogFormat format, String column) {
         Window owner = SwingUtilities.getWindowAncestor(tab);
-        String title = column.substring(0, 1).toUpperCase(Locale.ROOT) + column.substring(1);
+        String title = format.displayName(column);
         JDialog dlg = new JDialog(owner, title + " values", java.awt.Dialog.ModalityType.MODELESS);
         JLabel status = new JLabel("Counting…");
         JProgressBar busy = new JProgressBar();

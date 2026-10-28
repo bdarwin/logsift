@@ -256,12 +256,20 @@ public final class ColumnProfile {
         if (min == max) {
             bars.add(new Bar(unit.format(min), s.length, min, max));
         } else if (log) {
-            // a bucket per power of ten
-            double lo = Math.pow(10, Math.floor(Math.log10(min)));
-            while (lo <= max) {
-                double hi = lo * 10;
-                bars.add(new Bar(unit.format(lo) + " – " + unit.format(hi), countIn(s, lo, hi, false), lo, hi));
-                lo = hi;
+            // a bucket per power of ten (exact decimals, so a filter's text reads back the same edge)
+            int e = (int) Math.floor(Math.log10(min));
+            while (java.math.BigDecimal.ONE.scaleByPowerOfTen(e).doubleValue() > min) {
+                e--;
+            }
+            List<double[]> ranges = new ArrayList<>();
+            for (double lo = pow10(e); lo <= max; lo = pow10(++e)) {
+                ranges.add(new double[] {lo, pow10(e + 1)});
+            }
+            for (int i = 0; i < ranges.size(); i++) {
+                double lo = ranges.get(i)[0];
+                double hi = ranges.get(i)[1];
+                bars.add(new Bar(unit.format(lo) + " – " + unit.format(hi),
+                        countIn(s, lo, hi, i == ranges.size() - 1), lo, hi));
             }
         } else {
             double[] edges = niceEdges(min, max, BINS);
@@ -272,6 +280,20 @@ public final class ColumnProfile {
         }
         return new Column(name, title, Kind.NUMBER, unit, filled, empty, distinct, capped, stats, bars, log,
                 shortest, longest);
+    }
+
+    private static double pow10(int e) {
+        return java.math.BigDecimal.ONE.scaleByPowerOfTen(e).doubleValue();
+    }
+
+    /**
+     * The text of a filter on a number column's bar {@code i}: "5..<10", or "95..100" for the
+     * last bar (which has the largest value). The rows it keeps are the bar's.
+     */
+    public static String filterText(Column c, int i) {
+        Bar b = c.bars().get(i);
+        boolean last = i == c.bars().size() - 1;
+        return ColumnFilter.write(b.from(), c.unit()) + (last ? ".." : "..<") + ColumnFilter.write(b.to(), c.unit());
     }
 
     /** Values in [lo, hi) of a sorted array ([lo, hi] when {@code last}). */
@@ -309,20 +331,30 @@ public final class ColumnProfile {
         return lo;
     }
 
-    /** Bucket edges at round numbers (1, 2 or 5 × a power of ten), at most about {@code bins} buckets. */
+    /**
+     * Bucket edges at round numbers (1, 2 or 5 × a power of ten), at most about {@code bins}
+     * buckets. Each edge is the double nearest to its decimal (0.3, not 0.30000000000000004), so
+     * a filter written with it keeps the same rows as the bucket.
+     */
     static double[] niceEdges(double min, double max, int bins) {
         double raw = (max - min) / bins;
-        double p = Math.pow(10, Math.floor(Math.log10(raw)));
-        double step = raw <= p ? p : raw <= 2 * p ? 2 * p : raw <= 5 * p ? 5 * p : 10 * p;
-        double start = Math.floor(min / step) * step;
-        List<Double> e = new ArrayList<>();
-        for (double x = start; ; x += step) {
-            e.add(x);
-            if (x > max || e.size() > bins * 2 + 2) {
+        int e = (int) Math.floor(Math.log10(raw));
+        double p = pow10(e);
+        int m = raw <= p ? 1 : raw <= 2 * p ? 2 : raw <= 5 * p ? 5 : 10;
+        java.math.BigDecimal step = java.math.BigDecimal.valueOf(m).scaleByPowerOfTen(e);
+        long k = (long) Math.floor(min / step.doubleValue());
+        while (step.multiply(java.math.BigDecimal.valueOf(k)).doubleValue() > min) {
+            k--;
+        }
+        List<Double> out = new ArrayList<>();
+        for (; ; k++) {
+            double x = step.multiply(java.math.BigDecimal.valueOf(k)).doubleValue();
+            out.add(x);
+            if (x > max || out.size() > bins * 2 + 2) {
                 break;
             }
         }
-        return e.stream().mapToDouble(Double::doubleValue).toArray();
+        return out.stream().mapToDouble(Double::doubleValue).toArray();
     }
 
     private static Column time(String name, String title, long[] t, long filled, long empty, long distinct,

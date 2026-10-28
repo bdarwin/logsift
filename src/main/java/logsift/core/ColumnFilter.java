@@ -22,7 +22,8 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
         EQUALS("=", "The whole value is the text"),
         MORE(">", "The value is a number above this one (7 ms, 1.5 s and 2 KB compare too)"),
         LESS("<", "The value is a number below this one (7 ms, 1.5 s and 2 KB compare too)"),
-        BETWEEN("between", "The value is a number from the first to the second, as in 10..20 (both included)");
+        BETWEEN("between", "The value is a number from the first to the second: 10..20 (both included), or"
+                + " 10..<20 (without 20)");
 
         public final String label;
         public final String tip;
@@ -52,7 +53,7 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
             throw new IllegalArgumentException("Not a number: " + query.text());
         }
         if (op == Op.BETWEEN && range(query.text(), hint) == null) {
-            throw new IllegalArgumentException("Not two numbers like 10..20: " + query.text());
+            throw new IllegalArgumentException("Not two numbers like 10..20 or 10..<20: " + query.text());
         }
         if (op == Op.CONTAINS) {
             query.toPattern(); // check it
@@ -76,15 +77,21 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
         return ColumnMetrics.unitOf(titles != null && i >= 0 ? titles.get(i) : column);
     }
 
-    /** "10..20" as {10, 20} (smaller first), or null. */
+    /**
+     * "10..20" as {10, 20, 1} (both included), "10..<20" as {10, 20, 0} (20 left out); null if
+     * it isn't one.
+     */
     static double[] range(String text, String hint) {
         int dots = text.indexOf("..");
         if (dots < 0) {
             return null;
         }
+        String to = text.substring(dots + 2).strip();
+        boolean open = to.startsWith("<");
         double a = number(text.substring(0, dots), hint);
-        double b = number(text.substring(dots + 2), hint);
-        return Double.isNaN(a) || Double.isNaN(b) ? null : new double[] {Math.min(a, b), Math.max(a, b)};
+        double b = number(open ? to.substring(1) : to, hint);
+        return Double.isNaN(a) || Double.isNaN(b) || (open && b < a) ? null
+                : new double[] {Math.min(a, b), Math.max(a, b), open ? 0 : 1};
     }
 
     /** A number in a column's base unit (ms, bytes), written so that filters read it back. */
@@ -114,7 +121,7 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
             case LESS -> v -> number(v, hint) < limit;
             case BETWEEN -> v -> {
                 double x = number(v, hint);
-                return x >= range[0] && x <= range[1];
+                return x >= range[0] && (range[2] == 1 ? x <= range[1] : x < range[1]);
             };
         };
         // a line can only match if it has the text somewhere: a fast byte search finds those first

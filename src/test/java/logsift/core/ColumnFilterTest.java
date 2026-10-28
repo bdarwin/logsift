@@ -128,4 +128,14 @@ class ColumnFilterTest {
         assertTrue(!new FilterEngine.Spec('A', q, new ColumnFilter(f, "a", ColumnFilter.Op.EQUALS, q))
                 .equals(new FilterEngine.Spec('A', q, new ColumnFilter(f, "b", ColumnFilter.Op.EQUALS, q))));
     }
+
+    @Test
+    void betweenIncludesOrLeavesOutItsEnd() throws IOException {
+        assertEquals(31, run(csv(), "h.csv", ColumnFilter.Op.BETWEEN, "duration_ms", "30..120", false, false).size(),
+                "10 to 40 times 3: both ends");
+        assertEquals(30, run(csv(), "i.csv", ColumnFilter.Op.BETWEEN, "duration_ms", "30..<120", false, false).size(),
+                "120 left out");
+        assertThrows(IllegalArgumentException.class, () -> new ColumnFilter(LogFormat.detectCsv(List.of("a,b", "1,2",
+                "3,4"), true), "a", ColumnFilter.Op.BETWEEN, SearchQuery.literal("5..<1")));
+    }
 }

@@ -68,12 +68,12 @@ final class FilterDef {
 
     /** What it looks for, as on its chip: "ERROR", or "Host = web-1" for a column. */
     String label() {
-        if (column == null) {
-            return text;
-        }
-        String c = column.isEmpty() ? column : column.substring(0, 1).toUpperCase(java.util.Locale.ROOT)
-                + column.substring(1);
-        return c + " " + op.label + " " + text;
+        return label(c -> c.isEmpty() ? c : c.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + c.substring(1));
+    }
+
+    /** Like {@link #label()}, with columns named by {@code name} (a CSV's header as written). */
+    String label(java.util.function.UnaryOperator<String> name) {
+        return column == null ? text : name.apply(column) + " " + op.label + " " + text;
     }
 
     Swatch color() {

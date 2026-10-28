@@ -43,10 +43,10 @@ A log with no timestamps can't be merged: *no timestamps found to merge by*.
 
 When every file you tick is a CSV (or TSV) file, the merge makes one CSV file instead, and the dialog says so before you start:
 
-![Three CSV files merged into one: a Source column, the columns of all three, and the sources in the tree](../screenshots/csv-merge.png)
+![Three CSV files merged into one: a source column, the columns of all three, and the sources in the tree](../screenshots/csv-merge.png)
 
 - **One header.** Columns are matched by name, whatever their case or the spaces around them (*Host* in one file is *host* in another). The first file's columns come first, in its order, then any column only other files have. A row from a file without a column leaves it empty.
-- **A Source column**, first, holds each row's file (its name, with its folder when names clash). It is a column like any other: the tree beside the log shows the sources (uncheck one to hide its rows), and the [Profile](profile.md) and [filters on a column](filters.md#filters-on-a-column) work with it.
+- **A source column**, first, holds each row's file (its name, with its folder when names clash). It is a column like any other: the tree beside the log shows the sources (uncheck one to hide its rows), and the [Profile](profile.md) and [filters on a column](filters.md#filters-on-a-column) work with it.
 - **Commas** separate the fields, whatever each file used (`;`, a tab, `|`). Fields with a comma, a quote, a line break or spaces at an end are quoted, so they read back the same.
 - **The order:** when every file has times, rows go in time order. When one has none (a table), the files go one after the other, in the order they are listed; the dialog names the files without times.
 - The result opens as an ordinary CSV tab, **Merged (3 CSV files)**: columns, filters, metrics and the Profile all work. It keeps up while the files grow: new rows are added at the end, in the merged columns.

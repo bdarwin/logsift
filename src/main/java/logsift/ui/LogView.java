@@ -2281,7 +2281,7 @@ public final class LogView extends JPanel {
         public String getToolTipText(MouseEvent e) {
             if (columns != null && hiddenChip().contains(e.getPoint())) {
                 return "Hidden: " + String.join(", ", columns.hidden().stream()
-                        .map(n -> n.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + n.substring(1)).toList())
+                        .map(n -> columns.format().displayName(n)).toList())
                         + " · click to show them";
             }
             String col = columns == null ? null : columnAt(e.getX());
@@ -2289,7 +2289,7 @@ public final class LogView extends JPanel {
             if (names != null) {
                 String asWritten = names.get(columns.format().columns().indexOf(col));
                 if (!asWritten.equalsIgnoreCase(col)) { // a name Logsift knows: time, level…
-                    return "“" + asWritten + "” in the file · " + super.getToolTipText(e);
+                    return "Logsift reads “" + asWritten + "” as the " + col + " column · " + super.getToolTipText(e);
                 }
             }
             return super.getToolTipText(e);

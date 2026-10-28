@@ -63,7 +63,7 @@ A filter can look in one column instead of the whole line: pick the column in th
 | **contains** | contains the text. **Aa**, **W** and **.\*** work as usual |
 | **=** | is the text, all of it: *web-1* is not *web-10* |
 | **>** / **<** | is a number above or below the one you type. Units count: *1.5 s* is more than *800 ms*, and *2 KB* more than *900* |
-| **between** | is a number from the first to the second, both included: *10..20*. A click on a [Profile](profile.md) histogram adds one |
+| **between** | is a number from the first to the second: *10..20* includes both, *10..<20* leaves 20 out. A click on a [Profile](profile.md) histogram bar adds one that keeps exactly that bar's rows |
 
 The quick ways:
 

@@ -852,7 +852,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 for (FilterDef d : filterPanel.filters()) {
                     SearchSession fs = d.isActive() && d.color() != null ? engine.session(d.id) : null;
                     if (fs != null) {
-                        other.add(new OverviewBar.MarkSet("Filter " + d.id + " “" + d.label() + "”",
+                        other.add(new OverviewBar.MarkSet("Filter " + d.id + " “" + d.label(LogTab.this::columnName) + "”",
                                 d.color().mark(), OverviewBar.of(fs.hits())));
                     }
                 }
@@ -1237,6 +1237,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             throw new IllegalArgumentException("This log has no columns: its format has none");
         }
         return new logsift.core.ColumnFilter(f, d.column, d.op, q);
+    }
+
+    /** A column's name on screen: a CSV's as written in its header, else with a capital. */
+    @Override
+    public String columnName(String column) {
+        logsift.core.LogFormat f = logFormat;
+        return f != null ? f.displayName(column)
+                : column.isEmpty() ? column : column.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + column.substring(1);
     }
 
     /** The columns of the log's format (for filters on one column). */
@@ -2259,7 +2267,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         LogView.Cell cell = view.popupCell();
         if (cell != null && !cell.column().equals("message") && !cell.column().equals("fields")
                 && !cell.value().isBlank() && cell.value().length() <= 80) {
-            String col = cell.column().substring(0, 1).toUpperCase(java.util.Locale.ROOT) + cell.column().substring(1);
+            String col = columnName(cell.column());
             String v = cell.value().strip();
             String shown = col + " = " + (v.length() > 40 ? v.substring(0, 40) + "…" : v);
             JMenuItem only = new JMenuItem("Show Only Rows Where " + shown, Icons.of("filter"));
@@ -2812,7 +2820,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         JPopupMenu m = new JPopupMenu();
         if (col != null) {
-            String title = col.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + col.substring(1);
+            String title = columnName(col);
             JMenuItem count = new JMenuItem("Count Values in " + title + "…", Icons.of("chart-column"));
             count.addActionListener(a -> countValues(col));
             m.add(count);
@@ -2840,7 +2848,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 continue;
             }
             javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(
-                    c.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + c.substring(1), !hidden.contains(c));
+                    columnName(c), !hidden.contains(c));
             item.addActionListener(a -> setColumnHidden(c, !item.isSelected()));
             m.add(item);
         }

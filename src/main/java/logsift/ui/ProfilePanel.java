@@ -294,7 +294,7 @@ final class ProfilePanel extends JPanel {
         private void clicked(ColumnProfile.Bar b) {
             switch (column.kind()) {
                 case NUMBER -> host.filter(column.name(), ColumnFilter.Op.BETWEEN,
-                        ColumnFilter.write(b.from(), column.unit()) + ".." + ColumnFilter.write(b.to(), column.unit()));
+                        ColumnProfile.filterText(column, column.bars().indexOf(b)));
                 case TIME -> host.timeRange(column.name(), (long) b.from(), (long) Math.ceil(b.to()) + 1);
                 default -> host.filter(column.name(), ColumnFilter.Op.EQUALS, b.label());
             }
