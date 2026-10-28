@@ -158,6 +158,13 @@ final class MessagesPanel extends JPanel {
         return result;
     }
 
+    /** Whether the result counts the whole log (not only the filtered lines). */
+    boolean isWholeLogResult() {
+        return result != null && !resultFiltered;
+    }
+
+    private boolean resultFiltered;
+
     JTable tableForTest() {
         return table;
     }
@@ -191,6 +198,7 @@ final class MessagesPanel extends JPanel {
                     return;
                 }
                 running = null;
+                resultFiltered = onlyFiltered;
                 showResult(r);
             });
         }, "logsift-messages");
@@ -220,6 +228,7 @@ final class MessagesPanel extends JPanel {
     /** Messages of the whole file counted elsewhere (by Insights): used if there are none yet. */
     void useResult(MessageStats.Result r) {
         if (r != null && result == null && running == null && scope.getSelectedIndex() == 0) {
+            resultFiltered = false;
             showResult(r);
         }
     }

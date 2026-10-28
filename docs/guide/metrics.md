@@ -28,6 +28,19 @@ A column needs 20 rows or more. On big logs every n-th row is read, as for numbe
 
 ![The Metrics of a CSV file: the numbers in its message column, and rows per 10 seconds for each host](../screenshots/csv-metrics.png)
 
+## With filters
+
+With **Matching only** on and filters set (or a time range picked on the timeline), Metrics counts only the lines the filters keep, and the line at the top ends with *only the lines the filters keep*. It follows the filters as they change. Turn Matching only off to see the whole log again.
+
+- **Things that start and end** are paired over the whole log first, so a filter doesn't split a start from its end. A span counts when its **start** line is kept.
+- **Numbers in messages** and **columns of numbers** count the values on the kept lines.
+- **Rows per stretch of time** count the kept rows.
+- A measurement with nothing left on the kept lines is not listed.
+- The list of message kinds always comes from the whole log, and the log isn't read again when only the filters change: switching filters is quick.
+- [Insights](insights.md) always look at the whole log.
+
+![Order times of one thread only: a filter on the thread, with Matching only](../screenshots/metrics-filtered.png)
+
 ## The list
 
 | Column | Shows |

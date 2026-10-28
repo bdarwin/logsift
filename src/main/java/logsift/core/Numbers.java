@@ -66,6 +66,36 @@ public final class Numbers {
             return values.length;
         }
 
+        /**
+         * Only the points whose line passes; null if none is left. The count shrinks in step
+         * (a sampled series keeps its sampling).
+         */
+        public Series keep(java.util.function.LongPredicate include) {
+            int k = 0;
+            for (long l : lines) {
+                if (include.test(l)) {
+                    k++;
+                }
+            }
+            if (k == 0) {
+                return null;
+            }
+            long[] ls = new long[k];
+            long[] ts = new long[k];
+            double[] vs = new double[k];
+            int j = 0;
+            for (int i = 0; i < lines.length; i++) {
+                if (include.test(lines[i])) {
+                    ls[j] = lines[i];
+                    ts[j] = times[i];
+                    vs[j] = values[i];
+                    j++;
+                }
+            }
+            long newCount = k == lines.length ? count : Math.max(k, Math.round((double) count * k / lines.length));
+            return new Series(name, template, column, unit, ls, ts, vs, newCount, source, how);
+        }
+
         /** The value at this share of the sorted values (0.5: the median). */
         public double percentile(double p) {
             double[] v = values.clone();

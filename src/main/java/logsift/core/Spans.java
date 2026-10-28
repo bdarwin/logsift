@@ -42,7 +42,33 @@ public final class Spans {
      */
     public record Kind(String name, MessageStats.Template start, MessageStats.Template end, String matchedBy,
                        int count, long median, long p95, long max, List<Span> slowest, List<Span> unfinished,
-                       int unfinishedCount) {}
+                       int unfinishedCount, List<Span> all) {
+
+        /** Its numbers from these spans (null: none ended). */
+        static Kind of(String name, MessageStats.Template start, MessageStats.Template end, String matchedBy,
+                       List<Span> spans) {
+            long done = spans.stream().filter(s -> !s.open()).count();
+            long[] ms = spans.stream().mapToLong(Span::millis).filter(x -> x >= 0).sorted().toArray();
+            List<Span> slowest = spans.stream().filter(s -> s.millis() >= 0)
+                    .sorted(Comparator.comparingLong(Span::millis).reversed()).limit(KEEP).toList();
+            List<Span> unfinished = spans.stream().filter(Span::open).sorted(Comparator.comparingLong(Span::startLine))
+                    .toList();
+            return new Kind(name, start, end, matchedBy, (int) done,
+                    ms.length == 0 ? -1 : ms[ms.length / 2], ms.length == 0 ? -1 : ms[Math.min(ms.length - 1,
+                            (int) Math.ceil(ms.length * 0.95) - 1)], ms.length == 0 ? -1 : ms[ms.length - 1], slowest,
+                    unfinished.size() > KEEP ? unfinished.subList(0, KEEP) : unfinished, unfinished.size(),
+                    List.copyOf(spans));
+        }
+
+        /**
+         * Only the spans whose start line passes (pairs were made over the whole log, so a
+         * filter doesn't split them); null if none is left.
+         */
+        public Kind keep(java.util.function.LongPredicate include) {
+            List<Span> left = all.stream().filter(s -> include.test(s.startLine())).toList();
+            return left.isEmpty() ? null : of(name, start, end, matchedBy, left);
+        }
+    }
 
     public record Result(List<Kind> kinds) {
         public static final Result EMPTY = new Result(List.of());
@@ -285,16 +311,8 @@ public final class Spans {
         if (done == 0 || done * 2 < Math.min(starts.length, ends.length)) {
             return null; // they don't really pair up
         }
-        long[] ms = spans.stream().mapToLong(Span::millis).filter(x -> x >= 0).sorted().toArray();
-        List<Span> slowest = spans.stream().filter(s -> s.millis() >= 0)
-                .sorted(Comparator.comparingLong(Span::millis).reversed()).limit(KEEP).toList();
-        List<Span> unfinished = spans.stream().filter(Span::open).sorted(Comparator.comparingLong(Span::startLine))
-                .toList();
         String name = String.join(" ", words(Insights.display(a.text())).subject);
-        return new Kind(name.isEmpty() ? Insights.display(a.text()) : name, a, b, matchedBy, (int) done,
-                ms.length == 0 ? -1 : ms[ms.length / 2], ms.length == 0 ? -1 : ms[Math.min(ms.length - 1,
-                        (int) Math.ceil(ms.length * 0.95) - 1)], ms.length == 0 ? -1 : ms[ms.length - 1], slowest,
-                unfinished.size() > KEEP ? unfinished.subList(0, KEEP) : unfinished, unfinished.size());
+        return Kind.of(name.isEmpty() ? Insights.display(a.text()) : name, a, b, matchedBy, spans);
     }
 
     private static String[] captures(Pattern p, String text) {

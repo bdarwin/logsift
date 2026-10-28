@@ -3908,6 +3908,29 @@ class VisualTest {
                 return false;
             }
         }, 60_000, "the CSV's metrics");
+        // with Matching only on, the metrics are those of the rows the filters keep (web-3's)
+        waitFor(() -> {
+            try {
+                return onEdt(() -> csvTab.metricsPanel().metrics().filtered() && !csvTab.metricsPanel().isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the filtered rows' metrics");
+        List<String> keptNames = onEdt(() -> csvTab.metricsPanel().metrics().numbers().stream()
+                .map(logsift.core.Numbers.Series::name).toList());
+        assertTrue(keptNames.contains("Host = web-3") && !keptNames.contains("Host = web-1"), keptNames.toString());
+        // the whole log's metrics with Matching only off (the filters stay)
+        onEdt(() -> {
+            csvTab.setMatchingOnly(false);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !csvTab.metricsPanel().metrics().filtered() && !csvTab.metricsPanel().isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the whole CSV's metrics");
         List<String> measured = onEdt(() -> csvTab.metricsPanel().metrics().numbers().stream()
                 .map(logsift.core.Numbers.Series::name).toList());
         assertTrue(measured.contains("Host = web-1") && measured.stream().anyMatch(n -> n.contains("took # ms")),
@@ -4567,6 +4590,58 @@ class VisualTest {
         assertEquals(job.unfinished().get(0).startLine(), onEdt(tab::currentLine), "a click goes to the line");
         settle();
         shot("81-metrics-durations");
+
+        // with a filter and Matching only, Metrics counts only the lines the filters keep
+        int runs = onEdt(tab::measureRunsForTest);
+        long allOrders = onEdt(() -> mp.metrics().numbers().stream()
+                .filter(n -> n.name().equals("order … placed in # ms")).findFirst().orElseThrow().count());
+        assertEquals(1800, allOrders);
+        onEdt(() -> {
+            tab.addFilter("[http-nio-8080-exec-1]", FilterDef.Action.SHOW);
+            tab.setMatchingOnly(true);
+            return null;
+        });
+        waitForFilter(tab);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> mp.metrics() != null && !mp.isRunning() && mp.metrics().filtered());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the metrics of the kept lines");
+        assertTrue(onEdt(mp::summaryForTest).contains("only the lines the filters keep"), onEdt(mp::summaryForTest));
+        logsift.core.Metrics kept = onEdt(mp::metrics);
+        assertEquals(List.of("order … placed in # ms"), kept.numbers().stream().map(logsift.core.Numbers.Series::name)
+                .toList(), "queue sizes are written by another thread");
+        assertEquals(225, kept.numbers().get(0).count(), "one in 8 orders: exec-1's");
+        assertTrue(kept.spans().kinds().isEmpty(), "jobs run on other threads");
+        assertEquals(runs, (int) onEdt(tab::measureRunsForTest), "the log isn't measured again for the filters");
+        onEdt(() -> {
+            mp.itemsForTest().setRowSelectionInterval(0, 0);
+            return null;
+        });
+        settle();
+        shot("81b-metrics-filtered");
+        onEdt(() -> {
+            tab.setMatchingOnly(false);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> mp.metrics() != null && !mp.isRunning() && !mp.metrics().filtered());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the whole log's metrics again");
+        assertEquals(1800, (long) onEdt(() -> mp.metrics().numbers().get(0).count()));
+        assertEquals(1, (int) onEdt(() -> mp.metrics().spans().kinds().size()));
+        assertTrue(!onEdt(mp::summaryForTest).contains("filters keep"));
+        assertEquals(runs, (int) onEdt(tab::measureRunsForTest));
+        onEdt(() -> {
+            tab.logBar().clearAllButtonForTest().doClick();
+            return null;
+        });
+        waitForFilter(tab);
     }
 
     private static void setBottomFor(LogTab tab, java.awt.Component c) {

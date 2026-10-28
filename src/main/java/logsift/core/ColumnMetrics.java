@@ -103,8 +103,17 @@ public final class ColumnMetrics {
      */
     public static List<Numbers.Series> analyze(LogFormat format, long lineCount, LongFunction<String> text,
                                                TimeFormat time, BooleanSupplier cancelled) {
+        return collect(format, lineCount, text, time, cancelled).series(null);
+    }
+
+    /**
+     * What the measurements are made of: the values read from the log's columns. Filtering
+     * them later ({@link Data#series}) needs no new reading.
+     */
+    public static Data collect(LogFormat format, long lineCount, LongFunction<String> text, TimeFormat time,
+                               BooleanSupplier cancelled) {
         if (format == null || lineCount == 0) {
-            return List.of();
+            return Data.NONE;
         }
         List<String> cols = format.columns();
         List<String> titles = format.headerNames() != null ? format.headerNames() : cols;
@@ -117,7 +126,7 @@ public final class ColumnMetrics {
         int rows = 0;
         for (long l = 0; l < lineCount; l += step) {
             if ((l & 255) == 0 && cancelled.getAsBoolean()) {
-                return List.of();
+                return Data.NONE;
             }
             String[] cells = cellsOf(format, text.apply(l));
             if (cells == null) {
@@ -148,7 +157,7 @@ public final class ColumnMetrics {
             }
         }
         if (rows < MIN_ROWS) {
-            return List.of();
+            return Data.NONE;
         }
         List<Integer> numberCols = new ArrayList<>();
         List<Integer> countCols = new ArrayList<>();
@@ -176,7 +185,7 @@ public final class ColumnMetrics {
             countCols = new ArrayList<>(countCols.subList(0, MAX_COUNT_COLUMNS));
         }
         if (numberCols.isEmpty() && countCols.isEmpty()) {
-            return List.of();
+            return Data.NONE;
         }
         // 2. the values, from every line (or every n-th of a big log)
         long stride = Math.max(1, (lineCount + Numbers.MAX_POINTS - 1) / Numbers.MAX_POINTS);
@@ -195,7 +204,7 @@ public final class ColumnMetrics {
         int n = 0;
         for (long l = 0; l < lineCount && n < cap; l += stride) {
             if ((l & 1023) == 0 && cancelled.getAsBoolean()) {
-                return List.of();
+                return Data.NONE;
             }
             String t = text.apply(l);
             String[] cells = cellsOf(format, t);
@@ -226,20 +235,88 @@ public final class ColumnMetrics {
             rowTimes[n] = when;
             n++;
         }
-        List<Numbers.Series> out = new ArrayList<>();
+        List<Numbers.Series> numbers = new ArrayList<>();
         for (int i = 0; i < nums.length; i++) {
             Points p = nums[i];
             if (p.n >= MIN_ROWS) {
-                out.add(new Numbers.Series(titles.get(numberCols.get(i)), null, numberCols.get(i), p.unit,
+                numbers.add(new Numbers.Series(titles.get(numberCols.get(i)), null, numberCols.get(i), p.unit,
                         Arrays.copyOf(p.lines, p.n), Arrays.copyOf(p.times, p.n), Arrays.copyOf(p.values, p.n),
                         p.n * stride, Numbers.Source.COLUMN, "column"));
             }
         }
-        for (int i = 0; i < countCols.size(); i++) {
-            out.addAll(perTime(titles.get(countCols.get(i)), countCols.get(i), valueIds.get(i), valueOf[i],
-                    rowLines, rowTimes, n, stride));
+        List<String> countTitles = new ArrayList<>();
+        for (int c : countCols) {
+            countTitles.add(titles.get(c));
         }
-        return out;
+        return new Data(List.copyOf(numbers), countTitles, List.copyOf(countCols), valueIds, valueOf,
+                Arrays.copyOf(rowLines, n), Arrays.copyOf(rowTimes, n), n, stride);
+    }
+
+    /** The values a log's column measurements are made of (see {@link #collect}). */
+    public static final class Data {
+        static final Data NONE = new Data(List.of(), List.of(), List.of(), List.of(), new int[0][], new long[0],
+                new long[0], 0, 1);
+        private final List<Numbers.Series> numbers;
+        private final List<String> countTitles;
+        private final List<Integer> countCols;
+        private final List<Map<String, Integer>> valueIds;
+        private final int[][] valueOf;
+        private final long[] rowLines;
+        private final long[] rowTimes;
+        private final int n;
+        private final long stride;
+
+        Data(List<Numbers.Series> numbers, List<String> countTitles, List<Integer> countCols,
+             List<Map<String, Integer>> valueIds, int[][] valueOf, long[] rowLines, long[] rowTimes, int n, long stride) {
+            this.numbers = numbers;
+            this.countTitles = countTitles;
+            this.countCols = countCols;
+            this.valueIds = valueIds;
+            this.valueOf = valueOf;
+            this.rowLines = rowLines;
+            this.rowTimes = rowTimes;
+            this.n = n;
+            this.stride = stride;
+        }
+
+        /**
+         * The measurements: columns of numbers, then rows per value over time; only from the rows
+         * {@code include} passes (null: every row). A measurement with no rows left is left out.
+         */
+        public List<Numbers.Series> series(java.util.function.LongPredicate include) {
+            List<Numbers.Series> out = new ArrayList<>();
+            for (Numbers.Series s : numbers) {
+                Numbers.Series left = include == null ? s : s.keep(include);
+                if (left != null) {
+                    out.add(left);
+                }
+            }
+            for (int i = 0; i < countCols.size(); i++) {
+                int[] vo = valueOf[i];
+                long[] ls = rowLines;
+                long[] ts = rowTimes;
+                int m = n;
+                if (include != null) {
+                    int[] v2 = new int[n];
+                    long[] l2 = new long[n];
+                    long[] t2 = new long[n];
+                    m = 0;
+                    for (int r = 0; r < n; r++) {
+                        if (include.test(rowLines[r])) {
+                            v2[m] = vo[r];
+                            l2[m] = rowLines[r];
+                            t2[m] = rowTimes[r];
+                            m++;
+                        }
+                    }
+                    vo = v2;
+                    ls = l2;
+                    ts = t2;
+                }
+                out.addAll(perTime(countTitles.get(i), countCols.get(i), valueIds.get(i), vo, ls, ts, m, stride));
+            }
+            return out;
+        }
     }
 
     /** The line's values in the format's columns; null for other lines (and a CSV's header). */

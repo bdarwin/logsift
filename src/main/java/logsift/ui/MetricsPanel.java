@@ -70,10 +70,14 @@ final class MetricsPanel extends JPanel {
     private final JLabel exampleTitle = new JLabel(" ");
     private Metrics metrics;
     private AtomicBoolean running;
+    private String computedFor; // the filters the shown result is for (null: not known)
+    private String wanted = "";  // the filters now
+    private final javax.swing.Timer later = new javax.swing.Timer(400, e -> start());
 
     MetricsPanel(Host host) {
         super(new BorderLayout());
         this.host = host;
+        later.setRepeats(false);
         chart = new MetricChart(host::goToLine);
         JPanel top = new JPanel();
         top.setLayout(new BoxLayout(top, BoxLayout.X_AXIS));
@@ -175,12 +179,32 @@ final class MetricsPanel extends JPanel {
         return summary.getText();
     }
 
+    /**
+     * The filters changed ({@code key} says how): the measurements are filtered again when the
+     * tab is on screen, a moment after the filters settle (the whole log isn't read again).
+     */
+    void filtersChanged(String key) {
+        wanted = key;
+        if (metrics != null && !key.equals(computedFor) && isShowing()) {
+            later.restart();
+        }
+    }
+
+    /** The tab is shown: measures, or filters again if the filters changed meanwhile. */
+    void showing() {
+        if (running == null && (metrics == null || !wanted.equals(computedFor))) {
+            start();
+        }
+    }
+
     void start() {
+        later.stop();
         if (running != null) {
             running.set(true);
         }
         AtomicBoolean cancel = new AtomicBoolean();
         running = cancel;
+        String key = wanted;
         bar.setVisible(true);
         refresh.setEnabled(false);
         summary.setText("Looking for durations and numbers…");
@@ -209,6 +233,10 @@ final class MetricsPanel extends JPanel {
                     summary.setText("Could not look through the log: " + failed);
                 } else if (done != null) {
                     useResult(done);
+                    computedFor = key;
+                    if (!wanted.equals(computedFor) && isShowing()) {
+                        later.restart(); // the filters changed meanwhile
+                    }
                 }
             });
         }, "logsift-metrics");
@@ -217,6 +245,7 @@ final class MetricsPanel extends JPanel {
     }
 
     void cancel() {
+        later.stop();
         if (running != null) {
             running.set(true);
             running = null;
@@ -229,6 +258,7 @@ final class MetricsPanel extends JPanel {
             return;
         }
         metrics = m;
+        computedFor = null; // set by start() when it knows the filters
         items.clear();
         for (Spans.Kind k : m.spans().kinds()) {
             items.add(new Item(k.name(), "took (" + k.matchedBy() + ")", k, null));
@@ -245,6 +275,10 @@ final class MetricsPanel extends JPanel {
                         + (spans > 0 && nums > 0 ? "   ·   " : "")
                         + (nums > 0 ? nums + (nums == 1 ? " number" : " numbers") + " over time" : "")
                         + (open > 0 ? "   ·   " + open + " never ended" : ""));
+        if (m.filtered()) {
+            summary.setText((m.isEmpty() ? "Nothing measured" : summary.getText())
+                    + "   ·   only the lines the filters keep");
+        }
         if (!items.isEmpty()) {
             itemTable.setRowSelectionInterval(0, 0);
         } else {

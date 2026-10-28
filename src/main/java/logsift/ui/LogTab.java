@@ -361,6 +361,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             if (bottom.getSelectedComponent() == metrics && metrics.metrics() == null
                     && !metrics.isRunning() && !insights.isRunning()) {
                 metrics.start();
+            } else if (bottom.getSelectedComponent() == metrics && !insights.isRunning()) {
+                metrics.showing(); // the filters may have changed while it was hidden
             }
             if (bottom.getSelectedComponent() == profile) {
                 profile.showing();
@@ -1624,11 +1626,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 logsift.core.Metrics me = null;
                 if (doc.fileSize() <= AUTO_METRICS_BYTES) { // bigger: when the Metrics tab is opened
                     step.accept("Measuring durations and numbers…");
-                    me = measure(m, cancel::get);
-                    if (cancel.get() || me == null) {
+                    Measured w = measureWhole(m, cancel::get);
+                    if (cancel.get() || w == null) {
                         return null;
                     }
-                    logsift.core.Metrics found = me;
+                    me = w.base().withColumns(w.columns().series(null)); // Insights: always the whole log
+                    logsift.core.Metrics found = metricsView(w);
                     SwingUtilities.invokeLater(() -> metrics.useResult(found));
                 }
                 logsift.core.TimeFormat tf = timeFormat;
@@ -1801,15 +1804,66 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
      * numbers and of a few values (null if cancelled).
      */
     logsift.core.Metrics measure(logsift.core.MessageStats.Result m, java.util.function.BooleanSupplier stop) {
+        Measured w = measureWhole(m, stop);
+        return w == null ? null : w.base().withColumns(w.columns().series(null));
+    }
+
+    /**
+     * What the whole log measures, kept for this version of the file: filters then only pick
+     * from it ({@link #metricsView}), without reading the log again.
+     */
+    record Measured(logsift.core.Metrics base, logsift.core.ColumnMetrics.Data columns) {}
+
+    /** The version of the log a measurement is for. */
+    private record LogVersion(int generation, long lines, logsift.core.LogFormat format) {}
+
+    private final logsift.core.WholeLogCache<Measured> measured = new logsift.core.WholeLogCache<>();
+
+    private LogVersion logVersion() {
+        return new LogVersion(doc.generation(), doc.lineCount(), logFormat);
+    }
+
+    /** The cached measurements, if they are for the file as it is now. */
+    Measured measuredNow() {
+        return measured.peek(logVersion());
+    }
+
+    /** How often the whole log was measured (for tests). */
+    int measureRunsForTest() {
+        return measured.computations();
+    }
+
+    /** Measures the whole log (templates of the whole log in {@code m}) and keeps the result. */
+    private Measured measureWhole(logsift.core.MessageStats.Result m, java.util.function.BooleanSupplier stop) {
         java.util.function.BooleanSupplier halt = () -> stop.getAsBoolean() || closed;
+        LogVersion version = logVersion();
+        long lines = version.lines();
+        logsift.core.LogFormat f = version.format();
         logsift.core.Metrics me = logsift.core.Metrics.analyze(m.templates(), (t, c) -> templateLines(t, halt),
-                logsift.core.RequestTrace.reader(doc::line, timeFormat, logFormat), halt);
+                logsift.core.RequestTrace.reader(doc::line, timeFormat, f), halt);
         if (me == null || halt.getAsBoolean()) {
             return null;
         }
-        List<logsift.core.Numbers.Series> cols = logsift.core.ColumnMetrics.analyze(logFormat, doc.lineCount(),
-                doc::line, timeFormat, halt);
-        return halt.getAsBoolean() ? null : me.withColumns(cols);
+        logsift.core.ColumnMetrics.Data cols = logsift.core.ColumnMetrics.collect(f, lines, doc::line, timeFormat, halt);
+        if (halt.getAsBoolean()) {
+            return null;
+        }
+        Measured w = new Measured(me, cols);
+        measured.put(version, w);
+        return w;
+    }
+
+    /**
+     * The measurements to show: the whole log's, or with Matching only and filters on, only
+     * what the lines the filters keep measure (spans by their start line).
+     */
+    logsift.core.Metrics metricsView(Measured w) {
+        FilterResult r = filterResult;
+        java.util.function.LongPredicate include = matchingOnly && r.isFiltering() ? r::contains : null;
+        if (include == null) {
+            return w.base().withColumns(w.columns().series(null));
+        }
+        return w.base().keep(include).withColumns(w.columns().series(include));
     }
 
     /** The first lines of entries of a message kind (null if cancelled). */
@@ -1852,15 +1906,23 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                         return null;
                     }
                 }
-                step.accept("Grouping messages…");
-                logsift.core.MessageStats.Result m = messages.result() != null ? messages.result()
-                        : logsift.core.MessageStats.analyze(doc, entryFormat, logFormat, 0, Long.MAX_VALUE, null,
-                                cancel::get, null);
-                if (cancel.get()) {
-                    return null;
+                Measured w = measuredNow();
+                if (w == null) {
+                    step.accept("Grouping messages…");
+                    // always the whole log's message kinds, whatever the Messages tab counted
+                    logsift.core.MessageStats.Result m = messages.isWholeLogResult() ? messages.result()
+                            : logsift.core.MessageStats.analyze(doc, entryFormat, logFormat, 0, Long.MAX_VALUE, null,
+                                    cancel::get, null);
+                    if (cancel.get()) {
+                        return null;
+                    }
+                    step.accept("Measuring durations and numbers…");
+                    w = measureWhole(m, cancel::get);
+                    if (w == null) {
+                        return null;
+                    }
                 }
-                step.accept("Measuring durations and numbers…");
-                return measure(m, cancel::get);
+                return metricsView(w);
             }
 
             @Override
@@ -2162,6 +2224,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         FilterResult r = filterResult;
         if (profile != null && (!matchingOnly || !r.isFiltering() || r.isComplete())) {
             profile.filtersChanged(matchingOnly && r.isFiltering() ? "v" + r.version() : "");
+        }
+        if (metrics != null && (!matchingOnly || !r.isFiltering() || r.isComplete())) {
+            metrics.filtersChanged(matchingOnly && r.isFiltering() ? "v" + r.version() : "");
         }
     }
 
