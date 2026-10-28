@@ -1572,7 +1572,9 @@ public final class LogView extends JPanel {
     private void installKeys() {
         InputMap im = canvas.getInputMap(JComponent.WHEN_FOCUSED);
         ActionMap am = canvas.getActionMap();
-        int menu = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        // Ctrl, or ⌘ on macOS; Ctrl when there is no screen (tests on a build server)
+        int menu = java.awt.GraphicsEnvironment.isHeadless() ? java.awt.event.InputEvent.CTRL_DOWN_MASK
+                : Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
         bind(im, am, "up", KeyEvent.VK_UP, 0, () -> moveLead(currentRow() - 1, false));
         bind(im, am, "down", KeyEvent.VK_DOWN, 0, () -> moveLead(currentRow() + 1, false));
         bind(im, am, "pgup", KeyEvent.VK_PAGE_UP, 0, () -> page(-1, false));

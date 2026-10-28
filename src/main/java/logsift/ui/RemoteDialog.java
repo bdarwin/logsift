@@ -347,21 +347,37 @@ final class RemoteDialog extends JDialog {
         String typed = !t0.isEmpty() && !t0.startsWith("/") && !t0.startsWith("~") && currentDir != null
                 ? RemoteBrowser.join(currentDir, t0) : t0;
         listStatus.setText("Reading…");
+        int request = ++requests;
         background(() -> {
             String path = b.resolve(typed);
             if (b.isDirectory(path)) {
                 List<RemoteBrowser.Entry> list = b.list(path);
-                SwingUtilities.invokeLater(() -> show(path, list, null));
+                SwingUtilities.invokeLater(() -> {
+                    if (request == requests) {
+                        show(path, list, null);
+                    }
+                });
             } else {
                 String dir = RemoteBrowser.parent(path);
                 List<RemoteBrowser.Entry> list = b.list(dir);
                 String name = path.substring(path.lastIndexOf('/') + 1);
-                SwingUtilities.invokeLater(() -> show(dir, list, name));
+                SwingUtilities.invokeLater(() -> {
+                    if (request == requests) {
+                        show(dir, list, name);
+                    }
+                });
             }
-        }, e -> listStatus.setText(e.getMessage()));
+        }, e -> {
+            if (request == requests) {
+                listStatus.setText(e.getMessage());
+            }
+        });
     }
 
     private int listings; // for tests: how many listings were shown
+    // Each folder is read on its own thread, so answers can arrive out of order: only the
+    // latest request is shown (an older, slower answer must not replace it).
+    private int requests;
 
     private void show(String dir, List<RemoteBrowser.Entry> list, String select) {
         if (select == null && dir.equals(currentDir)) {
@@ -450,6 +466,10 @@ final class RemoteDialog extends JDialog {
 
     int listingsForTest() {
         return listings;
+    }
+
+    String statusForTest() {
+        return listStatus.getText();
     }
 
     private void closeBrowser() {

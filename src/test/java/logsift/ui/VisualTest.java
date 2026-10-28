@@ -1729,13 +1729,19 @@ class VisualTest {
                 dlg.go("/var/log/app");
                 return null;
             });
-            waitFor(() -> {
-                try {
-                    return onEdt(() -> dlg.listingsForTest() > before && "/var/log/app".equals(dlg.folderForTest()));
-                } catch (Exception e) {
-                    return false;
-                }
-            }, 10_000, "app folder by its full path");
+            try {
+                waitFor(() -> {
+                    try {
+                        return onEdt(() -> dlg.listingsForTest() > before && "/var/log/app".equals(dlg.folderForTest()));
+                    } catch (Exception e) {
+                        return false;
+                    }
+                }, 10_000, "app folder by its full path");
+            } catch (AssertionError e) { // say what the dialog shows
+                throw new AssertionError(e.getMessage() + "; shown: " + onEdt(dlg::folderForTest) + ", listings "
+                        + onEdt(dlg::listingsForTest) + " (before " + before + "), status: "
+                        + onEdt(dlg::statusForTest), e);
+            }
             onEdt(() -> {
                 dlg.select("server.log");
                 return null;
