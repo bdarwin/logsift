@@ -2185,7 +2185,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             @Override
             protected logsift.core.FolderListing.Result doInBackground() throws Exception {
                 return logsift.core.FolderListing.list(dir, logsift.core.FolderListing.MAX_FILES,
-                        () -> tabs.indexOfComponent(tab) < 0); // closed meanwhile: stop
+                        () -> !tab.isOpen()); // closed meanwhile: stop (read off the window's thread)
             }
 
             @Override

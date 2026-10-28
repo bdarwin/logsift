@@ -37,6 +37,26 @@ import logsift.core.Archives;
  */
 final class ArchiveTab extends JPanel {
 
+    /** True once the tab was taken out of the window; safe to read from any thread. */
+    private volatile boolean closed;
+
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        closed = false;
+    }
+
+    @Override
+    public void removeNotify() {
+        closed = true;
+        super.removeNotify();
+    }
+
+    /** False once the tab is closed (for background work that should stop then). */
+    boolean isOpen() {
+        return !closed;
+    }
+
     /** What the tab asks of the window. */
     interface Host {
         void openEntries(Path zip, List<Archives.Entry> entries);
