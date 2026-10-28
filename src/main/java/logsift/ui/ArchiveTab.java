@@ -68,6 +68,9 @@ final class ArchiveTab extends JPanel {
 
         /** Lists the folder's files again (folder tabs only). */
         default void refresh(ArchiveTab tab) {}
+
+        /** Compares two files (CSV and TSV files as tables). */
+        default void compareEntries(Path zip, List<Archives.Entry> entries) {}
     }
 
     /** A folder, a zip inside the zip, or a file. */
@@ -91,6 +94,7 @@ final class ArchiveTab extends JPanel {
     private final JLabel summary = new JLabel(" ");
     private final JButton open = new JButton("Open");
     private final JButton merge = new JButton("Merge by Time");
+    private final JButton compare = new JButton("Compare", Icons.of("git-compare"));
     private List<Archives.Entry> entries = List.of();
 
     ArchiveTab(Path zip, Host host) {
@@ -161,6 +165,13 @@ final class ArchiveTab extends JPanel {
                 host.mergeEntries(zip, sel);
             }
         });
+        compare.setToolTipText("Compare the two selected files (CSV and TSV files as tables, rows matched by a key)");
+        compare.addActionListener(e -> {
+            List<Archives.Entry> sel = selectedFiles();
+            if (sel.size() == 2) {
+                host.compareEntries(zip, sel);
+            }
+        });
         find.putClientProperty("JTextField.placeholderText", "Find in all files (Enter)");
         find.putClientProperty("JTextField.showClearButton", true);
         find.putClientProperty("JTextField.leadingIcon", Icons.find());
@@ -191,6 +202,7 @@ final class ArchiveTab extends JPanel {
         actions.add(filter);
         actions.add(open);
         actions.add(merge);
+        actions.add(compare);
         if (folder) {
             JButton refresh = new JButton("Refresh", Icons.reload());
             refresh.setToolTipText("List the folder's files again");
@@ -202,7 +214,7 @@ final class ArchiveTab extends JPanel {
         top.add(actions);
 
         JLabel hint = new JLabel("Double-click a file to open it as a log. Select several (Ctrl/⌘-click) to open"
-                + " them together or merge them by time.");
+                + " them together or merge them by time; select two to compare them.");
         hint.setForeground(Theme.uiColor("Label.disabledForeground", java.awt.Color.GRAY));
         hint.setBorder(BorderFactory.createEmptyBorder(6, 10, 8, 10));
 
@@ -386,6 +398,7 @@ final class ArchiveTab extends JPanel {
         open.setEnabled(n > 0);
         open.setText(n > 1 ? "Open " + n : "Open");
         merge.setEnabled(n > 1);
+        compare.setEnabled(n == 2);
     }
 
     // for tests
@@ -429,6 +442,10 @@ final class ArchiveTab extends JPanel {
 
     JButton mergeButtonForTest() {
         return merge;
+    }
+
+    JButton compareButtonForTest() {
+        return compare;
     }
 
     /** Folders, zips and files, each with its icon; files with their size. */

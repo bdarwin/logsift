@@ -5968,6 +5968,330 @@ class VisualTest {
         assertTrue(!onEdt(() -> frame.errorsButtonForTest().isVisible()));
     }
 
+    @Test
+    @Order(55)
+    void comparesCsvFilesByKey() throws Exception {
+        // two exports of the same orders: the newer one shuffled, with a region column, some
+        // prices and statuses changed, some orders gone and some new
+        Path box = Files.createDirectories(dir.resolve("csv-compare"));
+        Path left = box.resolve("orders-monday.csv");
+        Path right = box.resolve("orders-tuesday.csv");
+        StringBuilder a = new StringBuilder("order_id,customer,qty,price,status\n");
+        List<String> rows = new ArrayList<>();
+        int priceChanges = 0;
+        int statusChanges = 0;
+        int removed = 0;
+        String[] regions = {"eu", "us", "apac"};
+        for (int i = 1; i <= 500; i++) {
+            String customer = "customer " + (i % 37);
+            String price = String.format(java.util.Locale.ROOT, "%d.%02d", 5 + i % 90, (i * 7) % 100);
+            String status = i % 4 == 0 ? "paid" : "open";
+            a.append(String.format("ORD-%04d,%s,%d,%s,%s%n", i, customer, 1 + i % 9, price, status));
+            if (i % 61 == 0) {
+                removed++;
+                continue;
+            }
+            String newPrice = price;
+            String newStatus = status;
+            if (i % 50 == 7) {
+                newPrice = String.format(java.util.Locale.ROOT, "%d.%02d", 6 + i % 90, (i * 7) % 100);
+                priceChanges++;
+            } else if (i % 50 == 21) {
+                newStatus = "shipped";
+                statusChanges++;
+            } else if (i % 25 == 3) {
+                newPrice = price + "0"; // 12.30 → 12.300: the same number
+            }
+            rows.add(String.format("ORD-%04d,%s,%d,%s,%s,%s", i, customer, 1 + i % 9, newPrice, newStatus,
+                    regions[i % 3]));
+        }
+        for (int i = 501; i <= 506; i++) {
+            rows.add(String.format("ORD-%04d,customer %d,1,9.99,open,eu", i, i % 37));
+        }
+        java.util.Collections.shuffle(rows, new Random(5));
+        StringBuilder b = new StringBuilder("order_id,customer,qty,price,status,region\n");
+        rows.forEach(r -> b.append(r).append('\n'));
+        Files.writeString(left, a);
+        Files.writeString(right, b);
+        int changed = priceChanges + statusChanges;
+        int same = 500 - removed - changed;
+
+        onEdt(() -> {
+            frame.compareFiles(left, right);
+            return null;
+        });
+        CsvCompareTab tab = waitForCompare(null);
+        assertEquals(List.of("order_id"), onEdt(tab::keysForTest), "the key suggested and used");
+        assertTrue(onEdt(tab::suggestionForTest).startsWith("Suggested: order_id — unique and filled in"),
+                onEdt(tab::suggestionForTest));
+        assertEquals("Compare: orders-monday.csv ↔ orders-tuesday.csv", onEdt(tab::title));
+        logsift.core.diff.TableDiffResult r = onEdt(tab::result);
+        assertEquals(6, r.count(logsift.core.diff.DiffStatus.ADDED));
+        assertEquals(removed, r.count(logsift.core.diff.DiffStatus.REMOVED));
+        assertEquals(changed, r.count(logsift.core.diff.DiffStatus.CHANGED));
+        assertEquals(same, r.count(logsift.core.diff.DiffStatus.SAME));
+        assertEquals("6 + added (only right)", onEdt(() -> tab.tileTextForTest(logsift.core.diff.DiffStatus.ADDED)));
+        assertEquals(changed + " ≠ changed", onEdt(() -> tab.tileTextForTest(logsift.core.diff.DiffStatus.CHANGED)));
+        assertTrue(r.notes().contains("Column region only in the right file (orders-tuesday.csv)"), r.notes().toString());
+        assertEquals(6 + removed + changed, onEdt(tab::shownForTest).length, "all differences shown");
+        settle();
+        shot("106-csv-compare");
+        summary.put("csv compare (500 rows)", r.millis() + " ms");
+
+        // changes per column: a click shows only the rows changed there
+        List<String> counts = onEdt(tab::columnCountsForTest);
+        int priceAt = counts.indexOf("price: " + priceChanges + " rows");
+        assertTrue(priceAt > 0, counts.toString());
+        assertTrue(counts.contains("status: " + statusChanges + " rows"), counts.toString());
+        onEdt(() -> {
+            tab.clickColumnForTest(priceAt);
+            return null;
+        });
+        assertEquals(priceChanges, onEdt(tab::shownForTest).length);
+        String cell = onEdt(() -> tab.cellText(0, 4 + 1)); // status, line, key, customer, qty, price
+        assertTrue(cell.matches("\\d+\\.\\d+ → \\d+\\.\\d+"), cell);
+        settle();
+        shot("106b-csv-compare-price");
+        onEdt(() -> {
+            tab.clickColumnForTest(0);
+            return null;
+        });
+        // a tile shows its rows
+        onEdt(() -> {
+            tab.clickTileForTest(logsift.core.diff.DiffStatus.ADDED);
+            return null;
+        });
+        assertEquals(6, onEdt(tab::shownForTest).length);
+        assertEquals("Added", onEdt(() -> tab.showForTest().getSelectedItem()));
+        onEdt(() -> {
+            tab.showForTest().setSelectedIndex(6); // everything
+            return null;
+        });
+        assertEquals(r.size(), onEdt(tab::shownForTest).length);
+        // F7: the next difference, skipping rows that are the same
+        onEdt(() -> {
+            tab.tableForTest().setRowSelectionInterval(0, 0);
+            frame.findMenuItemForTest("Next Difference").doClick();
+            return null;
+        });
+        int at = onEdt(() -> tab.tableForTest().getSelectedRow());
+        int item = onEdt(() -> tab.shownForTest()[at]);
+        assertTrue(r.status(item).isDifference());
+        for (int k = 1; k < at; k++) {
+            assertFalse(r.status(onEdt(tab::shownForTest)[k]).isDifference(), "no difference skipped");
+        }
+        String pos = onEdt(tab::positionForTest);
+        assertTrue(pos.startsWith("difference ") && pos.contains(" of " + (6 + removed + changed) + " · "), pos);
+        onEdt(() -> {
+            frame.findMenuItemForTest("Next Difference").doClick();
+            frame.findMenuItemForTest("Previous Difference").doClick();
+            return null;
+        });
+        assertEquals(at, (int) onEdt(() -> tab.tableForTest().getSelectedRow()));
+        // search within the results
+        onEdt(() -> {
+            tab.showForTest().setSelectedIndex(0);
+            tab.setSearchForTest("shipped");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !tab.isSearchingForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "the search");
+        assertEquals(statusChanges, onEdt(tab::shownForTest).length);
+        // export
+        Path out = box.resolve("differences.csv");
+        onEdt(() -> {
+            tab.exportForTest(out);
+            return null;
+        });
+        List<String> exported = Files.readAllLines(out);
+        assertEquals(1 + 6 + removed + changed, exported.size());
+        assertEquals("status,left line,right line,order_id,customer (left),customer (right),qty (left),qty (right),"
+                + "price (left),price (right),status (left),status (right)", exported.get(0));
+        onEdt(() -> {
+            tab.setSearchForTest("");
+            return null;
+        });
+
+        // double-click: the row's line in the right file's tab
+        int changedRow = onEdt(() -> {
+            int[] sh = tab.shownForTest();
+            for (int i = 0; i < sh.length; i++) {
+                if (r.status(sh[i]) == logsift.core.diff.DiffStatus.CHANGED) {
+                    return i;
+                }
+            }
+            return -1;
+        });
+        long rightLine = r.rightLine(onEdt(tab::shownForTest)[changedRow]);
+        onEdt(() -> {
+            tab.openRowForTest(changedRow);
+            return null;
+        });
+        LogTab rightTab = waitForTab("orders-tuesday.csv");
+        waitFor(() -> {
+            try {
+                return onEdt(rightTab::currentLine) == rightLine;
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "line " + rightLine + " in the right file");
+        // a CSV tab has Compare in its bar
+        waitFor(() -> {
+            try {
+                return onEdt(() -> rightTab.logBar().compareButtonForTest().isVisible());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the CSV tab's Compare button");
+        settle();
+        shot("106c-csv-compare-opened-line");
+        onEdt(() -> {
+            frame.tabsForTest().setSelectedComponent(tab);
+            return null;
+        });
+
+        // dark mode
+        onEdt(() -> {
+            frame.toggleDark();
+            tab.showForTest().setSelectedIndex(6);
+            return null;
+        });
+        settle();
+        shot("106d-csv-compare-dark");
+        onEdt(() -> {
+            frame.toggleDark();
+            tab.showForTest().setSelectedIndex(0);
+            return null;
+        });
+        // a narrow window: the bars wrap, nothing is cut off
+        onEdt(() -> {
+            frame.setSize(820, 860);
+            frame.validate();
+            return null;
+        });
+        settle();
+        shot("106e-csv-compare-narrow");
+        onEdt(() -> {
+            frame.setSize(1400, 860);
+            frame.validate();
+            return null;
+        });
+
+        // drag and drop: the outline over the side a file lands on
+        onEdt(() -> {
+            tab.setHoverForTest(1);
+            return null;
+        });
+        settle();
+        shot("106f-csv-compare-drop-outline");
+        onEdt(() -> {
+            tab.setHoverForTest(-1);
+            return null;
+        });
+        // a file dropped on the right half replaces the right file and compares again
+        Path wednesday = box.resolve("orders-wednesday.tsv");
+        Files.writeString(wednesday, Files.readString(left).replace(',', '\t').replace("open", "closed"));
+        onEdt(() -> {
+            tab.dropForTest(List.of(wednesday), new java.awt.Point(tab.getWidth() - 50, 200));
+            return null;
+        });
+        waitForCompare(tab, "orders-monday.csv", "orders-wednesday.tsv");
+        logsift.core.diff.TableDiffResult r2 = onEdt(tab::result);
+        long open = a.toString().lines().filter(l -> l.endsWith(",open")).count();
+        assertEquals(open, r2.count(logsift.core.diff.DiffStatus.CHANGED), "open → closed");
+        assertEquals(0, r2.count(logsift.core.diff.DiffStatus.ADDED) + r2.count(logsift.core.diff.DiffStatus.REMOVED));
+        // two files dropped through the tab's transfer handler fill both sides
+        onEdt(() -> {
+            javax.swing.TransferHandler.TransferSupport ts = new javax.swing.TransferHandler.TransferSupport(
+                    tab.tableForTest(), FileDropTest.files(right, left));
+            assertTrue(tab.tableForTest().getTransferHandler().importData(ts));
+            return null;
+        });
+        waitForCompare(tab, "orders-tuesday.csv", "orders-monday.csv");
+        assertEquals(6, onEdt(tab::result).count(logsift.core.diff.DiffStatus.REMOVED), "swapped: new orders are removed");
+
+        // not CSV: a note that text compare comes next
+        Path logA = box.resolve("a.log");
+        Path logB = box.resolve("b.log");
+        Files.writeString(logA, "2026-10-21 10:00:00.000 INFO  [main] c.a.App - started\n");
+        Files.writeString(logB, "2026-10-21 10:00:00.000 INFO  [main] c.a.App - stopped\n");
+        onEdt(() -> {
+            frame.compareNoteForTest = null;
+            frame.compareFiles(logA, logB);
+            return null;
+        });
+        waitFor(() -> frame.compareNoteForTest != null, 20_000, "the note");
+        assertTrue(frame.compareNoteForTest.contains("Comparing text and logs line by line comes next"),
+                frame.compareNoteForTest);
+        assertTrue(frame.compareNoteForTest.startsWith("a.log doesn't look like a CSV file"), frame.compareNoteForTest);
+
+        // the folder's tab: two files selected → Compare
+        onEdt(() -> {
+            frame.openFolder(box);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentArchiveTabForTest() != null
+                        && frame.currentArchiveTabForTest().rowsForTest().contains("orders-monday.csv"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the folder's tab");
+        ArchiveTab ft = onEdt(frame::currentArchiveTabForTest);
+        onEdt(() -> {
+            ft.selectForTest("orders-monday.csv");
+            return null;
+        });
+        assertFalse(onEdt(() -> ft.compareButtonForTest().isEnabled()), "one file: nothing to compare with");
+        onEdt(() -> {
+            ft.selectForTest("orders-monday.csv", "orders-tuesday.csv");
+            ft.compareButtonForTest().doClick();
+            return null;
+        });
+        CsvCompareTab fromFolder = waitForCompare(tab);
+        assertEquals(6, onEdt(fromFolder::result).count(logsift.core.diff.DiffStatus.ADDED));
+        // the old Compare (by kind of message) is still there, renamed
+        assertNotNull(onEdt(() -> frame.findMenuItemForTest("Compare Logs by Message…")));
+        onEdt(() -> {
+            for (java.awt.Component c : List.of(tab, fromFolder, ft)) {
+                frame.closeTab(frame.tabsForTest().indexOfComponent(c));
+            }
+            frame.closeFile(right);
+            return null;
+        });
+    }
+
+    /** Waits for a comparison tab other than {@code not} to be shown and done. */
+    private CsvCompareTab waitForCompare(CsvCompareTab not) throws Exception {
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentCsvCompareTab() != null && frame.currentCsvCompareTab() != not
+                        && !frame.currentCsvCompareTab().isBusy() && frame.currentCsvCompareTab().result() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the comparison");
+        return onEdt(frame::currentCsvCompareTab);
+    }
+
+    /** Waits for {@code tab} to have compared these files. */
+    private void waitForCompare(CsvCompareTab tab, String leftName, String rightName) throws Exception {
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !tab.isBusy() && tab.result() != null
+                        && tab.result().left().name().equals(leftName) && tab.result().right().name().equals(rightName));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "comparing " + leftName + " with " + rightName);
+    }
+
     private LogTab waitForTab(String title) throws Exception {
         waitFor(() -> {
             try {

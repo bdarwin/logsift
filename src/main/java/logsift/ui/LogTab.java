@@ -80,6 +80,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** Opens the heap dump the JVM wrote when it ran out of memory (the log says where, near this line). */
         default void openHeapDumpOf(LogTab tab, long line) {}
+
+        /** Compares this CSV file with another one (as tables). */
+        default void compareCsv(LogTab tab) {}
     }
 
     private final LogDocument doc;
@@ -600,6 +603,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         tryPendingLine();
         updateFilterStatus();
         host.tabStatusChanged(this);
+    }
+
+    /** Whether the file is read as CSV (or TSV) columns. */
+    boolean isCsv() {
+        return logFormat != null && logFormat.isCsv();
+    }
+
+    /** The log's bar: compare this CSV file with another. */
+    void compareWithAnother() {
+        host.compareCsv(this);
     }
 
     /** The name of the format lines are read with (for the log's bar). */

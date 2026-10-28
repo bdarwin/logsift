@@ -89,6 +89,7 @@ final class LogBar extends JPanel {
     };
 
     /** Clear All: back to the whole log, no search. A pill in the accent color while anything is set. */
+    private final JButton compare = new JButton(Icons.of("git-compare"));
     private final JButton clearAll = new JButton("Clear All", Icons.of("x")) {
         @Override
         protected void paintComponent(Graphics g0) {
@@ -157,6 +158,11 @@ final class LogBar extends JPanel {
             m.show(reloadMenu, reloadMenu.getWidth() - m.getPreferredSize().width, reloadMenu.getHeight());
         });
 
+        flat(compare);
+        compare.setToolTipText("Compare this CSV file with another, as tables: rows matched by a key, whatever"
+                + " their order");
+        compare.addActionListener(e -> tab.compareWithAnother());
+        compare.setVisible(false);
         flat(format);
         format.setVisible(false);
         format.addActionListener(e -> {
@@ -182,6 +188,7 @@ final class LogBar extends JPanel {
         add(matchingOnly);
         add(Box.createHorizontalGlue());
         add(result);
+        add(compare);
         add(format);
         add(formatSeparator);
         add(wrap);
@@ -242,6 +249,7 @@ final class LogBar extends JPanel {
 
     /** Shows the format the log's lines are read with ("Format: CSV ▾"). */
     void updateFormat() {
+        compare.setVisible(tab.isCsv());
         String name = tab.formatName();
         boolean show = !name.isEmpty();
         format.setVisible(show);
@@ -285,6 +293,10 @@ final class LogBar extends JPanel {
         int paren = name.indexOf(" (");
         String s = paren > 0 ? name.substring(0, paren) : name;
         return s.length() > 24 ? s.substring(0, 23) + "…" : s;
+    }
+
+    JButton compareButtonForTest() {
+        return compare;
     }
 
     JButton formatButtonForTest() {
