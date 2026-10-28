@@ -62,7 +62,7 @@ After changing options, **Compare** in the options' row stands out in the accent
 
 ## What it shows
 
-**Tiles** count the rows, and a click on one shows only those rows:
+**Tiles** count the rows. They work as buttons: a tile is filled in its colour while its rows are in the table, and plain while they aren't. Click one to show only those rows (its border gets thicker); click it again to go back to all differences.
 
 | Tile | Colour | Means |
 |---|---|---|
@@ -77,7 +77,9 @@ After changing options, **Compare** in the options' row stands out in the accent
 **Unified | Side by Side** (above the table) picks the view; Logsift remembers it.
 
 - **Unified:** one table, as below.
-- **Side by Side:** the left file's rows on the left and the right file's on the right, a key's two rows on one line, scrolled and selected together. A row only one file has is empty (gray) on the other side; a changed value is on an amber cell on both sides, red on the left and green on the right. Double-click a side to open the row's line in that file.
+- **Side by Side:** the left file's rows on the left and the right file's on the right, a key's two rows on one line, scrolled and selected together. It shows **every row** (Show: *Everything*): unchanged rows too, so you see the changes where they are in the files. A row only one file has is empty (gray) on the other side; a changed row is tinted amber, its changed values on a stronger amber, red on the left and green on the right. Double-click a side to open the row's line in that file. Choose another **Show** for side by side and Logsift remembers it; the unified table keeps its own (all differences at first).
+
+Next to the scroll bar, a **strip of marks** shows where the differences are among the rows shown: green added, red removed, amber changed, purple key repeats, with a box for the part on screen. Click or drag on it to go to the difference there. Switching views or **Show** keeps the selected row when it is still shown.
 
 **The table** (unified) has a row per key: its **Status** (the symbol and the word, in the tile's colour), **Line (left → right)** in each file, the key columns (*(key)* after their name) and the compared columns.
 

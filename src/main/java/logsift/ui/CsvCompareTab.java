@@ -146,6 +146,9 @@ final class CsvCompareTab extends JPanel {
     private final SideModel[] sideModels = {new SideModel(0), new SideModel(1)};
     private final JTable[] sideTables = {new JTable(sideModels[0]), new JTable(sideModels[1])};
     private boolean sideBySide = AppState.prefs().getBoolean("compareSideBySide", false);
+    // what Show is set to in each view: side by side shows every row unless people choose otherwise
+    private int unifiedShow;
+    private int sideShow = Math.max(0, Math.min(SHOW.length - 1, AppState.prefs().getInt("compareSideShow", SHOW.length - 1)));
     private final JLabel suggestion = new JLabel(" ");
     // options
     private final JCheckBox trim = new JCheckBox("Trim spaces", true);
@@ -338,7 +341,24 @@ final class CsvCompareTab extends JPanel {
     private JComponent center() {
         JPanel bar = new JPanel(new WrapLayout(FlowLayout.LEFT, 6, 2));
         show.setToolTipText("Which rows to show");
-        show.addActionListener(e -> refilter());
+        show.addActionListener(e -> {
+            if (sideBySide) {
+                sideShow = show.getSelectedIndex();
+                try {
+                    AppState.prefs().putInt("compareSideShow", sideShow);
+                } catch (RuntimeException ex) {
+                    // remembered next time if it can be
+                }
+            } else {
+                unifiedShow = show.getSelectedIndex();
+            }
+            for (Tile t : tiles) {
+                if (t != null) {
+                    t.showState();
+                }
+            }
+            refilter();
+        });
         search.putClientProperty("JTextField.placeholderText", "search in results");
         search.putClientProperty("JTextField.showClearButton", true);
         search.getDocument().addDocumentListener(onChange(searchTimer::restart));
@@ -391,7 +411,11 @@ final class CsvCompareTab extends JPanel {
         JScrollPane tableScroll = new JScrollPane(table);
         tableScroll.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0,
                 Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY)));
-        viewCards.add(tableScroll, "unified");
+        JPanel unified = new JPanel(new BorderLayout());
+        unified.add(tableScroll, BorderLayout.CENTER);
+        unified.add(new ChangeStrip(), BorderLayout.EAST);
+        tableScroll.getViewport().addChangeListener(e -> strips.forEach(Component::repaint));
+        viewCards.add(unified, "unified");
         viewCards.add(sideView(), "side");
         JPanel right = new JPanel(new BorderLayout());
         right.add(bar, BorderLayout.NORTH);
@@ -484,7 +508,12 @@ final class CsvCompareTab extends JPanel {
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, halves[0], halves[1]);
         split.setResizeWeight(0.5);
         split.setBorder(BorderFactory.createEmptyBorder());
-        return split;
+        scrolls[0].getViewport().addChangeListener(e -> strips.forEach(Component::repaint));
+        JPanel view = new JPanel(new BorderLayout());
+        view.add(split, BorderLayout.CENTER);
+        ChangeStrip strip = new ChangeStrip();
+        view.add(strip, BorderLayout.EAST);
+        return view;
     }
 
     private final JLabel[] sideHeads = new JLabel[2];
@@ -492,6 +521,10 @@ final class CsvCompareTab extends JPanel {
 
     private void setSideBySide(boolean on) {
         sideBySide = on;
+        int want = on ? sideShow : unifiedShow;
+        if (show.getSelectedIndex() != want) {
+            show.setSelectedIndex(want); // the selected row stays selected if it is still shown
+        }
         (on ? sideButton : unifiedButton).setSelected(true);
         views.show(viewCards, on ? "side" : "unified");
         try {
@@ -534,32 +567,103 @@ final class CsvCompareTab extends JPanel {
         };
     }
 
-    /** A number with what it counts; a click shows only those rows. */
+    /**
+     * A number with what it counts, drawn as a button: filled in its colour while its rows are
+     * in the table, plain when they aren't. A click shows only those rows; a click on the one
+     * shown alone goes back to all differences.
+     */
     private final class Tile extends JPanel {
         final DiffStatus status;
         final JLabel big = new JLabel("–");
         final JLabel small = new JLabel();
         final String label;
+        final Color line;
+        final int showIndex;
+        private boolean hovered;
+        private String tip;
 
         Tile(DiffStatus status, String label, Color line, int showIndex) {
             super(new BorderLayout());
             this.status = status;
             this.label = label;
-            setBorder(BorderFactory.createCompoundBorder(BorderFactory.createMatteBorder(0, 3, 0, 0, line),
-                    BorderFactory.createEmptyBorder(2, 8, 2, 4)));
+            this.line = line;
+            this.showIndex = showIndex;
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder(3, 12, 3, 8));
             big.setFont(big.getFont().deriveFont(Font.BOLD, big.getFont().getSize2D() + 5f));
             small.setText(status.symbol() + " " + label);
-            small.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
             add(big, BorderLayout.NORTH);
             add(small, BorderLayout.SOUTH);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            setToolTipText("Show only these rows");
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mouseClicked(MouseEvent e) {
-                    show.setSelectedIndex(showIndex);
+                    show.setSelectedIndex(isOnly() ? 0 : showIndex);
+                }
+
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    hovered = true;
+                    repaint();
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    hovered = false;
+                    repaint();
                 }
             });
+            showState();
+        }
+
+        /** Whether its rows are in the table now. */
+        boolean isOn() {
+            return statuses().contains(status);
+        }
+
+        /** Whether only its rows are. */
+        boolean isOnly() {
+            return show.getSelectedIndex() == showIndex;
+        }
+
+        /** Its look and tooltip for what the table shows now. */
+        void showState() {
+            boolean on = isOn();
+            big.setForeground(on ? Theme.foreground() : Theme.uiColor("Label.disabledForeground", Color.GRAY));
+            small.setForeground(on ? Theme.foreground() : Theme.uiColor("Label.disabledForeground", Color.GRAY));
+            String what = isOnly() ? "Showing only these rows: click for all differences"
+                    : on ? "These rows are shown: click to show only them" : "Click to show only these rows";
+            super.setToolTipText(tip == null ? what
+                    : tip.replace("</html>", "<br><br>" + what + "</html>"));
+            repaint();
+        }
+
+        @Override
+        public void setToolTipText(String text) {
+            tip = text;
+            showState();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth();
+            int h = getHeight();
+            boolean on = isOn();
+            boolean dark = Theme.isDark();
+            int alpha = (on ? (isOnly() ? 70 : 34) : 0) + (hovered ? 22 : 0);
+            if (alpha > 0) {
+                g2.setColor(new Color(line.getRed(), line.getGreen(), line.getBlue(), dark ? alpha + 10 : alpha));
+                g2.fillRoundRect(0, 0, w - 1, h - 1, 10, 10);
+            }
+            g2.setColor(on ? line : Theme.uiColor("Component.borderColor", new Color(0xD1D5DB)));
+            g2.setStroke(new BasicStroke(isOnly() ? 2f : 1f));
+            g2.drawRoundRect(1, 1, w - 3, h - 3, 10, 10);
+            g2.setColor(line);
+            g2.fillRoundRect(4, 6, 4, h - 12, 4, 4);
+            g2.dispose();
+            super.paintComponent(g);
         }
 
         void set(TableDiffResult r) {
@@ -609,7 +713,7 @@ final class CsvCompareTab extends JPanel {
         if (items.length == 0) {
             b.append("<br><br>None here: every ").append(esc(keyNames)).append(" is on one row in each file.");
         }
-        return b.append("<br>Click to show only these rows.</html>").toString();
+        return b.append("</html>").toString();
     }
 
     String repeatsTipForTest() {
@@ -1337,12 +1441,142 @@ final class CsvCompareTab extends JPanel {
     }
 
     private void setShown(int[] items) {
+        int sel = table.getSelectedRow();
+        int keep = sel >= 0 && sel < shown.length ? shown[sel] : -1; // the selected row, if it is still shown
         shown = items;
         model.fireTableDataChanged();
         for (SideModel m : sideModels) {
             m.fireTableDataChanged();
         }
+        if (keep >= 0) {
+            int at = java.util.Arrays.binarySearch(items, keep);
+            if (at >= 0) {
+                table.setRowSelectionInterval(at, at);
+                SwingUtilities.invokeLater(() -> scrollTo(at));
+            }
+        }
+        for (ChangeStrip c : strips) {
+            c.repaint();
+        }
         updatePosition();
+    }
+
+    private final List<ChangeStrip> strips = new ArrayList<>();
+
+    /**
+     * Next to the scroll bar: a mark for each difference in the rows shown (green added, red
+     * removed, amber changed, violet key repeats), placed as far down as the row is. A click
+     * goes to the row there.
+     */
+    private final class ChangeStrip extends JComponent {
+        ChangeStrip() {
+            setPreferredSize(new Dimension(12, 10));
+            setToolTipText("Where the differences are: click to go there");
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            MouseAdapter go = new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    jump(e.getY());
+                }
+
+                @Override
+                public void mouseDragged(MouseEvent e) {
+                    jump(e.getY());
+                }
+            };
+            addMouseListener(go);
+            addMouseMotionListener(go);
+            strips.add(this);
+        }
+
+        private int top() {
+            return 2;
+        }
+
+        private int span() {
+            return Math.max(1, getHeight() - 4);
+        }
+
+        private void jump(int y) {
+            int n = shown.length;
+            if (n == 0) {
+                return;
+            }
+            int row = Math.max(0, Math.min(n - 1, (int) ((long) (y - top()) * n / span())));
+            // a mark is a pixel or more: go to the difference nearest the click
+            TableDiffResult r = result;
+            if (r != null && !r.status(shown[row]).isDifference()) {
+                int reach = (int) Math.max(2, (long) n * 3 / span());
+                for (int d = 1; d <= reach; d++) {
+                    if (row + d < n && r.status(shown[row + d]).isDifference()) {
+                        row += d;
+                        break;
+                    }
+                    if (row - d >= 0 && r.status(shown[row - d]).isDifference()) {
+                        row -= d;
+                        break;
+                    }
+                }
+            }
+            table.setRowSelectionInterval(row, row);
+            scrollTo(row);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            g.setColor(Theme.uiColor("ScrollBar.track", Theme.background()));
+            g.fillRect(0, 0, getWidth(), getHeight());
+            TableDiffResult r = result;
+            int[] s = shown;
+            int n = s.length;
+            if (r == null || n == 0) {
+                return;
+            }
+            int h = span();
+            // per pixel, the strongest status there: removed and added over changed over repeats
+            byte[] px = new byte[h];
+            for (int i = 0; i < n; i++) {
+                int rank = switch (r.status(s[i])) {
+                    case REMOVED -> 4;
+                    case ADDED -> 3;
+                    case CHANGED -> 2;
+                    case DUPLICATE -> 1;
+                    case SAME -> 0;
+                };
+                if (rank > 0) {
+                    int y = (int) ((long) i * h / n);
+                    if (rank > px[y]) {
+                        px[y] = (byte) rank;
+                    }
+                }
+            }
+            int markH = Math.max(2, h / n);
+            for (int y = 0; y < h; y++) {
+                if (px[y] > 0) {
+                    g.setColor(switch (px[y]) {
+                        case 4 -> removedColor();
+                        case 3 -> addedColor();
+                        case 2 -> changedColor();
+                        default -> duplicateColor();
+                    });
+                    g.fillRect(2, top() + y, getWidth() - 4, markH);
+                }
+            }
+            // where the view is now
+            JTable t = viewTable();
+            if (t.getParent() instanceof javax.swing.JViewport v && t.getHeight() > 0) {
+                java.awt.Rectangle vr = v.getViewRect();
+                int y0 = top() + (int) ((long) vr.y * h / t.getHeight());
+                int y1 = top() + (int) ((long) (vr.y + vr.height) * h / t.getHeight());
+                g.setColor(Theme.pick(new Color(0, 0, 0, 60), new Color(255, 255, 255, 70)));
+                g.drawRect(0, y0, getWidth() - 1, Math.max(3, y1 - y0 - 1));
+            }
+        }
+    }
+
+    void clickChangeStripForTest(double fraction) {
+        ChangeStrip c = strips.get(sideBySide ? 1 : 0);
+        c.jump(c.top() + (int) (fraction * c.span()));
     }
 
     private ChangeNavigator navigator() {
@@ -1759,6 +1993,7 @@ final class CsvCompareTab extends JPanel {
                     case ADDED -> Theme.pick(new Color(0xECFDF3), new Color(0x1B2D21));
                     case REMOVED -> Theme.pick(new Color(0xFEF2F2), new Color(0x33201F));
                     case DUPLICATE -> Theme.pick(new Color(0xF5F3FF), new Color(0x2A2440));
+                    case CHANGED -> Theme.pick(new Color(0xFFFBEB), new Color(0x2B271B)); // the whole row, faintly
                     default -> row % 2 == 1 ? Theme.stripe() : Theme.background();
                 };
             }
@@ -1781,7 +2016,7 @@ final class CsvCompareTab extends JPanel {
                 if (model.notCompared.contains(pair)) {
                     fg = Theme.gutterForeground();
                 } else if (s == DiffStatus.CHANGED && r.isChanged(item, pair)) {
-                    bg = Theme.pick(new Color(0xFFF4DB), new Color(0x3A3018));
+                    bg = Theme.pick(new Color(0xFDE5A8), new Color(0x4A3A12));
                     fg = side == 0 ? removedColor() : addedColor();
                     bold = true;
                 } else if (s == DiffStatus.ADDED) {
@@ -1987,6 +2222,17 @@ final class CsvCompareTab extends JPanel {
             }
         }
         return null;
+    }
+
+    /** The tiles lit: those whose rows the table shows. */
+    List<DiffStatus> tilesOnForTest() {
+        List<DiffStatus> out = new ArrayList<>();
+        for (Tile t : tiles) {
+            if (t.isVisible() && t.isOn()) {
+                out.add(t.status);
+            }
+        }
+        return out;
     }
 
     void clickTileForTest(DiffStatus s) {

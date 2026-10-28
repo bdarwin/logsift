@@ -6095,6 +6095,21 @@ class VisualTest {
         });
         assertEquals(6, onEdt(tab::shownForTest).length);
         assertEquals("Added", onEdt(() -> tab.showForTest().getSelectedItem()));
+        assertEquals(List.of(logsift.core.diff.DiffStatus.ADDED), onEdt(tab::tilesOnForTest), "only its tile is lit");
+        settle();
+        shot("106i-csv-compare-tile-on");
+        // a click on the tile shown alone goes back to all differences
+        onEdt(() -> {
+            tab.clickTileForTest(logsift.core.diff.DiffStatus.ADDED);
+            return null;
+        });
+        assertEquals("All differences", onEdt(() -> tab.showForTest().getSelectedItem()));
+        assertFalse(onEdt(tab::tilesOnForTest).contains(logsift.core.diff.DiffStatus.SAME), "same rows aren't shown");
+        assertTrue(onEdt(tab::tilesOnForTest).contains(logsift.core.diff.DiffStatus.CHANGED));
+        onEdt(() -> {
+            tab.clickTileForTest(logsift.core.diff.DiffStatus.ADDED);
+            return null;
+        });
         onEdt(() -> {
             tab.showForTest().setSelectedIndex(6); // everything
             return null;
@@ -6497,11 +6512,27 @@ class VisualTest {
         });
         assertEquals(List.of("Status", "Line (left → right)", "sku (key)", "name", "stock"), onEdt(tab::columnsForTest));
 
-        // side by side: the left file's rows next to the right file's, one line per key
+        // side by side: the left file's rows next to the right file's, one line per key, every row
+        onEdt(() -> {
+            JTable t = tab.tableForTest();
+            t.setRowSelectionInterval(1, 1);
+            return null;
+        });
+        int pickedItem = onEdt(() -> tab.shownForTest()[1]);
         onEdt(() -> {
             tab.setSideBySideForTest(true);
             return null;
         });
+        assertEquals("Everything", onEdt(() -> tab.showForTest().getSelectedItem()), "side by side shows every row");
+        assertEquals(again.size(), onEdt(tab::shownForTest).length);
+        assertEquals(pickedItem, onEdt(() -> tab.shownForTest()[tab.tableForTest().getSelectedRow()]),
+                "the selected row stays selected");
+        // the strip by the scroll bar goes to the difference nearest a click
+        onEdt(() -> {
+            tab.clickChangeStripForTest(0.5);
+            return null;
+        });
+        assertTrue(onEdt(() -> again.status(tab.shownForTest()[tab.tableForTest().getSelectedRow()]).isDifference()));
         assertEquals(List.of("Status", "Line", "sku (key)", "name", "stock"), onEdt(() -> tab.sideColumnsForTest(0)));
         assertEquals(List.of("Line", "sku (key)", "name", "stock"), onEdt(() -> tab.sideColumnsForTest(1)));
         int[] sideShown = onEdt(tab::shownForTest);
@@ -6534,6 +6565,23 @@ class VisualTest {
         shot("107f-compare-side-by-side-everything");
         onEdt(() -> {
             tab.showForTest().setSelectedIndex(0);
+            return null;
+        });
+        settle();
+        shot("107i-compare-side-by-side-differences");
+        onEdt(() -> {
+            tab.showForTest().setSelectedIndex(6); // remembered for side by side
+            tab.setSideBySideForTest(false);
+            return null;
+        });
+        assertEquals("All differences", onEdt(() -> tab.showForTest().getSelectedItem()),
+                "the table's own Show comes back");
+        onEdt(() -> {
+            tab.setSideBySideForTest(true);
+            return null;
+        });
+        assertEquals("Everything", onEdt(() -> tab.showForTest().getSelectedItem()));
+        onEdt(() -> {
             tab.setSideBySideForTest(false);
             return null;
         });
