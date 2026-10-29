@@ -164,6 +164,24 @@ public final class Workspace implements AutoCloseable {
         }
     }
 
+    /** Files Logsift wrote for this session (merged logs): removed when it ends. */
+    private final List<Path> generated = new ArrayList<>();
+
+    /**
+     * Opens a file Logsift itself wrote for this session (a merge of logs, in its temporary
+     * folder, so outside the agent's folders) and gives its handle.
+     */
+    public String openGenerated(Path file) throws IOException {
+        Path abs = file.toAbsolutePath().normalize();
+        synchronized (this) {
+            String h = "log:" + nextLog++;
+            logs.put(h, LogAnalysis.open(abs, options.formats()));
+            shown.put(h, abs);
+            generated.add(abs);
+            return h;
+        }
+    }
+
     /** The path a log was opened by (the .gz or zip entry, not the copy read). */
     public synchronized Path shownPath(String handle) {
         return shown.get(handle);
@@ -338,5 +356,21 @@ public final class Workspace implements AutoCloseable {
             shown.clear();
         }
         all.forEach(LogAnalysis::close);
+        List<Path> files;
+        synchronized (this) {
+            files = new ArrayList<>(generated);
+            generated.clear();
+        }
+        for (Path f : files) {
+            try {
+                Files.deleteIfExists(f);
+                Path dir = f.getParent();
+                if (dir != null && dir.getFileName().toString().startsWith("logsift-agent-")) {
+                    Files.deleteIfExists(dir); // only our own folder, and only if empty
+                }
+            } catch (IOException e) {
+                // left for the system's temp cleanup
+            }
+        }
     }
 }

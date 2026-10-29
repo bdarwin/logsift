@@ -41,6 +41,8 @@ public final class LogTools {
     public static List<Tool> all() {
         List<Tool> all = new ArrayList<>(List.of(LIST_LOGS, OPEN_LOG, LIST_OPEN, INSIGHTS, EXCEPTIONS, SEARCH,
                 READ_LINES, TOP_MESSAGES, METRICS, QUERY, SEARCH_FOLDER, ANALYZE_GC, ANALYZE_THREADS));
+        all.addAll(TraceTools.all());
+        all.addAll(CompareTools.all());
         all.addAll(CrashTools.all());
         return List.copyOf(all);
     }

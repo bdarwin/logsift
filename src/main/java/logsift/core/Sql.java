@@ -138,7 +138,8 @@ public final class Sql implements AutoCloseable {
             default -> "utf-8";
         };
         String src = "read_csv('" + quote(file.toAbsolutePath().toString()) + "', delim='" + quote(String.valueOf(delimiter))
-                + "', header=" + header + ", encoding='" + enc + "', sample_size=20480)";
+                + "', header=" + header + ", encoding='" + enc + "', sample_size=20480, strict_mode=false)";
+        // not strict: real files mix line ends (\n and \r\n), which the strict reader refuses
         try (Statement s = conn.createStatement()) {
             s.execute("CREATE OR REPLACE VIEW " + ident(name) + " AS SELECT row_number() OVER () + " + (header ? 1 : 0)
                     + " AS line, * FROM " + src);

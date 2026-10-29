@@ -48,6 +48,18 @@ class SqlTest {
     }
 
     @Test
+    void csvWithMixedLineEnds() throws Exception {
+        Path f = dir.resolve("mixed.csv");
+        Files.writeString(f, "order_id,region,amount\n1,North,12.5\r\n2,South,3\r\n3,North,4.5\r\n");
+        try (Sql sql = open()) {
+            sql.csv("t", f, ',', true, java.nio.charset.StandardCharsets.UTF_8);
+            Sql.Result r = sql.query("SELECT count(*), sum(amount) FROM t", 10, null);
+            assertEquals(3L, ((Number) r.rows().get(0)[0]).longValue());
+            assertEquals(20.0, ((Number) r.rows().get(0)[1]).doubleValue(), 1e-9);
+        }
+    }
+
+    @Test
     void aLogIsLoadedWithItsLinesTimesAndColumns() throws Exception {
         Path f = dir.resolve("app.log");
         Files.writeString(f, """

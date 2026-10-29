@@ -151,6 +151,12 @@ The file is plain JSON, if you prefer to write it by hand:
 | **search_folder** | Every file in a folder that contains a text, inside zips and `.gz` files too; give a service's name to search all its folders |
 | **analyze_gc** | Explains a GC log: pauses, time stopped, heap after collections, and what to tune |
 | **analyze_threads** | Explains thread dumps: deadlocks, lock queues, stuck and busy threads |
+| **follow_request** | One request, trace or order id through a log, several logs or a service's folders: its lines in time order, the threads, the errors, the longest wait |
+| **merge_logs** | Several logs merged by time into one (a temporary copy, never next to your files), to search and query together |
+| **analyze_profile** | A profile (a `.jfr` recording or collapsed stacks): the hottest methods, your own code's share, the hottest stacks |
+| **compare_files** | Two files: CSV/TSV as tables matched by a key (added, removed and changed rows, old → new), anything else line by line (times, numbers or IDs masked if asked) |
+| **compare_folders** | Two folders or zips, file by file: the same, different, only on one side |
+| **compare_logs** | A bad run against a good one, by kinds of message: new, gone, much more or less often |
 | **analyze_crash** | Explains a crash file: a Windows dump (`.dmp`, `.mdmp`) or a Java `hs_err_pid` file. What happened, the code to blame, the crashed thread's stack, what other threads and libraries may have caused it, and what to try |
 | **crash_threads** | The threads of a crash file with their stacks, threads with the same stack together; filter by name, state or function |
 | **crash_modules** | The DLLs or shared libraries loaded in the crashed process, with versions and paths |
@@ -160,6 +166,20 @@ Line numbers in answers start at 1, like in the log view. Times are the log's ow
 From a crash file the agent gets only the explanation: stacks, modules and facts. It never gets the process's memory that a dump holds.
 
 Long answers are cut, and say where. Slow work, such as a first look at a multi-GB log, goes on in the background. The agent is told to ask again in a few seconds.
+
+## Ready-made tasks
+
+Logsift also offers tasks that tell the agent how to go about a job, step by step, with which tools. It asks for evidence: line numbers, times and counts. Agents that support MCP prompts show them as commands. In VS Code's Copilot Chat, type `/` and look for `mcp.logsift.…`.
+
+| Task | Asks for | What the agent does |
+|---|---|---|
+| **investigate** | the problem in your words, and where (optional) | Finds the logs, insights and root causes, errors over time, the lines around the first error, one failing request end to end |
+| **explain_crash** | the crash file, and the logs around it (optional) | Explains the dump or `hs_err` file, the other threads and libraries, and what the logs show just before |
+| **compare_runs** | the bad run's log and the good run's | What's new or different in the bad run, and when they diverge |
+| **find_slow** | a service or log | Durations and percentiles over time, the slowest requests followed end to end, GC and threads for Java |
+| **health_check** | a service or log | A short report: healthy or not, and the top three things to look at |
+
+They come with `logsift-mcp`, so there's nothing else to install. Agents without prompts still get the same guidance when they connect.
 
 ## What it can't do
 

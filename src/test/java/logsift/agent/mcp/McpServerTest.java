@@ -211,7 +211,8 @@ class McpServerTest {
     void listsReadOnlyTools() throws Exception {
         List<Object> tools = list(map(request("tools/list", Map.of()).get("result")).get("tools"));
         assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines",
-                "top_messages", "metrics", "query", "search_folder", "analyze_gc", "analyze_threads", "analyze_crash",
+                "top_messages", "metrics", "query", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
+                "merge_logs", "analyze_profile", "compare_files", "compare_folders", "compare_logs", "analyze_crash",
                 "crash_threads", "crash_modules"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
@@ -537,6 +538,30 @@ class McpServerTest {
         Answer file = call("query", "log", f.toString(), "sql", "SELECT * FROM read_csv('" + csv + "')");
         assertTrue(file.error(), "no file access from SQL: " + file.text());
         assertTrue(call("query", "log", f.toString(), "sql", "SELECT 1; SELECT 2").text().startsWith("One query at a time"));
+    }
+
+    @Test
+    void offersReadyMadeTasks() throws Exception {
+        Map<String, Object> init = map(request("initialize", Map.of("protocolVersion", "2025-06-18")).get("result"));
+        assertTrue(map(init.get("capabilities")).containsKey("prompts"), init.toString());
+        assertTrue(String.valueOf(init.get("instructions")).contains("list_logs"));
+        List<Object> prompts = list(map(request("prompts/list", Map.of()).get("result")).get("prompts"));
+        assertEquals(List.of("investigate", "explain_crash", "compare_runs", "find_slow", "health_check"),
+                prompts.stream().map(p -> map(p).get("name")).toList());
+        for (Object p : prompts) {
+            assertFalse(list(map(p).get("arguments")).isEmpty(), String.valueOf(map(p).get("name")));
+        }
+        Map<String, Object> got = map(request("prompts/get", Map.of("name", "investigate", "arguments",
+                Map.of("problem", "orders failing since 10:00", "where", "orders"))).get("result"));
+        Map<String, Object> msg = map(list(got.get("messages")).get(0));
+        assertEquals("user", msg.get("role"));
+        String text = String.valueOf(map(msg.get("content")).get("text"));
+        assertTrue(text.contains("orders failing since 10:00") && text.contains("Where: orders"), text);
+        assertTrue(text.contains("insights") && text.contains("query") && text.contains("line numbers"), text);
+        Map<String, Object> missing = map(request("prompts/get", Map.of("name", "explain_crash")).get("result"));
+        assertTrue(String.valueOf(map(map(list(missing.get("messages")).get(0)).get("content")).get("text"))
+                .contains("find them with list_logs"), "an optional argument left out");
+        assertNotNull(request("prompts/get", Map.of("name", "nope")).get("error"));
     }
 
     @Test
