@@ -154,6 +154,8 @@ final class InsightsPanel extends JPanel {
             } catch (RuntimeException e) {
                 logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 error = e;
+            } catch (OutOfMemoryError e) {
+                error = new IllegalStateException("not enough memory for this (" + MainFrame.memoryAdvice() + ")");
             }
             Insights.Report done = r;
             Throwable failed = error;

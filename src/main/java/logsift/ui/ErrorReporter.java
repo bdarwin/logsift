@@ -1,5 +1,7 @@
 package logsift.ui;
 
+import java.util.List;
+
 import java.awt.BorderLayout;
 import java.awt.Font;
 import java.awt.FlowLayout;
@@ -41,6 +43,11 @@ final class ErrorReporter {
     private static JLabel moreLabel;
 
     private static final SessionErrors SESSION = new SessionErrors();
+
+    /** This session's errors (for tests). */
+    static List<SessionErrors.Entry> sessionForTest() {
+        return SESSION.list();
+    }
 
     /** This session's errors (for the status bar and the errors window). */
     static SessionErrors session() {

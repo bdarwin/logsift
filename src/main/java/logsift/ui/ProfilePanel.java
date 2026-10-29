@@ -70,6 +70,10 @@ final class ProfilePanel extends JPanel {
     private final javax.swing.Timer later = new javax.swing.Timer(400, e -> start());
 
     private static final int CARD_WIDTH = 330;
+    /** Cards made at a time: a table of 2,000 columns would take minutes to draw at once. */
+    static final int PAGE = 60;
+    private final javax.swing.JTextField filter = new javax.swing.JTextField(14);
+    private int shown = PAGE;
 
     ProfilePanel(Host host) {
         super(new BorderLayout());
@@ -81,6 +85,26 @@ final class ProfilePanel extends JPanel {
         summary.setFont(summary.getFont().deriveFont(Font.BOLD));
         top.add(summary);
         top.add(Box.createHorizontalGlue());
+        filter.putClientProperty("JTextField.placeholderText", "find a column, or cpu_*");
+        filter.putClientProperty("JTextField.showClearButton", true);
+        filter.setToolTipText("Part of a column's name, or a pattern: * is any text, ? one character");
+        filter.setMaximumSize(new Dimension(220, filter.getPreferredSize().height));
+        filter.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                refilter();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                refilter();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {}
+        });
+        top.add(filter);
+        top.add(Box.createHorizontalStrut(8));
         bar.setPreferredSize(new Dimension(100, 10));
         bar.setMaximumSize(new Dimension(100, 10));
         bar.setVisible(false);
@@ -119,9 +143,15 @@ final class ProfilePanel extends JPanel {
     List<ColumnCard> cardsForTest() {
         List<ColumnCard> out = new ArrayList<>();
         for (java.awt.Component c : cards.getComponents()) {
-            out.add((ColumnCard) c);
+            if (c instanceof ColumnCard cc) {
+                out.add(cc);
+            }
         }
         return out;
+    }
+
+    void setFilterForTest(String text) {
+        filter.setText(text);
     }
 
     /**
@@ -162,6 +192,8 @@ final class ProfilePanel extends JPanel {
             } catch (RuntimeException e) {
                 logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 error = e.getMessage();
+            } catch (OutOfMemoryError e) {
+                error = "not enough memory for this table (" + MainFrame.memoryAdvice() + ")";
             }
             ColumnProfile.Result done = r;
             String failed = error;
@@ -206,9 +238,43 @@ final class ProfilePanel extends JPanel {
                     r.lineCount());
         }
         summary.setText(text);
+        shown = PAGE;
+        fillCards();
+    }
+
+    private void refilter() {
+        shown = PAGE;
+        fillCards();
+    }
+
+    /** The cards of the columns the filter shows, the first {@link #shown} of them, then "Show more". */
+    private void fillCards() {
         cards.removeAll();
+        ColumnProfile.Result r = result;
+        if (r == null) {
+            layoutCards();
+            return;
+        }
+        List<ColumnProfile.Column> match = new ArrayList<>();
         for (ColumnProfile.Column c : r.columns()) {
-            cards.add(new ColumnCard(c, r.sampled()));
+            if (PivotPanel.fieldMatches(c.title(), filter.getText())) {
+                match.add(c);
+            }
+        }
+        for (int i = 0; i < match.size() && i < shown; i++) {
+            cards.add(new ColumnCard(match.get(i), r.sampled()));
+        }
+        if (match.size() > shown) {
+            int left = match.size() - shown;
+            JButton more = new JButton("Show " + Math.min(PAGE, left) + " More (" + String.format("%,d", left) + " left)");
+            more.setToolTipText("Or find the columns you want with the filter above");
+            more.addActionListener(e -> {
+                shown += PAGE;
+                fillCards();
+            });
+            JPanel holder = new JPanel(new java.awt.GridBagLayout());
+            holder.add(more);
+            cards.add(holder);
         }
         layoutCards();
     }

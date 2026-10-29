@@ -6902,6 +6902,119 @@ class VisualTest {
     }
 
     @Test
+    @Order(61)
+    void handlesAVeryWideTable() throws Exception {
+        // 2,000 columns once ran Profile, Insights and Pivot out of memory together
+        Path f = dir.resolve("wide-2000.csv");
+        if (!Files.exists(f)) {
+            java.util.Random rnd = new java.util.Random(1);
+            StringBuilder head = new StringBuilder("timestamp,host");
+            for (String g : List.of("cpu", "mem", "disk", "net")) {
+                for (int i = 0; i < 500; i++) {
+                    head.append(',').append(g).append('_').append(i);
+                }
+            }
+            try (var w = Files.newBufferedWriter(f)) {
+                w.write(head.substring(0, head.length()));
+                w.write('\n');
+                for (int r = 0; r < 6000; r++) {
+                    StringBuilder row = new StringBuilder(String.format("2026-10-28 10:%02d:%02d,web-%d", r / 60 % 60, r % 60,
+                            r % 4));
+                    for (int c = 0; c < 2000; c++) {
+                        row.append(',').append(rnd.nextInt(101));
+                    }
+                    w.write(row.append('\n').toString());
+                }
+            }
+        }
+        int errorsBefore = ErrorReporter.sessionForTest().size();
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                        && !frame.currentTab().document().isIndexing());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the wide table");
+        LogTab tab = onEdt(frame::currentTab);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the table's format");
+        assertEquals(2002, onEdt(() -> tab.logFormat().columns().size()));
+        ProfilePanel prof = onEdt(tab::profilePanel);
+        onEdt(() -> {
+            tab.showProfile();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> prof.result() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 120_000, "the profile of 2,002 columns");
+        logsift.core.ColumnProfile.Result pr = onEdt(prof::result);
+        assertEquals(2002, pr.columns().size());
+        assertTrue(pr.sampled() && pr.rows() < 6000, "a table this wide is read as a sample: " + pr.rows() + " rows");
+        assertEquals(ProfilePanel.PAGE, (int) onEdt(() -> prof.cardsForTest().size()), "cards made a page at a time");
+        onEdt(() -> {
+            prof.setFilterForTest("mem_4??");
+            return null;
+        });
+        assertEquals(ProfilePanel.PAGE, (int) onEdt(() -> prof.cardsForTest().size()), "mem_400 … mem_499: a page");
+        onEdt(() -> {
+            prof.setFilterForTest("mem_49?");
+            return null;
+        });
+        assertEquals(10, (int) onEdt(() -> prof.cardsForTest().size()));
+
+        PivotPanel pp = onEdt(tab::pivotPanel);
+        onEdt(() -> {
+            tab.showPivot();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.fieldsForTest().size() == 2002);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the pivot's fields");
+        onEdt(() -> {
+            pp.setFieldFilterForTest("cpu_1?");
+            return null;
+        });
+        assertEquals(10, (int) onEdt(pp::shownFieldCountForTest), "cpu_10 … cpu_19");
+        onEdt(() -> {
+            pp.addField(PivotPanel.Area.ROWS, pp.columnForTest("host"));
+            pp.addMatching(PivotPanel.Area.VALUES);
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(10, onEdt(() -> pp.areaForTest(PivotPanel.Area.VALUES)).size());
+        assertTrue(onEdt(() -> pp.areaForTest(PivotPanel.Area.VALUES)).get(0).startsWith("Sum of cpu_1"));
+        settle();
+        shot("115-pivot-wide-wildcards");
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "nothing failed: "
+                + ErrorReporter.sessionForTest());
+        assertTrue(PivotPanel.fieldMatches("disk_42", "DISK_*"));
+        assertTrue(PivotPanel.fieldMatches("latency_ms", "_ms"));
+        assertFalse(PivotPanel.fieldMatches("cpu_100", "cpu_1?"));
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+    }
+
+    @Test
     @Order(56)
     void comparesFromTheCompareTab() throws Exception {
         // the left file is in a zip inside a zip (old/exports.zip in bundle.zip); the right one is on disk

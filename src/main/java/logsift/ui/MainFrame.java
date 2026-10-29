@@ -3911,6 +3911,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    /** "Logsift may use 2.0 GB; close other tabs to free some" (after running out of memory). */
+    static String memoryAdvice() {
+        return "Logsift may use " + humanBytes(Runtime.getRuntime().maxMemory()) + "; close other tabs to free some";
+    }
+
     private static String memory() {
         Runtime r = Runtime.getRuntime();
         long used = (r.totalMemory() - r.freeMemory()) >> 20;

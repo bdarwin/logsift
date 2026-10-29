@@ -51,7 +51,11 @@ These are [filters on a column](filters.md#filters-on-a-column): they show as ch
 
 ## Big files
 
-A file with more than 200,000 lines is read in blocks of lines from all over the file, and the Profile says so: *in a sample of 200,000 of 12,400,000 lines*. Counts and *different* are then those of the sample.
+A file with more than 200,000 lines is read in blocks of lines from all over the file, and the Profile says so: *in a sample of 200,000 of 12,400,000 lines*. Counts and *different* are then those of the sample. A wide table is read in fewer rows, so it fits in memory: about 4 million values in all, so 2,000 columns are profiled from about 2,000 rows.
+
+## Many columns
+
+The cards come 60 at a time: **Show 60 More** at the end makes the next ones. **find a column** (top right) shows only the columns whose name has that text, or matches a pattern: `cpu_*`, `*_ms`, `mem_4??`.
 
 ## Tables without times
 

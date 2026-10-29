@@ -64,6 +64,17 @@ public final class ColumnProfile {
 
     /** Files with more lines are read in blocks spread over the file. */
     public static final int MAX_ROWS = 200_000;
+    /**
+     * The most cells kept (every value is kept until the column is profiled): a wide table is
+     * read in fewer rows, so 2,000 columns don't fill the memory.
+     */
+    static final long MAX_CELLS = 4_000_000;
+    private static final int MIN_ROWS = 1_000;
+
+    /** How many rows are read for a table this wide. */
+    static int rowsFor(int columns) {
+        return (int) Math.max(MIN_ROWS, Math.min(MAX_ROWS, MAX_CELLS / Math.max(1, columns)));
+    }
     private static final int BLOCK = 500;
     private static final int MAX_TRACKED = 10_000; // different values counted exactly
     static final int MAX_CATEGORIES = 20;
@@ -92,10 +103,11 @@ public final class ColumnProfile {
         for (int c = 0; c < n; c++) {
             values.add(new ArrayList<>());
         }
-        boolean sampled = lineCount > MAX_ROWS;
+        int maxRows = rowsFor(n);
+        boolean sampled = lineCount > maxRows;
         long rows = 0;
         long read = 0;
-        long blocks = sampled ? MAX_ROWS / BLOCK : 1;
+        long blocks = sampled ? Math.max(1, maxRows / BLOCK) : 1;
         String[] buf = new String[4096];
         for (long b = 0; b < blocks; b++) {
             long from = sampled ? b * (lineCount / blocks) : 0;

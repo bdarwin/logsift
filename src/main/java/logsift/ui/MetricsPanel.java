@@ -220,6 +220,8 @@ final class MetricsPanel extends JPanel {
             } catch (RuntimeException e) {
                 logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 error = e.getMessage();
+            } catch (OutOfMemoryError e) {
+                error = "not enough memory for this (" + MainFrame.memoryAdvice() + ")";
             }
             Metrics done = r;
             String failed = error;

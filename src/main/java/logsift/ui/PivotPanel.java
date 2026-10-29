@@ -424,7 +424,8 @@ final class PivotPanel extends JPanel {
         JLabel title = new JLabel("Fields");
         title.setFont(title.getFont().deriveFont(Font.BOLD));
         head.add(title, BorderLayout.NORTH);
-        fieldFilter.putClientProperty("JTextField.placeholderText", "find a field");
+        fieldFilter.putClientProperty("JTextField.placeholderText", "find a field, or cpu_* for many");
+        fieldFilter.setToolTipText("Part of a name, or a pattern: * is any text, ? one character (cpu_*, *_ms)");
         fieldFilter.putClientProperty("JTextField.showClearButton", true);
         fieldFilter.getDocument().addDocumentListener(new DocumentListener() {
             @Override
@@ -441,6 +442,19 @@ final class PivotPanel extends JPanel {
             public void changedUpdate(DocumentEvent e) {}
         });
         head.add(fieldFilter, BorderLayout.CENTER);
+        addMatching.setLayout(new WrapLayout(java.awt.FlowLayout.LEFT, 4, 0));
+        addMatchingText.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        addMatching.add(addMatchingText);
+        for (Area a : List.of(Area.VALUES, Area.ROWS, Area.COLUMNS, Area.FILTERS)) {
+            JButton b = new JButton(a == Area.VALUES ? "Values" : a == Area.ROWS ? "Rows" : a == Area.COLUMNS ? "Columns"
+                    : "Filters");
+            b.putClientProperty("JButton.buttonType", "toolBarButton");
+            b.setToolTipText("Puts every field the filter shows in " + b.getText());
+            b.addActionListener(e -> addMatching(a));
+            addMatching.add(b);
+        }
+        addMatching.setVisible(false);
+        head.add(addMatching, BorderLayout.SOUTH);
         p.add(head, BorderLayout.NORTH);
 
         fieldList.setCellRenderer(new FieldRenderer());
@@ -518,16 +532,71 @@ final class PivotPanel extends JPanel {
         return fields == null || column < 0 || column >= fields.titles().size() ? "?" : fields.titles().get(column);
     }
 
+    private final JPanel addMatching = new JPanel();
+    private final JLabel addMatchingText = new JLabel();
+
+    /** Whether a field's name matches the filter: a part of it, or a pattern with * and ?. */
+    static boolean fieldMatches(String title, String filter) {
+        String q = filter.strip().toLowerCase(Locale.ROOT);
+        if (q.isEmpty()) {
+            return true;
+        }
+        String t = title.toLowerCase(Locale.ROOT);
+        if (q.indexOf('*') < 0 && q.indexOf('?') < 0) {
+            return t.contains(q);
+        }
+        StringBuilder re = new StringBuilder();
+        for (char ch : q.toCharArray()) {
+            re.append(ch == '*' ? ".*" : ch == '?' ? "." : java.util.regex.Pattern.quote(String.valueOf(ch)));
+        }
+        return t.matches(re.toString());
+    }
+
     private void fillFields() {
         fieldModel.clear();
         if (fields == null) {
+            addMatching.setVisible(false);
             return;
         }
-        String q = fieldFilter.getText().strip().toLowerCase(Locale.ROOT);
+        String q = fieldFilter.getText();
         for (int c = 0; c < fields.titles().size(); c++) {
-            if (q.isEmpty() || fields.titles().get(c).toLowerCase(Locale.ROOT).contains(q)) {
+            if (fieldMatches(fields.titles().get(c), q)) {
                 fieldModel.addElement(c);
             }
+        }
+        int n = fieldModel.size();
+        boolean many = !q.isBlank() && n > 1;
+        addMatching.setVisible(many);
+        if (many) {
+            addMatchingText.setText("Add the " + n + " to:");
+        }
+        revalidate();
+    }
+
+    /** The most fields one click puts in an area. */
+    static final int MAX_ADD = 200;
+
+    /** Puts every field the filter shows (not already used) in an area. */
+    void addMatching(Area a) {
+        int added = 0;
+        int left = 0;
+        for (int i = 0; i < fieldModel.size(); i++) {
+            int c = fieldModel.get(i);
+            if (used(c)) {
+                continue;
+            }
+            if (added >= MAX_ADD) {
+                left++;
+                continue;
+            }
+            areas.get(a).addElement(newItem(c, a));
+            added++;
+        }
+        if (added > 0) {
+            changed();
+        }
+        if (left > 0) {
+            status.setText("Added " + added + " fields; " + left + " more match (at most " + MAX_ADD + " at a time).");
         }
     }
 
@@ -899,6 +968,8 @@ final class PivotPanel extends JPanel {
             } catch (RuntimeException e) {
                 logsift.core.Problems.unexpected(e);
                 error = e.getMessage();
+            } catch (OutOfMemoryError e) {
+                error = "not enough memory for this pivot (" + MainFrame.memoryAdvice() + ")";
             }
             Pivot.Fields gotFields = f;
             Pivot.Result got = r;
@@ -1804,6 +1875,14 @@ final class PivotPanel extends JPanel {
         return t && c ? "both" : t ? "table" : c ? "chart" : "nothing";
     }
 
+
+    void setFieldFilterForTest(String text) {
+        fieldFilter.setText(text);
+    }
+
+    int shownFieldCountForTest() {
+        return fieldModel.size();
+    }
 
     void setViewForTest(String v) {
         setView(v);

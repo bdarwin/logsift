@@ -124,6 +124,10 @@ public final class ColumnMetrics {
         }
         long step = Math.max(1, lineCount / SAMPLE_ROWS);
         int rows = 0;
+        String[] units = new String[cols.size()]; // once per column, not per cell
+        for (int c = 0; c < units.length; c++) {
+            units[c] = unitOf(titles.get(c));
+        }
         for (long l = 0; l < lineCount; l += step) {
             if ((l & 255) == 0 && cancelled.getAsBoolean()) {
                 return Data.NONE;
@@ -140,7 +144,7 @@ public final class ColumnMetrics {
                 }
                 Look k = looks[c];
                 k.filled++;
-                double n = Numbers.parse(v, unitOf(titles.get(c)), new Numbers.Unit[1]);
+                double n = c < units.length ? Numbers.parse(v, units[c], new Numbers.Unit[1]) : Double.NaN;
                 if (!Double.isNaN(n)) {
                     k.numbers++;
                     if (!(n < k.last)) {
