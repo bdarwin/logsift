@@ -64,6 +64,8 @@ Other agents: add a local (stdio) MCP server called `logsift` that runs `logsift
    - *Why did orders fail last night?* (with [your log locations](#where-your-logs-are) described)
    - *Group the exceptions in /var/log/app/app.log and tell me which started after 10:00.*
    - *Is the GC in ~/gc.log healthy?*
+   - *Why did the JVM crash? ~/crash/hs_err_pid31337.log*
+   - *Explain the crash in C:\dumps\orders-service.dmp: which thread crashed and what were the others doing?*
 
 The first time it uses a Logsift tool, Copilot CLI asks whether to allow it; choose to allow it for the session (or always). Logsift's tools only read. To skip the question, start it with `copilot --allow-tool=logsift`.
 
