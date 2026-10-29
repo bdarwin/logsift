@@ -51,6 +51,27 @@ public final class Sql implements AutoCloseable {
         return unavailable.isEmpty();
     }
 
+    /**
+     * Whether DuckDB works, if that's known yet (loading its library takes a moment): true,
+     * false, or null while not tried. Never waits.
+     */
+    public static Boolean availableIfKnown() {
+        String u = unavailable;
+        return u == null ? null : u.isEmpty();
+    }
+
+    /** Finds out whether DuckDB works, on a background thread; then runs {@code then} there. */
+    public static void checkInBackground(Runnable then) {
+        Thread t = new Thread(() -> {
+            available();
+            if (then != null) {
+                then.run();
+            }
+        }, "logsift-sql-check");
+        t.setDaemon(true);
+        t.start();
+    }
+
     /** Why SQL isn't available; "" when it is. */
     public static String unavailableReason() {
         available();
@@ -305,6 +326,8 @@ public final class Sql implements AutoCloseable {
         SQLException[] failed = {null};
         RuntimeException[] bug = {null};
         org.duckdb.DuckDBConnection base = conn.unwrap(org.duckdb.DuckDBConnection.class);
+        // a table's rows whole (a quoted value may go over lines); a log's lines
+        ColumnProfile.Lines lines = t.fields != null ? CsvRows.reader(t.doc, t.format) : t.doc::readLines;
         int[] index = new int[t.columns.size()];
         for (int i = 0; i < index.length; i++) {
             index[i] = t.fields != null ? i : t.format.columns().indexOf(t.columns.get(i));
@@ -321,7 +344,7 @@ public final class Sql implements AutoCloseable {
                             return;
                         }
                         int k = (int) Math.min(BLOCK, to - first);
-                        t.doc.readLines(first, k, buf);
+                        lines.read(first, k, buf);
                         for (int i = 0; i < k; i++) {
                             String text = buf[i] == null ? "" : buf[i];
                             String[] cells = t.format == null ? null : t.format.split(text, null);

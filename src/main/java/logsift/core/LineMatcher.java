@@ -218,6 +218,8 @@ abstract sealed class LineMatcher {
         private final java.util.function.Predicate<String> test;
         private final Literal literal;
         private final java.nio.charset.Charset cs;
+        /** A table's rows, where a quoted value may go over several lines; null for a log. */
+        volatile CsvRows rows;
 
         InColumn(LogFormat format, String column, java.util.function.Predicate<String> test, Literal literal,
                  java.nio.charset.Charset cs) {
@@ -243,7 +245,8 @@ abstract sealed class LineMatcher {
 
         @Override
         void scan(byte[] buf, int len, long firstLine, HitSink sink, BooleanSupplier cancelled) {
-            if (literal != null) {
+            CsvRows r = rows;
+            if (literal != null && r == null) {
                 literal.scanCandidates(buf, len, firstLine, this, sink, cancelled);
                 return;
             }
@@ -252,7 +255,15 @@ abstract sealed class LineMatcher {
             while (pos < len) {
                 int nl = ByteScan.indexOf(buf, pos, len, (byte) '\n');
                 int end = nl < 0 ? len : nl;
-                if (matches(buf, pos, end) && !sink.hit(line)) {
+                boolean hit;
+                if (r == null) {
+                    hit = matches(buf, pos, end);
+                } else if (r.continues(line)) {
+                    hit = false; // part of the row above: the row is matched at its first line
+                } else {
+                    hit = r.span(line) > 1 ? matchesLine(r.row(line)) : matches(buf, pos, end);
+                }
+                if (hit && !sink.hit(line)) {
                     return;
                 }
                 if (nl < 0) {

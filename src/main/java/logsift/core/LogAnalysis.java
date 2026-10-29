@@ -38,8 +38,7 @@ public final class LogAnalysis implements AutoCloseable {
     /** {@link #detect}, from the first of {@code lines} (the lines known when it was asked for). */
     public static Formats.Detected detect(LogDocument doc, long lines, List<CustomFormat> custom, String fileName,
                                           String chosen) {
-        String[] sample = new String[(int) Math.min(lines, SAMPLE_LINES)];
-        doc.readLines(0, sample.length, sample);
+        String[] sample = sample(doc, lines);
         int year = java.time.Year.now().getValue();
         try {
             year = java.time.Instant.ofEpochMilli(Files.getLastModifiedTime(doc.path()).toMillis())
@@ -48,6 +47,29 @@ public final class LogAnalysis implements AutoCloseable {
             // keep this year
         }
         return Formats.detect(Arrays.asList(sample), custom, fileName, chosen, year);
+    }
+
+    /** The most text read to work out the format (a wide table's rows are long). */
+    static final long SAMPLE_CHARS = 16_000_000;
+
+    /**
+     * The first lines, whole (a table's rows can be far longer than a line shown on screen),
+     * at most {@link #SAMPLE_LINES} and about {@link #SAMPLE_CHARS} of text.
+     */
+    public static String[] sample(LogDocument doc, long lines) {
+        int max = (int) Math.min(lines, SAMPLE_LINES);
+        List<String> out = new ArrayList<>(max);
+        long chars = 0;
+        String[] block = new String[16];
+        for (int first = 0; first < max && chars < SAMPLE_CHARS; first += block.length) {
+            int k = Math.min(block.length, max - first);
+            doc.readFullLines(first, k, block, CsvRows.MAX_ROW_BYTES);
+            for (int i = 0; i < k && chars < SAMPLE_CHARS; i++) {
+                out.add(block[i]);
+                chars += block[i] == null ? 0 : block[i].length();
+            }
+        }
+        return out.toArray(new String[0]);
     }
 
     /**
@@ -158,7 +180,7 @@ public final class LogAnalysis implements AutoCloseable {
         if (me == null || stop.getAsBoolean()) {
             return null;
         }
-        java.util.List<Numbers.Series> cols = ColumnMetrics.analyze(lf, doc.lineCount(), doc::line, tf, stop);
+        java.util.List<Numbers.Series> cols = ColumnMetrics.analyze(lf, doc.lineCount(), CsvRows.rowText(doc, lf), tf, stop);
         return stop.getAsBoolean() ? null : me.withColumns(cols);
     }
 

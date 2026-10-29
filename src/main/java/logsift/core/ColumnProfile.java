@@ -97,7 +97,7 @@ public final class ColumnProfile {
     public static Result analyze(LogFormat format, long lineCount, Lines lines, LongPredicate include, int year,
                                  BooleanSupplier cancelled, java.util.function.DoubleConsumer progress) {
         List<String> cols = format.columns();
-        List<String> titles = format.headerNames() != null ? format.headerNames() : cols;
+        List<String> titles = format.titles();
         int n = cols.size();
         List<List<String>> values = new ArrayList<>();
         for (int c = 0; c < n; c++) {

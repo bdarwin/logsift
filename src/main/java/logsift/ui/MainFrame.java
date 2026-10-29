@@ -133,6 +133,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     public MainFrame() {
         super(logsift.core.Channel.appName());
         logsift.core.Numbers.setOptions(logsift.core.Numbers.Options.load(AppState.home()));
+        logsift.core.Sql.checkInBackground(null); // DuckDB's library loads in a moment, not while a file opens
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         setIconImages(logsift.tools.IconGenerator.windowIcons());
         setSize(PREFS.getInt("width", 1280), PREFS.getInt("height", 820));

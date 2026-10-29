@@ -20,6 +20,8 @@ public final class LogFormat {
     private final String timePattern;       // how the time column is written (custom only), or null
     private final char delimiter;           // CSV: the separator; 0 otherwise
     private final String header;            // CSV: the header row (not a row of values)
+    private volatile List<String> headerNames;           // the header's names, once split
+    private volatile java.util.Map<String, Integer> columnIndex; // a column's place, by name
 
     static final String TS = "\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?";
     static final String LEVEL = "TRACE|DEBUG|INFO|NOTICE|WARN(?:ING)?|ERROR|SEVERE|FATAL|CRITICAL";
@@ -193,25 +195,27 @@ public final class LogFormat {
      * of names, and the other formats having found nothing.
      */
     public static LogFormat detectCsv(List<String> sample, boolean named) {
-        String header = null;
-        List<String> rows = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
         for (String s : sample) {
-            if (s == null || s.isBlank()) {
-                continue;
-            }
-            if (header == null) {
-                header = s.startsWith("\uFEFF") ? s.substring(1) : s;
-            } else {
-                rows.add(s);
+            if (s != null && !s.isBlank()) {
+                lines.add(lines.isEmpty() && s.startsWith("\uFEFF") ? s.substring(1) : s);
             }
         }
-        if (header == null || (!named && rows.size() < 4)) {
+        if (lines.isEmpty() || (!named && lines.size() < 5)) {
             return null;
         }
         char best = 0;
         double bestShare = 0;
+        String header = null;
         for (char d : new char[] {',', ';', '\t', '|'}) {
-            int n = Csv.fieldCount(header, d);
+            // rows, not lines: a quoted value may go over a line break
+            List<String> joined = CsvRows.join(lines, d);
+            String head = joined.get(0);
+            List<String> rows = joined.subList(1, joined.size());
+            if (!named && rows.size() < 4) {
+                continue;
+            }
+            int n = Csv.fieldCount(head, d);
             if (n < (named ? 2 : 3)) {
                 continue;
             }
@@ -225,6 +229,7 @@ public final class LogFormat {
             if (share > bestShare) {
                 best = d;
                 bestShare = share;
+                header = head;
             }
         }
         if (best == 0 || bestShare < (named ? 0.5 : 0.9)) {
@@ -281,11 +286,35 @@ public final class LogFormat {
      */
     public String displayName(String column) {
         List<String> names = headerNames();
-        int i = columns.indexOf(column);
+        java.util.Map<String, Integer> at = columnIndex;
+        if (at == null) {
+            java.util.Map<String, Integer> m = new java.util.HashMap<>();
+            for (int k = columns.size() - 1; k >= 0; k--) {
+                m.put(columns.get(k), k);
+            }
+            columnIndex = at = m;
+        }
+        int i = at.getOrDefault(column, -1);
         if (names != null && i >= 0 && !names.get(i).isEmpty()) {
             return names.get(i);
         }
         return column.isEmpty() ? column : column.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + column.substring(1);
+    }
+
+    /**
+     * The columns' titles for tables (Profile, Pivot): a CSV's names as written ("order_id"), its
+     * column's name where the header has none ("column 5"); the columns of other formats.
+     */
+    public List<String> titles() {
+        List<String> names = headerNames();
+        if (names == null) {
+            return columns;
+        }
+        List<String> out = new ArrayList<>(names.size());
+        for (int i = 0; i < names.size(); i++) {
+            out.add(names.get(i).isEmpty() ? columns.get(i) : names.get(i));
+        }
+        return out;
     }
 
     /** CSV: the header's names as written, one per column (null for other formats). */
@@ -293,7 +322,12 @@ public final class LogFormat {
         if (header == null) {
             return null;
         }
-        List<String> names = Csv.split(header, delimiter, null).stream().map(String::strip).toList();
+        List<String> names = headerNames;
+        if (names == null) {
+            // kept: a column's title is asked for each time it is drawn, and a wide header is long
+            names = Csv.split(header, delimiter, null).stream().map(String::strip).toList();
+            headerNames = names;
+        }
         return names.size() == columns.size() ? names : null;
     }
 

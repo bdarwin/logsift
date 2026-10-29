@@ -510,7 +510,7 @@ public final class LogTools {
                     String name = "file_" + h.replaceAll("\\W", "_");
                     if (table) {
                         logsift.core.Pivot.Fields fields = logsift.core.Pivot.fields(f.columns(), doc.lineCount(),
-                                doc::readLines, java.time.Year.now().getValue());
+                                logsift.core.CsvRows.reader(doc, f.columns()), java.time.Year.now().getValue());
                         return sql.table(name, doc, f.columns(), fields);
                     }
                     return sql.log(name, doc, f == null ? null : f.columns(), f == null ? null : f.times(),

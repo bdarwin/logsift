@@ -7168,6 +7168,113 @@ class VisualTest {
     }
 
     @Test
+    @Order(61)
+    void readsLongRowsAndValuesOverLineBreaks() throws Exception {
+        // an export: 2,000 columns of long values (rows of about 150 KB, more than a line shown)
+        // and notes with line breaks in them; rows over 128 KB once weren't rows at all
+        Path f = dir.resolve("export-long-rows.csv");
+        String[] regions = {"North", "South", "East", "West"};
+        int rows = 120;
+        try (var w = Files.newBufferedWriter(f)) {
+            StringBuilder head = new StringBuilder("region,note,amount");
+            for (int c = 3; c < 2000; c++) {
+                head.append(",Customer account balance adjusted for currency ").append(c);
+            }
+            w.write(head.append("\r\n").toString());
+            for (int r = 0; r < rows; r++) {
+                StringBuilder row = new StringBuilder(regions[r % 4]).append(',')
+                        .append(r % 10 == 0 ? "\"call back,\r\nafter 5 pm\"" : "fine").append(',').append(r);
+                for (int c = 3; c < 2000; c++) {
+                    row.append(",ACC-").append(String.format("%012d", r * 10_000L + c))
+                            .append("-EUR-2026-10-29T10:00:00.000Z-branch-Amsterdam-Zuidas");
+                }
+                w.write(row.append("\r\n").toString());
+            }
+        }
+        int errorsBefore = ErrorReporter.sessionForTest().size();
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                        && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the table");
+        LogTab tab = onEdt(frame::currentTab);
+        assertEquals(2000, onEdt(() -> tab.logFormat().columns().size()), "a header over 64 KB is a header");
+        assertEquals(rows + 1 + rows / 10, onEdt(() -> tab.document().lineCount()));
+        LogView view = onEdt(tab::mainView);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> view.cellsForTest(2) == null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the rows over two lines");
+        String[] first = onEdt(() -> view.cellsForTest(1));
+        assertEquals("call back,\nafter 5 pm", first[1], "a row over two lines: its note, whole");
+        assertEquals("ACC-000000001999-EUR-2026-10-29T10:00:00.000Z-branch-Amsterdam-Zuidas", first[1999],
+                "the last of 2,000 columns, 150 KB into the row");
+        assertEquals("1", onEdt(() -> view.cellsForTest(3))[2]);
+
+        PivotPanel pp = onEdt(tab::pivotPanel);
+        onEdt(() -> {
+            tab.showPivot();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.fieldsForTest().size() == 2000);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the pivot's fields");
+        onEdt(() -> {
+            pp.addField(PivotPanel.Area.ROWS, pp.columnForTest("region"));
+            pp.addField(PivotPanel.Area.VALUES, pp.columnForTest("amount"));
+            return null;
+        });
+        waitForPivot(pp);
+        logsift.core.Pivot.Result p = onEdt(pp::result);
+        assertEquals(rows, p.rows(), "rows, not lines");
+        assertEquals(List.of("East=30", "North=30", "South=30", "West=30"), p.root().kids().stream()
+                .map(k -> k.label() + "=" + k.rows()).sorted().toList());
+
+        if (logsift.core.Sql.available()) {
+            QueryPanel q = onEdt(tab::queryPanel);
+            onEdt(() -> {
+                tab.showQuery();
+                q.setQueryForTest("SELECT line, region, amount FROM t WHERE amount IN (0, 1, 11) ORDER BY amount");
+                return null;
+            });
+            logsift.core.Sql.Result r = runQuery(q);
+            assertEquals(List.of(2L, 4L, 15L), r.rows().stream().map(x -> ((Number) x[0]).longValue()).toList(),
+                    "the lines the rows start at (row 10 is pushed down by row 0's note)");
+            onEdt(() -> {
+                q.goToRowForTest(2);
+                return null;
+            });
+            assertEquals(14L, (long) onEdt(tab::currentLine));
+        }
+        onEdt(() -> {
+            tab.showPivot();
+            return null;
+        });
+        settle();
+        shot("116-long-rows-and-line-breaks");
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "nothing failed: "
+                + ErrorReporter.sessionForTest());
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+    }
+
+    @Test
     @Order(64)
     void measuresNumbersAfterKeys() throws Exception {
         Path f = dir.resolve("kv-service.log");

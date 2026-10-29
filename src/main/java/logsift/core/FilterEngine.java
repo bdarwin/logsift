@@ -111,7 +111,7 @@ public final class FilterEngine implements AutoCloseable {
             if (!sessions.containsKey(e.getKey())) {
                 Spec spec = e.getValue();
                 SearchSession s = spec.column() == null ? new SearchSession(doc, spec.query())
-                        : new SearchSession(doc, spec.query(), spec.column().matcher(doc.charset()));
+                        : new SearchSession(doc, spec.query(), spec.column().matcher(doc));
                 this.specs.put(e.getKey(), spec);
                 s.addListener(new SearchSession.Listener() {
                     @Override

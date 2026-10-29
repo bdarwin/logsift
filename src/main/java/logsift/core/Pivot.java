@@ -577,7 +577,7 @@ public final class Pivot {
     /** Looks at up to 500 rows to tell numbers, times and text apart. */
     public static Fields fields(LogFormat format, long lineCount, ColumnProfile.Lines lines, int year) {
         List<String> cols = format.columns();
-        List<String> titles = format.headerNames() != null ? format.headerNames() : cols;
+        List<String> titles = format.titles();
         int n = cols.size();
         List<List<String>> samples = new ArrayList<>();
         for (int c = 0; c < n; c++) {
@@ -668,7 +668,7 @@ public final class Pivot {
                                  DoubleConsumer progress) {
         long t0 = System.nanoTime();
         List<String> cols = format.columns();
-        List<String> titles = format.headerNames() != null ? format.headerNames() : cols;
+        List<String> titles = format.titles();
         List<Value> values = spec.cellValues();
         int nv = values.size();
         Agg[] distinct = new Agg[nv]; // what each value's accumulators must keep

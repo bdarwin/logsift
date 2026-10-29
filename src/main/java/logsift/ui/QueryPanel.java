@@ -59,6 +59,14 @@ final class QueryPanel extends JPanel {
 
         /** Shows a line (1-based, as Logsift numbers them). */
         void goToLine(long line);
+
+        /**
+         * A table's line by its row's number as the database counts it (1-based, the header
+         * being 1): rows over several lines push the ones after them down.
+         */
+        default long lineOfRow(long row) {
+            return row;
+        }
     }
 
     static final int MAX_ROWS = 10_000;
@@ -186,18 +194,29 @@ final class QueryPanel extends JPanel {
         split.setResizeWeight(0.4);
         split.setBorder(BorderFactory.createEmptyBorder());
         add(split, BorderLayout.CENTER);
-        if (!Sql.available()) {
+        // loading DuckDB takes a moment: found out in the background, never while a file opens
+        if (Sql.availableIfKnown() == null) {
+            Sql.checkInBackground(() -> SwingUtilities.invokeLater(this::availabilityKnown));
+        } else {
+            availabilityKnown();
+        }
+    }
+
+    private void availabilityKnown() {
+        if (Boolean.FALSE.equals(Sql.availableIfKnown())) {
             run.setEnabled(false);
             examples.setEnabled(false);
             editor.setEnabled(false);
             status.setText("Query isn't available here: " + Sql.unavailableReason());
+        } else if (isShowing()) {
+            showing();
         }
     }
 
     /** The tab is shown: a first query to start from. */
     void showing() {
         refreshHint();
-        if (!typed && editor.getText().isBlank() && Sql.available()) {
+        if (!typed && editor.getText().isBlank() && Boolean.TRUE.equals(Sql.availableIfKnown())) {
             List<String[]> ex = examples();
             if (!ex.isEmpty()) {
                 setQuery(ex.get(0)[1]);
@@ -277,7 +296,7 @@ final class QueryPanel extends JPanel {
     // ---------------------------------------------------------------- running
 
     void run() {
-        if (running != null || !Sql.available()) {
+        if (running != null || Boolean.FALSE.equals(Sql.availableIfKnown())) {
             return;
         }
         String q = editor.getText();
@@ -308,6 +327,9 @@ final class QueryPanel extends JPanel {
                         status.setText("Running…");
                     });
                     r = sql.query(q, MAX_ROWS, stopNow::get);
+                    if (host.isTable()) {
+                        linesOfRows(r);
+                    }
                 }
             } catch (java.sql.SQLException e) {
                 err = e.getMessage();
@@ -388,6 +410,19 @@ final class QueryPanel extends JPanel {
                     : String.format(Locale.ROOT, "%,.3f", d).replaceAll("0+$", "").replaceAll("\\.$", "");
         }
         return String.format(Locale.ROOT, "%,d", n.longValue());
+    }
+
+    /** A table's "line" values are its rows' numbers: they become the lines the rows start at. */
+    private void linesOfRows(Sql.Result r) {
+        for (int c = 0; c < r.columns().size(); c++) {
+            if (r.columns().get(c).equalsIgnoreCase("line")) {
+                for (Object[] row : r.rows()) {
+                    if (row[c] instanceof Number n) {
+                        row[c] = host.lineOfRow(n.longValue());
+                    }
+                }
+            }
+        }
     }
 
     private void goToRow(int row) {

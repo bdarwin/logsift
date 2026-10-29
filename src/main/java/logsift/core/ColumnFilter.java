@@ -107,6 +107,15 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
     }
 
     /** A matcher for lines of the document (text in {@code cs}); its scans may run in parallel. */
+    /** A matcher for a document's lines: a table's rows are read whole. */
+    LineMatcher matcher(LogDocument doc) {
+        LineMatcher m = matcher(doc.charset());
+        if (m instanceof LineMatcher.InColumn c) {
+            c.rows = CsvRows.of(doc, format);
+        }
+        return m;
+    }
+
     LineMatcher matcher(java.nio.charset.Charset cs) {
         Pattern p = op == Op.CONTAINS ? query.toPattern() : null;
         String hint = unitHint(format, column);

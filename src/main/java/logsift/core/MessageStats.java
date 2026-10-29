@@ -234,6 +234,7 @@ public final class MessageStats {
             throw new UncheckedIOException(e);
         }
         Map<String, Stat> stats = new HashMap<>();
+        CsvRows rows = CsvRows.of(doc, csv);
         byte[] tmp = new byte[MAX_LINE_BYTES + 16];
         long line = firstLine;
         long lines = 0;
@@ -252,7 +253,8 @@ public final class MessageStats {
             int b = Math.min(end, pos + MAX_LINE_BYTES);
             if (csv != null && head && end > pos) {
                 // a CSV row: its message only (the header and pieces of a quoted value are no rows)
-                String[] cells = csv.split(new String(buf, pos, end - pos, doc.charset()), null);
+                String[] cells = rows.continues(line) ? null : csv.split(rows.span(line) > 1 ? rows.row(line)
+                        : new String(buf, pos, end - pos, doc.charset()), null);
                 head = cells != null && cells[msgCol] != null;
                 if (head) {
                     src = cells[msgCol].getBytes(doc.charset());

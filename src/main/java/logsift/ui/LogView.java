@@ -75,6 +75,15 @@ public final class LogView extends JPanel {
             return n == 0 ? 0 : lineNumber(n - 1);
         }
 
+        /**
+         * The text a row's cells are split from, in the columns view: the row's own text, the
+         * whole row when a table's row goes over several lines (or is longer than a line is
+         * read for showing), or null for a line that continues the row above (no cells).
+         */
+        default String cellsText(int row, String raw) {
+            return raw;
+        }
+
         /** Rows drawn grayed out (for example, context lines or lines the filters remove). */
         default boolean dimmed(int row) {
             return false;
@@ -632,6 +641,11 @@ public final class LogView extends JPanel {
         return i < shownCount ? shownLines[shownLine[i]].raw : null;
     }
 
+    /** A row's cells as the columns view shows them; null for a row without cells. */
+    String[] cellsForTest(int row) {
+        return lineAt(row).cells;
+    }
+
     JComponent canvasForTest() {
         return canvas;
     }
@@ -741,7 +755,8 @@ public final class LogView extends JPanel {
             ColumnLayout cl = columns;
             if (cl != null) {
                 int[] starts = new int[cl.format().columns().size()];
-                String[] split = cl.format().split(raw, starts);
+                String whole = source.cellsText(row, raw);
+                String[] split = whole == null ? null : cl.format().split(whole, starts);
                 if (split == null) {
                     split = cl.format().headerCells(raw, starts); // a CSV's names, in their columns
                 }

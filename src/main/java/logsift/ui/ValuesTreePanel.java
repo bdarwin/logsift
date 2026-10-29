@@ -369,12 +369,13 @@ final class ValuesTreePanel extends JPanel {
         DefaultMutableTreeNode root = new DefaultMutableTreeNode(values.root());
         addChildren(root, values.root(), q);
         model.setRoot(root);
+        boolean few = values.root().children().size() <= 8; // once: a wide table has thousands
         for (int i = 0; i < tree.getRowCount(); i++) {
             TreePath p = tree.getPathForRow(i);
             ValueTree.Node n = node(p);
             boolean wasOpen = n != null && open.contains(n.path());
             // open the first levels at the start, and everything that matches a search
-            if (wasOpen || !q.isEmpty() || (first && p.getPathCount() <= 2 && values.root().children().size() <= 8)) {
+            if (wasOpen || !q.isEmpty() || (first && p.getPathCount() <= 2 && few)) {
                 tree.expandRow(i);
             }
         }

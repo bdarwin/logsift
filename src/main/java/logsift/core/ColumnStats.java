@@ -97,6 +97,7 @@ public final class ColumnStats {
 
     private static Local scan(LogDocument doc, LogFormat format, String column, long firstLine,
                               long startByte, long endByte, BooleanSupplier cancelled) {
+        CsvRows rows = CsvRows.of(doc, format);
         int len = (int) Math.min(endByte - startByte, 256L * 1024 * 1024);
         byte[] buf = BUFFERS.get();
         if (buf.length < len) {
@@ -121,8 +122,16 @@ public final class ColumnStats {
             if (end > pos && buf[end - 1] == '\r') {
                 end--;
             }
-            String text = new String(buf, pos, Math.min(end - pos, 4000), doc.charset());
-            String[] cells = format.split(text, null);
+            String[] cells;
+            if (rows == null) {
+                cells = format.split(new String(buf, pos, Math.min(end - pos, 4000), doc.charset()), null);
+            } else if (rows.continues(line)) {
+                cells = null; // part of the row above (a quoted value over a line break)
+            } else {
+                // a table's row, whole: a wide one is long, and one may go over several lines
+                String text = rows.span(line) > 1 ? rows.row(line) : new String(buf, pos, end - pos, doc.charset());
+                cells = text == null ? null : format.split(text, null);
+            }
             if (cells != null) {
                 String v = cells[col];
                 if (v != null) {

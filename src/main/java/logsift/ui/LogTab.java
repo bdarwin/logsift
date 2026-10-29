@@ -213,6 +213,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public String cellsText(int row, String raw) {
+                return rowCells(row, raw);
+            }
+
+            @Override
             public void textsNow(int first, int count, String[] out) {
                 readNow(main, count == 1 ? -1 : 0, first, count, out);
             }
@@ -253,6 +258,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             public boolean dimmed(int row) {
                 FilterResult r = filterResult;
                 return row < r.count() && !r.isMatch(r.lineAt(row)); // a context line
+            }
+
+            @Override
+            public String cellsText(int row, String raw) {
+                FilterResult r = filterResult;
+                return row < r.count() ? rowCells(r.lineAt(row), raw) : raw;
             }
 
             @Override
@@ -517,7 +528,59 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             logsift.core.Formats.Detected d = logsift.core.LogAnalysis.detect(doc, n, AppState.customFormats(),
                     path.getFileName() == null ? "" : path.getFileName().toString(), formatChoice);
             SwingUtilities.invokeLater(() -> applyDetected(gen, d.entries(), d.columns(), d.times()));
+            scanRows(logsift.core.CsvRows.of(doc, d.columns()));
         });
+    }
+
+    private final java.util.concurrent.atomic.AtomicBoolean scanningRows = new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** Finds a table's rows that go over several lines (in the background), then shows them so. */
+    private void scanRows(logsift.core.CsvRows rows) {
+        if (rows == null || !scanningRows.compareAndSet(false, true)) {
+            return;
+        }
+        ROWS.execute(() -> {
+            try {
+                rows.update(() -> closed);
+            } finally {
+                scanningRows.set(false);
+            }
+            SwingUtilities.invokeLater(() -> {
+                main.textsArrived();
+                if (resultsView() != null) {
+                    resultsView().textsArrived();
+                }
+            });
+        });
+    }
+
+    /** Scans tables' rows (shared by all tabs). */
+    private static final java.util.concurrent.ExecutorService ROWS =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "logsift-rows");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * A line's text for its cells (see {@link LogView.RowSource#cellsText}): a table's row is
+     * read whole where it goes over several lines or is long; never waits for the scan.
+     */
+    private String rowCells(long line, String raw) {
+        logsift.core.LogFormat f = logFormat;
+        logsift.core.CsvRows rows = logsift.core.CsvRows.of(doc, f);
+        if (rows == null || line < 0) {
+            return raw;
+        }
+        boolean cut = raw.length() >= logsift.core.LogDocument.MAX_DISPLAY_BYTES / 3;
+        if (!rows.knownUpTo(line + 1)) {
+            scanRows(rows); // not known yet: shown as it is, and again when it is
+            return cut ? rows.rowIfKnown(line) : raw;
+        }
+        if (rows.continuesIfKnown(line)) {
+            return null;
+        }
+        return cut || rows.continuesIfKnown(line + 1) ? rows.rowIfKnown(line) : raw;
     }
 
     /** Who asked for lines being read in the background (a view, and which part of it). */
@@ -1776,6 +1839,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public long lineOfRow(long row) {
+                logsift.core.CsvRows rows = logsift.core.CsvRows.of(doc, logFormat);
+                if (rows == null || row < 1) {
+                    return row;
+                }
+                rows.update(() -> closed);
+                return rows.lineOfRow(row - 1) + 1;
+            }
+
+            @Override
             public List<String> columns() {
                 logsift.core.LogFormat f = logFormat;
                 List<String> out = new ArrayList<>(List.of("line"));
@@ -1860,7 +1933,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 if (!ready(cancel)) {
                     return null;
                 }
-                return logsift.core.Pivot.fields(logFormat, doc.lineCount(), doc::readLines,
+                return logsift.core.Pivot.fields(logFormat, doc.lineCount(), logsift.core.CsvRows.reader(doc, logFormat),
                         java.time.Year.now().getValue());
             }
 
@@ -1872,7 +1945,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 }
                 FilterResult r = filterResult;
                 java.util.function.LongPredicate include = matchingOnly && r.isFiltering() ? r::contains : null;
-                return logsift.core.Pivot.compute(logFormat, doc.lineCount(), doc::readLines, include, spec, fields,
+                return logsift.core.Pivot.compute(logFormat, doc.lineCount(), logsift.core.CsvRows.reader(doc, logFormat), include, spec, fields,
                         () -> cancel.get() || closed, progress);
             }
 
@@ -1920,7 +1993,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 }
                 FilterResult r = filterResult;
                 java.util.function.LongPredicate include = matchingOnly && r.isFiltering() ? r::contains : null;
-                return logsift.core.ColumnProfile.analyze(f, doc.lineCount(), doc::readLines, include,
+                return logsift.core.ColumnProfile.analyze(f, doc.lineCount(), logsift.core.CsvRows.reader(doc, f), include,
                         java.time.Year.now().getValue(), () -> cancel.get() || closed, progress);
             }
 
@@ -1997,7 +2070,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         if (me == null || halt.getAsBoolean()) {
             return null;
         }
-        logsift.core.ColumnMetrics.Data cols = logsift.core.ColumnMetrics.collect(f, lines, doc::line, timeFormat, halt);
+        logsift.core.ColumnMetrics.Data cols = logsift.core.ColumnMetrics.collect(f, lines, logsift.core.CsvRows.rowText(doc, f), timeFormat,
+                halt);
         if (halt.getAsBoolean()) {
             return null;
         }

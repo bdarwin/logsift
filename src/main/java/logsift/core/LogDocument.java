@@ -336,8 +336,16 @@ public final class LogDocument implements Closeable {
      * past the end are set to null.
      */
     public void readLines(long first, int count, String[] out) {
+        readFullLines(first, count, out, MAX_DISPLAY_BYTES);
+    }
+
+    /**
+     * Like {@link #readLines}, with lines up to {@code maxBytes} long (for a table's rows, which
+     * can be much longer than what is shown of a line).
+     */
+    public void readFullLines(long first, int count, String[] out, int maxBytes) {
         try {
-            readLinesUnchecked(first, count, out, false);
+            readLinesUnchecked(first, count, out, false, maxBytes);
         } catch (FileChangedException | UncheckedIOException e) {
             Arrays.fill(out, 0, count, null);
             requestRefresh();
@@ -355,7 +363,7 @@ public final class LogDocument implements Closeable {
      */
     public boolean readLinesNow(long first, int count, String[] out, Object owner, Runnable loaded) {
         try {
-            readLinesUnchecked(first, count, out, true);
+            readLinesUnchecked(first, count, out, true, MAX_DISPLAY_BYTES);
             return true;
         } catch (PageCache.NotLoaded e) {
             Want w = new Want(first, count, new java.util.concurrent.CountDownLatch(1));
@@ -366,7 +374,7 @@ public final class LogDocument implements Closeable {
                 // after a wait ran out, don't wait again for a moment (many rows, one slow drive)
                 if (System.nanoTime() - slowSince > TimeUnit.MILLISECONDS.toNanos(250)
                         && w.done.await(PAINT_WAIT_MS, TimeUnit.MILLISECONDS)) {
-                    readLinesUnchecked(first, count, out, true);
+                    readLinesUnchecked(first, count, out, true, MAX_DISPLAY_BYTES);
                     return true;
                 }
                 if (w.done.getCount() > 0) {
@@ -412,7 +420,7 @@ public final class LogDocument implements Closeable {
     public String lineIfLoaded(long line) {
         String[] out = new String[1];
         try {
-            readLinesUnchecked(line, 1, out, true);
+            readLinesUnchecked(line, 1, out, true, MAX_DISPLAY_BYTES);
             return out[0];
         } catch (PageCache.NotLoaded | FileChangedException | UncheckedIOException e) {
             return null;
@@ -425,7 +433,15 @@ public final class LogDocument implements Closeable {
     /** Reads lines for painting in the background (shared by all documents). */
     private static final ExecutorService LOADERS = Executors.newFixedThreadPool(4, daemon("logsift-load"));
 
-    private void readLinesUnchecked(long first, int count, String[] out, boolean cachedOnly) {
+    private final java.util.concurrent.ConcurrentHashMap<Character, CsvRows> csvRows =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The rows of this file read as CSV with {@code delimiter} (see {@link CsvRows#of}). */
+    CsvRows csvRows(char delimiter) {
+        return csvRows.computeIfAbsent(delimiter, d -> new CsvRows(this, d));
+    }
+
+    private void readLinesUnchecked(long first, int count, String[] out, boolean cachedOnly, int maxBytes) {
         LineIndex.Snapshot s = index.snapshot();
         PageCache pc = cache;
         long limit = Math.max(fileSize, s.indexedBytes);
@@ -440,7 +456,7 @@ public final class LogDocument implements Closeable {
             if (pos < 0) {
                 pos = lineStart(s, line, pc, cachedOnly);
             }
-            long max = Math.min(limit, pos + MAX_DISPLAY_BYTES);
+            long max = Math.min(limit, pos + maxBytes);
             long nl = pc.indexOf(pos, max, (byte) '\n', cachedOnly);
             long end = nl >= 0 ? nl : max;
             int len = (int) (end - pos);
