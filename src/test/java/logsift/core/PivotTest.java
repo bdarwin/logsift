@@ -65,6 +65,82 @@ class PivotTest {
     }
 
     @Test
+    void plainNumbersAreReadFast() {
+        assertEquals(1508.0, Pivot.plainNumber("1508"));
+        assertEquals(-3.25, Pivot.plainNumber("-3.25"));
+        assertEquals(12.5, Pivot.plainNumber("+12.5"));
+        assertEquals(12.0, Pivot.plainNumber("12."), "as the full reader takes it");
+        assertTrue(Double.isNaN(Pivot.plainNumber("1,234")));
+        assertTrue(Double.isNaN(Pivot.plainNumber("-")));
+        assertTrue(Double.isNaN(Pivot.plainNumber("7 ms")));
+        assertEquals(7.0, Pivot.number("7 ms"), "the rest as before");
+        assertEquals(Double.parseDouble("0.1"), Pivot.number("0.1"), "decimals exactly as parsed");
+    }
+
+    @Test
+    void medianAndPercentiles() {
+        List<String> l = new ArrayList<>();
+        l.add("host,ms");
+        for (int i = 1; i <= 100; i++) {
+            l.add((i % 2 == 0 ? "a" : "b") + "," + i);
+        }
+        Pivot.Result r = run(l, new Pivot.Spec(List.of(new Pivot.Field(0)), List.of(),
+                List.of(new Pivot.Value(1, Pivot.Agg.MEDIAN), new Pivot.Value(1, Pivot.Agg.P95),
+                        new Pivot.Value(1, Pivot.Agg.P99)), Map.of()));
+        Pivot.Node root = r.root();
+        assertEquals(50.5, r.value(root, -1, 0), 1e-9, "the median of 1..100");
+        assertEquals(95.05, r.value(root, -1, 1), 1e-9, "interpolated, as spreadsheets do");
+        assertEquals(99.01, r.value(root, -1, 2), 1e-9);
+        assertEquals(51.0, r.value(kid(root, "a"), -1, 0), 1e-9, "2, 4 … 100");
+        assertEquals(50.0, r.value(kid(root, "b"), -1, 0), 1e-9, "1, 3 … 99");
+        assertTrue(Pivot.Agg.MEDIAN.numeric() && Pivot.Agg.P95.numeric());
+    }
+
+    @Test
+    void bigTablesAreReadInParallelWithTheSameResult() {
+        // over PARALLEL_LINES lines: split and worked out on several threads, added in file order
+        List<String> l = new ArrayList<>();
+        l.add("region,product,amount");
+        String[] regions = {"North", "South", "East", "West", "Central"};
+        String[] products = {"Tea", "Coffee", "Cake"};
+        double[] sums = new double[regions.length];
+        long[] counts = new long[regions.length];
+        java.util.List<String> firstSeen = new ArrayList<>();
+        int n = Pivot.PARALLEL_LINES * 3 + 123;
+        for (int i = 0; i < n; i++) {
+            int r = (i * 7 + i / 1000) % regions.length;
+            double amount = (i % 997) / 4.0;
+            l.add(regions[r] + "," + products[i % 3] + "," + amount);
+            sums[r] += amount;
+            counts[r]++;
+            if (!firstSeen.contains(regions[r])) {
+                firstSeen.add(regions[r]);
+            }
+        }
+        Pivot.Result res = run(l, new Pivot.Spec(List.of(new Pivot.Field(0)), List.of(new Pivot.Field(1)),
+                List.of(new Pivot.Value(2, Pivot.Agg.SUM), new Pivot.Value(2, Pivot.Agg.COUNT)), Map.of()));
+        assertEquals(n, res.rows());
+        for (int r = 0; r < regions.length; r++) {
+            Pivot.Node k = kid(res.root(), regions[r]);
+            assertEquals(sums[r], res.value(k, -1, 0), 1e-6, regions[r]);
+            assertEquals(counts[r], res.value(k, -1, 1), 1e-9, regions[r]);
+        }
+        assertEquals(List.of("Cake", "Coffee", "Tea"), res.colKeys().stream().map(c -> c.get(0)).toList());
+    }
+
+    @Test
+    void manyValuesKeepAFairSample() {
+        Pivot.Acc a = new Pivot.Acc();
+        int n = Pivot.MAX_KEPT * 2;
+        for (int i = 0; i < n; i++) {
+            a.add("", i, Pivot.Agg.MEDIAN);
+        }
+        assertEquals(Pivot.MAX_KEPT, a.nKept);
+        double median = a.get(Pivot.Agg.MEDIAN);
+        assertTrue(Math.abs(median - n / 2.0) < n * 0.01, "close to the true median: " + median);
+    }
+
+    @Test
     void fieldKinds() {
         List<String> l = sales();
         Pivot.Fields f = Pivot.fields(format(l), l.size(), lines(l), 2026);

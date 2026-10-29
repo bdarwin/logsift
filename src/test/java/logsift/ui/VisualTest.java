@@ -6389,6 +6389,19 @@ class VisualTest {
         assertEquals(PivotPanel.format(Math.round(north * 100) / 100.0), onEdt(() -> pp.cellTextForTest(1, 1)));
         assertEquals(PivotPanel.format(Math.round(total * 100) / 100.0), onEdt(() -> pp.cellTextForTest(4, 1)));
         assertEquals(4, onEdt(() -> pp.chartForTest().data().size()), "a bar per region");
+        // the median instead of the sum, then back
+        onEdt(() -> {
+            pp.setAggForTest(0, logsift.core.Pivot.Agg.MEDIAN, logsift.core.Pivot.ShowAs.VALUE);
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(List.of("Median of amount"), onEdt(() -> pp.areaForTest(PivotPanel.Area.VALUES)));
+        assertFalse(onEdt(() -> pp.cellTextForTest(4, 1)).isBlank(), "a median for the grand total");
+        onEdt(() -> {
+            pp.setAggForTest(0, logsift.core.Pivot.Agg.SUM, logsift.core.Pivot.ShowAs.VALUE);
+            return null;
+        });
+        waitForPivot(pp);
 
         // the products across the top (dragged there), the grand total last
         onEdt(() -> {

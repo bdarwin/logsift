@@ -18,7 +18,7 @@ On the right, **Fields** lists the file's columns, each with its kind: **#** num
 |---|---|
 | **Rows** | Groups the rows down the side, one line per value. A second field groups inside the first (*region › month*), with a subtotal on each group's line |
 | **Columns** | Splits each value across the top, one column per value of the field, plus a **Total** column |
-| **Values** | What the cells hold: **Sum**, **Count**, **Count distinct**, **Average**, **Min** or **Max** of a field. With no values, the cells count the rows |
+| **Values** | What the cells hold: **Sum**, **Count**, **Count distinct**, **Average**, **Min**, **Max**, **Median**, **95th percentile** or **99th percentile** of a field (percentiles interpolated, as spreadsheets do; past a million numbers in a cell, from a fair sample of a million). With no values, the cells count the rows |
 | **Filters** | Keeps only rows with some values of a field: click it → **Choose Values…** and untick the ones to leave out |
 
 - **Tick** a field (or double-click it): numbers go to **Values** (summed), times and text to **Rows**. Untick it to take it out.

@@ -30,7 +30,8 @@ public final class Pivot {
 
     /** How a value is summed up in a cell. */
     public enum Agg {
-        COUNT("Count"), COUNT_DISTINCT("Count distinct"), SUM("Sum"), AVERAGE("Average"), MIN("Min"), MAX("Max");
+        COUNT("Count"), COUNT_DISTINCT("Count distinct"), SUM("Sum"), AVERAGE("Average"), MIN("Min"), MAX("Max"),
+        MEDIAN("Median"), P95("95th percentile"), P99("99th percentile");
 
         public final String label;
 
@@ -183,15 +184,23 @@ public final class Pivot {
         Set<String> distinct;
         boolean distinctCapped;
 
-        void add(String text, double number, boolean wantDistinct) {
+        /** The numbers, for median and percentiles: all of them, or a fair sample past {@link #MAX_KEPT}. */
+        double[] kept;
+        int nKept;
+        private long rnd = 0x9E3779B97F4A7C15L;
+
+        void add(String text, double number, Agg agg) {
             count++;
             if (!Double.isNaN(number)) {
                 numbers++;
                 sum += number;
                 min = Math.min(min, number);
                 max = Math.max(max, number);
+                if (agg == Agg.MEDIAN || agg == Agg.P95 || agg == Agg.P99) {
+                    keep(number);
+                }
             }
-            if (wantDistinct) {
+            if (agg == Agg.COUNT_DISTINCT) {
                 if (distinct == null) {
                     distinct = new HashSet<>();
                 }
@@ -203,8 +212,49 @@ public final class Pivot {
             }
         }
 
+        private void keep(double v) {
+            if (kept == null) {
+                kept = new double[16];
+            }
+            if (nKept < MAX_KEPT) {
+                if (nKept == kept.length) {
+                    kept = Arrays.copyOf(kept, Math.min(MAX_KEPT, kept.length * 2));
+                }
+                kept[nKept++] = v;
+                return;
+            }
+            // reservoir sampling: every number has the same chance to be in the sample
+            rnd ^= rnd << 13;
+            rnd ^= rnd >>> 7;
+            rnd ^= rnd << 17;
+            long j = Math.floorMod(rnd, numbers);
+            if (j < MAX_KEPT) {
+                kept[(int) j] = v;
+            }
+        }
+
+        private boolean sorted;
+
+        /** The q-quantile of the numbers (0.5: the median), interpolated as spreadsheets do. */
+        double quantile(double q) {
+            if (nKept == 0) {
+                return Double.NaN;
+            }
+            if (!sorted) {
+                Arrays.sort(kept, 0, nKept);
+                sorted = true;
+            }
+            double pos = q * (nKept - 1);
+            int lo = (int) Math.floor(pos);
+            int hi = Math.min(nKept - 1, lo + 1);
+            return kept[lo] + (kept[hi] - kept[lo]) * (pos - lo);
+        }
+
         double get(Agg agg) {
             return switch (agg) {
+                case MEDIAN -> quantile(0.5);
+                case P95 -> quantile(0.95);
+                case P99 -> quantile(0.99);
                 case COUNT -> count;
                 case COUNT_DISTINCT -> distinct == null ? 0 : distinct.size();
                 case SUM -> numbers == 0 ? Double.NaN : sum;
@@ -415,6 +465,10 @@ public final class Pivot {
         if (text == null) {
             return Double.NaN;
         }
+        double plain = plainNumber(text);
+        if (!Double.isNaN(plain)) {
+            return plain;
+        }
         String t = text.strip();
         if (t.isEmpty()) {
             return Double.NaN;
@@ -445,6 +499,47 @@ public final class Pivot {
         } catch (NumberFormatException e) {
             return Double.NaN;
         }
+    }
+
+    /** "1508", "-3.25", "12.5": read without patterns (most cells); NaN for anything else. */
+    static double plainNumber(String t) {
+        int n = t.length();
+        if (n == 0 || n > 18) {
+            return Double.NaN;
+        }
+        int i = 0;
+        boolean neg = false;
+        char c0 = t.charAt(0);
+        if (c0 == '-' || c0 == '+') {
+            neg = c0 == '-';
+            i = 1;
+            if (n == 1) {
+                return Double.NaN;
+            }
+        }
+        long whole = 0;
+        int digits = 0;
+        for (; i < n; i++) {
+            char c = t.charAt(i);
+            if (c < '0' || c > '9') {
+                break;
+            }
+            whole = whole * 10 + (c - '0');
+            digits++;
+        }
+        if (i == n) {
+            return digits == 0 ? Double.NaN : neg ? -whole : whole;
+        }
+        if (t.charAt(i) != '.' || digits == 0) {
+            return Double.NaN;
+        }
+        for (int j = i + 1; j < n; j++) {
+            char c = t.charAt(j);
+            if (c < '0' || c > '9') {
+                return Double.NaN;
+            }
+        }
+        return Double.parseDouble(t); // exact, as before, for decimals
     }
 
     /**
@@ -576,9 +671,9 @@ public final class Pivot {
         List<String> titles = format.headerNames() != null ? format.headerNames() : cols;
         List<Value> values = spec.cellValues();
         int nv = values.size();
-        boolean[] distinct = new boolean[nv];
+        Agg[] distinct = new Agg[nv]; // what each value's accumulators must keep
         for (int v = 0; v < nv; v++) {
-            distinct[v] = values.get(v).agg() == Agg.COUNT_DISTINCT;
+            distinct[v] = values.get(v).agg();
         }
         Node root = new Node("Grand Total", null, 0);
         int[] groups = {0};
@@ -586,95 +681,77 @@ public final class Pivot {
         Map<String, Integer> colIndex = new HashMap<>();
         List<List<String>> colKeys = new ArrayList<>();
         boolean colsCapped = false;
+        boolean[] colsCappedHolder = {false};
         Map<Integer, Set<String>> seen = new HashMap<>();
         for (Integer f : spec.filters().keySet()) {
             seen.put(f, new HashSet<>());
         }
         long rows = 0;
         long read = 0;
-        String[] buf = new String[4096];
-        String[] rowKey = new String[spec.rows().size()];
-        String[] colKey = new String[spec.cols().size()];
-        for (long first = 0; first < lineCount; first += buf.length) {
-            if (cancelled.getAsBoolean()) {
-                return null;
-            }
-            int k = (int) Math.min(buf.length, lineCount - first);
-            lines.read(first, k, buf);
-            line:
-            for (int i = 0; i < k; i++) {
-                read++;
-                String t = buf[i];
-                if (t == null || t.isBlank() || (include != null && !include.test(first + i))) {
-                    continue;
+        List<Integer> filterCols = new ArrayList<>(spec.filters().keySet());
+        int threads = lineCount < PARALLEL_LINES ? 1
+                : Math.max(1, Math.min(MAX_THREADS, Runtime.getRuntime().availableProcessors() - 1));
+        java.util.concurrent.ExecutorService pool = threads == 1 ? null
+                : java.util.concurrent.Executors.newFixedThreadPool(threads, r -> {
+                    Thread t = new Thread(r, "logsift-pivot-part");
+                    t.setDaemon(true);
+                    return t;
+                });
+        java.util.ArrayDeque<java.util.concurrent.Future<Prepared[]>> pending = new java.util.ArrayDeque<>();
+        try {
+            for (long first = 0; first < lineCount; first += CHUNK) {
+                if (cancelled.getAsBoolean()) {
+                    return null;
                 }
-                String[] cells = format.split(t, null);
-                if (cells == null) {
-                    continue;
-                }
-                // filters: the values each filter field has are listed, then the row is kept or not
-                for (Map.Entry<Integer, Set<String>> f : spec.filters().entrySet()) {
-                    String v = cell(cells, f.getKey());
-                    Set<String> s = seen.get(f.getKey());
-                    if (s.size() < MAX_FILTER_VALUES) {
-                        s.add(v);
+                int k = (int) Math.min(CHUNK, lineCount - first);
+                String[] buf = new String[k];
+                lines.read(first, k, buf);
+                read += k;
+                long at = first;
+                java.util.concurrent.Callable<Prepared[]> job = () -> prepare(buf, at, include, format, spec, fields, zone,
+                        values, filterCols);
+                if (pool == null) {
+                    Prepared[] p = job.call();
+                    rows += consume(p, spec, filterCols, seen, colIndex, colKeys, root, groups, rowsCapped, distinct,
+                            colsCappedHolder);
+                } else {
+                    pending.add(pool.submit(job));
+                    while (pending.size() >= threads * 2) {
+                        rows += consume(pending.poll().get(), spec, filterCols, seen, colIndex, colKeys, root, groups,
+                                rowsCapped, distinct, colsCappedHolder);
                     }
                 }
-                for (Map.Entry<Integer, Set<String>> f : spec.filters().entrySet()) {
-                    if (f.getValue() != null && !f.getValue().contains(cell(cells, f.getKey()))) {
-                        continue line;
-                    }
-                }
-                rows++;
-                for (int r = 0; r < rowKey.length; r++) {
-                    rowKey[r] = label(cells, spec.rows().get(r), fields, zone);
-                }
-                int ci = 0;
-                if (colKey.length > 0) {
-                    for (int c = 0; c < colKey.length; c++) {
-                        colKey[c] = label(cells, spec.cols().get(c), fields, zone);
-                    }
-                    String joined = String.join("\u0001", colKey);
-                    Integer at = colIndex.get(joined);
-                    if (at == null) {
-                        if (colKeys.size() < MAX_COL_GROUPS) {
-                            at = colKeys.size();
-                            colKeys.add(List.of(colKey.clone()));
-                            colIndex.put(joined, at);
-                        } else {
-                            colsCapped = true;
-                            String other = String.join("\u0001", java.util.Collections.nCopies(colKey.length, OTHER));
-                            at = colIndex.get(other);
-                            if (at == null) {
-                                at = colKeys.size();
-                                colKeys.add(java.util.Collections.nCopies(colKey.length, OTHER));
-                                colIndex.put(other, at);
-                            }
-                        }
-                    }
-                    ci = at;
-                }
-                String[] texts = new String[nv];
-                double[] nums = new double[nv];
-                for (int v = 0; v < nv; v++) {
-                    int c = values.get(v).column();
-                    texts[v] = c < 0 ? "" : cell(cells, c);
-                    if (c >= 0 && texts[v].equals(BLANK)) {
-                        texts[v] = null; // a blank cell isn't counted
-                    }
-                    nums[v] = texts[v] == null ? Double.NaN : number(texts[v]);
-                }
-                Node n = root;
-                add(n, ci, colKeys.size(), texts, nums, distinct);
-                for (int r = 0; r < rowKey.length; r++) {
-                    n = child(n, rowKey[r], groups, rowsCapped);
-                    add(n, ci, colKeys.size(), texts, nums, distinct);
+                if (progress != null) {
+                    progress.accept((double) (first + k) / Math.max(1, lineCount));
                 }
             }
-            if (progress != null) {
-                progress.accept((double) (first + k) / Math.max(1, lineCount));
+            while (!pending.isEmpty()) {
+                if (cancelled.getAsBoolean()) {
+                    return null;
+                }
+                rows += consume(pending.poll().get(), spec, filterCols, seen, colIndex, colKeys, root, groups, rowsCapped,
+                        distinct, colsCappedHolder);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (java.util.concurrent.ExecutionException e) {
+            Throwable c = e.getCause();
+            if (c instanceof RuntimeException re) {
+                throw re;
+            }
+            if (c instanceof Error er) {
+                throw er;
+            }
+            throw new IllegalStateException(c);
+        } catch (Exception e) {
+            throw e instanceof RuntimeException re ? re : new IllegalStateException(e);
+        } finally {
+            if (pool != null) {
+                pool.shutdownNow();
             }
         }
+        colsCapped = colsCappedHolder[0];
         // the total column: cells were kept by column group; the row's total is its own cell
         Map<Integer, List<String>> filterValues = new HashMap<>();
         for (Map.Entry<Integer, Set<String>> e : seen.entrySet()) {
@@ -714,6 +791,111 @@ public final class Pivot {
                 (System.nanoTime() - t0) / 1_000_000);
         res.sort(-1, -1, false);
         return res;
+    }
+
+    /** Lines read at a time, and the parts done in parallel. */
+    static final int CHUNK = 4096;
+    /** Numbers kept per cell for median and percentiles; past this, a fair sample. */
+    static final int MAX_KEPT = 1_000_000;
+    static final int PARALLEL_LINES = 50_000;
+    static final int MAX_THREADS = 8;
+
+    /** One row, split and worked out (in parallel); added to the table in file order. */
+    private record Prepared(String[] filterValues, String[] rowKey, String[] colKey, String[] texts, double[] nums) {}
+
+    /** The rows of a block of lines: splitting, labels and numbers, which take the time. */
+    private static Prepared[] prepare(String[] buf, long first, LongPredicate include, LogFormat format, Spec spec,
+                                      Fields fields, ZoneId zone, List<Value> values, List<Integer> filterCols) {
+        List<Prepared> out = new ArrayList<>(buf.length);
+        int nv = values.size();
+        for (int i = 0; i < buf.length; i++) {
+            String t = buf[i];
+            if (t == null || t.isBlank() || (include != null && !include.test(first + i))) {
+                continue;
+            }
+            String[] cells = format.split(t, null);
+            if (cells == null) {
+                continue;
+            }
+            String[] fv = new String[filterCols.size()];
+            for (int f = 0; f < fv.length; f++) {
+                fv[f] = cell(cells, filterCols.get(f));
+            }
+            String[] rk = new String[spec.rows().size()];
+            for (int r = 0; r < rk.length; r++) {
+                rk[r] = label(cells, spec.rows().get(r), fields, zone);
+            }
+            String[] ck = new String[spec.cols().size()];
+            for (int c = 0; c < ck.length; c++) {
+                ck[c] = label(cells, spec.cols().get(c), fields, zone);
+            }
+            String[] texts = new String[nv];
+            double[] nums = new double[nv];
+            for (int v = 0; v < nv; v++) {
+                int c = values.get(v).column();
+                texts[v] = c < 0 ? "" : cell(cells, c);
+                if (c >= 0 && texts[v].equals(BLANK)) {
+                    texts[v] = null; // a blank cell isn't counted
+                }
+                nums[v] = texts[v] == null ? Double.NaN : number(texts[v]);
+            }
+            out.add(new Prepared(fv, rk, ck, texts, nums));
+        }
+        return out.toArray(new Prepared[0]);
+    }
+
+    /** Adds prepared rows to the table, in order; returns how many were kept by the filters. */
+    private static long consume(Prepared[] rowsIn, Spec spec, List<Integer> filterCols, Map<Integer, Set<String>> seen,
+                                Map<String, Integer> colIndex, List<List<String>> colKeys, Node root, int[] groups,
+                                boolean[] rowsCapped, Agg[] distinct, boolean[] colsCapped) {
+        long kept = 0;
+        row:
+        for (Prepared p : rowsIn) {
+            // filters: the values each filter field has are listed, then the row is kept or not
+            for (int f = 0; f < filterCols.size(); f++) {
+                Set<String> s = seen.get(filterCols.get(f));
+                if (s.size() < MAX_FILTER_VALUES) {
+                    s.add(p.filterValues()[f]);
+                }
+            }
+            for (int f = 0; f < filterCols.size(); f++) {
+                Set<String> keep = spec.filters().get(filterCols.get(f));
+                if (keep != null && !keep.contains(p.filterValues()[f])) {
+                    continue row;
+                }
+            }
+            kept++;
+            int ci = 0;
+            String[] colKey = p.colKey();
+            if (colKey.length > 0) {
+                String joined = String.join("\u0001", colKey);
+                Integer at = colIndex.get(joined);
+                if (at == null) {
+                    if (colKeys.size() < MAX_COL_GROUPS) {
+                        at = colKeys.size();
+                        colKeys.add(List.of(colKey.clone()));
+                        colIndex.put(joined, at);
+                    } else {
+                        colsCapped[0] = true;
+                        String other = String.join("\u0001", java.util.Collections.nCopies(colKey.length, OTHER));
+                        at = colIndex.get(other);
+                        if (at == null) {
+                            at = colKeys.size();
+                            colKeys.add(java.util.Collections.nCopies(colKey.length, OTHER));
+                            colIndex.put(other, at);
+                        }
+                    }
+                }
+                ci = at;
+            }
+            Node n = root;
+            add(n, ci, colKeys.size(), p.texts(), p.nums(), distinct);
+            for (String rk : p.rowKey()) {
+                n = child(n, rk, groups, rowsCapped);
+                add(n, ci, colKeys.size(), p.texts(), p.nums(), distinct);
+            }
+        }
+        return kept;
     }
 
     private static String cell(String[] cells, int c) {
@@ -756,7 +938,7 @@ public final class Pivot {
         return k;
     }
 
-    private static void add(Node n, int col, int cols, String[] texts, double[] nums, boolean[] distinct) {
+    private static void add(Node n, int col, int cols, String[] texts, double[] nums, Agg[] distinct) {
         n.rows++;
         if (n.cells == null) {
             n.cells = new Acc[Math.max(cols + 1, 4)][];
@@ -766,7 +948,7 @@ public final class Pivot {
     }
 
     /** Adds to a column group's cell ({@code col}), or (-2) the row's total, kept at {@link #TOTAL}. */
-    private static void addTo(Node n, int col, String[] texts, double[] nums, boolean[] distinct) {
+    private static void addTo(Node n, int col, String[] texts, double[] nums, Agg[] distinct) {
         if (col == -1) {
             return; // no column fields: only the total
         }
