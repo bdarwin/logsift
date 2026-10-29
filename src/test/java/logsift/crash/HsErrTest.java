@@ -30,7 +30,8 @@ class HsErrTest {
     static String text(String name) throws IOException {
         try (InputStream in = HsErrTest.class.getResourceAsStream("/logsift/crash/" + name)) {
             assertNotNull(in, name);
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            // Windows checkouts may turn line ends into \r\n: the tests edit the text by lines
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8).replace("\r\n", "\n");
         }
     }
 
