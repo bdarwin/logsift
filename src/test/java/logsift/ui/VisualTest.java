@@ -6406,6 +6406,15 @@ class VisualTest {
         assertEquals(3, onEdt(() -> pp.chartForTest().data().series().size()), "a series per product");
         settle();
         shot("108b-pivot-table-and-chart");
+        // every switch between the views, both ways (table → both once failed: "No such child: 1")
+        for (String v : List.of("table", "both", "chart", "both", "table", "chart", "table", "both")) {
+            onEdt(() -> {
+                pp.setViewForTest(v);
+                return null;
+            });
+            settle();
+            assertEquals(v, onEdt(pp::shownViewForTest), "after switching to " + v);
+        }
         onEdt(() -> {
             pp.setChartTypeForTest(PivotChart.Type.STACKED_COLUMN);
             pp.setHeatForTest(true);

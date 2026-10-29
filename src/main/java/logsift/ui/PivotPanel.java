@@ -137,6 +137,7 @@ final class PivotPanel extends JPanel {
     private final PivotChart chart = new PivotChart();
     private final CardLayout views = new CardLayout();
     private final JPanel viewCards = new JPanel(views);
+    private final JPanel emptyPanel = new JPanel(new java.awt.GridBagLayout());
     private final JSplitPane both;
     private final JPanel tableHolder = new JPanel(new BorderLayout());
     private final JPanel chartHolder = new JPanel(new BorderLayout());
@@ -240,7 +241,6 @@ final class PivotPanel extends JPanel {
 
         empty.setHorizontalAlignment(SwingConstants.CENTER);
         empty.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
-        JPanel emptyPanel = new JPanel(new java.awt.GridBagLayout());
         JPanel emptyBox = new JPanel();
         emptyBox.setLayout(new BoxLayout(emptyBox, BoxLayout.Y_AXIS));
         empty.setAlignmentX(CENTER_ALIGNMENT);
@@ -387,11 +387,19 @@ final class PivotPanel extends JPanel {
         if (want == both && (both.getTopComponent() != tableHolder || both.getBottomComponent() != chartHolder)) {
             both.setTopComponent(tableHolder);
             both.setBottomComponent(chartHolder);
+            tableHolder.setVisible(true); // a card hidden while it was one of the cards
+            chartHolder.setVisible(true);
             current = null; // placed again: the divider goes to the middle
         }
-        if (viewCards.getComponent(1) != want) {
-            viewCards.remove(viewCards.getComponent(1));
-            viewCards.add(want, "view", 1);
+        // Putting the table or chart into the split takes it out of the cards, so the cards may
+        // hold just the empty panel here: place what is wanted by its parent, not by position.
+        if (want.getParent() != viewCards) {
+            for (Component c : viewCards.getComponents()) {
+                if (c != emptyPanel) {
+                    viewCards.remove(c);
+                }
+            }
+            viewCards.add(want, "view");
         }
         views.show(viewCards, "view");
         if (want == both && current != both) {
@@ -1785,6 +1793,17 @@ final class PivotPanel extends JPanel {
         areas.get(Area.FILTERS).get(filterIndex).keep = keep;
         changed();
     }
+
+    /** What is on screen: "table", "chart", "both" or "empty". */
+    String shownViewForTest() {
+        if (emptyPanel.isVisible()) {
+            return "empty";
+        }
+        boolean t = tableHolder.isShowing();
+        boolean c = chartHolder.isShowing();
+        return t && c ? "both" : t ? "table" : c ? "chart" : "nothing";
+    }
+
 
     void setViewForTest(String v) {
         setView(v);
