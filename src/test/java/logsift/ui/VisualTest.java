@@ -7393,6 +7393,143 @@ class VisualTest {
         return null;
     }
 
+    /** Runs the Query tab's query and waits for it. */
+    private static logsift.core.Sql.Result runQuery(QueryPanel q) throws Exception {
+        onEdt(() -> {
+            q.run();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !q.runningForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the query");
+        assertNull(onEdt(q::failureForTest), "the query failed");
+        return onEdt(q::resultForTest);
+    }
+
+    @Test
+    @Order(65)
+    void queriesLogsAndTablesWithSql() throws Exception {
+        Path box = Files.createDirectories(dir.resolve("query"));
+        Path log = box.resolve("orders-service.log");
+        StringBuilder sb = new StringBuilder();
+        java.util.Random rnd = new java.util.Random(7);
+        long errorLines = 0;
+        for (int i = 0; i < 6000; i++) {
+            String level = i % 50 == 0 ? "ERROR" : i % 9 == 0 ? "WARN " : "INFO ";
+            String logger = new String[] {"c.a.order.OrderService", "c.a.pay.Payments", "c.a.cache.Redis"}[i % 3];
+            String msg = level.startsWith("ERROR") ? "Payment declined for order " + (7000 + i) + " after " + (100 + rnd.nextInt(900)) + " ms"
+                    : "Order " + (7000 + i) + " placed in " + (5 + rnd.nextInt(200)) + " ms";
+            sb.append(String.format("2026-10-28 10:%02d:%02d.%03d %s [http-%d] %s - %s%n", i / 100 % 60, i % 60, i % 1000,
+                    level, i % 8, logger, msg));
+            if (level.startsWith("ERROR")) {
+                errorLines++;
+                sb.append("java.lang.IllegalStateException: card declined\n\tat c.a.pay.Payments.charge(Payments.java:88)\n");
+            }
+        }
+        Files.writeString(log, sb);
+        onEdt(() -> {
+            frame.openFile(log);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(log)
+                        && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the log");
+        LogTab tab = onEdt(frame::currentTab);
+        QueryPanel q = onEdt(tab::queryPanel);
+        onEdt(() -> {
+            tab.showQuery();
+            return null;
+        });
+        logsift.core.Sql.Result levels = runQuery(q); // the first example: lines per level
+        assertEquals(List.of("level", "lines"), levels.columns());
+        assertEquals(List.of("INFO", "WARN", "ERROR"), levels.rows().stream().map(r -> r[0]).toList());
+        assertEquals(errorLines, ((Number) levels.rows().get(2)[1]).longValue(), "entries, not stack trace lines");
+        onEdt(() -> {
+            q.setQueryForTest("SELECT line, time, logger, message\nFROM log\nWHERE level = 'ERROR'\nORDER BY line\nLIMIT 20");
+            return null;
+        });
+        logsift.core.Sql.Result errors = runQuery(q);
+        assertEquals(20, errors.rows().size());
+        long firstError = ((Number) errors.rows().get(1)[0]).longValue();
+        onEdt(() -> {
+            q.goToRowForTest(1);
+            return null;
+        });
+        assertEquals(firstError - 1, (long) onEdt(tab::currentLine), "a double-click shows its line");
+        onEdt(() -> {
+            q.setQueryForTest("SELECT logger, count(*) AS errors, round(avg(CAST(regexp_extract(message, '([0-9]+) ms', 1) AS INTEGER))) AS avg_ms\n"
+                    + "FROM log\nWHERE level = 'ERROR'\nGROUP BY logger\nORDER BY errors DESC");
+            return null;
+        });
+        runQuery(q);
+        settle();
+        shot("117-query-log");
+
+        // a CSV file is the table t
+        Path csv = box.resolve("orders.csv");
+        StringBuilder rows = new StringBuilder("order_id,region,amount,placed_at\n");
+        for (int i = 0; i < 500; i++) {
+            rows.append(String.format("%d,%s,%d.%02d,2026-10-%02d 10:00:00%n", 1000 + i,
+                    new String[] {"North", "South", "East"}[i % 3], 5 + i % 90, i % 100, 1 + i % 28));
+        }
+        Files.writeString(csv, rows);
+        onEdt(() -> {
+            frame.openFile(csv);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(csv)
+                        && frame.currentTab().logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the table");
+        LogTab ct = onEdt(frame::currentTab);
+        QueryPanel cq = onEdt(ct::queryPanel);
+        onEdt(() -> {
+            ct.showQuery();
+            cq.setQueryForTest("SELECT region, count(*) AS orders, sum(amount) AS total, median(amount) AS median\nFROM t\n"
+                    + "GROUP BY region\nORDER BY total DESC");
+            return null;
+        });
+        logsift.core.Sql.Result t = runQuery(cq);
+        assertEquals(3, t.rows().size());
+        assertEquals(500L, t.rows().stream().mapToLong(r -> ((Number) r[1]).longValue()).sum());
+        settle();
+        shot("117b-query-table");
+        // writing is refused
+        onEdt(() -> {
+            cq.setQueryForTest("COPY (SELECT 1) TO '" + box.resolve("x.csv") + "'");
+            cq.run();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !cq.runningForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the refusal");
+        assertTrue(onEdt(cq::failureForTest).startsWith("Only queries can run here"), onEdt(cq::failureForTest));
+        assertFalse(Files.exists(box.resolve("x.csv")));
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(ct));
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
     @Test
     @Order(56)
     void comparesFromTheCompareTab() throws Exception {

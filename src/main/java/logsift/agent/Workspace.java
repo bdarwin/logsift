@@ -59,6 +59,8 @@ public final class Workspace implements AutoCloseable {
         return t;
     });
     private int nextLog = 1;
+    private logsift.core.Sql sql;
+    private final Map<String, logsift.core.Sql.LogTable> sqlTables = new LinkedHashMap<>();
     private volatile String client = "agent";
     private volatile java.util.function.Supplier<LogCatalog> catalog = () -> LogCatalog.EMPTY;
 
@@ -293,8 +295,41 @@ public final class Workspace implements AutoCloseable {
         }
     }
 
+    /**
+     * The SQL table of an open log (made and loaded the first time, brought up to date after):
+     * read by Logsift itself, so SQL never reads a file (DuckDB gets no file access at all).
+     */
+    public synchronized logsift.core.Sql.LogTable sqlTable(String handle, LogAnalysis log, BooleanSupplierEx loader)
+            throws Exception {
+        if (sql == null) {
+            sql = logsift.core.Sql.open(new logsift.core.Sql.Options(List.of(), null));
+        }
+        logsift.core.Sql.LogTable t = sqlTables.get(handle);
+        if (t == null || t.format() != (log.formats() == null ? null : log.formats().columns())) {
+            t = loader.make(sql);
+            sqlTables.put(handle, t);
+        }
+        return t;
+    }
+
+    public synchronized logsift.core.Sql sql() {
+        return sql;
+    }
+
+    /** Makes a log's table. */
+    @FunctionalInterface
+    public interface BooleanSupplierEx {
+        logsift.core.Sql.LogTable make(logsift.core.Sql sql) throws Exception;
+    }
+
     @Override
     public void close() {
+        synchronized (this) {
+            if (sql != null) {
+                sql.close();
+                sql = null;
+            }
+        }
         pool.shutdownNow();
         List<LogAnalysis> all;
         synchronized (this) {

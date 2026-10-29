@@ -40,7 +40,7 @@ public final class LogTools {
     /** Every tool, in a fixed order (agents cache the list): these, then the crash tools. */
     public static List<Tool> all() {
         List<Tool> all = new ArrayList<>(List.of(LIST_LOGS, OPEN_LOG, LIST_OPEN, INSIGHTS, EXCEPTIONS, SEARCH,
-                READ_LINES, TOP_MESSAGES, METRICS, SEARCH_FOLDER, ANALYZE_GC, ANALYZE_THREADS));
+                READ_LINES, TOP_MESSAGES, METRICS, QUERY, SEARCH_FOLDER, ANALYZE_GC, ANALYZE_THREADS));
         all.addAll(CrashTools.all());
         return List.copyOf(all);
     }
@@ -478,6 +478,73 @@ public final class LogTools {
                 }
                 return w.finish(b.toString().stripTrailing(), maxChars(a));
             });
+
+    // ---------------------------------------------------------------- SQL
+
+    static final Tool QUERY = new Def("query", "SQL over a log or table",
+            "Runs a read-only SQL query (DuckDB) over one log or CSV/TSV file, for exact counts, groups, time "
+                    + "buckets, percentiles and top-N lists. A log is the table log (line, starts, time, then its "
+                    + "columns such as level, thread, logger, message, and text: one row per line, line numbers as in "
+                    + "the other tools; starts is false for continuation lines like stack traces). A CSV/TSV file is "
+                    + "the table t (line, then its columns, numbers and times typed). Example: SELECT "
+                    + "date_trunc('minute', time) AS minute, count(*) FROM log WHERE level = 'ERROR' GROUP BY minute "
+                    + "ORDER BY minute. Only queries run (no COPY, ATTACH, SET…), and SQL can't read files itself.",
+            new Tool.Schema().string("log", LOG_ARG, true)
+                    .string("sql", "One SELECT (or WITH, FROM, PIVOT, SUMMARIZE, DESCRIBE) query over log or t.", true)
+                    .integer("limit", "Most rows shown (default 100, at most 1000).", false)
+                    .integer("max_chars", "Longest answer (default 24000).", false).build(),
+            (a, w) -> {
+                if (!logsift.core.Sql.available()) {
+                    throw new Tool.Failure("SQL isn't available here: " + logsift.core.Sql.unavailableReason());
+                }
+                LogAnalysis log = ready(a, w);
+                String h = w.handleOf(log);
+                String q = a.string("sql");
+                int limit = (int) a.number("limit", 100, 1, 1000);
+                LogDocument doc = log.document();
+                var f = log.formats();
+                boolean table = f != null && f.columns() != null && f.columns().isCsv();
+                logsift.core.Sql.LogTable t = w.sqlTable(h, log, sql -> {
+                    String name = "file_" + h.replaceAll("\\W", "_");
+                    if (table) {
+                        logsift.core.Pivot.Fields fields = logsift.core.Pivot.fields(f.columns(), doc.lineCount(),
+                                doc::readLines, java.time.Year.now().getValue());
+                        return sql.table(name, doc, f.columns(), fields);
+                    }
+                    return sql.log(name, doc, f == null ? null : f.columns(), f == null ? null : f.times(),
+                            f == null ? null : f.entries());
+                });
+                w.await(h + ":sql:" + doc.generation() + ":" + doc.lineCount(), "getting " + log.path().getFileName()
+                        + " ready for SQL (once; new lines are added as it grows)", () -> t.update(INTERRUPTED, null));
+                logsift.core.Sql.Result r;
+                try {
+                    r = w.await("sql:" + h + ":" + t.loaded() + ":" + q + ":" + limit, "running the query",
+                            () -> w.sql().query(table ? "t" : "log", t, q, limit, INTERRUPTED));
+                } catch (java.sql.SQLException e) {
+                    throw new Tool.Failure(e.getMessage());
+                }
+                return w.finish(sqlText(r, limit, table ? "t" : "log", t), maxChars(a));
+            });
+
+    static String sqlText(logsift.core.Sql.Result r, int limit, String table, logsift.core.Sql.LogTable t) {
+        StringBuilder b = new StringBuilder();
+        b.append(n(r.rows().size())).append(r.rows().size() == 1 ? " row" : " rows")
+                .append(r.more() ? " (the first " + n(limit) + "; raise limit or narrow the query)" : "")
+                .append(" in ").append(n(r.millis())).append(" ms:\n");
+        b.append(String.join(" | ", r.columns())).append('\n');
+        for (Object[] row : r.rows()) {
+            for (int i = 0; i < row.length; i++) {
+                b.append(i == 0 ? "" : " | ").append(row[i] == null ? "null" : cut(String.valueOf(row[i]), 300)
+                        .replace('\n', ' '));
+            }
+            b.append('\n');
+        }
+        if (r.rows().isEmpty()) {
+            b.append("(no rows) Columns of ").append(table).append(": ").append(String.join(", ", t.sqlColumns()))
+                    .append('.');
+        }
+        return b.toString().stripTrailing();
+    }
 
     // ---------------------------------------------------------------- messages and metrics
 

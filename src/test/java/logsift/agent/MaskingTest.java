@@ -76,4 +76,16 @@ class MaskingTest {
         assertTrue(Masking.luhn("4111111111111111"));
         assertTrue(!Masking.luhn("4111111111111112"));
     }
+
+    @Test
+    void numbersInNamesAndPathsAreNotCards() {
+        Masking m = new Masking(Masking.Options.DEFAULT);
+        String path = "/tmp/junit-8535496816683098565/logs/app.log";
+        assertEquals(path, m.mask(path, null), "a temporary folder's number is part of its name");
+        assertEquals("build_4111111111111111.log", m.mask("build_4111111111111111.log", null));
+        assertEquals("C:\\Temp\\4111111111111111\\x", m.mask("C:\\Temp\\4111111111111111\\x", null));
+        assertEquals("paid with ‹masked:card›", m.mask("paid with 4111 1111 1111 1111", null));
+        assertEquals("card=‹masked:card›.", m.mask("card=4111111111111111.", null), "a sentence's full stop");
+        assertEquals("card ‹masked:card›, ok", m.mask("card 4111-1111-1111-1111, ok", null));
+    }
 }

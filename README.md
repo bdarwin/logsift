@@ -28,6 +28,7 @@
 - **Folder search.** Search a whole folder in parallel, including inside `.gz` and `.zip` files, and zips inside zips.
 - **Remote logs over SSH/SFTP.** Browse the server, pick a file, and it stays up to date as the remote log grows.
 - **Analyze.** See the top messages by count, compare a bad run with a good one, and merge several logs by time.
+- **Query with SQL.** A Query tab asks a log or a CSV anything SQL can (errors per minute, the slowest requests, percentiles, joins with another file) in milliseconds over millions of lines, read-only; double-click a result to see its line. Coding agents can ask it too.
 - **Pivot tables and charts.** Group a CSV file's rows, sum, count or average its values, split them across columns and chart them, as in a spreadsheet; double-click a cell to see its rows.
 - **Compare CSV files by key.** Two exports of the same table, in any row order: pick the key columns (one is suggested), choosing the files in a browser on each side, inside zips too, and see what was added, removed and changed, value by value (old → new), with changes per column, numbers within a tolerance, and an export of the differences. A million rows compare in seconds.
 - **Compare text and folders, merge with git.** Two folders (or zips) file by file; two text files or logs side by side, with the changed words marked and times, numbers or IDs masked so two runs line up; a three-way merge for conflicts; Logsift can be git's difftool and mergetool.

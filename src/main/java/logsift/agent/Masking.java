@@ -72,6 +72,33 @@ public final class Masking {
                     + "|session[_-]?token|token|credentials?)[\"']?\\s*[:=]\\s*[\"']?([^\\s\"',;&}\\]]{3,})"), 1, "secret"));
 
     private static final Pattern CARD = Pattern.compile("\\b(?:\\d[ -]?){12,18}\\d\\b");
+
+    /**
+     * Whether digits are part of a name or path ({@code junit-8535496816683098565/logs},
+     * {@code build_4111111111111111.log}) rather than a number on its own: masking those breaks
+     * paths an agent needs, and a card number is never written that way.
+     */
+    static boolean partOfAName(String s, int start, int end) {
+        if (start > 0) {
+            char b = s.charAt(start - 1);
+            if (Character.isLetter(b) || b == '_' || b == '/' || b == '\\' || b == '.') {
+                return true;
+            }
+            if (b == '-' && start > 1 && Character.isLetterOrDigit(s.charAt(start - 2))) {
+                return true;
+            }
+        }
+        if (end < s.length()) {
+            char a = s.charAt(end);
+            if (Character.isLetter(a) || a == '_' || a == '/' || a == '\\') {
+                return true;
+            }
+            if (a == '.' && end + 1 < s.length() && Character.isLetterOrDigit(s.charAt(end + 1))) {
+                return true;
+            }
+        }
+        return false;
+    }
     private static final Pattern EMAIL = Pattern.compile("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b");
     private static final Pattern IPV4 = Pattern.compile(
             "\\b(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\b");
@@ -153,7 +180,8 @@ public final class Masking {
             int last = 0;
             while (m.find()) {
                 String digits = m.group().replaceAll("[ -]", "");
-                if (digits.length() >= 13 && digits.length() <= 19 && luhn(digits) && !allSame(digits)) {
+                if (digits.length() >= 13 && digits.length() <= 19 && luhn(digits) && !allSame(digits)
+                        && !partOfAName(s, m.start(), m.end())) {
                     if (out == null) {
                         out = new StringBuilder(s.length());
                     }

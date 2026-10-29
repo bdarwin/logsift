@@ -127,6 +127,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final MetricsPanel metrics;
     private final ProfilePanel profile;
     private final PivotPanel pivot;
+    private final QueryPanel query;
+    private logsift.core.Sql.LogTable queryTable;
+    private logsift.core.LogFormat queryCsvFor;
     private boolean profileAsked; // the user opened Profile for a log that isn't CSV
     private boolean pivotAsked;   // the user opened Pivot for a log that isn't CSV
     private int insightsGeneration = -1;
@@ -337,6 +340,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         metrics = new MetricsPanel(metricsHost());
         profile = new ProfilePanel(profileHost());
         pivot = new PivotPanel(pivotHost());
+        query = new QueryPanel(queryHost());
         bookmarks = new Bookmarks(this.path, doc::fileSize);
         bookmarkGeneration = doc.generation();
         bookmarksPanel = new BookmarksPanel(bookmarks, this::timeText, doc::line, this::showLine);
@@ -350,6 +354,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         bottom.addTab("Insights", insights);
         bottom.addTab("Exceptions", exceptions);
         bottom.addTab("Metrics", metrics);
+        bottom.addTab("Query", query);
+        bottom.setToolTipTextAt(bottom.indexOfComponent(query), "SQL over the log (or the table), read-only");
         results = new ResultsPanel(doc, resultsHost());
         bottom.addTab("Find results", results);
         bottom.addTab("Messages", messages);
@@ -392,6 +398,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
             if (bottom.getSelectedComponent() == pivot) {
                 pivot.showing();
+            }
+            if (bottom.getSelectedComponent() == query) {
+                query.showing();
             }
         });
         bottom.setPreferredSize(new Dimension(400, 210));
@@ -1741,6 +1750,81 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     PivotPanel pivotPanel() {
         return pivot;
+    }
+
+    QueryPanel queryPanel() {
+        return query;
+    }
+
+    /** Shows the Query tab. */
+    void showQuery() {
+        setBottomCollapsed(false);
+        bottom.setSelectedComponent(query);
+    }
+
+    private QueryPanel.Host queryHost() {
+        return new QueryPanel.Host() {
+            @Override
+            public Path file() {
+                return doc.path();
+            }
+
+            @Override
+            public boolean isTable() {
+                logsift.core.LogFormat f = logFormat;
+                return f != null && f.isCsv();
+            }
+
+            @Override
+            public List<String> columns() {
+                logsift.core.LogFormat f = logFormat;
+                List<String> out = new ArrayList<>(List.of("line"));
+                if (f != null && f.isCsv()) {
+                    out.addAll(f.headerNames() != null ? f.headerNames() : f.columns());
+                    return out;
+                }
+                out.add("starts");
+                out.add("time");
+                if (f != null) {
+                    for (String c : f.columns()) {
+                        if (!c.equals("time") && !c.equals("line") && !c.equals("text") && !c.equals("starts")) {
+                            out.add(c);
+                        }
+                    }
+                }
+                out.add("text");
+                return out;
+            }
+
+            @Override
+            public String prepare(logsift.core.Sql sql, AtomicBoolean stop, java.util.function.DoubleConsumer progress)
+                    throws Exception {
+                while (doc.isIndexing() || detectedGeneration != doc.generation()) {
+                    if (stop.get() || closed) {
+                        return "Stopped.";
+                    }
+                    Thread.sleep(100);
+                }
+                logsift.core.LogFormat f = logFormat;
+                if (f != null && f.isCsv()) {
+                    if (queryCsvFor != f) {
+                        sql.csv("t", doc.path(), f.delimiter(), f.headerNames() != null, doc.charset());
+                        queryCsvFor = f;
+                    }
+                    return null;
+                }
+                if (queryTable == null || queryTable.format() != f) {
+                    queryTable = sql.log("log", doc, f, timeFormat, entryFormat);
+                }
+                return queryTable.update(stop::get, progress) ? null : "Stopped.";
+            }
+
+            @Override
+            public void goToLine(long line) {
+                showLine(line - 1);
+                mainView().focusView();
+            }
+        };
     }
 
     /** Shows the Pivot tab (added for a log that isn't CSV). */
@@ -3648,6 +3732,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         metrics.cancel();
         profile.cancel();
         pivot.cancel();
+        query.close();
         if (request != null) {
             request.cancel();
         }

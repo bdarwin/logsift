@@ -12,12 +12,26 @@ repositories {
     mavenCentral()
 }
 
+/** DuckDB's native library for the system building (and later running) this. */
+val duckdbClassifier: String = run {
+    val os = System.getProperty("os.name").lowercase()
+    val arm = System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm") }
+    when {
+        os.contains("mac") -> "macos_universal"
+        os.contains("win") -> if (arm) "windows_arm64" else "windows_amd64"
+        else -> if (arm) "linux_arm64" else "linux_amd64"
+    }
+}
+
 dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
     // SVG icons (menus, toolbar) in the theme's colors
     implementation("com.formdev:flatlaf-extras:3.7.2")
     // SSH/SFTP for remote logs (maintained fork of JSch)
     implementation("com.github.mwiede:jsch:0.2.20")
+    // DuckDB (MIT) for the Query tab: SQL over tables and logs. Only this system's native
+    // library: each installer is built on its own system.
+    implementation("org.duckdb:duckdb_jdbc:1.5.6.0:$duckdbClassifier")
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

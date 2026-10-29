@@ -211,7 +211,7 @@ class McpServerTest {
     void listsReadOnlyTools() throws Exception {
         List<Object> tools = list(map(request("tools/list", Map.of()).get("result")).get("tools"));
         assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines",
-                "top_messages", "metrics", "search_folder", "analyze_gc", "analyze_threads", "analyze_crash",
+                "top_messages", "metrics", "query", "search_folder", "analyze_gc", "analyze_threads", "analyze_crash",
                 "crash_threads", "crash_modules"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
@@ -502,6 +502,41 @@ class McpServerTest {
         // folder search names files by their real path (on Windows the temporary folder's long name)
         assertTrue(found.text().contains(orders.toRealPath().resolve("app.log").toString()), found.text());
         assertTrue(call("open_log", "path", "billing/billing").error(), "outside the folders agents may read");
+    }
+
+    @Test
+    void answersSqlReadOnly() throws Exception {
+        Path f = serviceLog(logs.resolve("orders.log"));
+        long errors = Files.readAllLines(f).stream().filter(l -> l.contains(" ERROR ")).count();
+        Answer a = ok("query", "log", f.toString(), "sql", "SELECT level, count(*) AS lines FROM log WHERE starts "
+                + "GROUP BY level ORDER BY level");
+        assertTrue(a.text().contains("ERROR | " + errors), a.text());
+        assertTrue(a.text().startsWith("3 rows in "), a.text());
+        Answer burst = ok("query", "log", f.toString(), "sql", "SELECT date_trunc('minute', time) AS minute, count(*) AS e "
+                + "FROM log WHERE level = 'ERROR' GROUP BY minute ORDER BY e DESC LIMIT 1");
+        assertTrue(burst.text().contains("2026-10-21 10:2"), "the burst's minute: " + burst.text());
+        // line numbers as the other tools give them
+        Answer first = ok("query", "log", f.toString(), "sql", "SELECT min(line) AS l FROM log WHERE text LIKE '%Pricing failed%'");
+        Answer search = ok("search", "log", f.toString(), "query", "Pricing failed", "limit", 1);
+        String l = first.text().lines().toList().get(2).strip();
+        assertTrue(search.text().contains("\n" + String.format(java.util.Locale.ROOT, "%,d", Long.parseLong(l)) + ": "),
+                l + " / " + search.text());
+
+        // a table: numbers and times typed
+        Path csv = logs.resolve("orders.csv");
+        Files.writeString(csv, "order_id,placed_at,amount,region\n1,2026-10-21 10:00:00,12.50,North\n"
+                + "2,2026-10-21 10:05:00,3,South\n3,2026-10-21 11:00:00,4.5,North\n");
+        Answer t = ok("query", "log", csv.toString(), "sql", "SELECT region, sum(amount) AS total, "
+                + "max(placed_at) AS last FROM t GROUP BY region ORDER BY region");
+        assertTrue(t.text().contains("North | 17.0 | 2026-10-21 11:00"), t.text());
+
+        // read-only, and SQL can't read files, even in the folders agents may read
+        assertTrue(call("query", "log", f.toString(), "sql", "COPY (SELECT 1) TO '" + logs.resolve("x.csv") + "'")
+                .error());
+        assertFalse(Files.exists(logs.resolve("x.csv")));
+        Answer file = call("query", "log", f.toString(), "sql", "SELECT * FROM read_csv('" + csv + "')");
+        assertTrue(file.error(), "no file access from SQL: " + file.text());
+        assertTrue(call("query", "log", f.toString(), "sql", "SELECT 1; SELECT 2").text().startsWith("One query at a time"));
     }
 
     @Test

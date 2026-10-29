@@ -147,6 +147,7 @@ The file is plain JSON, if you prefer to write it by hand:
 | **read_lines** | Lines from a line number on |
 | **top_messages** | The most frequent messages, with numbers replaced by placeholders |
 | **metrics** | How long things took, and numbers in messages |
+| **query** | A read-only SQL query over a log (the table `log`: line, time, level, logger, message, text…) or a CSV/TSV file (the table `t`): exact counts, groups, time buckets, percentiles. See [Query](query.md) |
 | **search_folder** | Every file in a folder that contains a text, inside zips and `.gz` files too; give a service's name to search all its folders |
 | **analyze_gc** | Explains a GC log: pauses, time stopped, heap after collections, and what to tune |
 | **analyze_threads** | Explains thread dumps: deadlocks, lock queues, stuck and busy threads |
