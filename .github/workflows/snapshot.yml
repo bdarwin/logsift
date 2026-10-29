@@ -45,19 +45,6 @@ jobs:
       - name: Unit tests
         run: ./gradlew --no-daemon test installDist distZip
 
-      - name: Visual tests (Linux, virtual display, 200 MB log)
-        if: matrix.target == 'linux-x64'
-        run: |
-          sudo apt-get update -q && sudo apt-get install -yq xvfb fonts-dejavu fonts-noto-cjk
-          xvfb-run -a -s "-screen 0 1600x1000x24" ./gradlew --no-daemon visualTest -PsizeMb=200
-          rm -rf build/visual
-
-      - name: Visual tests (Windows desktop, 200 MB log)
-        if: matrix.target == 'windows-x64'
-        run: |
-          ./gradlew --no-daemon visualTest -PsizeMb=200
-          rm -rf build/visual
-
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v5
@@ -68,11 +55,13 @@ jobs:
             build/screenshots
           if-no-files-found: ignore
 
+      # WiX's own zip of its tools: faster than installing it with Chocolatey
       - name: Install WiX 3 (for the Windows installer)
         if: startsWith(matrix.target, 'windows-')
         run: |
-          choco install wixtoolset -y --no-progress
-          echo "C:/Program Files (x86)/WiX Toolset v3.14/bin" >> "$GITHUB_PATH"
+          curl -sSfL -o wix.zip https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+          mkdir -p /c/wix && unzip -q wix.zip -d /c/wix && rm wix.zip
+          echo "C:/wix" >> "$GITHUB_PATH"
 
       - name: Package
         run: |
@@ -247,9 +236,54 @@ jobs:
           name: dist-${{ matrix.target }}
           path: dist/*
 
+  # The UI tests on a real screen, beside the builds (the release waits for them too)
+  visual:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: linux-x64 }
+          - { os: windows-latest, target: windows-x64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Visual tests (Linux, virtual display, 200 MB log)
+        if: matrix.target == 'linux-x64'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq xvfb fonts-dejavu fonts-noto-cjk
+          xvfb-run -a -s "-screen 0 1600x1000x24" ./gradlew --no-daemon visualTest -PsizeMb=200
+          rm -rf build/visual
+
+      - name: Visual tests (Windows desktop, 200 MB log)
+        if: matrix.target == 'windows-x64'
+        run: |
+          ./gradlew --no-daemon visualTest -PsizeMb=200
+          rm -rf build/visual
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: reports-visual-${{ matrix.target }}
+          path: |
+            build/reports/tests
+            build/screenshots
+          if-no-files-found: ignore
+
   release:
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/beta/'))
-    needs: build
+    needs: [build, visual]
     runs-on: ubuntu-latest
     permissions:
       contents: write
