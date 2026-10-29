@@ -13,8 +13,24 @@ The **Metrics** tab (below the log) shows what the log measures, without any set
 ## What it finds
 
 - **Things that start and end:** message kinds that open and close something (*Started job sync-7* … *Finished job sync-7*, *Processing request r-12* … *Completed request r-12*) are found by their words. Lines are paired by the value they share (the job, the request), or else by thread. The list says which: *took (by its job)* or *took (by thread)*. Hover for the two messages.
-- **Numbers in messages:** a number with a unit after it (`ms`, `s`, `MB`, `%`, `rows`), or a word like *took*, *size*, *latency* or *queue* before it: *order … placed in **#** ms*, *queue size=**#***. Order numbers and IDs are not measurements. A message kind needs 20 lines or more. Durations are in milliseconds and sizes in bytes, whatever unit each line used.
+- **Numbers in messages:** a number with a unit after it (`ms`, `s`, `MB`, `%`, `rows`), or a word like *took*, *size*, *latency* or *queue* before it: *order … placed in **#** ms*, *queue size=**#***. Order numbers and IDs are not measurements. A message kind needs 20 lines or more. Durations are in milliseconds and sizes in bytes, whatever unit each line used. The 10 measurements of the most frequent messages are shown (change it in Settings → Metrics).
+- **Numbers after a key:** `latency=35 bytes=512 items=3`, `depth: 42`. Each number belongs to the key right before it, and a key's name can give its unit (`latency_ms`, `body_bytes`, `timeout_s`). Which keys count is set under [Which numbers count](#which-numbers-count).
 - **Columns** of a CSV file, a JSON log or a layout with columns (see below).
+
+## Which numbers count
+
+**Which Numbers Count…** (top right of the tab) opens **Settings → Metrics**:
+
+![Settings → Metrics: which keys' numbers count, with a line of the log tried](../screenshots/settings-metrics.png)
+
+- **Known keys** (at first): *latency*, *size*, *bytes*, *count*, *hits*, *misses*, *items*, *retries*, *errors* and the like, and keys that name a unit (*latency_ms*, *body_bytes*).
+- **Every key, except ids, codes and names**: every number after a key, but not *id*, *…_id*, *user*, *status*, *code*, *port*, *version* and the like.
+- **Only these keys**: the keys you list.
+- **Never these keys**: keys that never count, whatever the choice above.
+- **Show at most**: how many measurements of messages the tab shows (10 at first, up to 100).
+- **Try a line**: paste a line of your log, and see which of its numbers count.
+
+Changes apply to the open logs at once. Coding agents' `metrics` tool uses them the next time the agent starts Logsift.
 
 ## Columns
 

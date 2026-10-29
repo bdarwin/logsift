@@ -32,6 +32,7 @@ final class SettingsDialog extends JDialog {
     static final String FORMATS = "Log Formats";
     static final String SOURCE = "Source Code";
     static final String AGENTS = "Agents";
+    static final String METRICS = "Metrics";
 
     private static final Preferences PREFS = AppState.prefs();
     private final MainFrame frame;
@@ -51,6 +52,7 @@ final class SettingsDialog extends JDialog {
         tabs.addTab("General", general());
         tabs.addTab(FORMATS, formats);
         tabs.addTab(SOURCE, sourceCode());
+        tabs.addTab(METRICS, metrics());
         agents = new AgentsPanel(logsift.agent.AgentSettings.launcher(), this::openAgentActivity);
         tabs.addTab(AGENTS, agents);
         JButton close = new JButton("Close");
@@ -109,6 +111,150 @@ final class SettingsDialog extends JDialog {
             frame.formatsChanged();
         }
         super.dispose();
+    }
+
+    // ---------------------------------------------------------------- Metrics
+
+    /** Which numbers in messages count as measurements (the Metrics tab, and agents' metrics). */
+    private JComponent metrics() {
+        java.nio.file.Path home = AppState.home();
+        logsift.core.Numbers.Options o = logsift.core.Numbers.Options.load(home);
+        JPanel p = new JPanel(new BorderLayout(0, 10));
+        p.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+        JLabel intro = new JLabel("<html>The <b>Metrics</b> tab charts numbers that messages report over time. A number "
+                + "counts when a unit follows it (<i>345 ms</i>, <i>12 MB</i>, <i>3 items</i>) or the word before it "
+                + "says it is a measurement (<i>took</i>, <i>latency</i>, <i>size</i>, <i>queue</i>…). Numbers after a "
+                + "key, as in <i>latency=35 items=3</i> or <i>depth: 42</i>, count:</html>");
+        p.add(intro, BorderLayout.NORTH);
+
+        javax.swing.JRadioButton known = new javax.swing.JRadioButton("Known keys: latency, size, bytes, count, hits, "
+                + "misses, items, retries, errors, …, and keys that name a unit (latency_ms, body_bytes)");
+        javax.swing.JRadioButton all = new javax.swing.JRadioButton("Every key, except ids, codes and names (id, "
+                + "order_id, user, status, code, port, version, …)");
+        javax.swing.JRadioButton only = new javax.swing.JRadioButton("Only these keys:");
+        javax.swing.ButtonGroup g = new javax.swing.ButtonGroup();
+        g.add(known);
+        g.add(all);
+        g.add(only);
+        javax.swing.JTextField onlyKeys = new javax.swing.JTextField(String.join(", ", o.only()), 40);
+        onlyKeys.putClientProperty("JTextField.placeholderText", "latency, amount, items");
+        javax.swing.JTextField never = new javax.swing.JTextField(String.join(", ", o.never()), 40);
+        never.putClientProperty("JTextField.placeholderText", "keys that never count, like: shard, partition");
+        JSpinner max = new JSpinner(new SpinnerNumberModel(o.maxSeries(), 1, 100, 1));
+        (switch (o.keys()) {
+            case KNOWN -> known;
+            case ALL_BUT_IDS -> all;
+            case ONLY -> only;
+        }).setSelected(true);
+        onlyKeys.setEnabled(only.isSelected());
+
+        javax.swing.JTextField tryLine = new javax.swing.JTextField(
+                "GET /orders status=200 latency=35 bytes=512 items=3 user=u12 order_id=99812", 50);
+        JLabel tryResult = new JLabel(" ");
+        Runnable apply = () -> {
+            logsift.core.Numbers.KeyMode mode = all.isSelected() ? logsift.core.Numbers.KeyMode.ALL_BUT_IDS
+                    : only.isSelected() ? logsift.core.Numbers.KeyMode.ONLY : logsift.core.Numbers.KeyMode.KNOWN;
+            onlyKeys.setEnabled(only.isSelected());
+            logsift.core.Numbers.Options n = new logsift.core.Numbers.Options(mode,
+                    logsift.core.Numbers.Options.split(onlyKeys.getText()),
+                    logsift.core.Numbers.Options.split(never.getText()), (Integer) max.getValue());
+            List<String> yes = new ArrayList<>();
+            List<String> no = new ArrayList<>();
+            for (logsift.core.Numbers.Explained x : logsift.core.Numbers.explain(tryLine.getText(), n)) {
+                String name = x.key().isEmpty() ? x.value() : x.key();
+                if (x.measured()) {
+                    yes.add("<b>" + LogLocationsDialogLike.esc(name) + "</b>"
+                            + (x.unit().equals("none") ? "" : " (" + x.unit() + ")"));
+                } else {
+                    no.add(LogLocationsDialogLike.esc(name));
+                }
+            }
+            tryResult.setText("<html>" + (yes.isEmpty() ? "No number in it counts." : "Measured: " + String.join(", ", yes)
+                    + ".") + (no.isEmpty() ? "" : " <span style='color:#6b7280'>Not: " + String.join(", ", no) + ".</span>")
+                    + "</html>");
+            if (!n.equals(logsift.core.Numbers.options())) {
+                logsift.core.Numbers.setOptions(n);
+                try {
+                    n.save(home);
+                } catch (java.io.IOException e) {
+                    // used for this session; said nowhere else
+                }
+                frame.metricsOptionsChanged();
+            }
+        };
+        for (javax.swing.JRadioButton b : List.of(known, all, only)) {
+            b.addActionListener(e -> apply.run());
+        }
+        javax.swing.event.DocumentListener typed = new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                apply.run();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                apply.run();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {}
+        };
+        onlyKeys.getDocument().addDocumentListener(typed);
+        never.getDocument().addDocumentListener(typed);
+        tryLine.getDocument().addDocumentListener(typed);
+        max.addChangeListener(e -> apply.run());
+
+        JPanel form = new JPanel(new GridBagLayout());
+        GridBagConstraints l = new GridBagConstraints();
+        l.gridx = 0;
+        l.gridwidth = 2;
+        l.anchor = GridBagConstraints.WEST;
+        l.insets = new Insets(3, 0, 3, 0);
+        form.add(known, l);
+        form.add(all, l);
+        JPanel onlyRow = new JPanel(new BorderLayout(8, 0));
+        onlyRow.add(only, BorderLayout.WEST);
+        onlyRow.add(onlyKeys, BorderLayout.CENTER);
+        l.fill = GridBagConstraints.HORIZONTAL;
+        form.add(onlyRow, l);
+        l.fill = GridBagConstraints.NONE;
+        l.gridwidth = 1;
+        GridBagConstraints f = new GridBagConstraints();
+        f.gridx = 1;
+        f.anchor = GridBagConstraints.WEST;
+        f.fill = GridBagConstraints.HORIZONTAL;
+        f.weightx = 1;
+        f.insets = new Insets(5, 0, 5, 0);
+        l.insets = new Insets(12, 0, 5, 12);
+        add(form, l, f, "Never these keys", never);
+        l.insets = new Insets(5, 0, 5, 12);
+        JPanel maxRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        maxRow.add(max);
+        JLabel maxHint = new JLabel("  numbers over time, the most frequent messages' first");
+        maxHint.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        maxRow.add(maxHint);
+        add(form, l, f, "Show at most", maxRow);
+        l.insets = new Insets(14, 0, 5, 12);
+        add(form, l, f, "Try a line", tryLine);
+        l.insets = new Insets(0, 0, 5, 12);
+        add(form, l, f, "", tryResult);
+        note(form, l, f, "Paste a line of your log to see which of its numbers count. Changes apply to open logs at "
+                + "once, and to coding agents' metrics the next time they start.");
+        GridBagConstraints end = new GridBagConstraints();
+        end.gridx = 0;
+        end.gridy = GridBagConstraints.RELATIVE;
+        end.weighty = 1;
+        form.add(new JLabel(), end);
+        p.add(form, BorderLayout.CENTER);
+        apply.run();
+        return p;
+    }
+
+    /** HTML escaping for labels. */
+    private static final class LogLocationsDialogLike {
+        static String esc(String s) {
+            return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        }
     }
 
     // ---------------------------------------------------------------- Source code

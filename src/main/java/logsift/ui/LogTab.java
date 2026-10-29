@@ -61,6 +61,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         /** Reads the GC lines of this log and explains them in a tab of their own. */
         default void analyzeGc(LogTab tab) {}
 
+        /** Opens Settings on a tab (null: the first). */
+        default void showSettings(String tab) {}
+
         /** Shows the thread a line names in a thread dump of the log's JVM. */
         default void showThread(LogTab tab, String thread) {}
 
@@ -1876,12 +1879,13 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     record Measured(logsift.core.Metrics base, logsift.core.ColumnMetrics.Data columns) {}
 
     /** The version of the log a measurement is for. */
-    private record LogVersion(int generation, long lines, logsift.core.LogFormat format) {}
+    private record LogVersion(int generation, long lines, logsift.core.LogFormat format,
+                              logsift.core.Numbers.Options numbers) {}
 
     private final logsift.core.WholeLogCache<Measured> measured = new logsift.core.WholeLogCache<>();
 
     private LogVersion logVersion() {
-        return new LogVersion(doc.generation(), doc.lineCount(), logFormat);
+        return new LogVersion(doc.generation(), doc.lineCount(), logFormat, logsift.core.Numbers.options());
     }
 
     /** The cached measurements, if they are for the file as it is now. */
@@ -1932,8 +1936,18 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return logsift.core.LogAnalysis.templateLines(doc, entryFormat, t, stop);
     }
 
+    /** Which numbers count as measurements changed (Settings → Metrics): measure again. */
+    void metricsOptionsChanged() {
+        metrics.reset();
+    }
+
     private MetricsPanel.Host metricsHost() {
         return new MetricsPanel.Host() {
+            @Override
+            public void openMetricsSettings() {
+                host.showSettings(SettingsDialog.METRICS);
+            }
+
             @Override
             public logsift.core.Metrics analyze(AtomicBoolean cancel, java.util.function.Consumer<String> step) {
                 while (doc.isIndexing() || detectedGeneration != doc.generation()) {

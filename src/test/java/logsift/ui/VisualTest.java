@@ -7015,6 +7015,105 @@ class VisualTest {
     }
 
     @Test
+    @Order(64)
+    void measuresNumbersAfterKeys() throws Exception {
+        Path f = dir.resolve("kv-service.log");
+        java.util.Random rnd = new java.util.Random(4);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 600; i++) {
+            sb.append(String.format("2026-10-28 10:%02d:%02d.000 INFO  [http-%d] c.a.Api - GET /orders status=%d latency=%d "
+                    + "bytes=%d user=u%d order_id=%d%n", i / 60 % 60, i % 60, i % 4, rnd.nextInt(10) == 0 ? 500 : 200,
+                    20 + rnd.nextInt(80) + (i > 400 && i < 430 ? 900 : 0), 300 + rnd.nextInt(2000), rnd.nextInt(500),
+                    90000 + i));
+            sb.append(String.format("2026-10-28 10:%02d:%02d.500 INFO  [pay-%d] c.a.Pay - payment done amount=%d.%02d "
+                    + "items=%d retries=%d%n", i / 60 % 60, i % 60, i % 2, rnd.nextInt(300), rnd.nextInt(100),
+                    1 + rnd.nextInt(5), rnd.nextInt(3)));
+        }
+        Files.writeString(f, sb);
+        Path home = Path.of(System.getProperty("logsift.home"));
+        Files.deleteIfExists(logsift.core.Numbers.Options.file(home));
+        onEdt(() -> {
+            logsift.core.Numbers.setOptions(logsift.core.Numbers.Options.DEFAULT);
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                        && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the log");
+        LogTab tab = onEdt(frame::currentTab);
+        setBottomFor(tab, tab.metricsPanel());
+        java.util.function.Supplier<List<String>> names = () -> {
+            try {
+                return onEdt(() -> tab.metricsPanel().itemListForTest().stream().map(MetricsPanel.Item::name).toList());
+            } catch (Exception e) {
+                return List.of();
+            }
+        };
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.metricsPanel().metrics() != null && !tab.metricsPanel().isRunning());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the metrics");
+        List<String> known = names.get();
+        assertTrue(known.stream().anyMatch(n -> n.contains("latency=#")), known.toString());
+        assertTrue(known.stream().anyMatch(n -> n.contains("bytes=#")), known.toString());
+        assertTrue(known.stream().anyMatch(n -> n.contains("items=#")), known.toString());
+        assertFalse(known.stream().anyMatch(n -> n.contains("status=#") || n.contains("order_id=#") || n.contains("amount=#")),
+                "codes and ids don't count, nor amount (not a known key): " + known);
+        settle();
+        shot("116-metrics-key-value");
+
+        // Settings → Metrics: every key except ids
+        javax.swing.SwingUtilities.invokeLater(() -> frame.showSettings(SettingsDialog.METRICS));
+        waitFor(() -> SettingsDialog.lastForTest() != null && SettingsDialog.lastForTest().isShowing(), 10_000, "Settings");
+        SettingsDialog sd = SettingsDialog.lastForTest();
+        settle();
+        onEdt(() -> {
+            ((javax.swing.AbstractButton) findText(sd.getRootPane(), "Every key, except ids")).doClick();
+            return null;
+        });
+        settle();
+        shotOf(sd.getRootPane(), "116b-settings-metrics");
+        assertEquals(logsift.core.Numbers.KeyMode.ALL_BUT_IDS, logsift.core.Numbers.Options.load(home).keys(), "saved");
+        onEdt(() -> {
+            sd.dispose();
+            return null;
+        });
+        waitFor(() -> names.get().stream().anyMatch(n -> n.contains("amount=#")), 30_000, "amount measured: " + names.get());
+        assertFalse(names.get().stream().anyMatch(n -> n.contains("order_id=#") || n.contains("status=#")));
+        // put the default back for other tests
+        onEdt(() -> {
+            logsift.core.Numbers.setOptions(logsift.core.Numbers.Options.DEFAULT);
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+        Files.deleteIfExists(logsift.core.Numbers.Options.file(home));
+    }
+
+    /** The button whose text starts with this, in a window. */
+    private static java.awt.Component findText(java.awt.Container c, String start) {
+        for (java.awt.Component k : c.getComponents()) {
+            if (k instanceof javax.swing.AbstractButton b && b.getText() != null && b.getText().startsWith(start)) {
+                return b;
+            }
+            if (k instanceof java.awt.Container cc) {
+                java.awt.Component f = findText(cc, start);
+                if (f != null) {
+                    return f;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
     @Order(56)
     void comparesFromTheCompareTab() throws Exception {
         // the left file is in a zip inside a zip (old/exports.zip in bundle.zip); the right one is on disk

@@ -59,6 +59,7 @@ In `~/.logsift` (your home folder):
 | File or folder | Holds |
 |---|---|
 | `formats.properties` | Your log formats |
+| `metrics.properties` | Settings → Metrics: which numbers in messages count |
 | `files/` | What each log remembers: filters, position, view |
 | `bookmarks/` | Bookmarks and their notes |
 | `errors.log` | Unexpected errors, every session (Help → Open Error Log; this session's in Help → Show Errors…) |
@@ -70,6 +71,10 @@ In `~/.logsift` (your home folder):
 Other preferences (window size, recent files, last folders, servers and users, never passwords) are kept in Java's preferences store for your user.
 
 Logsift never sends your logs anywhere. Its only network connections are the daily update check (if on) and the servers you choose: SSH servers, JMX ports, and web addresses you open. When you set up a [coding agent](agents.md), what Logsift answers it goes to the agent's AI provider.
+
+## Metrics
+
+Which numbers in messages the [Metrics tab](metrics.md#which-numbers-count) charts: numbers after **known keys**, **every key except ids, codes and names**, or **only these keys**; keys that **never** count; and how many measurements to **show at most**. **Try a line** shows which numbers of a line of your log count. Saved in `~/.logsift/metrics.properties`.
 
 ## Agents
 

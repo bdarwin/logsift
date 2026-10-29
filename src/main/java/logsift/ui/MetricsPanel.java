@@ -42,6 +42,9 @@ final class MetricsPanel extends JPanel {
 
         void goToLine(long line);
 
+        /** Opens Settings → Metrics: which numbers in messages count. */
+        default void openMetricsSettings() {}
+
         /** "10:02:13" for a line, or its number when the log has no times. */
         String describeLine(long line);
     }
@@ -95,6 +98,11 @@ final class MetricsPanel extends JPanel {
         refresh.setToolTipText("Look through the log again (it may have grown)");
         refresh.addActionListener(e -> start());
         top.add(refresh);
+        JButton which = new JButton("Which Numbers Count…");
+        which.putClientProperty("JButton.buttonType", "toolBarButton");
+        which.setToolTipText("Settings → Metrics: numbers after key= (latency=35, items=3) and how many to show");
+        which.addActionListener(e -> host.openMetricsSettings());
+        top.add(which);
         add(top, BorderLayout.NORTH);
 
         for (JTable t : List.of(itemTable, exampleTable)) {
@@ -245,6 +253,16 @@ final class MetricsPanel extends JPanel {
         }, "logsift-metrics");
         t.setDaemon(true);
         t.start();
+    }
+
+    /** What counts as a measurement changed: measure again (now if shown, else when shown). */
+    void reset() {
+        cancel();
+        metrics = null;
+        computedFor = null;
+        if (isShowing()) {
+            start();
+        }
     }
 
     void cancel() {

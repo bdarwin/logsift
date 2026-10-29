@@ -20,6 +20,61 @@ class NumbersTest {
         assertEquals(List.of(), cols("user <*> logged in from <*>"));
     }
 
+    @Test
+    void readsKeyValuePairs() {
+        // the next key is not the unit of this number: latency isn't a size because "bytes=" follows
+        Numbers.Options known = Numbers.Options.DEFAULT;
+        assertEquals(List.of(1, 2), cols("GET /orders status=<*> latency=<*> bytes=<*> user=<*> order_id=<*>", known));
+        assertEquals(1, Numbers.measuredColumns("GET /orders status=<*> latency=<*> bytes=<*>", known).get(1)[1],
+                "bytes is a size");
+        assertEquals(2, Numbers.measuredColumns("GET /orders status=<*> latency=<*> bytes=<*>", known).get(0)[1],
+                "latency without a unit: a plain number");
+        assertEquals(List.of(0, 1, 2, 3), cols("cache stats hits=<*> misses=<*> size=<*> evictions=<*>", known));
+        assertEquals(List.of(1, 2, 3), cols("payment done amount=<*> items=<*> retries=<*> duration_ms=<*>", known));
+        assertEquals(List.of(0, 1), cols("queue depth: <*>, active threads: <*>", known));
+        assertEquals(List.of(0, 1, 2), cols("GET latency_ms=<*> body_bytes=<*> timeout_s=<*> status=<*>", known));
+
+        Numbers.Options all = new Numbers.Options(Numbers.KeyMode.ALL_BUT_IDS, java.util.Set.of(), java.util.Set.of(), 10);
+        assertEquals(List.of(0, 1, 2, 3), cols("payment done amount=<*> items=<*> retries=<*> duration_ms=<*>", all));
+        assertEquals(List.of(1, 2), cols("GET /orders status=<*> latency=<*> bytes=<*> user=<*> order_id=<*>", all),
+                "ids, users and status codes never count");
+        Numbers.Options only = new Numbers.Options(Numbers.KeyMode.ONLY, java.util.Set.of("Amount"), java.util.Set.of(), 10);
+        assertEquals(List.of(0), cols("payment done amount=<*> items=<*> retries=<*> duration_ms=<*>", only));
+        Numbers.Options never = new Numbers.Options(Numbers.KeyMode.ALL_BUT_IDS, java.util.Set.of(),
+                java.util.Set.of("retries"), 10);
+        assertEquals(List.of(0, 1, 3), cols("payment done amount=<*> items=<*> retries=<*> duration_ms=<*>", never));
+        // the old cases read the same
+        assertEquals(List.of(2), cols("INFO [<*>] c.a.Shop - order <*> placed in <*> ms", all));
+        assertEquals(List.of(), cols("user <*> logged in from <*>", all));
+    }
+
+    @Test
+    void explainsALine() {
+        List<Numbers.Explained> e = Numbers.explain("GET /orders status=200 latency=35ms bytes=512 user=u12",
+                Numbers.Options.DEFAULT);
+        assertEquals(List.of("status", "latency", "bytes"), e.stream().map(Numbers.Explained::key).toList(),
+                "u12 isn't a number");
+        assertEquals(List.of(false, true, true), e.stream().map(Numbers.Explained::measured).toList());
+        assertEquals("millis", e.get(1).unit());
+        assertEquals("bytes", e.get(2).unit());
+    }
+
+    @Test
+    void optionsAreSavedAndRead(@org.junit.jupiter.api.io.TempDir java.nio.file.Path home) throws Exception {
+        assertEquals(Numbers.Options.DEFAULT, Numbers.Options.load(home));
+        Numbers.Options o = new Numbers.Options(Numbers.KeyMode.ONLY, java.util.Set.of("latency", "items"),
+                java.util.Set.of("shard"), 25);
+        o.save(home);
+        assertEquals(o, Numbers.Options.load(home));
+        assertEquals(java.util.Set.of("a", "b", "c"), Numbers.Options.split("a, b;c  "));
+        assertEquals(100, new Numbers.Options(Numbers.KeyMode.KNOWN, java.util.Set.of(), java.util.Set.of(), 500)
+                .maxSeries(), "at most 100");
+    }
+
+    private static List<Integer> cols(String t, Numbers.Options o) {
+        return Numbers.measuredColumns(t, o).stream().map(c -> c[0]).toList();
+    }
+
     private static List<Integer> cols(String t) {
         return Numbers.measuredColumns(t).stream().map(c -> c[0]).toList();
     }

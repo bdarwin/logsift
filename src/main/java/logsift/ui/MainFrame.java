@@ -132,6 +132,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     public MainFrame() {
         super(logsift.core.Channel.appName());
+        logsift.core.Numbers.setOptions(logsift.core.Numbers.Options.load(AppState.home()));
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         setIconImages(logsift.tools.IconGenerator.windowIcons());
         setSize(PREFS.getInt("width", 1280), PREFS.getInt("height", 820));
@@ -3484,7 +3485,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             new javax.swing.JCheckBoxMenuItem("Check for Updates Automatically");
 
     /** Opens Settings (on the given tab, or General). */
-    void showSettings(String tab) {
+    /** Which numbers count as measurements changed: every log measures again. */
+    void metricsOptionsChanged() {
+        for (LogTab t : allTabs()) {
+            t.metricsOptionsChanged();
+        }
+    }
+
+    @Override
+    public void showSettings(String tab) {
         LogTab t = currentTab();
         SettingsDialog d = settingsDialog(t);
         d.showTab(tab);

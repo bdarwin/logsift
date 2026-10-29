@@ -56,6 +56,7 @@ public final class McpMain {
         }
         System.err.println("logsift-mcp " + logsift.core.Version.current() + ": reading under "
                 + options.scope().describe() + "; masking " + options.masking().describe());
+        logsift.core.Numbers.setOptions(logsift.core.Numbers.Options.load(home()));
         try (Workspace w = new Workspace(options)) {
             new McpServer(LogTools.all(), w, logsift.core.Version.current(), protocol)
                     .serve(new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8)));
