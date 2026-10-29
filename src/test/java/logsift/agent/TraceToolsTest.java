@@ -178,7 +178,7 @@ class TraceToolsTest {
             return;
         }
         String a = run(TraceTools.ANALYZE_PROFILE, "path", jfr.toString());
-        assertTrue(a.contains("samples."), a);
+        assertTrue(a.matches("(?s).*\\d+ samples?\\..*"), a); // "1 sample." where a machine gives few
         assertTrue(a.contains("Most time of their own:\n 1. "), a);
     }
 
