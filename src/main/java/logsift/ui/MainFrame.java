@@ -430,6 +430,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             openHeapDump(abs);
             return;
         }
+        if (!asText.remove(abs) && logsift.crash.CrashFiles.likelyByName(abs) && Files.isRegularFile(abs)
+                && logsift.crash.CrashFiles.kindOf(abs) != null) {
+            openCrash(abs);
+            return;
+        }
         logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
         if (in != null || logsift.core.Archives.isGzip(abs)) {
             openPacked(abs, in, forced, then);
@@ -1415,6 +1420,85 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
         updateEmptyState();
         return tab;
+    }
+
+    /** Files to open as text once, though they are crash files ("Open as Text"). */
+    private final java.util.Set<Path> asText = new java.util.HashSet<>();
+
+    /** Opens a crash file (a Windows dump, a Java hs_err_pid file) explained, in a tab of its own. */
+    CrashTab openCrash(Path file) {
+        Path abs = file.toAbsolutePath().normalize();
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof CrashTab c && abs.equals(c.file())) {
+                tabs.setSelectedIndex(i);
+                return c;
+            }
+        }
+        CrashTab tab = new CrashTab(abs, new CrashTab.Host() {
+            @Override
+            public void openAsText(Path f) {
+                Path a = f.toAbsolutePath().normalize();
+                asText.add(a);
+                openFile(a);
+            }
+
+            @Override
+            public void openCrash(Path f) {
+                MainFrame.this.openCrash(f);
+            }
+
+            @Override
+            public void changed(CrashTab t) {
+                if (tabs.getSelectedComponent() == t) {
+                    refreshStatus();
+                }
+            }
+        });
+        tabs.addTab(tab.title(), Icons.of("octagon-alert"), tab);
+        tabs.setToolTipTextAt(tabs.getTabCount() - 1, abs.toString());
+        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        closeHooks.put(tab, tab::close);
+        if (!isOwnCopy(abs)) {
+            AppState.addRecent(abs);
+        }
+        updateEmptyState();
+        return tab;
+    }
+
+    /** Opens a crash tab's file as text (its Open as Text button). */
+    void openCrashAsText(CrashTab t) {
+        asText.add(t.file());
+        openFile(t.file());
+    }
+
+    CrashTab currentCrashTab() {
+        return tabs.getSelectedComponent() instanceof CrashTab t ? t : null;
+    }
+
+    /** Asks for a crash file (a Windows dump or a Java hs_err_pid file) and explains it. */
+    private void openCrashDialog() {
+        FileDialog fd = new FileDialog(this, "Open Crash Dump (.dmp, .mdmp, hs_err_pid….log)", FileDialog.LOAD);
+        String folder = PREFS.get("lastDir", null);
+        if (folder != null) {
+            fd.setDirectory(folder);
+        }
+        fd.setVisible(true);
+        if (fd.getFile() != null) {
+            Path f = Path.of(fd.getDirectory(), fd.getFile());
+            if (logsift.crash.CrashFiles.kindOf(f) == null) {
+                JOptionPane.showMessageDialog(this, f.getFileName() + " isn't a crash file Logsift knows. It reads "
+                        + "Windows dumps (.dmp, .mdmp) and Java crash reports (hs_err_pid….log).", "Open Crash Dump",
+                        JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            openCrash(f);
+        }
+    }
+
+    /** Explains the Java crash report a log tab shows (its banner). */
+    @Override
+    public void explainCrash(LogTab tab) {
+        openCrash(tab.path());
     }
 
     /** Opens a heap dump (.hprof) in a tab of its own; it is read in the background. */
@@ -2935,6 +3019,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             LogTab t = currentTab();
             openLogLocations(t == null ? null : t.path());
         }));
+        file.add(item("Open Crash Dump…", "octagon-alert", null, e -> openCrashDialog()));
         JMenu recent = submenu("Open Recent", "history");
         onOpen(recent, () -> {
             recent.removeAll();
@@ -3130,6 +3215,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }));
         jvm.add(item("Open Profile…", "flame", null, e -> openProfileDialog()));
         jvm.add(item("Open Heap Dump…", "memory-stick", null, e -> openHeapDumpDialog()));
+        jvm.add(item("Open Java Crash Report (hs_err)…", "octagon-alert", null, e -> openCrashDialog()));
         jvm.add(item("Open Heap Dump on a Server…", "server", null, e -> openHeapDumpOnServerDialog()));
         jvm.add(item("Compare Two Heap Dumps…", "git-compare", null, e -> compareHeapDumpsDialog()));
         bar.add(jvm);
@@ -3814,6 +3900,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private void refreshStatus() {
         LogTab t = currentTab();
         updateReloadButton(t);
+        if (tabs.getSelectedComponent() instanceof CrashTab ct) {
+            setTitle(ct.title() + " — " + logsift.core.Channel.appName());
+            status.setText(ct.statusText());
+            statusRight.setText(memory());
+            progress.setVisible(false);
+            return;
+        }
         if (tabs.getSelectedComponent() instanceof GcTab gt) {
             setTitle(gt.title() + " — " + logsift.core.Channel.appName());
             status.setText(gt.statusText());

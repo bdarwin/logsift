@@ -63,6 +63,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
         /** Opens Settings on a tab (null: the first). */
         default void showSettings(String tab) {}
+        /** Explains the Java crash report (hs_err_pid file) this tab shows. */
+        default void explainCrash(LogTab tab) {}
 
         /** Shows the thread a line names in a thread dump of the log's JVM. */
         default void showThread(LogTab tab, String thread) {}
@@ -408,11 +410,13 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         this.banners = banners;
         banners.add(dumpsBanner);
         banners.add(gcBanner);
+        banners.add(crashBanner);
         banners.add(noColumns);
         north.add(banners, BorderLayout.SOUTH);
         noColumns.setVisible(false);
         dumpsBanner.setVisible(false);
         gcBanner.setVisible(false);
+        crashBanner.setVisible(false);
         checkForThreadDumps();
         JPanel logArea = new JPanel(new BorderLayout());
         logArea.add(north, BorderLayout.NORTH);
@@ -2858,6 +2862,38 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return p;
     }
 
+    private final JPanel crashBanner = crashBanner();
+
+    private JPanel crashBanner() {
+        JPanel p = new JPanel(new BorderLayout(10, 0));
+        p.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.uiColor("Component.borderColor", java.awt.Color.GRAY)),
+                javax.swing.BorderFactory.createEmptyBorder(5, 10, 5, 8)));
+        JLabel text = new JLabel("This is a Java crash report. See how the JVM crashed, the code to blame, which threads "
+                + "and libraries may have caused it, and what to try.", Icons.of("octagon-alert"), javax.swing.SwingConstants.LEFT);
+        text.setIconTextGap(8);
+        p.add(text, BorderLayout.CENTER);
+        JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 4, 0));
+        buttons.setOpaque(false);
+        javax.swing.JButton explain = new javax.swing.JButton("Explain the Crash");
+        explain.addActionListener(e -> host.explainCrash(this));
+        javax.swing.JButton close = new javax.swing.JButton(Icons.of("x"));
+        close.putClientProperty("JButton.buttonType", "toolBarButton");
+        close.setToolTipText("Hide");
+        close.addActionListener(e -> {
+            p.setVisible(false);
+            revalidate();
+        });
+        buttons.add(explain);
+        buttons.add(close);
+        p.add(buttons, BorderLayout.EAST);
+        return p;
+    }
+
+    boolean crashBannerShownForTest() {
+        return crashBanner.isVisible();
+    }
+
     boolean gcBannerShownForTest() {
         return gcBanner.isVisible();
     }
@@ -2928,6 +2964,12 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 if (logsift.jvm.DumpParser.looksLikeDump(text)) {
                     SwingUtilities.invokeLater(() -> {
                         dumpsBanner.setVisible(true);
+                        revalidate();
+                    });
+                }
+                if (logsift.crash.HsErr.looksLike(text.substring(0, Math.min(text.length(), 4096)))) {
+                    SwingUtilities.invokeLater(() -> {
+                        crashBanner.setVisible(true);
                         revalidate();
                     });
                 }

@@ -33,6 +33,7 @@ final class SettingsDialog extends JDialog {
     static final String SOURCE = "Source Code";
     static final String AGENTS = "Agents";
     static final String METRICS = "Metrics";
+    static final String CRASH = "Crash Dumps";
 
     private static final Preferences PREFS = AppState.prefs();
     private final MainFrame frame;
@@ -56,6 +57,7 @@ final class SettingsDialog extends JDialog {
         agents = new AgentsPanel(logsift.agent.AgentSettings.launcher(), this::openAgentActivity,
                 () -> new LogLocationsDialog(this, null).setVisible(true));
         tabs.addTab(AGENTS, agents);
+        tabs.addTab(CRASH, crashDumps());
         JButton close = new JButton("Close");
         close.addActionListener(e -> dispose());
         getRootPane().setDefaultButton(close);
@@ -348,6 +350,82 @@ final class SettingsDialog extends JDialog {
         JPanel center = new JPanel(new BorderLayout(0, 12));
         center.add(folders, BorderLayout.NORTH);
         center.add(form, BorderLayout.CENTER);
+        p.add(center, BorderLayout.CENTER);
+        return p;
+    }
+
+    // ---------------------------------------------------------------- Crash dumps
+
+    /** Where Windows dumps find function names: PDB folders, and Microsoft's symbol server if allowed. */
+    private JComponent crashDumps() {
+        java.nio.file.Path home = AppState.home();
+        logsift.crash.CrashSettings settings = logsift.crash.CrashSettings.load(home);
+        JPanel p = new JPanel(new BorderLayout(0, 10));
+        p.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+        JLabel intro = new JLabel("<html>Logsift rebuilds the stacks of a Windows dump from the dump itself. For "
+                + "function names and source lines it reads PDB files: next to the dump, where the build put them, "
+                + "in the symbol caches named by _NT_SYMBOL_PATH, and in these folders (the program's .pdb files, "
+                + "and its .exe and .dll files for minidumps).</html>");
+        p.add(intro, BorderLayout.NORTH);
+
+        javax.swing.DefaultListModel<java.nio.file.Path> model = new javax.swing.DefaultListModel<>();
+        settings.symbolFolders().forEach(model::addElement);
+        javax.swing.JList<java.nio.file.Path> list = new javax.swing.JList<>(model);
+        list.setVisibleRowCount(6);
+        JCheckBox microsoft = new JCheckBox("Download the names of Windows' own files from Microsoft's symbol server");
+        microsoft.setSelected(settings.downloadMicrosoft());
+        Runnable save = () -> {
+            try {
+                new logsift.crash.CrashSettings(java.util.Collections.list(model.elements()), microsoft.isSelected())
+                        .save(home);
+            } catch (java.io.IOException e) {
+                javax.swing.JOptionPane.showMessageDialog(this, "Logsift couldn't save the crash dump settings: "
+                        + e.getMessage(), CRASH, javax.swing.JOptionPane.WARNING_MESSAGE);
+            }
+        };
+        microsoft.addActionListener(e -> save.run());
+        JButton add = new JButton("Add Folder…", Icons.of("folder-open"));
+        JButton remove = new JButton("Remove");
+        remove.setEnabled(false);
+        list.addListSelectionListener(e -> remove.setEnabled(list.getSelectedIndex() >= 0));
+        add.addActionListener(e -> {
+            javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+            fc.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
+            fc.setDialogTitle("A folder with PDB files");
+            if (fc.showOpenDialog(this) == javax.swing.JFileChooser.APPROVE_OPTION && fc.getSelectedFile() != null) {
+                model.addElement(fc.getSelectedFile().toPath().toAbsolutePath().normalize());
+                save.run();
+            }
+        });
+        remove.addActionListener(e -> {
+            for (java.nio.file.Path q : list.getSelectedValuesList()) {
+                model.removeElement(q);
+            }
+            save.run();
+        });
+        JPanel buttons = new JPanel();
+        buttons.setLayout(new javax.swing.BoxLayout(buttons, javax.swing.BoxLayout.Y_AXIS));
+        buttons.add(add);
+        buttons.add(javax.swing.Box.createVerticalStrut(6));
+        buttons.add(remove);
+        JPanel folders = new JPanel(new BorderLayout(8, 0));
+        folders.add(new javax.swing.JScrollPane(list), BorderLayout.CENTER);
+        folders.add(buttons, BorderLayout.EAST);
+
+        JPanel below = new JPanel();
+        below.setLayout(new javax.swing.BoxLayout(below, javax.swing.BoxLayout.Y_AXIS));
+        microsoft.setAlignmentX(LEFT_ALIGNMENT);
+        below.add(microsoft);
+        JLabel how = new JLabel("<html>Off unless you turn it on. Only Windows' own files (under \\Windows) are asked "
+                + "for, by name and build id, never your program's. Downloads are kept in "
+                + logsift.crash.CrashSettings.cache(home) + ". A dump's tab can also download them once.</html>");
+        how.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        how.setBorder(BorderFactory.createEmptyBorder(2, 26, 0, 0));
+        how.setAlignmentX(LEFT_ALIGNMENT);
+        below.add(how);
+        JPanel center = new JPanel(new BorderLayout(0, 12));
+        center.add(folders, BorderLayout.NORTH);
+        center.add(below, BorderLayout.CENTER);
         p.add(center, BorderLayout.CENTER);
         return p;
     }

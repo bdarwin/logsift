@@ -34,9 +34,15 @@ public final class Workspace implements AutoCloseable {
      * @param waitMillis how long a call waits for slow work before saying "still working"
      * @param formats   the user's own log formats
      * @param auditLog  where each call is recorded (null: nowhere)
+     * @param logsiftHome Logsift's folder, for settings such as where crash dumps find names (null: none)
      */
     public record Options(Scope scope, Masking.Options masking, int maxChars, long waitMillis,
-                          List<CustomFormat> formats, Path auditLog) {}
+                          List<CustomFormat> formats, Path auditLog, Path logsiftHome) {
+        public Options(Scope scope, Masking.Options masking, int maxChars, long waitMillis, List<CustomFormat> formats,
+                       Path auditLog) {
+            this(scope, masking, maxChars, waitMillis, formats, auditLog, null);
+        }
+    }
 
     /** The most an answer may be, whatever is asked (about 20,000 tokens). */
     public static final int HARD_MAX_CHARS = 80_000;

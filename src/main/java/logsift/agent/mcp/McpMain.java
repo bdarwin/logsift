@@ -135,7 +135,7 @@ public final class McpMain {
         return new Workspace.Options(new Scope(roots, userHome), masking,
                 Math.max(500, Math.min(maxChars, Workspace.HARD_MAX_CHARS)), 25_000,
                 logsift.core.CustomFormat.load(logsiftHome.resolve("formats.properties")),
-                logsiftHome.resolve("agent.log"));
+                logsiftHome.resolve("agent.log"), logsiftHome);
     }
 
     private static String value(String[] args, int i, String option) {

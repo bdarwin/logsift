@@ -68,10 +68,21 @@ In `~/.logsift` (your home folder):
 | `agent.properties` | Settings → Agents: what is masked, which folders agents may read |
 | `agent.log` | Each call coding agents made (never the answers) |
 | `logs.json` | Log Locations for Agents: your services, their log folders and what each file holds |
+| `crash.properties` | Settings → Crash Dumps: PDB folders, and whether Windows' names may be downloaded |
+| `symbols/` | PDBs of Windows' own files, when you let Logsift download them |
 
 Other preferences (window size, recent files, last folders, servers and users, never passwords) are kept in Java's preferences store for your user.
 
-Logsift never sends your logs anywhere. Its only network connections are the daily update check (if on) and the servers you choose: SSH servers, JMX ports, and web addresses you open. When you set up a [coding agent](agents.md), what Logsift answers it goes to the agent's AI provider.
+Logsift never sends your logs anywhere. Its only network connections are the daily update check (if on) and the servers you choose: SSH servers, JMX ports, and web addresses you open. With a Windows dump, it can also download the names of Windows' own files from Microsoft's symbol server, only when you click **Download Windows' Names** or turn that on under Crash Dumps. When you set up a [coding agent](agents.md), what Logsift answers it goes to the agent's AI provider.
+
+## Crash Dumps
+
+Where [Windows dumps](crash-dumps.md) find function names and source lines:
+
+- **PDB folders:** folders with your program's `.pdb` files (and its `.exe` and `.dll` files, for minidumps). **Add Folder…**, **Remove**. Logsift also looks next to the dump, where the build put the PDB, and in the symbol caches named by `_NT_SYMBOL_PATH`.
+- **Download the names of Windows' own files from Microsoft's symbol server:** off unless you turn it on. Only files under `\Windows` are asked for, by name and build id, never your program's. Downloads are kept in `~/.logsift/symbols`.
+
+Coding agents use the same settings.
 
 ## Metrics
 

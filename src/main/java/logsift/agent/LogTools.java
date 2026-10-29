@@ -37,10 +37,12 @@ import logsift.jvm.ThreadDump;
 public final class LogTools {
     private LogTools() {}
 
-    /** Every tool, in a fixed order (agents cache the list). */
+    /** Every tool, in a fixed order (agents cache the list): these, then the crash tools. */
     public static List<Tool> all() {
-        return List.of(LIST_LOGS, OPEN_LOG, LIST_OPEN, INSIGHTS, EXCEPTIONS, SEARCH, READ_LINES, TOP_MESSAGES, METRICS,
-                SEARCH_FOLDER, ANALYZE_GC, ANALYZE_THREADS);
+        List<Tool> all = new ArrayList<>(List.of(LIST_LOGS, OPEN_LOG, LIST_OPEN, INSIGHTS, EXCEPTIONS, SEARCH,
+                READ_LINES, TOP_MESSAGES, METRICS, SEARCH_FOLDER, ANALYZE_GC, ANALYZE_THREADS));
+        all.addAll(CrashTools.all());
+        return List.copyOf(all);
     }
 
     /** A tool from its parts. */

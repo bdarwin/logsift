@@ -29,7 +29,7 @@ New to Logsift? Start with [Opening logs](opening-logs.md) and [The log view](lo
 | [Compare and merge](compare.md) | A bad run against a good one; several logs merged by time |
 | [Folder search](folder-search.md) | Searching every file in a folder, inside zips and `.gz` files too |
 
-## Java and Python
+## Java, Python and crashes
 
 | Page | What it covers |
 |---|---|
@@ -38,6 +38,7 @@ New to Logsift? Start with [Opening logs](opening-logs.md) and [The log view](lo
 | [Thread dumps](threads.md) | Findings (deadlocks, lock queues, stuck and busy threads), the thread list, state colours, timeline, compare |
 | [Profiling and flame graphs](profiling.md) | What to measure, reading a flame graph and its colours, comparing runs |
 | [Heap](heap.md) | Live heap histograms, heap dumps (what fills the heap, why it is alive, map, waste, classes), comparing dumps, dumps on a server |
+| [Crash dumps](crash-dumps.md) | Windows dumps (`.dmp`, `.mdmp`) of any program and Java crash reports (`hs_err_pid`): what happened, the code to blame, every thread's stack, which threads may have caused it, what to try |
 
 ## Everything else
 

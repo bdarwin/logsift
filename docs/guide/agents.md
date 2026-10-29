@@ -148,8 +148,13 @@ The file is plain JSON, if you prefer to write it by hand:
 | **search_folder** | Every file in a folder that contains a text, inside zips and `.gz` files too; give a service's name to search all its folders |
 | **analyze_gc** | Explains a GC log: pauses, time stopped, heap after collections, and what to tune |
 | **analyze_threads** | Explains thread dumps: deadlocks, lock queues, stuck and busy threads |
+| **analyze_crash** | Explains a crash file: a Windows dump (`.dmp`, `.mdmp`) or a Java `hs_err_pid` file. What happened, the code to blame, the crashed thread's stack, what other threads and libraries may have caused it, and what to try |
+| **crash_threads** | The threads of a crash file with their stacks, threads with the same stack together; filter by name, state or function |
+| **crash_modules** | The DLLs or shared libraries loaded in the crashed process, with versions and paths |
 
 Line numbers in answers start at 1, like in the log view. Times are the log's own times.
+
+From a crash file the agent gets only the explanation: stacks, modules and facts. It never gets the process's memory that a dump holds.
 
 Long answers are cut, and say where. Slow work, such as a first look at a multi-GB log, goes on in the background. The agent is told to ask again in a few seconds.
 

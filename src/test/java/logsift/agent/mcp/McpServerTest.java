@@ -210,8 +210,9 @@ class McpServerTest {
     @Test
     void listsReadOnlyTools() throws Exception {
         List<Object> tools = list(map(request("tools/list", Map.of()).get("result")).get("tools"));
-        assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines", "top_messages",
-                "metrics", "search_folder", "analyze_gc", "analyze_threads"),
+        assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines",
+                "top_messages", "metrics", "search_folder", "analyze_gc", "analyze_threads", "analyze_crash",
+                "crash_threads", "crash_modules"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
             Map<String, Object> d = map(t);
@@ -371,6 +372,93 @@ class McpServerTest {
         assertTrue(t.text().startsWith("3 thread dumps. "), t.text());
         assertTrue(t.text().contains("[ERROR] Deadlock: 2 threads wait for each other"), t.text());
         assertTrue(call("analyze_threads", "log", plain.toString()).text().startsWith("There is no thread dump"));
+    }
+
+    /** A Java crash report from Linux: a JNI library crashed in memcpy, with a password on the command line. */
+    private static final String HS_ERR = """
+            #
+            # A fatal error has been detected by the Java Runtime Environment:
+            #
+            #  SIGSEGV (0xb) at pc=0x00007f1c2a1b2c3d, pid=4242, tid=4250
+            #
+            # JRE version: OpenJDK Runtime Environment (17.0.9+9) (build 17.0.9+9)
+            # Java VM: OpenJDK 64-Bit Server VM (17.0.9+9, mixed mode, sharing, tiered, compressed oops, \
+            compressed class ptrs, g1 gc, linux-amd64)
+            # Problematic frame:
+            # C  [libc.so.6+0x18b8c]  __memmove_avx_unaligned_erms+0x5c
+            #
+
+            ---------------  S U M M A R Y ------------
+
+            Command Line: -Xmx2g -Ddb.password=hunter2secret com.acme.ImageServer
+
+            Time: Tue Oct 27 10:15:02 2026 UTC elapsed time: 3600.5 seconds (0d 1h 0m 0s)
+
+            ---------------  T H R E A D  ---------------
+
+            Current thread (0x00007f1c3c0f1000):  JavaThread "image-worker-3" [_thread_in_native, id=4250, \
+            stack(0x00007f1c0a000000,0x00007f1c0a100000)]
+
+            Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+            C  [libc.so.6+0x18b8c]  __memmove_avx_unaligned_erms+0x5c
+            C  [libturbojpeg.so.0+0x2f1a0]  tjDecompress2+0x120
+            j  com.acme.jpeg.Decoder.decode([BI)[B+0
+            j  com.acme.ImageServer.handle(Lcom/acme/Request;)V+42
+            j  java.lang.Thread.run()V+11 java.base@17.0.9
+
+            siginfo: si_signo: 11 (SIGSEGV), si_code: 1 (SEGV_MAPERR), si_addr: 0x0000000000000000
+
+            ---------------  P R O C E S S  ---------------
+
+            Java Threads: ( => current thread )
+              0x00007f1c3c0e1000 JavaThread "main" [_thread_blocked, id=4243, stack(0x1,0x2)]
+            =>0x00007f1c3c0f1000 JavaThread "image-worker-3" [_thread_in_native, id=4250, stack(0x3,0x4)]
+              0x00007f1c3c0f2000 JavaThread "image-worker-4" [_thread_in_native, id=4251, stack(0x5,0x6)]
+            Total: 3
+
+            Dynamic libraries:
+            7f1c2a000000-7f1c2a200000 r-xp 00000000 08:01 1001   /usr/lib/x86_64-linux-gnu/libc.so.6
+            7f1c2b000000-7f1c2b100000 r-xp 00000000 08:01 1002   /opt/acme/native/libturbojpeg.so.0
+            7f1c2c000000-7f1c2d000000 r-xp 00000000 08:01 1003   /usr/lib/jvm/java-17/lib/server/libjvm.so
+
+            VM Arguments:
+            jvm_args: -Xmx2g -Ddb.password=hunter2secret
+            java_command: com.acme.ImageServer
+            Launcher Type: SUN_STANDARD
+
+            END.
+            """;
+
+    @Test
+    void explainsCrashFiles() throws Exception {
+        Path f = logs.resolve("hs_err_pid4242.log");
+        Files.writeString(f, HS_ERR);
+        Answer a = ok("analyze_crash", "path", f.toString());
+        assertTrue(a.text().startsWith("Java crash report: SIGSEGV in native code"), a.text());
+        assertTrue(a.text().contains("libturbojpeg.so.0 passed a bad pointer or size to the system"), a.text());
+        assertTrue(a.text().contains("image-worker-3"), a.text());
+        assertTrue(a.text().contains("com.acme.jpeg.Decoder.decode(byte[], int)"), a.text());
+        assertFalse(a.text().contains("hunter2secret"), "secrets on the command line are masked: " + a.text());
+        assertTrue(a.text().contains("Logsift masked"), a.text());
+
+        Answer t = ok("crash_threads", "path", f.toString(), "filter", "image-worker");
+        assertTrue(t.text().contains("Thread 4250 \"image-worker-3\""), t.text());
+        assertTrue(t.text().contains("running native code"), t.text());
+        assertFalse(t.text().contains("\"main\""), "filtered out: " + t.text());
+
+        Answer m = ok("crash_modules", "path", f.toString());
+        assertTrue(m.text().contains("libturbojpeg.so.0"), m.text());
+        assertTrue(m.text().contains("not the JDK's or the system's"), m.text());
+
+        Path plain = logs.resolve("plain.log");
+        Files.writeString(plain, "nothing to see\n");
+        assertTrue(call("analyze_crash", "path", plain.toString()).text().startsWith("Not a crash file"));
+        Path outside = dir.resolve("hs_err_pid1.log");
+        Files.writeString(outside, HS_ERR);
+        assertTrue(call("analyze_crash", "path", outside.toString()).error(), "outside the folders agents may read");
+        Path bad = logs.resolve("broken.dmp");
+        Files.write(bad, new byte[] {'M', 'D', 'M', 'P', 1, 2, 3});
+        assertTrue(call("analyze_crash", "path", bad.toString()).error(), "a damaged dump is an error, not a crash");
     }
 
     @Test

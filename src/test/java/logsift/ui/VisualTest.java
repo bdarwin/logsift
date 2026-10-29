@@ -6901,6 +6901,146 @@ class VisualTest {
         assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
     }
 
+    /** Waits until a crash tab has read its file. */
+    private static void waitForCrash(CrashTab t) throws InterruptedException {
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !t.busy() && (t.report() != null || t.failureForTest() != null));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the crash file to be read");
+    }
+
+    @Test
+    @Order(61)
+    void explainsJavaCrashReports() throws Exception {
+        // a JVM on Linux crashed in a JPEG library called through JNI, on one of four thumbnail workers
+        Path box = Files.createDirectories(dir.resolve("crashes"));
+        Path hsErr = box.resolve("hs_err_pid31337.log");
+        try (java.io.InputStream in = getClass().getResourceAsStream("/visual/hs_err_pid31337.log")) {
+            Files.copy(in, hsErr, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        onEdt(() -> {
+            frame.openFile(hsErr);
+            return null;
+        });
+        CrashTab t = onEdt(frame::currentCrashTab);
+        assertNotNull(t, "an hs_err file opens explained, in a crash tab");
+        waitForCrash(t);
+        logsift.crash.CrashReport r = onEdt(t::report);
+        assertNotNull(r, String.valueOf(onEdt(t::failureForTest)));
+        assertEquals(logsift.crash.CrashReport.Kind.JAVA_CRASH, r.kind());
+        assertTrue(r.title().startsWith("SIGSEGV in native code"), r.title());
+        assertTrue(r.where().contains("called by tjDecompress2 in libturbojpeg.so.0"), r.where());
+        assertEquals("libturbojpeg.so.0 passed a bad pointer or size to the system", r.findings().get(0).title());
+        assertEquals("thumbnail-worker-3", r.crashedThread().name());
+        assertEquals(19, r.threads().size(), "14 Java threads and 5 of the JVM's");
+        assertEquals("Crash: hs_err_pid31337.log",
+                onEdt(() -> frame.tabsForTest().getTitleAt(frame.tabsForTest().indexOfComponent(t))));
+        assertTrue(onEdt(frame::statusTextForTest).startsWith("Java crash report · 19 threads"),
+                onEdt(frame::statusTextForTest));
+        settle();
+        shot("112-crash-java");
+
+        // the threads: the crashed one first, with its stack; the others by what they were doing
+        onEdt(() -> {
+            t.viewsForTest().setSelectedIndex(1);
+            return null;
+        });
+        assertTrue(onEdt(t::threadTitleForTest).startsWith("Thread 31402 “thumbnail-worker-3” — crashed"),
+                onEdt(t::threadTitleForTest));
+        assertEquals("[libturbojpeg.so.0+0x2f1a0]  tjDecompress2+0x120",
+                onEdt(() -> String.valueOf(t.framesForTest().getValueAt(1, 1))));
+        onEdt(() -> {
+            t.filterThreadsForTest("native");
+            return null;
+        });
+        assertEquals(2, (int) onEdt(() -> t.groupsForTest().getRowCount()),
+                "the crashed thread, and the three others in native code together (the same state, no stack)");
+        assertEquals("3 threads", onEdt(() -> String.valueOf(t.groupsForTest().getValueAt(1, 0))));
+        onEdt(() -> {
+            t.filterThreadsForTest("");
+            return null;
+        });
+        settle();
+        shot("112b-crash-java-threads");
+
+        // the report itself, as text, says what it is
+        onEdt(() -> {
+            frame.openCrashAsText(t);
+            return null;
+        });
+        LogTab text = onEdt(frame::currentTab);
+        assertNotNull(text);
+        assertEquals(hsErr, onEdt(text::path));
+        waitFor(() -> {
+            try {
+                return onEdt(text::crashBannerShownForTest);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "the crash banner on the report's text");
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(text));
+            frame.closeTab(frame.tabsForTest().indexOfComponent(t));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    @Test
+    @Order(62)
+    void explainsWindowsDumps() throws Exception {
+        // a full dump of a Windows service that read a field of a null object; two threads wait for a lock
+        Path box = Files.createDirectories(dir.resolve("crashes"));
+        Path dmp = logsift.crash.TestDumps.crashDump(box);
+        onEdt(() -> {
+            frame.openFile(dmp);
+            return null;
+        });
+        CrashTab t = onEdt(frame::currentCrashTab);
+        assertNotNull(t, "a .dmp file opens explained, in a crash tab");
+        waitForCrash(t);
+        logsift.crash.CrashReport r = onEdt(t::report);
+        assertNotNull(r, String.valueOf(onEdt(t::failureForTest)));
+        assertEquals(logsift.crash.CrashReport.Kind.WINDOWS_DUMP, r.kind());
+        assertTrue(r.title().startsWith("Access violation: reading address 0x0000000000000018, a null pointer"), r.title());
+        assertTrue(r.where().startsWith("in OrdersService!Order::total+0x1f"), r.where());
+        assertEquals("worker-2", r.crashedThread().name());
+        assertEquals("OrdersService!Order::total+0x1f", r.crashedThread().frames().get(0).text());
+        settle();
+        shot("113-crash-windows");
+
+        onEdt(() -> {
+            t.viewsForTest().setSelectedIndex(1);
+            t.filterThreadsForTest("lock");
+            return null;
+        });
+        assertEquals(1, (int) onEdt(() -> t.groupsForTest().getRowCount()), "the two threads waiting for a lock: one row");
+        assertTrue(onEdt(t::threadTitleForTest).startsWith("2 threads (worker-1, worker-3)"), onEdt(t::threadTitleForTest));
+        onEdt(() -> {
+            t.filterThreadsForTest("");
+            t.groupsForTest().setRowSelectionInterval(0, 0);
+            return null;
+        });
+        settle();
+        shot("113b-crash-windows-threads");
+
+        onEdt(() -> {
+            t.viewsForTest().setSelectedIndex(2);
+            return null;
+        });
+        assertTrue(onEdt(() -> t.modulesForTest().getRowCount()) >= 5);
+        settle();
+        shot("113c-crash-windows-modules");
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(t));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
     @Test
     @Order(61)
     void handlesAVeryWideTable() throws Exception {
