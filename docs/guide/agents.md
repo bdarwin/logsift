@@ -30,6 +30,49 @@ A Logsift run from a source build has no `logsift-mcp`, so the tab says so and *
 
 Other agents: add a local (stdio) MCP server called `logsift` that runs `logsift-mcp`, with no arguments.
 
+## GitHub Copilot CLI
+
+1. Add Logsift with one command in a terminal, giving the path of `logsift-mcp` after `--` (see the table above; **Settings → Agents** shows it):
+
+   ```sh
+   # macOS
+   copilot mcp add logsift -- /Applications/Logsift.app/Contents/MacOS/logsift-mcp
+   # Linux (.deb; from the .tar.gz it is Logsift/bin/logsift-mcp where you unpacked it)
+   copilot mcp add logsift -- /opt/logsift/bin/logsift-mcp
+   # Windows (PowerShell; the installer puts Logsift in your own AppData folder)
+   copilot mcp add logsift -- "$env:LOCALAPPDATA\Logsift\logsift-mcp.exe"
+   ```
+
+   Or, by hand: open **Settings → Agents**, choose **GitHub Copilot CLI**, click **Copy**, and paste it into `~/.copilot/mcp-config.json` (on Windows `%USERPROFILE%\.copilot\mcp-config.json`). If the file already lists other servers, add `"logsift": {…}` next to them inside `"mcpServers"`. In this file, a Windows path has each `\` written twice (`"C:\\Users\\you\\…"`). **Copy** does that for you.
+
+   ```json
+   {
+     "mcpServers": {
+       "logsift": {
+         "type": "local",
+         "command": "/Applications/Logsift.app/Contents/MacOS/logsift-mcp",
+         "args": [],
+         "tools": ["*"]
+       }
+     }
+   }
+   ```
+2. Check it: `copilot mcp list` lists **logsift**, and `copilot mcp get logsift` shows its command.
+3. Start `copilot` (start it again if it was running).
+4. Ask in plain words, naming the file:
+   - *What went wrong in ~/logs/orders.log last night?*
+   - *Group the exceptions in /var/log/app/app.log and tell me which started after 10:00.*
+   - *Is the GC in ~/gc.log healthy?*
+
+The first time it uses a Logsift tool, Copilot CLI asks whether to allow it; choose to allow it for the session (or always). Logsift's tools only read. To skip the question, start it with `copilot --allow-tool=logsift`.
+
+To remove it: `copilot mcp remove logsift`.
+
+If logsift isn't listed, or its tools fail:
+- The path in `command` is wrong. Run it in a terminal: `logsift-mcp --version` should print the version.
+- The file isn't valid JSON. A missing comma between two servers is the usual cause.
+- **What Agents Asked…** (below) stays empty until the agent calls a tool. Each call is listed there.
+
 ## What the agent can ask
 
 | Tool | What it does |
