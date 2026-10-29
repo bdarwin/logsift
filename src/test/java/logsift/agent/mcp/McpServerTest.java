@@ -491,7 +491,9 @@ class McpServerTest {
         assertFalse(all.contains("billing.log"), "nothing listed from a folder agents may not read: " + all);
         String one = ok("list_logs", "service", "orders").text();
         assertTrue(one.startsWith("1 service:"), one);
-        assertTrue(one.contains(orders.resolve("app.log.1").toString()), "every file of a log, asked for one service");
+        // the file's name, not its whole path: a temporary folder's random digits can look like a card number to masking
+        assertTrue(one.contains("/app.log.1\n") || one.contains("\\app.log.1\n"),
+                "every file of a log, asked for one service: " + one);
         assertTrue(ok("list_logs", "service", "shipping").text().startsWith("No service called shipping."));
 
         Answer opened = ok("open_log", "path", "orders/app");
