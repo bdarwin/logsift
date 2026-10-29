@@ -48,7 +48,13 @@ final class AgentsPanel extends JPanel {
      * @param openActivity opens the log of what agents asked
      */
     AgentsPanel(Path launcher, Runnable openActivity) {
+        this(launcher, openActivity, null);
+    }
+
+    /** {@code openLocations}: opens Log Locations for Agents (null: no button). */
+    AgentsPanel(Path launcher, Runnable openActivity, Runnable openLocations) {
         super(new BorderLayout(0, 10));
+        this.openLocations = openLocations;
         this.launcher = launcher;
         this.openActivity = openActivity;
         setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
@@ -64,6 +70,10 @@ final class AgentsPanel extends JPanel {
         center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
         center.add(setup());
         center.add(Box.createVerticalStrut(12));
+        if (openLocations != null) {
+            center.add(locations());
+            center.add(Box.createVerticalStrut(12));
+        }
         center.add(rules());
         add(new JScrollPane(center, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER) {
@@ -72,6 +82,41 @@ final class AgentsPanel extends JPanel {
             }
         }, BorderLayout.CENTER);
         load();
+    }
+
+    private final Runnable openLocations;
+    private final JLabel locationsText = new JLabel();
+
+    /** Where the logs are: what agents know, and the button to tell them more. */
+    private JPanel locations() {
+        JPanel p = section("Where your logs are");
+        locationsText.setAlignmentX(LEFT_ALIGNMENT);
+        p.add(locationsText);
+        p.add(Box.createVerticalStrut(6));
+        JButton open = new JButton("Log Locations…", Icons.of("folder-open"));
+        open.setName("agentLocations");
+        open.setToolTipText("Tell agents where each service writes its logs and what each file holds");
+        open.addActionListener(e -> {
+            openLocations.run();
+            showLocations();
+        });
+        open.setAlignmentX(LEFT_ALIGNMENT);
+        p.add(open);
+        showLocations();
+        return p;
+    }
+
+    void showLocations() {
+        logsift.agent.LogCatalog c = logsift.agent.LogCatalog.load(AppState.home(), null,
+                AppState.logLocationProjects());
+        List<String> names = new java.util.ArrayList<>();
+        c.entries().forEach(e -> names.add(e.service().name()));
+        locationsText.setText("<html>" + (names.isEmpty()
+                ? "Agents don't know where your logs are yet, so you name a file in each question. Describe your "
+                + "services' log folders, and ask “why did orders fail last night?” instead."
+                : "Agents know the logs of " + names.size() + (names.size() == 1 ? " service: " : " services: ")
+                + LogLocationsDialog.esc(String.join(", ", names.subList(0, Math.min(8, names.size()))))
+                + (names.size() > 8 ? ", …" : "") + ". They find them with <b>list_logs</b>.") + "</html>");
     }
 
     // ---------------------------------------------------------------- set up an agent

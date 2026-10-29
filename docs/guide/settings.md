@@ -67,6 +67,7 @@ In `~/.logsift` (your home folder):
 | `heap-index/` | Indexes of big heap dumps, removed when their tab closes |
 | `agent.properties` | Settings → Agents: what is masked, which folders agents may read |
 | `agent.log` | Each call coding agents made (never the answers) |
+| `logs.json` | Log Locations for Agents: your services, their log folders and what each file holds |
 
 Other preferences (window size, recent files, last folders, servers and users, never passwords) are kept in Java's preferences store for your user.
 

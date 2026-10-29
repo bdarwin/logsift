@@ -54,6 +54,7 @@ public final class Workspace implements AutoCloseable {
     });
     private int nextLog = 1;
     private volatile String client = "agent";
+    private volatile java.util.function.Supplier<LogCatalog> catalog = () -> LogCatalog.EMPTY;
 
     public Workspace(Options options) {
         this.options = options;
@@ -66,6 +67,37 @@ public final class Workspace implements AutoCloseable {
 
     public Masking masking() {
         return masking;
+    }
+
+    /** Where the person's logs are (read again on each use, so edits count at once). */
+    public void setCatalog(java.util.function.Supplier<LogCatalog> c) {
+        catalog = c == null ? () -> LogCatalog.EMPTY : c;
+    }
+
+    public LogCatalog catalog() {
+        try {
+            return catalog.get();
+        } catch (RuntimeException e) {
+            return LogCatalog.EMPTY;
+        }
+    }
+
+    /**
+     * A path from what an agent gave: a path, or a name from the log locations ("orders/app":
+     * the newest file of that log). A name that is neither stays a path (and fails as one).
+     */
+    public Path pathOf(String pathOrName) {
+        String s = pathOrName.strip();
+        try {
+            Path p = Path.of(s);
+            if (p.isAbsolute() || Files.exists(p)) {
+                return p;
+            }
+        } catch (RuntimeException e) {
+            // not a path: maybe a name
+        }
+        Path named = catalog().resolve(s);
+        return named != null ? named : Path.of(s);
     }
 
     /** The agent's name and version, as it said ("Visual Studio Code 1.106"). */
@@ -155,7 +187,7 @@ public final class Workspace implements AutoCloseable {
                 throw new Tool.Failure("No open log " + h + ". Open it with open_log, or pass its path.");
             }
         }
-        String opened = open(Path.of(h));
+        String opened = open(pathOf(h));
         synchronized (this) {
             return logs.get(opened);
         }

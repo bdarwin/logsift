@@ -2104,6 +2104,19 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return tabs.getSelectedComponent() instanceof GcTab g ? g : null;
     }
 
+    /** Opens Log Locations for Agents, starting from a log or folder (null: the list). */
+    void openLogLocations(Path focus) {
+        LogLocationsDialog d = new LogLocationsDialog(this, focus);
+        lastLogLocationsForTest = d;
+        d.setVisible(true);
+    }
+
+    private LogLocationsDialog lastLogLocationsForTest;
+
+    LogLocationsDialog lastLogLocationsForTest() {
+        return lastLogLocationsForTest;
+    }
+
     /** Asks for a GC log, opens it and explains it. */
     private void openGcLogDialog() {
         FileDialog fd = new FileDialog(this, "Open GC Log", FileDialog.LOAD);
@@ -2459,6 +2472,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     private final ArchiveTab.Host folderHost = new ArchiveTab.Host() {
+        @Override
+        public void describeForAgents(Path folder) {
+            openLogLocations(folder);
+        }
+
         @Override
         public void openEntries(Path dir, List<logsift.core.Archives.Entry> entries) {
             for (logsift.core.Archives.Entry e : entries) {
@@ -2913,6 +2931,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         JMenu file = menu("File");
         file.add(item("Open…", "folder-open", KeyStroke.getKeyStroke(KeyEvent.VK_O, MENU), e -> openDialog()));
         file.add(item("Open Folder…", "folder", null, e -> openFolderDialog()));
+        file.add(item("Log Locations for Agents…", "sparkles", null, e -> {
+            LogTab t = currentTab();
+            openLogLocations(t == null ? null : t.path());
+        }));
         JMenu recent = submenu("Open Recent", "history");
         onOpen(recent, () -> {
             recent.removeAll();

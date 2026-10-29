@@ -210,7 +210,7 @@ class McpServerTest {
     @Test
     void listsReadOnlyTools() throws Exception {
         List<Object> tools = list(map(request("tools/list", Map.of()).get("result")).get("tools"));
-        assertEquals(List.of("open_log", "list_open", "insights", "exceptions", "search", "read_lines", "top_messages",
+        assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines", "top_messages",
                 "metrics", "search_folder", "analyze_gc", "analyze_threads"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
@@ -371,6 +371,46 @@ class McpServerTest {
         assertTrue(t.text().startsWith("3 thread dumps. "), t.text());
         assertTrue(t.text().contains("[ERROR] Deadlock: 2 threads wait for each other"), t.text());
         assertTrue(call("analyze_threads", "log", plain.toString()).text().startsWith("There is no thread dump"));
+    }
+
+    @Test
+    void findsLogsByTheirServiceName() throws Exception {
+        assertTrue(ok("list_logs").text().startsWith("No log locations are described yet."));
+        Path orders = Files.createDirectories(logs.resolve("srv/orders/logs"));
+        serviceLog(orders.resolve("app.log"));
+        Files.copy(orders.resolve("app.log"), orders.resolve("app.log.1"));
+        Files.writeString(orders.resolve("gc.log"), "[0.015s][info][gc] Using G1\n");
+        Path outside = Files.createDirectories(dir.resolve("outside/billing"));
+        Files.writeString(outside.resolve("billing.log"), "2026-10-28 10:00:00 INFO billed\n");
+        logsift.agent.LogCatalog c = logsift.agent.LogCatalog.of(List.of(
+                new logsift.agent.LogCatalog.Entry(new logsift.agent.LogCatalog.Service("orders",
+                        "Order service: takes orders", List.of(orders.toString()),
+                        List.of(new logsift.agent.LogCatalog.FileKind("app.log*", "Application log")), "UTC",
+                        "Timeouts before 06:00 are the nightly maintenance."), dir.resolve("logs.json"), false),
+                new logsift.agent.LogCatalog.Entry(new logsift.agent.LogCatalog.Service("billing", "", List.of(
+                        outside.toString()), List.of(), "", ""), dir.resolve("logs.json"), false)));
+        workspace.setCatalog(() -> c);
+
+        String all = ok("list_logs").text();
+        assertTrue(all.startsWith("2 services:"), all);
+        assertTrue(all.contains("orders — Order service: takes orders"), all);
+        assertTrue(all.contains("Times in its logs: UTC"), all);
+        assertTrue(all.contains("Notes: Timeouts before 06:00 are the nightly maintenance."), all);
+        assertTrue(all.contains("- orders/app: app.log — Application log"), all);
+        assertTrue(all.contains("2 files (app.log*)"), all);
+        assertTrue(all.contains("- orders/gc: gc.log — "), all);
+        assertTrue(all.contains("(agents may not read this folder"), "billing's folder is outside: " + all);
+        assertFalse(all.contains("billing.log"), "nothing listed from a folder agents may not read: " + all);
+        String one = ok("list_logs", "service", "orders").text();
+        assertTrue(one.startsWith("1 service:"), one);
+        assertTrue(one.contains(orders.resolve("app.log.1").toString()), "every file of a log, asked for one service");
+        assertTrue(ok("list_logs", "service", "shipping").text().startsWith("No service called shipping."));
+
+        Answer opened = ok("open_log", "path", "orders/app");
+        assertTrue(opened.text().startsWith("log:1  " + orders.resolve("app.log")), opened.text());
+        Answer found = ok("search_folder", "folder", "orders", "query", "Database connection lost");
+        assertTrue(found.text().contains(orders.resolve("app.log").toString()), found.text());
+        assertTrue(call("open_log", "path", "billing/billing").error(), "outside the folders agents may read");
     }
 
     @Test

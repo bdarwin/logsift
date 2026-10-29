@@ -7114,6 +7114,133 @@ class VisualTest {
     }
 
     @Test
+    @Order(63)
+    void describesLogLocationsForAgents() throws Exception {
+        // a service's log folder: today's log, rotated ones (one compressed), a GC log, an access log, a JVM crash
+        Path logs = Files.createDirectories(dir.resolve("locations/srv/orders/logs"));
+        Path other = Files.createDirectories(dir.resolve("locations/elsewhere"));
+        StringBuilder app = new StringBuilder();
+        for (int i = 0; i < 300; i++) {
+            app.append(String.format("2026-10-28 10:%02d:%02d.%03d INFO  [http-%d] c.a.orders.OrderService - order %d placed%n",
+                    i / 60, i % 60, i, i % 8, 7000 + i));
+        }
+        Path appLog = logs.resolve("app.log");
+        Files.writeString(appLog, app);
+        Files.writeString(logs.resolve("app.log.1"), app);
+        try (var gz = new java.util.zip.GZIPOutputStream(Files.newOutputStream(logs.resolve("app.2026-10-26.log.gz")))) {
+            gz.write(app.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        Files.writeString(logs.resolve("gc.log"), """
+                [2026-10-28T10:00:00.123+0000][0.015s][info][gc] Using G1
+                [2026-10-28T10:00:01.456+0000][1.348s][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 24M->4M(256M) 3.112ms
+                [2026-10-28T10:00:05.789+0000][5.681s][info][gc] GC(1) Pause Young (Normal) (G1 Evacuation Pause) 28M->6M(256M) 2.871ms
+                """);
+        StringBuilder access = new StringBuilder();
+        for (int i = 0; i < 50; i++) {
+            access.append(String.format("10.0.0.%d - - [28/Oct/2026:10:%02d:00 +0000] \"GET /orders/%d HTTP/1.1\" 200 512 \"-\" \"curl/8\"%n",
+                    i % 9, i % 60, i));
+        }
+        Files.writeString(logs.resolve("access.log"), access);
+        Files.writeString(logs.resolve("hs_err_pid4242.log"), """
+                #
+                # A fatal error has been detected by the Java Runtime Environment:
+                #
+                #  SIGSEGV (0xb) at pc=0x00007f1c2a1b2c3d, pid=4242, tid=4250
+                #
+                """);
+        Path home = Path.of(System.getProperty("logsift.home"));
+        Files.deleteIfExists(logsift.agent.LogCatalog.userFile(home));
+        // agents may read only another folder: the dialog says so, and can let them
+        new logsift.agent.AgentSettings(logsift.agent.Masking.Options.DEFAULT, List.of(other)).save(home);
+
+        javax.swing.SwingUtilities.invokeLater(() -> frame.openLogLocations(appLog));
+        waitFor(() -> frame.lastLogLocationsForTest() != null && frame.lastLogLocationsForTest().isShowing(), 10_000,
+                "Log Locations for Agents");
+        LogLocationsDialog d = frame.lastLogLocationsForTest();
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !d.scanningForTest() && d.filesForTest().getRowCount() > 0);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the files found");
+        assertEquals("orders", onEdt(() -> d.listForTest().getSelectedValue().name), "named after the folder above logs");
+        List<String> found = onEdt(() -> {
+            List<String> out = new ArrayList<>();
+            for (int r = 0; r < d.filesForTest().getRowCount(); r++) {
+                out.add(d.filesForTest().getValueAt(r, 0) + " " + d.filesForTest().getValueAt(r, 1));
+            }
+            return out;
+        });
+        assertTrue(found.contains("app.log 3"), "today's log and its two rotated copies are one log: " + found);
+        assertEquals(4, found.size(), "app, gc, access and the crash report: " + found);
+        assertTrue(onEdt(d::accessShownForTest), "agents may not read the folder yet");
+        assertTrue(onEdt(d::previewForTest).contains("(agents may not read this folder"), onEdt(d::previewForTest));
+        settle();
+        shotOf(d.getRootPane(), "114a-log-locations-not-allowed");
+        onEdt(() -> {
+            ((javax.swing.JButton) findButton(d.getRootPane(), "Let Agents Read Them")).doClick();
+            return null;
+        });
+        assertFalse(onEdt(d::accessShownForTest), "allowed");
+        assertTrue(logsift.agent.AgentSettings.load(home).roots().contains(logs));
+        assertTrue(onEdt(d::previewForTest).contains("(guessed) Java GC log"), onEdt(d::previewForTest));
+        assertTrue(onEdt(d::previewForTest).contains("(guessed) Java crash report (hs_err)"), onEdt(d::previewForTest));
+
+        int appRow = found.indexOf("app.log 3");
+        onEdt(() -> {
+            d.setDescriptionForTest("Order service: takes orders from the shop and charges cards");
+            d.describeForTest(appRow, "Application log: one line per order, errors with stack traces");
+            d.setTimeZoneForTest("UTC");
+            d.setNotesForTest("Payment gateway timeouts before 06:00 are the nightly maintenance.");
+            return null;
+        });
+        String preview = onEdt(d::previewForTest);
+        assertTrue(preview.contains("orders — Order service: takes orders from the shop and charges cards"), preview);
+        assertTrue(preview.contains("orders/app: app.log — Application log: one line per order"), preview);
+        assertTrue(preview.contains("Times in its logs: UTC"), preview);
+        settle();
+        shotOf(d.getRootPane(), "114-log-locations");
+        onEdt(() -> {
+            d.closeForTest();
+            return null;
+        });
+        assertFalse(onEdt(d::isShowing));
+        String saved = Files.readString(logsift.agent.LogCatalog.userFile(home));
+        String userHome = Path.of(System.getProperty("user.home")).toString();
+        if (logs.startsWith(userHome)) {
+            assertTrue(saved.contains("\"~/"), "a folder in the home folder is saved as ~/…, for other computers: " + saved);
+            assertFalse(saved.contains(userHome), saved);
+        }
+        logsift.agent.LogCatalog c = logsift.agent.LogCatalog.load(home, null, List.of());
+        assertEquals(1, c.entries().size());
+        assertEquals("Application log: one line per order, errors with stack traces",
+                c.entries().get(0).service().describe("app.log.1"));
+        assertEquals(appLog, c.resolve("orders/app"));
+        assertEquals(logs.resolve("gc.log"), c.resolve("orders/gc"));
+        // put back what other tests expect
+        Files.deleteIfExists(logsift.agent.LogCatalog.userFile(home));
+        logsift.agent.AgentSettings.DEFAULT.save(home);
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    /** The button with this text in a window. */
+    private static java.awt.Component findButton(java.awt.Container c, String text) {
+        for (java.awt.Component k : c.getComponents()) {
+            if (k instanceof javax.swing.AbstractButton b && text.equals(b.getText())) {
+                return b;
+            }
+            if (k instanceof java.awt.Container cc) {
+                java.awt.Component f = findButton(cc, text);
+                if (f != null) {
+                    return f;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
     @Order(56)
     void comparesFromTheCompareTab() throws Exception {
         // the left file is in a zip inside a zip (old/exports.zip in bundle.zip); the right one is on disk

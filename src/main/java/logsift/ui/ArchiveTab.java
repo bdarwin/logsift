@@ -69,6 +69,9 @@ final class ArchiveTab extends JPanel {
         /** Lists the folder's files again (folder tabs only). */
         default void refresh(ArchiveTab tab) {}
 
+        /** Opens Log Locations for Agents with this folder (folder tabs only). */
+        default void describeForAgents(Path folder) {}
+
         /** Compares two files (CSV and TSV files as tables). */
         default void compareEntries(Path zip, List<Archives.Entry> entries) {}
     }
@@ -209,6 +212,10 @@ final class ArchiveTab extends JPanel {
             refresh.addActionListener(e -> host.refresh(this));
             actions.add(refresh);
             refreshButton = refresh;
+            JButton describe = new JButton("Describe for Agents…", Icons.of("sparkles"));
+            describe.setToolTipText("Tell coding agents what this folder's logs are, so they can find them by name");
+            describe.addActionListener(e -> host.describeForAgents(zip));
+            actions.add(describe);
         }
         top.add(first);
         top.add(actions);

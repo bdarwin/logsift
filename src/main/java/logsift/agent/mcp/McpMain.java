@@ -57,7 +57,11 @@ public final class McpMain {
         System.err.println("logsift-mcp " + logsift.core.Version.current() + ": reading under "
                 + options.scope().describe() + "; masking " + options.masking().describe());
         logsift.core.Numbers.setOptions(logsift.core.Numbers.Options.load(home()));
+        List<Path> logFiles = logFiles(args);
+        Path cwd = Path.of("").toAbsolutePath();
+        Path home = home();
         try (Workspace w = new Workspace(options)) {
+            w.setCatalog(() -> logsift.agent.LogCatalog.load(home, cwd, logFiles));
             new McpServer(LogTools.all(), w, logsift.core.Version.current(), protocol)
                     .serve(new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8)));
         }
@@ -66,10 +70,22 @@ public final class McpMain {
 
     static final String USAGE = """
             usage: logsift-mcp [--root FOLDER]... [--mask-emails] [--mask-ips] [--mask REGEX]... [--no-mask] \
-            [--max-chars N]
+            [--max-chars N] [--logs FILE]...
               --root FOLDER   allow reading under FOLDER (default: your home folder and the current folder)
               --mask-emails   also mask email addresses; --mask-ips: IP addresses; --mask REGEX: your own
-              --no-mask       don't mask secrets (passwords, tokens, keys) in answers""";
+              --no-mask       don't mask secrets (passwords, tokens, keys) in answers
+              --logs FILE     also read log locations from FILE (like a project's .logsift/logs.json)""";
+
+    /** The --logs files. */
+    static List<Path> logFiles(String[] args) {
+        List<Path> out = new ArrayList<>();
+        for (int i = 0; i + 1 < args.length; i++) {
+            if (args[i].equals("--logs")) {
+                out.add(Path.of(args[i + 1]).toAbsolutePath());
+            }
+        }
+        return out;
+    }
 
     /** Logsift's own folder (settings, the audit log). */
     static Path home() {
@@ -97,6 +113,7 @@ public final class McpMain {
                 case "--mask-ips" -> ips = true;
                 case "--mask" -> custom.add(value(args, ++i, a));
                 case "--no-mask" -> secrets = false;
+                case "--logs" -> value(args, ++i, a); // read by logFiles
                 case "--max-chars" -> {
                     try {
                         maxChars = Integer.parseInt(value(args, ++i, a));

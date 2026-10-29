@@ -39,7 +39,7 @@ public final class LogTools {
 
     /** Every tool, in a fixed order (agents cache the list). */
     public static List<Tool> all() {
-        return List.of(OPEN_LOG, LIST_OPEN, INSIGHTS, EXCEPTIONS, SEARCH, READ_LINES, TOP_MESSAGES, METRICS,
+        return List.of(LIST_LOGS, OPEN_LOG, LIST_OPEN, INSIGHTS, EXCEPTIONS, SEARCH, READ_LINES, TOP_MESSAGES, METRICS,
                 SEARCH_FOLDER, ANALYZE_GC, ANALYZE_THREADS);
     }
 
@@ -109,10 +109,12 @@ public final class LogTools {
     static final Tool OPEN_LOG = new Def("open_log", "Open a log",
             "Opens a log file (plain, .gz, or any text log; big files are fine) and says what it is: size, lines, "
                     + "format, time range. Gives a handle (log:1) for the other tools. Start here, then call "
-                    + "insights for what happened in it.",
-            new Tool.Schema().string("path", "The log file's path.", true).build(),
+                    + "insights for what happened in it. Without a path, call list_logs: it names the person's "
+                    + "services and their logs, and a name from it (\"orders/app\") opens the newest file of that log.",
+            new Tool.Schema().string("path", "The log file's path, or a name from list_logs (\"orders/app\").", true)
+                    .build(),
             (a, w) -> {
-                String h = w.open(Path.of(a.string("path")));
+                String h = w.open(w.pathOf(a.string("path")));
                 LogAnalysis log = w.log(h);
                 w.await(h + ":ready", "reading " + log.path().getFileName() + " (" + n(log.document().lineCount())
                         + " lines so far)", () -> log.awaitReady(INTERRUPTED));
@@ -151,6 +153,120 @@ public final class LogTools {
 
     static String size(long bytes) {
         return GcReport.size(bytes);
+    }
+
+    static final Tool LIST_LOGS = new Def("list_logs", "Where the logs are",
+            "The person's services and where their logs are, as they described them in Logsift: each service's "
+                    + "folders, its kinds of log (with rotated copies counted together), what each holds, sizes, "
+                    + "when they last changed, time zone and notes. Call this first when you don't have a path; "
+                    + "open a log by its name (\"orders/app\") or search a whole service with search_folder.",
+            new Tool.Schema().string("service", "Only this service, with every file (default: all, briefly).", false)
+                    .integer("max_chars", "Longest answer (default 24000).", false).build(),
+            (a, w) -> w.finish(catalogText(w, a.string("service", null)), maxChars(a)));
+
+    private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT);
+
+    private static String when(long millis) {
+        return millis <= 0 ? "?" : WHEN.format(java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault()));
+    }
+
+    static String catalogText(Workspace w, String only) {
+        return catalogText(w.catalog(), w.options().scope(), w.options().formats(), only);
+    }
+
+    /** What list_logs answers, for these locations (the window shows it as a preview). */
+    public static String catalogText(LogCatalog c, Scope scope, List<logsift.core.CustomFormat> formats, String only) {
+        StringBuilder b = new StringBuilder();
+        if (c.isEmpty()) {
+            b.append("No log locations are described yet. Ask the person to add them in Logsift (File → Log Locations "
+                    + "for Agents…, or Describe for Agents… in a folder's tab), or to add a .logsift/logs.json to the "
+                    + "project. Until then, open_log needs a path.");
+            for (String p : c.problems()) {
+                b.append("\n(Couldn't read ").append(p).append(".)");
+            }
+            return b.toString();
+        }
+        List<LogCatalog.Entry> entries = new ArrayList<>();
+        for (LogCatalog.Entry e : c.entries()) {
+            if (only == null || e.service().name().equalsIgnoreCase(only.strip())) {
+                entries.add(e);
+            }
+        }
+        if (entries.isEmpty()) {
+            List<String> names = new ArrayList<>();
+            c.entries().forEach(e -> names.add(e.service().name()));
+            return "No service called " + only + ". The services: " + String.join(", ", names) + ".";
+        }
+        boolean detail = only != null;
+        b.append(entries.size()).append(entries.size() == 1 ? " service" : " services").append(":\n");
+        for (LogCatalog.Entry e : entries) {
+            LogCatalog.Service s = e.service();
+            b.append('\n').append(s.name());
+            if (!s.description().isEmpty()) {
+                b.append(" — ").append(s.description());
+            }
+            b.append(e.project() ? "  (from the project's " + e.file() + ")" : "").append('\n');
+            if (!s.timeZone().isEmpty()) {
+                b.append("  Times in its logs: ").append(s.timeZone()).append('\n');
+            }
+            if (!s.notes().isEmpty()) {
+                b.append("  Notes: ").append(s.notes().replace("\n", " ")).append('\n');
+            }
+            List<LogCatalog.Group> groups = new ArrayList<>();
+            for (Path f : e.folders()) {
+                if (!scope.allows(f)) {
+                    b.append("  ").append(f).append("  (agents may not read this folder: the person can allow it in "
+                            + "Settings → Agents)\n");
+                } else if (!Files.isDirectory(f) && !Files.isRegularFile(f)) {
+                    b.append("  ").append(f).append("  (not found on this computer)\n");
+                } else {
+                    b.append("  ").append(f).append('\n');
+                }
+            }
+            LogCatalog.Entry readable = new LogCatalog.Entry(new LogCatalog.Service(s.name(), s.description(),
+                    e.folders().stream().filter(f -> scope.allows(f)).map(Path::toString).toList(),
+                    s.files(), s.timeZone(), s.notes()), e.file(), false);
+            groups.addAll(LogCatalog.scan(readable));
+            int max = detail ? 200 : 15;
+            int guessed = 0;
+            for (int i = 0; i < groups.size() && i < max; i++) {
+                LogCatalog.Group g = groups.get(i);
+                String what = g.description();
+                if (what == null || what.isBlank()) {
+                    String gs = guessed++ < 15 ? LogCatalog.guess(g.current(), formats) : null;
+                    what = gs == null ? "(not described)" : "(guessed) " + gs;
+                }
+                b.append("  - ").append(s.name()).append('/').append(LogCatalog.stem(g.name())).append(": ")
+                        .append(g.name()).append(" — ").append(what).append('\n');
+                b.append("      ").append(g.files().size() == 1 ? "1 file" : n(g.files().size()) + " files (" + g.pattern()
+                        + ")").append(", ").append(size(g.bytes())).append(", last changed ").append(when(g.newest()));
+                if (g.files().size() > 1) {
+                    b.append(", oldest ").append(when(g.oldest()));
+                }
+                b.append('\n');
+                if (detail && g.files().size() > 1) {
+                    for (int k = 0; k < g.files().size() && k < 10; k++) {
+                        b.append("        ").append(g.files().get(k)).append('\n');
+                    }
+                    if (g.files().size() > 10) {
+                        b.append("        … ").append(g.files().size() - 10).append(" more\n");
+                    }
+                }
+            }
+            if (groups.size() > max) {
+                b.append("  … and ").append(groups.size() - max).append(" more kinds of file (list_logs with service=\"")
+                        .append(s.name()).append("\" lists them all).\n");
+            }
+            if (groups.isEmpty()) {
+                b.append("  (no files found)\n");
+            }
+        }
+        b.append("\nOpen one with open_log(path=\"service/name\"): the newest file of that log. Search a service's "
+                + "folders with search_folder(folder=\"service\").");
+        for (String p : c.problems()) {
+            b.append("\n(Couldn't read ").append(p).append(".)");
+        }
+        return b.toString();
     }
 
     static final Tool LIST_OPEN = new Def("list_open", "Open logs",
@@ -469,8 +585,9 @@ public final class LogTools {
 
     static final Tool SEARCH_FOLDER = new Def("search_folder", "Search a folder",
             "Searches every log in a folder and its subfolders, inside .zip and .gz files too, without opening "
-                    + "them. Gives matching files with their hit counts and first hits.",
-            new Tool.Schema().string("folder", "The folder's path.", true)
+                    + "them. Gives matching files with their hit counts and first hits. The folder can be a "
+                    + "service's name from list_logs: all its folders are searched.",
+            new Tool.Schema().string("folder", "The folder's path, or a service's name from list_logs.", true)
                     .string("query", "What to find.", true)
                     .bool("regex", "query is a Java regular expression (default false).")
                     .bool("match_case", "Upper and lower case must match (default false).")
@@ -480,9 +597,21 @@ public final class LogTools {
                     .integer("hits_per_file", "Lines shown per file (default 5).", false)
                     .integer("max_chars", "Longest answer (default 24000).", false).build(),
             (a, w) -> {
-                Path folder = w.options().scope().check(Path.of(a.string("folder")));
-                if (!Files.isDirectory(folder)) {
-                    throw new Tool.Failure("Not a folder: " + folder + ". Use open_log and search for a file.");
+                String arg = a.string("folder");
+                List<Path> folders = new ArrayList<>();
+                LogCatalog.Entry service = w.catalog().entry(arg);
+                if (service != null && !looksLikePath(arg)) {
+                    folders.addAll(service.folders());
+                } else {
+                    folders.add(Path.of(arg));
+                }
+                List<Path> checked = new ArrayList<>();
+                for (Path f : folders) {
+                    Path c = w.options().scope().check(f);
+                    if (!Files.isDirectory(c)) {
+                        throw new Tool.Failure("Not a folder: " + c + ". Use open_log and search for a file.");
+                    }
+                    checked.add(c);
                 }
                 SearchQuery q = new SearchQuery(a.string("query"), a.bool("match_case", false), a.bool("regex", false),
                         false);
@@ -495,39 +624,48 @@ public final class LogTools {
                 boolean archives = a.bool("archives", true);
                 int limitFiles = (int) a.number("limit_files", 50, 1, 1000);
                 int perFile = (int) a.number("hits_per_file", 5, 0, 100);
-                FolderSearch fs = w.await("folder:" + folder + ":" + names + ":" + archives + ":" + q,
-                        "searching " + folder, () -> {
-                            FolderSearch s = new FolderSearch(new FolderSearch.Options(folder, names, true, archives, q))
-                                    .start();
-                            try {
-                                while (!s.awaitDone(1000)) {
-                                    // until every file is read
-                                }
-                            } catch (InterruptedException e) {
-                                s.close();
-                                throw e;
-                            }
-                            return s;
-                        });
                 List<FolderSearch.FileResult> results = new ArrayList<>();
+                long done = 0;
+                long skipped = 0;
                 int hidden = 0;
-                for (FolderSearch.FileResult r : fs.results()) {
-                    if (r.hitCount() == 0) {
-                        continue;
+                for (Path folder : checked) {
+                    FolderSearch fs = w.await("folder:" + folder + ":" + names + ":" + archives + ":" + q,
+                            "searching " + folder, () -> {
+                                FolderSearch s = new FolderSearch(new FolderSearch.Options(folder, names, true, archives,
+                                        q)).start();
+                                try {
+                                    while (!s.awaitDone(1000)) {
+                                        // until every file is read
+                                    }
+                                } catch (InterruptedException e) {
+                                    s.close();
+                                    throw e;
+                                }
+                                return s;
+                            });
+                    done += fs.filesDone();
+                    skipped += fs.filesSkipped();
+                    for (FolderSearch.FileResult r : fs.results()) {
+                        if (r.hitCount() == 0) {
+                            continue;
+                        }
+                        if (!w.options().scope().allows(r.file())) {
+                            hidden++;
+                            continue;
+                        }
+                        results.add(r);
                     }
-                    if (!w.options().scope().allows(r.file())) {
-                        hidden++;
-                        continue;
-                    }
-                    results.add(r);
                 }
                 results.sort((x, y) -> Long.compare(y.hitCount(), x.hitCount()));
                 long total = results.stream().mapToLong(FolderSearch.FileResult::hitCount).sum();
                 StringBuilder b = new StringBuilder();
                 b.append(n(total)).append(" matching lines in ").append(n(results.size())).append(" of ")
-                        .append(n(fs.filesDone())).append(" files searched");
-                if (fs.filesSkipped() > 0) {
-                    b.append(" (").append(n(fs.filesSkipped())).append(" skipped)");
+                        .append(n(done)).append(" files searched");
+                if (checked.size() > 1) {
+                    b.append(" in ").append(checked.size()).append(" folders");
+                }
+                if (skipped > 0) {
+                    b.append(" (").append(n(skipped)).append(" skipped)");
                 }
                 b.append(":\n");
                 for (int i = 0; i < results.size() && i < limitFiles; i++) {
@@ -548,6 +686,11 @@ public final class LogTools {
                 }
                 return w.finish(b.toString().stripTrailing(), maxChars(a));
             });
+
+    /** A path, not a name: has a separator other than the one in "service/log", or starts like a path. */
+    static boolean looksLikePath(String s) {
+        return s.startsWith("/") || s.startsWith("~") || s.startsWith(".") || s.contains("\\") || s.matches("^[A-Za-z]:.*");
+    }
 
     // ---------------------------------------------------------------- JVM files
 

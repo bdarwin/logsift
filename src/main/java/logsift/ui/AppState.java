@@ -51,6 +51,40 @@ final class AppState {
     private static volatile List<logsift.core.CustomFormat> formats;
 
     /** Where the user's log formats are saved (a file that can be copied to another computer). */
+    /** Projects' log location files the person has used (.logsift/logs.json), newest first. */
+    static List<Path> logLocationProjects() {
+        List<Path> out = new java.util.ArrayList<>();
+        for (String l : prefs().get("logLocations.projects", "").split("\n")) {
+            if (!l.isBlank()) {
+                try {
+                    Path p = Path.of(l.strip());
+                    if (java.nio.file.Files.isRegularFile(p) && !out.contains(p)) {
+                        out.add(p);
+                    }
+                } catch (RuntimeException e) {
+                    // not a path here any more
+                }
+            }
+        }
+        return out;
+    }
+
+    static void addLogLocationProject(Path file) {
+        List<Path> all = new java.util.ArrayList<>(List.of(file.toAbsolutePath().normalize()));
+        for (Path p : logLocationProjects()) {
+            if (!all.contains(p) && all.size() < 20) {
+                all.add(p);
+            }
+        }
+        StringBuilder b = new StringBuilder();
+        all.forEach(p -> b.append(p).append('\n'));
+        try {
+            prefs().put("logLocations.projects", b.toString());
+        } catch (RuntimeException e) {
+            // remembered next time if it can be
+        }
+    }
+
     static Path formatsFile() {
         return home().resolve("formats.properties");
     }

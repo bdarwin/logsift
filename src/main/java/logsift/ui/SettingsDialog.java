@@ -53,7 +53,8 @@ final class SettingsDialog extends JDialog {
         tabs.addTab(FORMATS, formats);
         tabs.addTab(SOURCE, sourceCode());
         tabs.addTab(METRICS, metrics());
-        agents = new AgentsPanel(logsift.agent.AgentSettings.launcher(), this::openAgentActivity);
+        agents = new AgentsPanel(logsift.agent.AgentSettings.launcher(), this::openAgentActivity,
+                () -> new LogLocationsDialog(this, null).setVisible(true));
         tabs.addTab(AGENTS, agents);
         JButton close = new JButton("Close");
         close.addActionListener(e -> dispose());
