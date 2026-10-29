@@ -432,7 +432,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             return;
         }
         if (!asText.remove(abs) && logsift.crash.CrashFiles.likelyByName(abs) && Files.isRegularFile(abs)
-                && logsift.crash.CrashFiles.kindOf(abs) != null) {
+                && (logsift.crash.CrashFiles.kindOf(abs) != null || isDumpName(abs))) {
+            // a .dmp or .mdmp that isn't one Logsift reads opens in a crash tab too: it says why
+            // (empty, a dump of Windows itself, still being written…), where text would show noise
             openCrash(abs);
             return;
         }
@@ -1421,6 +1423,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
         updateEmptyState();
         return tab;
+    }
+
+    private static boolean isDumpName(Path p) {
+        String n = p.getFileName() == null ? "" : p.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return n.endsWith(".dmp") || n.endsWith(".mdmp");
     }
 
     /** Files to open as text once, though they are crash files ("Open as Text"). */

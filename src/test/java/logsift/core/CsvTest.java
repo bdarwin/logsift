@@ -120,4 +120,42 @@ class CsvTest {
         assertArrayEquals(new int[] {1, 11, 17}, starts);
         assertNull(f.headerCells("2026-10-21 10:00:00,INFO,web-1", null));
     }
+
+    @Test
+    void aHeaderWithAColumnMoreOrLessThanItsRowsIsStillATable() {
+        // a column named in the header that no row fills (a tool adds it, nothing writes it)
+        List<String> extra = List.of("order id,customer name,amount,notes,exported by",
+                "1,Ann Lee,10.5,,", "2,Bob,,late", "3,Cy Doe,7,", "4,Di,3,gift", "5,Ed,1,");
+        for (boolean named : new boolean[] {true, false}) {
+            LogFormat f = LogFormat.detectCsv(extra, named);
+            assertNotNull(f, named ? "named .csv" : "by content");
+            assertEquals(5, f.columns().size());
+            assertEquals(List.of("order id", "customer name", "amount", "notes", "exported by"), f.titles());
+            assertArrayEquals(new String[] {"2", "Bob", "", "late", null}, f.split("2,Bob,,late", null));
+            assertEquals("Ann Lee", f.value("1,Ann Lee,10.5,,", "customer name"));
+            assertEquals(5, f.headerCells(extra.get(0), null).length);
+        }
+
+        // a separator at the header's end names nothing: no empty column for it
+        List<String> trailing = List.of("id,name,city,", "1,Ann,Paris", "2,Bob,Lyon", "3,Cy,Nice", "4,Di,Rome");
+        LogFormat t = LogFormat.detectCsv(trailing, true);
+        assertNotNull(t);
+        assertEquals(List.of("id", "name", "city"), t.titles());
+        int[] starts = new int[3];
+        assertArrayEquals(new String[] {"id", "name", "city"}, t.headerCells("id,name,city,", starts));
+        assertArrayEquals(new String[] {"1", "Ann", "Paris"}, t.split("1,Ann,Paris", null));
+
+        // rows ending with one separator more than the header: the extra value gets its own column
+        List<String> more = List.of("id;name;city", "1;Ann;Paris;", "2;Bob;Lyon;x", "3;Cy;Nice;", "4;Di;Rome;");
+        LogFormat m = LogFormat.detectCsv(more, true);
+        assertNotNull(m);
+        assertEquals(';', m.delimiter());
+        assertEquals(List.of("id", "name", "city", "column 4"), m.titles());
+        assertArrayEquals(new String[] {"2", "Bob", "Lyon", "x"}, m.split("2;Bob;Lyon;x", null));
+        assertArrayEquals(new String[] {"id", "name", "city", ""}, m.headerCells("id;name;city", null));
+
+        // and a log with commas in its messages is still not a table
+        assertNull(LogFormat.detectCsv(List.of("2026-10-21 10:00:01 INFO started, ok", "2026-10-21 10:00:02 WARN slow, very",
+                "2026-10-21 10:00:03 INFO a, b, c", "2026-10-21 10:00:04 INFO done", "2026-10-21 10:00:05 INFO x, y"), false));
+    }
 }

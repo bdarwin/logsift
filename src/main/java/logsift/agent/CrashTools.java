@@ -47,8 +47,7 @@ public final class CrashTools {
             throw new Tool.Failure("No such file: " + file);
         }
         if (CrashFiles.kindOf(file) == null) {
-            throw new Tool.Failure("Not a crash file: " + file.getFileName() + ". This reads Windows dumps (.dmp, "
-                    + ".mdmp) and Java hs_err_pid files; use open_log for logs.");
+            throw new Tool.Failure("Not a crash file: " + CrashFiles.whyNot(file) + " Use open_log for logs.");
         }
         long stamp = Files.getLastModifiedTime(file).toMillis();
         Path home = w.options().logsiftHome();

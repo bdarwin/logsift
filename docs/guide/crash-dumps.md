@@ -13,6 +13,15 @@ Logsift explains two kinds of crash files:
 
 Open one with **File → Open Crash Dump…**, **JVM → Open Java Crash Report (hs_err)…**, or by dropping it on the window. Files with those names open in a crash tab. A crash report that has another name opens as a log, with a bar that offers **Explain the Crash**.
 
+A `.dmp` or `.mdmp` that Logsift can't read still opens in a crash tab, which says why:
+- the file is empty;
+- it is still being written, or another program has it open;
+- it is a memory dump of Windows itself (a blue-screen or whole-machine dump, starting with `PAGEDU64`), which Windows' own debugger reads;
+- it is zipped or cut short;
+- its first bytes aren't `MDMP`, which the tab shows.
+
+**Open as Text** there opens the file as it is.
+
 ![A Java crash in a JPEG library called through JNI, on one of four thumbnail workers](../screenshots/crash-java.png)
 
 ## The top

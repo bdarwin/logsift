@@ -7003,6 +7003,92 @@ class VisualTest {
     }
 
     @Test
+    @Order(61)
+    void readsATableWhoseHeaderNamesAColumnNoRowFills() throws Exception {
+        // a header naming one column more than its rows have (an export's empty last column),
+        // with spaces in names and empty values: once not a table at all
+        Path f = dir.resolve("orders-export.csv");
+        StringBuilder sb = new StringBuilder("order id,customer name,amount,notes,exported by\n");
+        for (int r = 1; r <= 40; r++) {
+            sb.append(r).append(",Customer ").append(r).append(',').append(r % 5 == 0 ? "" : String.valueOf(r))
+                    .append(',').append(r % 4 == 0 ? "gift" : "").append('\n');
+        }
+        Files.writeString(f, sb.toString());
+        int errorsBefore = ErrorReporter.sessionForTest().size();
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                        && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the table");
+        LogTab tab = onEdt(frame::currentTab);
+        assertTrue(onEdt(() -> tab.logFormat().isCsv()), "a table");
+        assertEquals(List.of("order id", "customer name", "amount", "notes", "exported by"),
+                onEdt(() -> tab.logFormat().titles()));
+        LogView view = onEdt(tab::mainView);
+        assertArrayEquals(new String[] {"4", "Customer 4", "4", "gift", ""}, padded(onEdt(() -> view.cellsForTest(4)), 5));
+
+        PivotPanel pp = onEdt(tab::pivotPanel);
+        onEdt(() -> {
+            tab.showPivot();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.fieldsForTest().size() == 5);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the pivot's fields");
+        onEdt(() -> {
+            pp.addField(PivotPanel.Area.ROWS, pp.columnForTest("notes"));
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(40, onEdt(pp::result).rows());
+
+        if (logsift.core.Sql.available()) {
+            QueryPanel q = onEdt(tab::queryPanel);
+            onEdt(() -> {
+                tab.showQuery();
+                q.setQueryForTest("SELECT count(*), sum(amount), count(\"exported by\") FROM t");
+                return null;
+            });
+            logsift.core.Sql.Result r = runQuery(q);
+            assertEquals(40L, ((Number) r.rows().get(0)[0]).longValue());
+            assertEquals(820 - 5 - 10 - 15 - 20 - 25 - 30 - 35 - 40, ((Number) r.rows().get(0)[1]).longValue());
+            assertEquals(0L, ((Number) r.rows().get(0)[2]).longValue());
+        }
+        onEdt(() -> {
+            tab.showPivot();
+            return null;
+        });
+        settle();
+        shot("118-header-with-an-empty-column");
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "nothing failed: "
+                + ErrorReporter.sessionForTest());
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+    }
+
+    /** Cells as shown, with a missing trailing value as empty. */
+    private static String[] padded(String[] cells, int n) {
+        String[] out = java.util.Arrays.copyOf(cells, n);
+        for (int i = 0; i < n; i++) {
+            out[i] = out[i] == null ? "" : out[i];
+        }
+        return out;
+    }
+
+    @Test
     @Order(62)
     void explainsWindowsDumps() throws Exception {
         // a full dump of a Windows service that read a field of a null object; two threads wait for a lock
@@ -7051,6 +7137,65 @@ class VisualTest {
             frame.closeTab(frame.tabsForTest().indexOfComponent(t));
             return null;
         });
+
+        // the same dump as .mdmp (as Windows Error Reporting and many crash handlers name it)
+        Path mdmp = Files.copy(dmp, box.resolve("OrdersService.exe.4812.mdmp"));
+        onEdt(() -> {
+            frame.openFile(mdmp);
+            return null;
+        });
+        CrashTab m = onEdt(frame::currentCrashTab);
+        assertNotNull(m, "a .mdmp opens explained too");
+        waitForCrash(m);
+        assertNotNull(onEdt(m::report), String.valueOf(onEdt(m::failureForTest)));
+        assertEquals(onEdt(() -> t.report().crashedThread().id()), onEdt(() -> m.report().crashedThread().id()));
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(m));
+            return null;
+        });
+
+        // dumps Logsift can't read say why, rather than opening as a page of noise
+        Path empty = Files.write(box.resolve("empty.mdmp"), new byte[0]);
+        byte[] kernel = new byte[4096];
+        System.arraycopy("PAGEDU64".getBytes(java.nio.charset.StandardCharsets.US_ASCII), 0, kernel, 0, 8);
+        Path machine = Files.write(box.resolve("MEMORY.mdmp"), kernel);
+        for (Object[] c : new Object[][] {{empty, "is empty"}, {machine, "memory dump of Windows itself"}}) {
+            Path bad = (Path) c[0];
+            onEdt(() -> {
+                frame.openFile(bad);
+                return null;
+            });
+            CrashTab b = onEdt(frame::currentCrashTab);
+            assertNotNull(b, bad + " opens in a crash tab");
+            waitForCrash(b);
+            String why = onEdt(b::problemForTest);
+            assertNotNull(why);
+            assertTrue(why.contains((String) c[1]), why);
+            if (bad == machine) {
+                settle();
+                shot("113d-crash-not-a-program-dump");
+                // and it can still be opened as text
+                onEdt(() -> {
+                    b.openAsTextForTest();
+                    return null;
+                });
+                waitFor(() -> {
+                    try {
+                        return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(machine));
+                    } catch (Exception e) {
+                        return false;
+                    }
+                }, 20_000, "the dump as text");
+                onEdt(() -> {
+                    frame.closeTab(frame.tabsForTest().indexOfComponent(frame.currentTab()));
+                    return null;
+                });
+            }
+            onEdt(() -> {
+                frame.closeTab(frame.tabsForTest().indexOfComponent(b));
+                return null;
+            });
+        }
         assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
     }
 

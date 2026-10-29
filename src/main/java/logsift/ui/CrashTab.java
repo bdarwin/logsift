@@ -102,10 +102,31 @@ final class CrashTab extends JPanel {
         problem.setEditable(false);
         problem.setOpaque(false);
         JPanel problemPanel = new JPanel(new java.awt.GridBagLayout());
-        problemPanel.add(problem);
+        JPanel problemBox = new JPanel();
+        problemBox.setOpaque(false);
+        problemBox.setLayout(new BoxLayout(problemBox, BoxLayout.Y_AXIS));
+        problem.setAlignmentX(LEFT_ALIGNMENT);
+        problemBox.add(problem);
+        problemBox.add(Box.createVerticalStrut(12));
+        problemAsText.setAlignmentX(LEFT_ALIGNMENT);
+        problemAsText.setToolTipText("Opens the file as it is, as a log");
+        problemAsText.addActionListener(e -> host.openAsText(file));
+        problemBox.add(problemAsText);
+        problemPanel.add(problemBox);
         body.add(problemPanel, "problem");
         add(body, BorderLayout.CENTER);
         load(null);
+    }
+
+    private final JButton problemAsText = new JButton("Open as Text", Icons.of("file-text"));
+
+    void openAsTextForTest() {
+        problemAsText.doClick();
+    }
+
+    /** The problem shown when the file can't be read (null while it reads or once it has). */
+    String problemForTest() {
+        return report == null && !busy ? problem.getText() : null;
     }
 
     Path file() {

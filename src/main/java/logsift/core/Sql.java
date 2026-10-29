@@ -153,17 +153,69 @@ public final class Sql implements AutoCloseable {
      */
     public void csv(String name, Path file, char delimiter, boolean header, java.nio.charset.Charset charset)
             throws SQLException {
+        csv(name, file, delimiter, header ? List.of() : null, charset);
+    }
+
+    /**
+     * A CSV file as a view; {@code columns} are its header's names as Logsift found them (null
+     * for no header; empty to leave them to DuckDB), used when DuckDB cannot read the header.
+     */
+    public void csv(String name, Path file, char delimiter, List<String> columns, java.nio.charset.Charset charset)
+            throws SQLException {
+        boolean header = columns != null;
         String enc = charset == null ? "utf-8" : switch (charset.name().toUpperCase(Locale.ROOT)) {
             case "ISO-8859-1", "WINDOWS-1252", "US-ASCII" -> charset.name().equalsIgnoreCase("US-ASCII") ? "utf-8" : "latin-1";
             case "UTF-16", "UTF-16LE", "UTF-16BE" -> "utf-16";
             default -> "utf-8";
         };
         String src = "read_csv('" + quote(file.toAbsolutePath().toString()) + "', delim='" + quote(String.valueOf(delimiter))
-                + "', header=" + header + ", encoding='" + enc + "', sample_size=20480, strict_mode=false)";
+                + "', header=" + header + ", encoding='" + enc + "', sample_size=20480, strict_mode=false";
         // not strict: real files mix line ends (\n and \r\n), which the strict reader refuses
+        String view = "CREATE OR REPLACE VIEW " + ident(name) + " AS SELECT row_number() OVER () + " + (header ? 1 : 0)
+                + " AS line, * FROM ";
         try (Statement s = conn.createStatement()) {
-            s.execute("CREATE OR REPLACE VIEW " + ident(name) + " AS SELECT row_number() OVER () + " + (header ? 1 : 0)
-                    + " AS line, * FROM " + src);
+            s.execute(view + src + ")");
+            if (!readsHeader(s.executeQuery("SELECT * FROM " + ident(name) + " LIMIT 0"), columns)) {
+                throw new SQLException("the header was read as values");
+            }
+        } catch (SQLException e) {
+            // rows shorter or longer than the header (a column no row fills, a separator more at
+            // each row's end): padded with nulls. Only then, as that reads on one thread
+            String names = "";
+            if (columns != null && !columns.isEmpty()) {
+                // DuckDB takes a header shorter or longer than the rows for a row of values:
+                // the header is skipped and its names given instead
+                StringBuilder sb = new StringBuilder(", header=false, skip=1, names=[");
+                java.util.Set<String> used = new java.util.HashSet<>();
+                for (int i = 0; i < columns.size(); i++) {
+                    String c = columns.get(i);
+                    for (int k = 2; !used.add(c.toLowerCase(Locale.ROOT)); k++) {
+                        c = columns.get(i) + "_" + k;
+                    }
+                    sb.append(i == 0 ? "" : ", ").append('\'').append(quote(c)).append('\'');
+                }
+                names = sb.append(']').toString();
+            }
+            try (Statement s = conn.createStatement()) {
+                s.execute(view + (names.isEmpty() ? src : src.replace(", header=true", names)) + ", null_padding=true)");
+            }
+        }
+    }
+
+    /** Whether DuckDB found the header's names (it takes a header of another width for values). */
+    private static boolean readsHeader(ResultSet rs, List<String> columns) throws SQLException {
+        try (rs) {
+            if (columns == null || columns.isEmpty()) {
+                return true;
+            }
+            ResultSetMetaData md = rs.getMetaData();
+            java.util.Set<String> found = new java.util.HashSet<>();
+            for (int i = 2; i <= md.getColumnCount(); i++) {
+                found.add(md.getColumnLabel(i).strip().toLowerCase(Locale.ROOT));
+            }
+            return md.getColumnCount() - 1 == columns.size()
+                    && columns.stream().allMatch(c -> found.contains(c.strip().toLowerCase(Locale.ROOT))
+                            || c.matches("column \\d+"));
         }
     }
 

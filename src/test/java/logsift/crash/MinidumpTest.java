@@ -162,6 +162,26 @@ class MinidumpTest {
     }
 
     @Test
+    void saysWhyAFileIsNotADump() throws Exception {
+        Path empty = Files.write(dir.resolve("a.mdmp"), new byte[0]);
+        assertTrue(CrashFiles.whyNot(empty).contains("is empty"), CrashFiles.whyNot(empty));
+        byte[] kernel = new byte[64];
+        System.arraycopy("PAGEDU64".getBytes(java.nio.charset.StandardCharsets.US_ASCII), 0, kernel, 0, 8);
+        Path machine = Files.write(dir.resolve("MEMORY.DMP"), kernel);
+        assertTrue(CrashFiles.whyNot(machine).contains("memory dump of Windows itself"), CrashFiles.whyNot(machine));
+        Path zip = Files.write(dir.resolve("z.mdmp"), new byte[] {'P', 'K', 3, 4, 0, 0});
+        assertTrue(CrashFiles.whyNot(zip).contains("zip"));
+        Path cut = Files.write(dir.resolve("cut.mdmp"), new byte[] {'M', 'D', 'M', 'P', (byte) 0x93, (byte) 0xA7});
+        assertTrue(CrashFiles.whyNot(cut).contains("cut short or damaged"), CrashFiles.whyNot(cut));
+        Path other = Files.write(dir.resolve("o.mdmp"), new byte[] {1, 2, 3, (byte) 0xFF});
+        assertTrue(CrashFiles.whyNot(other).contains("starts with 01 02 03 FF"), CrashFiles.whyNot(other));
+        assertTrue(CrashFiles.whyNot(dir.resolve("gone.mdmp")).contains("can't be read"));
+        IOException e = assertThrows(IOException.class,
+                () -> CrashFiles.analyze(machine, new CrashFiles.Options(CrashSettings.DEFAULT, null, false), () -> false));
+        assertTrue(e.getMessage().contains("Windows itself"), e.getMessage());
+    }
+
+    @Test
     void windowsNames() {
         assertEquals("Windows 11 (build 22631)", new Minidump.SystemInfo(Minidump.Arch.AMD64, 8, 1, 10, 0, 22631, "")
                 .osName());

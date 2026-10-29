@@ -20,6 +20,7 @@ public final class LogFormat {
     private final String timePattern;       // how the time column is written (custom only), or null
     private final char delimiter;           // CSV: the separator; 0 otherwise
     private final String header;            // CSV: the header row (not a row of values)
+    private final int rowFields;            // CSV: how many fields rows usually have
     private volatile List<String> headerNames;           // the header's names, once split
     private volatile java.util.Map<String, Integer> columnIndex; // a column's place, by name
 
@@ -65,6 +66,7 @@ public final class LogFormat {
         this.timePattern = timePattern;
         this.delimiter = 0;
         this.header = null;
+        this.rowFields = 0;
         if (columns.isEmpty()) {
             throw new IllegalArgumentException("The pattern needs at least one column, like {level}");
         }
@@ -79,10 +81,11 @@ public final class LogFormat {
         this.timePattern = null;
         this.delimiter = 0;
         this.header = null;
+        this.rowFields = 0;
     }
 
     /** CSV: columns named by the header row. */
-    private LogFormat(List<String> columns, char delimiter, String header) {
+    private LogFormat(List<String> columns, char delimiter, String header, int rowFields) {
         this.name = CSV;
         this.pattern = null;
         this.columns = List.copyOf(columns);
@@ -91,6 +94,7 @@ public final class LogFormat {
         this.timePattern = null;
         this.delimiter = delimiter;
         this.header = header;
+        this.rowFields = rowFields;
     }
 
     /** CSV: whether a line is the header row (which names the columns, and has no values). */
@@ -207,6 +211,8 @@ public final class LogFormat {
         char best = 0;
         double bestShare = 0;
         String header = null;
+        int bestWidth = 0;
+        int bestRowFields = 0;
         for (char d : new char[] {',', ';', '\t', '|'}) {
             // rows, not lines: a quoted value may go over a line break
             List<String> joined = CsvRows.join(lines, d);
@@ -216,13 +222,27 @@ public final class LogFormat {
                 continue;
             }
             int n = Csv.fieldCount(head, d);
-            if (n < (named ? 2 : 3)) {
+            // the rows' usual width: often the header's, but exports also name a column no row
+            // fills, or end each row with one separator more than the header has
+            java.util.Map<Integer, Integer> widths = new java.util.HashMap<>();
+            for (String r : rows) {
+                widths.merge(Csv.fieldCount(r, d), 1, Integer::sum);
+            }
+            int m = n;
+            for (var e : widths.entrySet()) {
+                if (e.getValue() > widths.getOrDefault(m, 0)) {
+                    m = e.getKey();
+                }
+            }
+            int lo = Math.min(n, m);
+            int hi = Math.max(n, m);
+            if (lo < (named ? 2 : 3)) {
                 continue;
             }
             int same = 0;
-            for (String r : rows) {
-                if (Csv.fieldCount(r, d) == n) {
-                    same++;
+            for (var e : widths.entrySet()) {
+                if (e.getKey() >= lo && e.getKey() <= hi) {
+                    same += e.getValue();
                 }
             }
             double share = rows.isEmpty() ? 1 : (double) same / rows.size();
@@ -230,12 +250,14 @@ public final class LogFormat {
                 best = d;
                 bestShare = share;
                 header = head;
+                bestWidth = hi;
+                bestRowFields = m;
             }
         }
         if (best == 0 || bestShare < (named ? 0.5 : 0.9)) {
             return null;
         }
-        List<String> names = Csv.split(header, best, null);
+        List<String> names = new ArrayList<>(Csv.split(header, best, null));
         if (!named) {
             for (String n : names) {
                 if (!n.trim().matches("[\\p{L}_@][\\p{L}\\p{N} _.@/()-]{0,40}")) {
@@ -243,7 +265,15 @@ public final class LogFormat {
                 }
             }
         }
-        return new LogFormat(columnNames(names), best, header);
+        // a trailing separator in the header names nothing: no column for it if no row fills it
+        while (names.size() > bestRowFields && names.size() > 2 && names.get(names.size() - 1).isBlank()) {
+            names.remove(names.size() - 1);
+            bestWidth = Math.max(names.size(), bestRowFields);
+        }
+        while (names.size() < bestWidth) {
+            names.add(""); // values past the header's last name: "column 5"
+        }
+        return new LogFormat(columnNames(names), best, header, Math.min(names.size(), bestRowFields));
     }
 
     /**
@@ -325,10 +355,14 @@ public final class LogFormat {
         List<String> names = headerNames;
         if (names == null) {
             // kept: a column's title is asked for each time it is drawn, and a wide header is long
-            names = Csv.split(header, delimiter, null).stream().map(String::strip).toList();
+            List<String> split = new ArrayList<>(Csv.split(header, delimiter, null).stream().map(String::strip).toList());
+            while (split.size() < columns.size()) {
+                split.add(""); // rows have values past the header's last name
+            }
+            names = List.copyOf(split.subList(0, columns.size()));
             headerNames = names;
         }
-        return names.size() == columns.size() ? names : null;
+        return names;
     }
 
     /** True for CSV (columns from the header row, not a regex). */
@@ -454,7 +488,8 @@ public final class LogFormat {
         if (v.size() == n) {
             return v.toArray(new String[0]);
         }
-        if (v.size() < 2 || v.size() < n - n / 2) {
+        int usual = Math.min(n, rowFields);
+        if (v.size() < 2 || v.size() < usual - usual / 2) {
             return null;
         }
         String[] out = new String[n];
@@ -484,7 +519,18 @@ public final class LogFormat {
                 starts[0]++;
             }
         }
-        return v.length == columns.size() ? v : null;
+        if (v.length != columns.size()) {
+            // a header naming more columns than rows fill (dropped), or fewer than rows have
+            String[] w = java.util.Arrays.copyOf(v, columns.size());
+            for (int i = v.length; i < w.length; i++) {
+                w[i] = "";
+                if (starts != null && i < starts.length) {
+                    starts[i] = -1;
+                }
+            }
+            v = w;
+        }
+        return v;
     }
 
     private String[] splitJson(String line, int[] starts) {

@@ -60,6 +60,34 @@ class SqlTest {
     }
 
     @Test
+    void csvWithAColumnNoRowFills() throws Exception {
+        Path f = dir.resolve("extra.csv");
+        Files.writeString(f, "order id,customer name,amount,notes,exported by\n1,Ann Lee,10.5,,\n2,Bob,,late\n"
+                + "3,Cy Doe,7,\n4,Di,3,gift\n");
+        try (Sql sql = open()) {
+            sql.csv("t", f, ',', true, java.nio.charset.StandardCharsets.UTF_8);
+            Sql.Result r = sql.query("SELECT count(*), sum(amount), count(\"exported by\") FROM t", 10, null);
+            assertEquals(4L, ((Number) r.rows().get(0)[0]).longValue());
+            assertEquals(20.5, ((Number) r.rows().get(0)[1]).doubleValue(), 1e-9);
+            assertEquals(0L, ((Number) r.rows().get(0)[2]).longValue());
+            Sql.Result late = sql.query("SELECT line FROM t WHERE notes = 'late'", 10, null);
+            assertEquals(3L, ((Number) late.rows().get(0)[0]).longValue());
+        }
+        Path g = dir.resolve("more.csv");
+        Files.writeString(g, "id,name,amount\n1,Ann,2,\n2,Bob,3,x\n3,Cy,4,\n");
+        try (Sql sql = open()) {
+            sql.csv("t", g, ',', LogFormat.detectCsv(Files.readAllLines(g), true).titles(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            Sql.Result r = sql.query("SELECT count(*), sum(amount) FROM t", 10, null);
+            assertEquals(3L, ((Number) r.rows().get(0)[0]).longValue());
+            assertEquals(9.0, ((Number) r.rows().get(0)[1]).doubleValue(), 1e-9);
+            Sql.Result x = sql.query("SELECT line, \"column 4\" FROM t WHERE name = 'Bob'", 10, null);
+            assertEquals(3L, ((Number) x.rows().get(0)[0]).longValue());
+            assertEquals("x", x.rows().get(0)[1]);
+        }
+    }
+
+    @Test
     void aLogIsLoadedWithItsLinesTimesAndColumns() throws Exception {
         Path f = dir.resolve("app.log");
         Files.writeString(f, """

@@ -1881,7 +1881,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 logsift.core.LogFormat f = logFormat;
                 if (f != null && f.isCsv()) {
                     if (queryCsvFor != f) {
-                        sql.csv("t", doc.path(), f.delimiter(), f.headerNames() != null, doc.charset());
+                        sql.csv("t", doc.path(), f.delimiter(), f.titles(), doc.charset());
                         queryCsvFor = f;
                     }
                     return null;

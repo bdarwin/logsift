@@ -42,6 +42,49 @@ public final class CrashFiles {
         return null;
     }
 
+    /**
+     * Why a file isn't a crash file Logsift reads, from what it starts with: empty, unreadable,
+     * a memory dump of Windows itself rather than of a program, packed, or something else.
+     */
+    public static String whyNot(Path file) {
+        String name = String.valueOf(file.getFileName());
+        String reads = " Logsift reads Windows dumps of a program (.dmp, .mdmp, starting with MDMP) and Java "
+                + "hs_err_pid files.";
+        byte[] head;
+        long size;
+        try (InputStream in = Files.newInputStream(file)) {
+            size = Files.size(file);
+            head = in.readNBytes(16);
+        } catch (IOException | RuntimeException e) {
+            return name + " can't be read: " + e.getMessage()
+                    + ". If a program is still writing it, or another program has it open, try again once it's done.";
+        }
+        if (size == 0) {
+            return name + " is empty: the dump wasn't written (the program may have been stopped while writing it,"
+                    + " or the disk was full).";
+        }
+        String start = new String(head, 0, Math.min(8, head.length), StandardCharsets.ISO_8859_1);
+        if (start.startsWith("PAGEDU64") || start.startsWith("PAGEDUMP")) {
+            return name + " is a memory dump of Windows itself (written at a blue screen, or of the whole"
+                    + " machine), not of one program. Windows' own debugger reads it." + reads;
+        }
+        if (start.startsWith("PK")) {
+            return name + " is a zip file: open it to see what's inside.";
+        }
+        if (head.length >= 2 && (head[0] & 0xFF) == 0x1F && (head[1] & 0xFF) == 0x8B) {
+            return name + " is packed with gzip: unpack it first, or open it as text.";
+        }
+        if (start.startsWith("MDMP")) {
+            return name + " starts as a Windows dump but is cut short or damaged (" + size + " bytes).";
+        }
+        StringBuilder hex = new StringBuilder();
+        for (int i = 0; i < Math.min(8, head.length); i++) {
+            hex.append(String.format("%02X ", head[i] & 0xFF));
+        }
+        return name + " isn't a dump Logsift knows: it starts with " + hex.toString().strip()
+                + ", where a Windows dump starts with MDMP." + reads;
+    }
+
     /** Whether a name says crash file (.dmp, .mdmp, hs_err_pid…): worth looking inside on open. */
     public static boolean likelyByName(Path file) {
         String n = file.getFileName() == null ? "" : file.getFileName().toString().toLowerCase(Locale.ROOT);
@@ -52,8 +95,7 @@ public final class CrashFiles {
     public static CrashReport analyze(Path file, Options o, BooleanSupplier stop) throws IOException {
         CrashReport.Kind k = kindOf(file);
         if (k == null) {
-            throw new IOException("Not a crash file Logsift knows: " + file.getFileName()
-                    + " (it reads Windows dumps, .dmp and .mdmp, and Java hs_err_pid files)");
+            throw new IOException(whyNot(file));
         }
         if (k == CrashReport.Kind.JAVA_CRASH) {
             return HsErr.read(file).report();
