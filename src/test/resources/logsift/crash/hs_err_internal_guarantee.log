@@ -1,0 +1,82 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  Internal Error (g1RemSet.cpp:1123), pid=31337, tid=31402
+#  guarantee(cl.n_failures() == 0) failed: 3 failures in region verification
+#
+# JRE version: OpenJDK Runtime Environment (11.0.21+9) (build 11.0.21+9)
+# Java VM: OpenJDK 64-Bit Server VM (11.0.21+9, mixed mode, sharing, tiered, compressed oops, g1 gc, linux-amd64)
+# Problematic frame:
+# V  [libjvm.so+0x7f4d21]  G1RemSet::verify_card_table()+0x261
+#
+# Core dump will be written. Default location: /var/lib/stream/core.31337
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Xmx8g -Dio.netty.transport.noNative=false com.acme.stream.Main
+
+Host: Intel(R) Xeon(R) Silver 4214 CPU @ 2.20GHz, 24 cores, 94G, CentOS Linux release 7.9.2009 (Core)
+Time: Fri Jun 13 22:01:48 2025 UTC elapsed time: 26411.913201 seconds (0d 7h 20m 11s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007fbd2402b000):  GCTaskThread "GC Thread#3" [stack: 0x00007fbd0a1fe000,0x00007fbd0a2fe000] [id=31402]
+
+Stack: [0x00007fbd0a1fe000,0x00007fbd0a2fe000],  sp=0x00007fbd0a2fc8e0,  free space=1018k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+V  [libjvm.so+0xe1a5c1]  VMError::report_and_die(int, char const*, char const*, __va_list_tag*, Thread*, unsigned char*, void*, void*, char const*, int, unsigned long)+0x1a1
+V  [libjvm.so+0x6a5e2b]  report_vm_error(char const*, int, char const*, char const*, ...)+0xeb
+V  [libjvm.so+0x7f4d21]  G1RemSet::verify_card_table()+0x261
+V  [libjvm.so+0x7a1b38]  G1CollectedHeap::do_collection_pause_at_safepoint(double)+0x8f8
+V  [libjvm.so+0xe41c25]  GangWorker::loop()+0x55
+C  [libpthread.so.0+0x7ea5]  start_thread+0xc5
+
+---------------  P R O C E S S  ---------------
+
+Java Threads: ( => current thread )
+  0x00007fbd24012800 JavaThread "main" [_thread_blocked, id=31338, stack(0x00007fbd2c5fe000,0x00007fbd2c6ff000)]
+  0x00007fbd24400000 JavaThread "epollEventLoopGroup-2-1" [_thread_in_native, id=31550, stack(0x00007fbcf91fe000,0x00007fbcf92ff000)]
+  0x00007fbd24401800 JavaThread "lz4-compressor-1" [_thread_in_native, id=31551, stack(0x00007fbcf90fd000,0x00007fbcf91fe000)]
+  0x00007fbd24403000 JavaThread "kafka-producer-network-thread" [_thread_blocked, id=31552, stack(0x00007fbcf8ffc000,0x00007fbcf90fd000)]
+
+Other Threads:
+  0x00007fbd24178000 VMThread "VM Thread" [stack: 0x00007fbd0b1ff000,0x00007fbd0b2ff000] [id=31390]
+=>0x00007fbd2402b000 GCTaskThread "GC Thread#3" [stack: 0x00007fbd0a1fe000,0x00007fbd0a2fe000] [id=31402]
+
+VM state: at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread:  ([mutex/lock_event])
+[0x00007fbd24009b50] Threads_lock - owner thread: 0x00007fbd24178000
+[0x00007fbd2400a2c0] Heap_lock - owner thread: 0x00007fbd24401800
+
+Heap:
+ garbage-first heap   total 8388608K, used 5102231K [0x0000000600000000, 0x0000000800000000)
+ Metaspace       used 85123K, capacity 89211K, committed 89344K, reserved 1128448K
+
+VM Operations (2 events):
+Event: 26411.902 Executing VM operation: G1CollectForAllocation
+Event: 26411.910 Executing VM operation: G1CollectForAllocation done
+
+Dynamic libraries:
+7fbd0c000000-7fbd0d1a1000 r-xp 00000000 fd:00 3409123                    /usr/lib/jvm/java-11-openjdk/lib/server/libjvm.so
+7fbcfa000000-7fbcfa080000 r-xp 00000000 fd:00 21311                      /tmp/libnetty_transport_native_epoll_x86_6412983112.so
+7fbcfb000000-7fbcfb040000 r-xp 00000000 fd:00 21312                      /tmp/liblz4-java-48211.so
+7fbd2d000000-7fbd2d018000 r-xp 00000000 fd:00 1050299                    /usr/lib64/libpthread-2.17.so
+
+VM Arguments:
+jvm_args: -Xmx8g -Dio.netty.transport.noNative=false 
+java_command: com.acme.stream.Main
+Launcher Type: SUN_STANDARD
+
+---------------  S Y S T E M  ---------------
+
+OS:CentOS Linux release 7.9.2009 (Core)
+uname:Linux 3.10.0-1160.el7.x86_64 #1 SMP x86_64
+rlimit: STACK 8192k, CORE infinity, NPROC 4096, NOFILE 65536, AS infinity
+
+Memory: 4k page, physical 98304000k(12201344k free), swap 0k(0k free)
+
+vm_info: OpenJDK 64-Bit Server VM (11.0.21+9) for linux-amd64 JRE (11.0.21+9), built on Oct 17 2023 10:12:09 by "mockbuild" with gcc 4.8.5 20150623 (Red Hat 4.8.5-44)
+
+END.

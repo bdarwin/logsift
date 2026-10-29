@@ -1,0 +1,159 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007f3a2c1b4e2d, pid=1, tid=87
+#
+# JRE version: OpenJDK Runtime Environment Temurin-17.0.8+7 (17.0.8+7) (build 17.0.8+7)
+# Java VM: OpenJDK 64-Bit Server VM Temurin-17.0.8+7 (17.0.8+7, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, linux-amd64)
+# Problematic frame:
+# C  [librocksdbjni4182741372468362451.so+0x5b4e2d]  rocksdb::DBImpl::GetImpl(rocksdb::ReadOptions const&, rocksdb::Slice const&, rocksdb::DBImpl::GetImplOptions&)+0x23d
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -- %E" (or dumping to /app/core.1)
+#
+# If you would like to submit a bug report, please visit:
+#   https://github.com/adoptium/adoptium-support/issues
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Xmx3g -XX:+UseG1GC -javaagent:/opt/agents/apm-agent.jar -jar /app/orders-service.jar
+
+Host: Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz, 4 cores, 15G, Ubuntu 22.04.3 LTS
+Time: Tue Oct 14 09:12:44 2025 UTC elapsed time: 86412.512376 seconds (1d 0h 0m 12s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007f3a58012340):  JavaThread "order-store-reader-3" [_thread_in_native, id=87, stack(0x00007f3a1d2fe000,0x00007f3a1d3ff000)]
+
+Stack: [0x00007f3a1d2fe000,0x00007f3a1d3ff000],  sp=0x00007f3a1d3fc9a0,  free space=1018k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+C  [librocksdbjni4182741372468362451.so+0x5b4e2d]  rocksdb::DBImpl::GetImpl(rocksdb::ReadOptions const&, rocksdb::Slice const&, rocksdb::DBImpl::GetImplOptions&)+0x23d
+C  [librocksdbjni4182741372468362451.so+0x5b5a1c]  rocksdb::DBImpl::Get(rocksdb::ReadOptions const&, rocksdb::ColumnFamilyHandle*, rocksdb::Slice const&, rocksdb::PinnableSlice*)+0x8c
+C  [librocksdbjni4182741372468362451.so+0x3f20d1]  rocksdb_get_helper(JNIEnv_*, rocksdb::DB*, rocksdb::ReadOptions const&, rocksdb::ColumnFamilyHandle*, _jbyteArray*, int, int)+0x111
+C  [librocksdbjni4182741372468362451.so+0x3f2402]  Java_org_rocksdb_RocksDB_get__J_3BII+0x52
+J 4211  org.rocksdb.RocksDB.get(J[BII)[B (0 bytes) @ 0x00007f3a44a1c2f3 [0x00007f3a44a1c240+0x00000000000000b3]
+J 5120 c2 com.acme.orders.store.OrderStore.find(Ljava/lang/String;)Lcom/acme/orders/Order; (88 bytes) @ 0x00007f3a44b2d1a4 [0x00007f3a44b2d0e0+0x00000000000000c4]
+J 5302 c2 com.acme.orders.api.OrderHandler.handle(Lio/undertow/server/HttpServerExchange;)V (212 bytes) @ 0x00007f3a44c0e9cc [0x00007f3a44c0e7a0+0x000000000000022c]
+j  java.lang.Thread.run()V+11 java.base@17.0.8
+v  ~StubRoutines::call_stub
+V  [libjvm.so+0x833d75]  JavaCalls::call_helper(JavaValue*, methodHandle const&, JavaCallArguments*, JavaThread*)+0x315
+V  [libjvm.so+0x8354fa]  JavaCalls::call_virtual(JavaValue*, Handle, Klass*, Symbol*, Symbol*, JavaThread*)+0x1ca
+V  [libjvm.so+0x8ff1a3]  thread_entry(JavaThread*, JavaThread*)+0x93
+V  [libjvm.so+0xe94d1e]  JavaThread::thread_main_inner()+0xce
+V  [libjvm.so+0xe98a20]  Thread::call_run()+0xc0
+V  [libjvm.so+0xc4f1e1]  thread_native_entry(Thread*)+0xe1
+C  [libc.so.6+0x94ac3]
+
+Java frames: (J=compiled Java code, j=interpreted, Vv=VM code)
+J 4211  org.rocksdb.RocksDB.get(J[BII)[B (0 bytes) @ 0x00007f3a44a1c26f [0x00007f3a44a1c240+0x000000000000002f]
+J 5120 c2 com.acme.orders.store.OrderStore.find(Ljava/lang/String;)Lcom/acme/orders/Order; (88 bytes) @ 0x00007f3a44b2d1a4 [0x00007f3a44b2d0e0+0x00000000000000c4]
+J 5302 c2 com.acme.orders.api.OrderHandler.handle(Lio/undertow/server/HttpServerExchange;)V (212 bytes) @ 0x00007f3a44c0e9cc [0x00007f3a44c0e7a0+0x000000000000022c]
+j  java.lang.Thread.run()V+11 java.base@17.0.8
+v  ~StubRoutines::call_stub
+
+siginfo: si_signo: 11 (SIGSEGV), si_code: 1 (SEGV_MAPERR), si_addr: 0x0000000000000018
+
+Registers:
+RAX=0x0000000000000000, RBX=0x00007f3a1d3fcb10, RCX=0x0000000000000001, RDX=0x00007f3a1d3fcae0
+
+---------------  P R O C E S S  ---------------
+
+Threads class SMR info:
+_java_thread_list=0x00007f3a50004a90, length=6, elements={
+0x00007f3a8c0f3800, 0x00007f3a8c0f4c00, 0x00007f3a58012340, 0x00007f3a58013a10
+}
+
+Java Threads: ( => current thread )
+  0x00007f3a8c0f3800 JavaThread "Reference Handler" daemon [_thread_blocked, id=15, stack(0x00007f3a6c0fe000,0x00007f3a6c1ff000)]
+  0x00007f3a8c0f4c00 JavaThread "Finalizer" daemon [_thread_blocked, id=16, stack(0x00007f3a6bffd000,0x00007f3a6c0fe000)]
+  0x00007f3a8c0fa000 JavaThread "Signal Dispatcher" daemon [_thread_blocked, id=17, stack(0x00007f3a6befc000,0x00007f3a6bffd000)]
+  0x00007f3a8c0fb400 JavaThread "C2 CompilerThread0" daemon [_thread_blocked, id=19, stack(0x00007f3a6bcfa000,0x00007f3a6bdfb000)]
+=>0x00007f3a58012340 JavaThread "order-store-reader-3" [_thread_in_native, id=87, stack(0x00007f3a1d2fe000,0x00007f3a1d3ff000)]
+  0x00007f3a58013a10 JavaThread "order-store-compactor" [_thread_in_native, id=88, stack(0x00007f3a1d1fd000,0x00007f3a1d2fe000)]
+  0x00007f3a58015000 JavaThread "XNIO-1 I/O-1" [_thread_in_native, id=90, stack(0x00007f3a1cffb000,0x00007f3a1d0fc000)]
+  0x00007f3a58016200 JavaThread "XNIO-1 task-1" [_thread_blocked, id=91, stack(0x00007f3a1cefa000,0x00007f3a1cffb000)]
+
+Other Threads:
+  0x00007f3a8c0e1a20 VMThread "VM Thread" [stack: 0x00007f3a6c1ff000,0x00007f3a6c2ff000] [id=14]
+  0x00007f3a8c0e8b00 WatcherThread [stack: 0x00007f3a6b9f7000,0x00007f3a6baf7000] [id=24]
+  0x00007f3a8c02a1b0 GCTaskThread "GC Thread#0" [stack: 0x00007f3a7c1ae000,0x00007f3a7c2ae000] [id=8]
+  0x00007f3a8c03b600 ConcurrentGCThread "G1 Main Marker" [stack: 0x00007f3a7c0ad000,0x00007f3a7c1ad000] [id=9]
+
+Threads with active compile tasks:
+
+VM state: not at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread: None
+
+Heap address: 0x0000000740000000, size: 3072 MB, Compressed Oops mode: Zero based, Oop shift amount: 3
+
+Heap:
+ garbage-first heap   total 3145728K, used 1817443K [0x0000000740000000, 0x0000000800000000)
+  region size 2048K, 412 young (843776K), 18 survivors (36864K)
+ Metaspace       used 98211K, committed 99328K, reserved 1138688K
+  class space    used 12034K, committed 12544K, reserved 1048576K
+
+Dll operation events (8 events):
+Event: 0.003 Loaded shared library /opt/java/openjdk/lib/libjava.so
+Event: 12.302 Loaded shared library /tmp/librocksdbjni4182741372468362451.so
+
+Internal exceptions (0 events):
+No events
+
+Dynamic libraries:
+55d1b2a00000-55d1b2a01000 r--p 00000000 08:01 131330                     /opt/java/openjdk/bin/java
+7f3a2bc00000-7f3a2c9a1000 r-xp 00000000 103:01 2097311                   /tmp/librocksdbjni4182741372468362451.so
+7f3a2c9a1000-7f3a2cba0000 ---p 00da1000 103:01 2097311                   /tmp/librocksdbjni4182741372468362451.so
+7f3a90000000-7f3a91000000 r-xp 00000000 08:01 131388                     /opt/java/openjdk/lib/server/libjvm.so
+7f3a92a00000-7f3a92a28000 r--p 00000000 08:01 3803                       /usr/lib/x86_64-linux-gnu/libc.so.6
+7f3a92c80000-7f3a92c9a000 r-xp 00000000 08:01 131377                     /opt/java/openjdk/lib/libjava.so
+7f3a92d00000-7f3a92d12000 r-xp 00000000 08:01 131402                     /opt/java/openjdk/lib/libzip.so
+
+VM Arguments:
+jvm_args: -Xmx3g -XX:+UseG1GC -javaagent:/opt/agents/apm-agent.jar 
+java_command: /app/orders-service.jar
+java_class_path (initial): /app/orders-service.jar
+Launcher Type: SUN_STANDARD
+
+[Global flags]
+   size_t MaxHeapSize                              = 3221225472                                {product} {command line}
+     bool UseG1GC                                  = true                                      {product} {command line}
+
+Environment Variables:
+JAVA_HOME=/opt/java/openjdk
+PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+---------------  S Y S T E M  ---------------
+
+OS:
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=22.04
+DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
+uname: Linux 5.15.0-1047-aws #52-Ubuntu SMP Thu Sep 21 10:21:15 UTC 2023 x86_64
+OS uptime: 41 days 6:02 hours
+libc: glibc 2.35 NPTL 2.35
+rlimit (soft/hard): STACK 8192k/infinity , CORE infinity/infinity , NPROC infinity/infinity , NOFILE 1048576/1048576 , AS infinity/infinity , CPU infinity/infinity , DATA infinity/infinity , FSIZE infinity/infinity , MEMLOCK 64k/64k
+load average: 3.81 3.52 3.20
+
+container (cgroup) information:
+container_type: cgroupv2
+cpu_cpuset_cpus: not supported
+cpu_memory_nodes: not supported
+active_processor_count: 4
+cpu_quota: 400000
+cpu_period: 100000
+cpu_shares: no shares
+memory_limit_in_bytes: 6291456 k
+memory_and_swap_limit_in_bytes: 6291456 k
+memory_soft_limit_in_bytes: unlimited
+memory_usage_in_bytes: 4851200 k
+
+CPU: total 4 (initial active 4) (2 cores per cpu, 2 threads per core) family 6 model 85 stepping 7 microcode 0x5003604, cx8, cmov, fxsr, ht, mmx, sse, sse2, sse3, avx, avx2
+
+Memory: 4k page, physical 6291456k(1440256k free), swap 0k(0k free)
+
+vm_info: OpenJDK 64-Bit Server VM (17.0.8+7) for linux-amd64 JRE (17.0.8+7), built on 2023-07-20T00:00:00Z by "temurin" with gcc 11.2.0
+
+END.

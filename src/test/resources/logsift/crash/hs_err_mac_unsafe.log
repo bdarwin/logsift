@@ -1,0 +1,348 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x0000000108c49214, pid=6912, tid=10243
+#
+# JRE version: OpenJDK Runtime Environment Homebrew (21.0.11) (build 21.0.11)
+# Java VM: OpenJDK 64-Bit Server VM Homebrew (21.0.11, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, bsd-aarch64)
+# Problematic frame:
+# V  [libjvm.dylib+0x7c9214]  Unsafe_GetLong(JNIEnv_*, _jobject*, _jobject*, long)+0xb0
+#
+# No core dump will be written. Core dumps have been disabled. To enable core dumping, try "ulimit -c unlimited" before starting Java again
+#
+# If you would like to submit a bug report, please visit:
+#   https://github.com/Homebrew/homebrew-core/issues
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Xmx256m -XX:ErrorFile=/Users/dev/app/hs_err_pid%p.log Crash
+
+Host: "Mac14,5" arm64, 8 cores, 16G, Darwin 25.5.0, macOS 26.5.2 (25F84)
+Time: Thu Oct 29 16:23:28 2026 +08 elapsed time: 0.379854 seconds (0d 0h 0m 0s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00000001031b92b0):  JavaThread "main"             [_thread_in_vm, id=10243, stack(0x000000016d354000,0x000000016d557000) (2060K)]
+
+Stack: [0x000000016d354000,0x000000016d557000],  sp=0x000000016d556280,  free space=2056k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+V  [libjvm.dylib+0x7c9214]  Unsafe_GetLong(JNIEnv_*, _jobject*, _jobject*, long)+0xb0
+j  jdk.internal.misc.Unsafe.getLong(Ljava/lang/Object;J)J+0 java.base@21.0.11
+j  jdk.internal.misc.Unsafe.getLong(J)J+3 java.base@21.0.11
+j  sun.misc.Unsafe.getLong(J)J+4 jdk.unsupported@21.0.11
+j  java.lang.invoke.DirectMethodHandle$Holder.invokeSpecial(Ljava/lang/Object;Ljava/lang/Object;J)J+13 java.base@21.0.11
+j  java.lang.invoke.LambdaForm$MH+0x000000f801005400.invoke(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;+52 java.base@21.0.11
+j  java.lang.invoke.Invokers$Holder.invokeExact_MT(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;+20 java.base@21.0.11
+j  jdk.internal.reflect.DirectMethodHandleAccessor.invokeImpl(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;+55 java.base@21.0.11
+j  jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;+23 java.base@21.0.11
+j  java.lang.reflect.Method.invoke(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;+102 java.base@21.0.11
+j  Crash.boom()V+55
+j  Crash.deep(I)V+4
+j  Crash.deep(I)V+13
+j  Crash.deep(I)V+13
+j  Crash.deep(I)V+13
+j  Crash.deep(I)V+13
+j  Crash.deep(I)V+13
+j  Crash.main([Ljava/lang/String;)V+71
+v  ~StubRoutines::call_stub 0x0000000118f48154
+V  [libjvm.dylib+0x3a167c]  JavaCalls::call_helper(JavaValue*, methodHandle const&, JavaCallArguments*, JavaThread*)+0x244
+V  [libjvm.dylib+0x4034a8]  jni_invoke_static(JNIEnv_*, JavaValue*, _jobject*, JNICallType, _jmethodID*, JNI_ArgumentPusher*, JavaThread*)+0xb8
+V  [libjvm.dylib+0x4060a4]  jni_CallStaticVoidMethod+0xcc
+C  [libjli.dylib+0x5b5c]  JavaMain+0x87c
+C  [libjli.dylib+0x83a4]  ThreadJavaMain+0xc
+C  [libsystem_pthread.dylib+0x6c58]  _pthread_start+0x88
+Java frames: (J=compiled Java code, j=interpreted, Vv=VM code)
+j  jdk.internal.misc.Unsafe.getLong(Ljava/lang/Object;J)J+0 java.base@21.0.11
+j  jdk.internal.misc.Unsafe.getLong(J)J+3 java.base@21.0.11
+j  sun.misc.Unsafe.getLong(J)J+4 jdk.unsupported@21.0.11
+j  java.lang.invoke.DirectMethodHandle$Holder.invokeSpecial(Ljava/lang/Object;Ljava/lang/Object;J)J+13 java.base@21.0.11
+j  java.lang.invoke.LambdaForm$MH+0x000000f801005400.invoke(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;+52 java.base@21.0.11
+j  java.lang.invoke.Invokers$Holder.invokeExact_MT(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;+20 java.base@21.0.11
+j  jdk.internal.reflect.DirectMethodHandleAccessor.invokeImpl(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;+55 java.base@21.0.11
+j  jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;+23 java.base@21.0.11
+j  java.lang.reflect.Method.invoke(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;+102 java.base@21.0.11
+j  Crash.boom()V+55
+j  Crash.deep(I)V+4
+j  Crash.deep(I)V+13
+j  Crash.deep(I)V+13
+j  Crash.deep(I)V+13
+j  Crash.deep(I)V+13
+j  Crash.deep(I)V+13
+j  Crash.main([Ljava/lang/String;)V+71
+v  ~StubRoutines::call_stub 0x0000000118f48154
+
+siginfo: si_signo: 11 (SIGSEGV), si_code: 2 (SEGV_ACCERR), si_addr: 0x0000000000000008
+
+---------------  P R O C E S S  ---------------
+
+Threads class SMR info:
+_java_thread_list=0x0000000c6d1d9fe0, length=13, elements={
+0x00000001031b92b0, 0x00000001031d2bf0, 0x0000000c6d144000, 0x0000000c6d144700,
+0x0000000c6d144e00, 0x0000000c6d145500, 0x0000000c6cd51000, 0x0000000c6cd50800,
+0x0000000c6d145c00, 0x0000000c6d146300, 0x0000000c6d146a00, 0x0000000c6d147100,
+0x0000000c6d147800
+}
+
+Java Threads: ( => current thread )
+=>0x00000001031b92b0 JavaThread "main"                              [_thread_in_vm, id=10243, stack(0x000000016d354000,0x000000016d557000) (2060K)]
+  0x00000001031d2bf0 JavaThread "Reference Handler"          daemon [_thread_blocked, id=23555, stack(0x000000016e4cc000,0x000000016e6cf000) (2060K)]
+  0x0000000c6d144000 JavaThread "Finalizer"                  daemon [_thread_blocked, id=23811, stack(0x000000016e6d8000,0x000000016e8db000) (2060K)]
+  0x0000000c6d144700 JavaThread "Signal Dispatcher"          daemon [_thread_blocked, id=28163, stack(0x000000016e8e4000,0x000000016eae7000) (2060K)]
+  0x0000000c6d144e00 JavaThread "Service Thread"             daemon [_thread_blocked, id=24323, stack(0x000000016eaf0000,0x000000016ecf3000) (2060K)]
+  0x0000000c6d145500 JavaThread "Monitor Deflation Thread"   daemon [_thread_blocked, id=24579, stack(0x000000016ecfc000,0x000000016eeff000) (2060K)]
+  0x0000000c6cd51000 JavaThread "C2 CompilerThread0"         daemon [_thread_blocked, id=27651, stack(0x000000016ef08000,0x000000016f10b000) (2060K)]
+  0x0000000c6cd50800 JavaThread "C1 CompilerThread0"         daemon [_thread_blocked, id=25347, stack(0x000000016f114000,0x000000016f317000) (2060K)]
+  0x0000000c6d145c00 JavaThread "Notification Thread"        daemon [_thread_blocked, id=27395, stack(0x000000016f320000,0x000000016f523000) (2060K)]
+  0x0000000c6d146300 JavaThread "Common-Cleaner"             daemon [_thread_blocked, id=26115, stack(0x000000016f52c000,0x000000016f72f000) (2060K)]
+  0x0000000c6d146a00 JavaThread "worker-0"                          [_thread_blocked, id=27139, stack(0x000000016f738000,0x000000016f93b000) (2060K)]
+  0x0000000c6d147100 JavaThread "worker-1"                          [_thread_blocked, id=26627, stack(0x000000016f944000,0x000000016fb47000) (2060K)]
+  0x0000000c6d147800 JavaThread "worker-2"                          [_thread_blocked, id=43267, stack(0x000000016fb50000,0x000000016fd53000) (2060K)]
+Total: 13
+
+Other Threads:
+  0x0000000c6cca6400 VMThread "VM Thread"                           [id=19203, stack(0x000000016e1a8000,0x000000016e3ab000) (2060K)]
+  0x00000001031c8190 WatcherThread "VM Periodic Task Thread"        [id=20483, stack(0x000000016df9c000,0x000000016e19f000) (2060K)]
+  0x00000001031c05e0 WorkerThread "GC Thread#0"                     [id=13059, stack(0x000000016d560000,0x000000016d763000) (2060K)]
+  0x00000001031c2400 ConcurrentGCThread "G1 Main Marker"            [id=14595, stack(0x000000016d76c000,0x000000016d96f000) (2060K)]
+  0x0000000c6cca4000 WorkerThread "G1 Conc#0"                       [id=13571, stack(0x000000016d978000,0x000000016db7b000) (2060K)]
+  0x0000000c6d094000 ConcurrentGCThread "G1 Refine#0"               [id=16387, stack(0x000000016db84000,0x000000016dd87000) (2060K)]
+  0x0000000c6cca4c00 ConcurrentGCThread "G1 Service"                [id=21507, stack(0x000000016dd90000,0x000000016df93000) (2060K)]
+Total: 7
+
+Threads with active compile tasks:
+Total: 0
+
+VM state: not at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread: None
+
+Heap address: 0x00000007f0000000, size: 256 MB, Compressed Oops mode: Zero based, Oop shift amount: 3
+
+CDS archive(s) mapped at: [0x000000f800000000-0x000000f800c94000-0x000000f800c94000), size 13189120, SharedBaseAddress: 0x000000f800000000, ArchiveRelocationMode: 1.
+Compressed class space mapped at: 0x000000f801000000-0x000000f841000000, reserved size: 1073741824
+Narrow klass base: 0x000000f800000000, Narrow klass shift: 0, Narrow klass range: 0x100000000
+
+GC Precious Log:
+ CardTable entry size: 512
+ Card Set container configuration: InlinePtr #cards 5 size 8 Array Of Cards #cards 12 size 40 Howl #buckets 4 coarsen threshold 1843 Howl Bitmap #cards 512 size 80 coarsen threshold 460 Card regions per heap region 1 cards per card region 2048
+ CPUs: 10 total, 10 available
+ Memory: 32768M
+ Large Page Support: Disabled
+ NUMA Support: Disabled
+ Compressed Oops: Enabled (Zero based)
+ Heap Region Size: 1M
+ Heap Min Capacity: 8M
+ Heap Initial Capacity: 256M
+ Heap Max Capacity: 256M
+ Pre-touch: Disabled
+ Parallel Workers: 9
+ Concurrent Workers: 2
+ Concurrent Refinement Workers: 9
+ Periodic GC: Disabled
+
+Heap:
+ garbage-first heap   total 262144K, used 3103K [0x00000007f0000000, 0x0000000800000000)
+  region size 1024K, 3 young (3072K), 0 survivors (0K)
+ Metaspace       used 600K, committed 768K, reserved 1114112K
+  class space    used 57K, committed 128K, reserved 1048576K
+
+Compilation events (20 events):
+Event: 0.376 Thread 0x0000000c6cd50800 nmethod 153 0x0000000111a46610 code [0x0000000111a467c0, 0x0000000111a46998]
+Event: 0.376 Thread 0x0000000c6cd50800  155       3       java.lang.StringBuilder::append (8 bytes)
+Event: 0.376 Thread 0x0000000c6cd50800 nmethod 155 0x0000000111a46a90 code [0x0000000111a46c40, 0x0000000111a46dc0]
+Event: 0.376 Thread 0x0000000c6cd50800  156       3       java.lang.AbstractStringBuilder::append (77 bytes)
+Event: 0.376 Thread 0x0000000c6cd50800 nmethod 156 0x0000000111a46e90 code [0x0000000111a470c0, 0x0000000111a47658]
+Event: 0.376 Thread 0x0000000c6cd50800  159       3       java.lang.invoke.LambdaForm::argument (27 bytes)
+Event: 0.376 Thread 0x0000000c6cd50800 nmethod 159 0x0000000111a47810 code [0x0000000111a479c0, 0x0000000111a47c50]
+Event: 0.377 Thread 0x0000000c6cd50800  164       3       jdk.internal.org.objectweb.asm.ByteVector::putInt (74 bytes)
+Event: 0.377 Thread 0x0000000c6cd50800 nmethod 164 0x0000000111a47d90 code [0x0000000111a47f40, 0x0000000111a481f0]
+Event: 0.377 Thread 0x0000000c6cd50800  165       3       java.lang.invoke.LambdaForm::internArgument (85 bytes)
+Event: 0.377 Thread 0x0000000c6cd50800 nmethod 165 0x0000000111a48390 code [0x0000000111a48580, 0x0000000111a48900]
+Event: 0.377 Thread 0x0000000c6cd50800  166       3       jdk.internal.org.objectweb.asm.Frame::pop (42 bytes)
+Event: 0.377 Thread 0x0000000c6cd50800 nmethod 166 0x0000000111a48a90 code [0x0000000111a48c40, 0x0000000111a48e10]
+Event: 0.377 Thread 0x0000000c6cd50800  167       3       java.lang.invoke.LambdaForm$Name::<init> (66 bytes)
+Event: 0.377 Thread 0x0000000c6cd50800 nmethod 167 0x0000000111a48f10 code [0x0000000111a490c0, 0x0000000111a49360]
+Event: 0.377 Thread 0x0000000c6cd50800  168       3       java.lang.invoke.LambdaForm$NamedFunction::methodType (28 bytes)
+Event: 0.377 Thread 0x0000000c6cd50800 nmethod 168 0x0000000111a49410 code [0x0000000111a495c0, 0x0000000111a49920]
+Event: 0.377 Thread 0x0000000c6cd50800  170       3       java.lang.invoke.MemberName::isStatic (8 bytes)
+Event: 0.378 Thread 0x0000000c6cd50800 nmethod 170 0x0000000111a49a90 code [0x0000000111a49c40, 0x0000000111a49e10]
+Event: 0.378 Thread 0x0000000c6cd50800  171       3       java.lang.StringLatin1::newString (24 bytes)
+
+GC Heap History (0 events):
+No events
+
+Dll operation events (1 events):
+Event: 0.003 Loaded shared library /opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home/lib/libjava.dylib
+
+Deoptimization events (0 events):
+No events
+
+Classes loaded (20 events):
+Event: 0.359 Loading class java/lang/WeakPairMap$WeakRefPeer done
+Event: 0.359 Loading class java/lang/WeakPairMap$Pair$Weak done
+Event: 0.359 Loading class java/lang/WeakPairMap$Pair$Weak$1
+Event: 0.359 Loading class java/lang/WeakPairMap$Pair$Weak$1 done
+Event: 0.360 Loading class java/lang/reflect/Proxy$ProxyBuilder$ProxyClassContext
+Event: 0.361 Loading class java/lang/reflect/Proxy$ProxyBuilder$ProxyClassContext done
+Event: 0.361 Loading class java/lang/reflect/ProxyGenerator
+Event: 0.361 Loading class java/lang/reflect/ProxyGenerator done
+Event: 0.362 Loading class java/lang/reflect/ProxyGenerator$ProxyMethod
+Event: 0.362 Loading class java/lang/reflect/ProxyGenerator$ProxyMethod done
+Event: 0.363 Loading class java/lang/reflect/ProxyGenerator$PrimitiveTypeInfo
+Event: 0.363 Loading class java/lang/reflect/ProxyGenerator$PrimitiveTypeInfo done
+Event: 0.364 Loading class jdk/internal/org/objectweb/asm/Edge
+Event: 0.364 Loading class jdk/internal/org/objectweb/asm/Edge done
+Event: 0.366 Loading class java/lang/reflect/Proxy$ProxyBuilder$1
+Event: 0.366 Loading class java/lang/reflect/Proxy$ProxyBuilder$1 done
+Event: 0.370 Loading class sun/invoke/util/ValueConversions$1
+Event: 0.370 Loading class sun/invoke/util/ValueConversions$1 done
+Event: 0.371 Loading class java/lang/invoke/BoundMethodHandle$Species_LI
+Event: 0.371 Loading class java/lang/invoke/BoundMethodHandle$Species_LI done
+
+Classes unloaded (0 events):
+No events
+
+Classes redefined (0 events):
+No events
+
+Internal exceptions (3 events):
+Event: 0.018 Thread 0x00000001031b92b0 Exception <a 'java/lang/NoSuchMethodError'{0x00000007ffd1a090}: 'void java.lang.invoke.DirectMethodHandle$Holder.invokeStatic(java.lang.Object, java.lang.Object)'> (0x00000007ffd1a090) 
+thrown [src/hotspot/share/interpreter/linkResolver.cpp, line 773]
+Event: 0.370 Thread 0x00000001031b92b0 Exception <a 'java/lang/NoSuchMethodError'{0x00000007ffb1f438}: 'long java.lang.invoke.DirectMethodHandle$Holder.invokeStatic(java.lang.Object, java.lang.Object, int)'> (0x00000007ffb1f438) 
+thrown [src/hotspot/share/interpreter/linkResolver.cpp, line 773]
+Event: 0.374 Thread 0x00000001031b92b0 Exception <a 'java/lang/NoSuchMethodError'{0x00000007ffb32410}: 'java.lang.Object java.lang.invoke.DirectMethodHandle$Holder.invokeStatic(java.lang.Object, java.lang.Object, java.lang.Object, java.lang.Object, int)'> (0x00000007ffb32410) 
+thrown [src/hotspot/share/interpreter/linkResolver.cpp, line 773]
+
+ZGC Phase Switch (0 events):
+No events
+
+VM Operations (0 events):
+No events
+
+Memory protections (13 events):
+Event: 0.002 Protecting memory [0x000000016d354000,0x000000016d360000] with protection modes 0
+Event: 0.014 Protecting memory [0x000000016e4cc000,0x000000016e4d8000] with protection modes 0
+Event: 0.014 Protecting memory [0x000000016e6d8000,0x000000016e6e4000] with protection modes 0
+Event: 0.014 Protecting memory [0x000000016e8e4000,0x000000016e8f0000] with protection modes 0
+Event: 0.014 Protecting memory [0x000000016eaf0000,0x000000016eafc000] with protection modes 0
+Event: 0.014 Protecting memory [0x000000016ecfc000,0x000000016ed08000] with protection modes 0
+Event: 0.015 Protecting memory [0x000000016ef08000,0x000000016ef14000] with protection modes 0
+Event: 0.015 Protecting memory [0x000000016f114000,0x000000016f120000] with protection modes 0
+Event: 0.016 Protecting memory [0x000000016f320000,0x000000016f32c000] with protection modes 0
+Event: 0.016 Protecting memory [0x000000016f52c000,0x000000016f538000] with protection modes 0
+Event: 0.023 Protecting memory [0x000000016f738000,0x000000016f744000] with protection modes 0
+Event: 0.023 Protecting memory [0x000000016f944000,0x000000016f950000] with protection modes 0
+Event: 0.023 Protecting memory [0x000000016fb50000,0x000000016fb5c000] with protection modes 0
+
+Nmethod flushes (0 events):
+No events
+
+Events (13 events):
+Event: 0.008 Thread 0x00000001031b92b0 Thread added: 0x00000001031b92b0
+Event: 0.014 Thread 0x00000001031b92b0 Thread added: 0x00000001031d2bf0
+Event: 0.014 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d144000
+Event: 0.014 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d144700
+Event: 0.014 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d144e00
+Event: 0.014 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d145500
+Event: 0.015 Thread 0x00000001031b92b0 Thread added: 0x0000000c6cd51000
+Event: 0.015 Thread 0x00000001031b92b0 Thread added: 0x0000000c6cd50800
+Event: 0.016 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d145c00
+Event: 0.016 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d146300
+Event: 0.023 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d146a00
+Event: 0.023 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d147100
+Event: 0.023 Thread 0x00000001031b92b0 Thread added: 0x0000000c6d147800
+
+
+Dynamic libraries:
+0x0000000102b70000 	/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home/lib/libjli.dylib
+0x000000019812e000 	/usr/lib/libz.1.dylib
+0x00000001981e4000 	/usr/lib/libSystem.B.dylib
+0x000000018839c000 	/usr/lib/system/libsystem_platform.dylib
+0x000000018838f000 	/usr/lib/system/libsystem_pthread.dylib
+0x00000001882a5000 	/usr/lib/libc++.1.dylib
+0x0000000108480000 	/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home/lib/server/libjvm.dylib
+0x0000000102c28000 	/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home/lib/libjava.dylib
+
+JVMTI agents: none
+
+
+VM Arguments:
+jvm_args: -Xmx256m -XX:ErrorFile=/Users/dev/app/hs_err_pid%p.log 
+java_command: Crash
+java_class_path (initial): .
+Launcher Type: SUN_STANDARD
+
+[Global flags]
+     intx CICompilerCount                          = 4                                         {product} {ergonomic}
+     uint ConcGCThreads                            = 2                                         {product} {ergonomic}
+    ccstr ErrorFile                                = /Users/dev/app/hs_err_pid%p.log            {product} {command line}
+     uint G1ConcRefinementThreads                  = 9                                         {product} {ergonomic}
+   size_t G1HeapRegionSize                         = 1048576                                   {product} {ergonomic}
+    uintx GCDrainStackTargetSize                   = 64                                        {product} {ergonomic}
+   size_t InitialHeapSize                          = 268435456                                 {product} {ergonomic}
+   size_t MarkStackSize                            = 4194304                                   {product} {ergonomic}
+   size_t MaxHeapSize                              = 268435456                                 {product} {command line}
+   size_t MaxNewSize                               = 160432128                                 {product} {ergonomic}
+   size_t MinHeapDeltaBytes                        = 1048576                                   {product} {ergonomic}
+   size_t MinHeapSize                              = 8388608                                   {product} {ergonomic}
+    uintx NonNMethodCodeHeapSize                   = 5839564                                {pd product} {ergonomic}
+    uintx NonProfiledCodeHeapSize                  = 122909338                              {pd product} {ergonomic}
+    uintx ProfiledCodeHeapSize                     = 122909338                              {pd product} {ergonomic}
+    uintx ReservedCodeCacheSize                    = 251658240                              {pd product} {ergonomic}
+     bool SegmentedCodeCache                       = true                                      {product} {ergonomic}
+   size_t SoftMaxHeapSize                          = 268435456                              {manageable} {ergonomic}
+     bool UseCompressedOops                        = true                           {product lp64_product} {ergonomic}
+     bool UseG1GC                                  = true                                      {product} {ergonomic}
+     bool UseNUMA                                  = false                                     {product} {ergonomic}
+     bool UseNUMAInterleaving                      = false                                     {product} {ergonomic}
+
+Logging:
+Log output configuration:
+ #0: stdout all=warning uptime,level,tags foldmultilines=false
+ #1: stderr all=off uptime,level,tags foldmultilines=false
+
+Release file:
+IMPLEMENTOR="Homebrew"
+IMPLEMENTOR_VERSION="Homebrew"
+JAVA_RUNTIME_VERSION="21.0.11"
+JAVA_VERSION="21.0.11"
+JAVA_VERSION_DATE="2026-04-21"
+LIBC="default"
+MODULES="java.base java.compiler java.datatransfer java.xml java.prefs java.desktop java.instrument java.logging java.management java.security.sasl java.naming java.rmi java.management.rmi java.net.http java.scripting java.security.jgss java.transaction.xa java.sql java.sql.rowset java.xml.crypto java.se java.smartcardio jdk.accessibility jdk.internal.jvmstat jdk.attach jdk.charsets jdk.internal.opt jdk.zipfs jdk.compiler jdk.crypto.ec jdk.crypto.cryptoki jdk.dynalink jdk.internal.ed jdk.editpad jdk.hotspot.agent jdk.httpserver jdk.incubator.vector jdk.internal.le jdk.internal.vm.ci jdk.internal.vm.compiler jdk.internal.vm.compiler.management jdk.jartool jdk.javadoc jdk.jcmd jdk.management jdk.management.agent jdk.jconsole jdk.jdeps jdk.jdwp.agent jdk.jdi jdk.jfr jdk.jlink jdk.jpackage jdk.jshell jdk.jsobject jdk.jstatd jdk.localedata jdk.management.jfr jdk.naming.dns jdk.naming.rmi jdk.net jdk.nio.mapmode jdk.random jdk.sctp jdk.security.auth jdk.security.jgss jdk.unsupported jdk.unsupported.desktop jdk.xml.dom"
+OS_ARCH="aarch64"
+OS_NAME="Darwin"
+SOURCE=""
+
+Environment Variables:
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home
+
+Active Locale:
+LC_ALL=en_US.UTF-8
+LC_COLLATE=en_US.UTF-8
+LC_CTYPE=en_US.UTF-8
+LC_MESSAGES=en_US.UTF-8
+LC_MONETARY=en_US.UTF-8
+LC_NUMERIC=en_US.UTF-8
+LC_TIME=en_US.UTF-8
+
+---------------  S Y S T E M  ---------------
+
+OS:
+uname: Darwin 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:18:58 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T6000 arm64
+OS uptime: 27 days 3:29 hours
+rlimit (soft/hard): STACK 8176k/65520k , CORE 0k/infinity , NPROC 5333/5333 , NOFILE 1048576/infinity , AS infinity/infinity , CPU infinity/infinity , DATA infinity/infinity , FSIZE infinity/infinity , MEMLOCK infinity/infinity , RSS infinity/infinity
+load average: 5.39 3.67 3.98
+
+CPU: total 10 (initial active 10) 0x61:0x0:0x1b588bb3:0, fp, asimd, aes, pmull, sha1, sha256, crc32, lse, sha3, sha512
+machdep.cpu.brand_string:Apple M1 Max
+hw.cachelinesize:128
+hw.l1icachesize:131072
+hw.l1dcachesize:65536
+hw.l2cachesize:4194304
+
+Memory: 16k page, physical 33554432k(70496k free), swap 19922944k(1275392k free)
+
+vm_info: OpenJDK 64-Bit Server VM (21.0.11) for bsd-aarch64 JRE (21.0.11), built on 2026-04-17T19:09:35Z by "brew" with clang Apple LLVM 21.0.0 (clang-2100.0.123.102)
+
+END.

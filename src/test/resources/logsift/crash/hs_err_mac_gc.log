@@ -1,0 +1,296 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x000000010608f9bc, pid=13022, tid=42755
+#
+# JRE version: OpenJDK Runtime Environment Homebrew (21.0.11) (build 21.0.11)
+# Java VM: OpenJDK 64-Bit Server VM Homebrew (21.0.11, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, bsd-aarch64)
+# Problematic frame:
+# V  [libjvm.dylib+0x2fb9bc]  void G1AdjustClosure::do_oop_work<narrowOop>(narrowOop*)+0x40
+#
+# No core dump will be written. Core dumps have been disabled. To enable core dumping, try "ulimit -c unlimited" before starting Java again
+#
+# If you would like to submit a bug report, please visit:
+#   https://github.com/Homebrew/homebrew-core/issues
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Xmx512m -XX:ErrorFile=/Users/dev/app/hs_err_pid%p.log Gc
+
+Host: "Mac14,5" arm64, 8 cores, 16G, Darwin 25.5.0, macOS 26.5.2 (25F84)
+Time: Thu Oct 29 16:29:10 2026 +08 elapsed time: 0.031018 seconds (0d 0h 0m 0s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x0000000722e76800):  WorkerThread "GC Thread#5"    [id=42755, stack(0x00000001728dc000,0x0000000172adf000) (2060K)]
+
+Stack: [0x00000001728dc000,0x0000000172adf000],  sp=0x0000000172adecf0,  free space=2059k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+V  [libjvm.dylib+0x2fb9bc]  void G1AdjustClosure::do_oop_work<narrowOop>(narrowOop*)+0x40
+V  [libjvm.dylib+0x2fcce8]  void OopOopIterateDispatch<G1AdjustClosure>::Table::oop_oop_iterate<ObjArrayKlass, narrowOop>(G1AdjustClosure*, oopDesc*, Klass*)+0x58
+V  [libjvm.dylib+0x2fbcbc]  G1AdjustLiveClosure::apply(oopDesc*)+0xec
+V  [libjvm.dylib+0x2fbaa4]  G1AdjustRegionClosure::do_heap_region(HeapRegion*)+0xa8
+V  [libjvm.dylib+0x36c974]  HeapRegionManager::par_iterate(HeapRegionClosure*, HeapRegionClaimer*, unsigned int) const+0xa8
+V  [libjvm.dylib+0x2fb8a0]  G1FullGCAdjustTask::work(unsigned int)+0x114
+V  [libjvm.dylib+0x82e9a4]  WorkerTaskDispatcher::worker_run_task()+0x6c
+V  [libjvm.dylib+0x82edbc]  WorkerThread::run()+0x20
+V  [libjvm.dylib+0x7a71bc]  Thread::call_run()+0x8c
+V  [libjvm.dylib+0x640ffc]  thread_native_entry(Thread*)+0xcc
+C  [libsystem_pthread.dylib+0x6c58]  _pthread_start+0x88
+
+siginfo: si_signo: 11 (SIGSEGV), si_code: 2 (SEGV_ACCERR), si_addr: 0x00000003fff891a0
+
+---------------  P R O C E S S  ---------------
+
+Threads class SMR info:
+_java_thread_list=0x0000000722edb260, length=10, elements={
+0x0000000100ace4e0, 0x0000000722e4c000, 0x0000000722e4c700, 0x0000000722e4ce00,
+0x0000000722e4d500, 0x0000000722e4dc00, 0x0000000100aea9c0, 0x000000072315c000,
+0x0000000722e4e300, 0x0000000722e4ea00
+}
+
+Java Threads: ( => current thread )
+  0x0000000100ace4e0 JavaThread "<un-named>"                        [_thread_blocked, id=9475, stack(0x000000016fcc8000,0x000000016fecb000) (2060K)]
+  0x0000000722e4c000 JavaThread "<un-named>"                        [_thread_blocked, id=24579, stack(0x0000000170e40000,0x0000000171043000) (2060K)]
+  0x0000000722e4c700 JavaThread "<un-named>"                        [_thread_blocked, id=29699, stack(0x000000017104c000,0x000000017124f000) (2060K)]
+  0x0000000722e4ce00 JavaThread "<un-named>"                        [_thread_blocked, id=29443, stack(0x0000000171258000,0x000000017145b000) (2060K)]
+  0x0000000722e4d500 JavaThread "<un-named>"                        [_thread_blocked, id=25603, stack(0x0000000171464000,0x0000000171667000) (2060K)]
+  0x0000000722e4dc00 JavaThread "<un-named>"                        [_thread_blocked, id=29187, stack(0x0000000171670000,0x0000000171873000) (2060K)]
+  0x0000000100aea9c0 JavaThread "<un-named>"                        [_thread_blocked, id=28675, stack(0x000000017187c000,0x0000000171a7f000) (2060K)]
+  0x000000072315c000 JavaThread "<un-named>"                        [_thread_blocked, id=26371, stack(0x0000000171a88000,0x0000000171c8b000) (2060K)]
+  0x0000000722e4e300 JavaThread "<un-named>"                        [_thread_blocked, id=28163, stack(0x0000000171c94000,0x0000000171e97000) (2060K)]
+  0x0000000722e4ea00 JavaThread "<un-named>"                        [_thread_blocked, id=26883, stack(0x0000000171ea0000,0x00000001720a3000) (2060K)]
+Total: 10
+
+Other Threads:
+  0x0000000722dc1400 VMThread "VM Thread"                           [id=19459, stack(0x0000000170b1c000,0x0000000170d1f000) (2060K)]
+  0x0000000100ae0770 WatcherThread "VM Periodic Task Thread"        [id=20739, stack(0x0000000170910000,0x0000000170b13000) (2060K)]
+  0x0000000100ad5ff0 WorkerThread "GC Thread#0"                     [id=11523, stack(0x000000016fed4000,0x00000001700d7000) (2060K)]
+  0x0000000722e75800 WorkerThread "GC Thread#1"                     [id=27395, stack(0x00000001720ac000,0x00000001722af000) (2060K)]
+  0x0000000722e75c00 WorkerThread "GC Thread#2"                     [id=27651, stack(0x00000001722b8000,0x00000001724bb000) (2060K)]
+  0x0000000722e76000 WorkerThread "GC Thread#3"                     [id=43267, stack(0x00000001724c4000,0x00000001726c7000) (2060K)]
+  0x0000000722e76400 WorkerThread "GC Thread#4"                     [id=43011, stack(0x00000001726d0000,0x00000001728d3000) (2060K)]
+=>0x0000000722e76800 WorkerThread "GC Thread#5"                     [id=42755, stack(0x00000001728dc000,0x0000000172adf000) (2060K)]
+  0x0000000722e77000 WorkerThread "GC Thread#6"                     [id=42499, stack(0x0000000172ae8000,0x0000000172ceb000) (2060K)]
+  0x0000000722e77800 WorkerThread "GC Thread#7"                     [id=33795, stack(0x0000000172cf4000,0x0000000172ef7000) (2060K)]
+  0x0000000722ee8000 WorkerThread "GC Thread#8"                     [id=34051, stack(0x0000000172f00000,0x0000000173103000) (2060K)]
+  0x0000000100ad8b80 ConcurrentGCThread "G1 Main Marker"            [id=13315, stack(0x00000001700e0000,0x00000001702e3000) (2060K)]
+  0x0000000100ad9630 WorkerThread "G1 Conc#0"                       [id=12803, stack(0x00000001702ec000,0x00000001704ef000) (2060K)]
+  0x0000000723064a00 ConcurrentGCThread "G1 Refine#0"               [id=16387, stack(0x00000001704f8000,0x00000001706fb000) (2060K)]
+  0x0000000722dc0000 ConcurrentGCThread "G1 Service"                [id=16643, stack(0x0000000170704000,0x0000000170907000) (2060K)]
+Total: 15
+
+Threads with active compile tasks:
+Total: 0
+
+VM state: at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread:  ([mutex/lock_event])
+[0x000000010688b9e0] Threads_lock - owner thread: 0x0000000722dc1400
+[0x000000010688ba60] Heap_lock - owner thread: 0x0000000100ace4e0
+
+Heap address: 0x0000000335000000, size: 512 MB, Compressed Oops mode: Zero based, Oop shift amount: 3
+
+CDS archive(s) mapped at: [0x0000007000000000-0x0000007000c94000-0x0000007000c94000), size 13189120, SharedBaseAddress: 0x0000007000000000, ArchiveRelocationMode: 1.
+Compressed class space mapped at: 0x0000007001000000-0x0000007041000000, reserved size: 1073741824
+Narrow klass base: 0x0000007000000000, Narrow klass shift: 0, Narrow klass range: 0x100000000
+
+GC Precious Log:
+ CardTable entry size: 512
+ Card Set container configuration: InlinePtr #cards 5 size 8 Array Of Cards #cards 12 size 40 Howl #buckets 4 coarsen threshold 1843 Howl Bitmap #cards 512 size 80 coarsen threshold 460 Card regions per heap region 1 cards per card region 2048
+ CPUs: 10 total, 10 available
+ Memory: 32768M
+ Large Page Support: Disabled
+ NUMA Support: Disabled
+ Compressed Oops: Enabled (Zero based)
+ Heap Region Size: 1M
+ Heap Min Capacity: 8M
+ Heap Initial Capacity: 512M
+ Heap Max Capacity: 512M
+ Pre-touch: Disabled
+ Parallel Workers: 9
+ Concurrent Workers: 2
+ Concurrent Refinement Workers: 9
+ Periodic GC: Disabled
+
+Heap:
+ garbage-first heap   total 524288K, used 57375K [0x0000000335000000, 0x0000000355000000)
+  region size 1024K, 7 young (7168K), 0 survivors (0K)
+ Metaspace       used 153K, committed 384K, reserved 1114112K
+  class space    used 6K, committed 128K, reserved 1048576K
+
+Compilation events (18 events):
+Event: 0.016 Thread 0x000000072315c000    1       3       java.lang.Object::<init> (1 bytes)
+Event: 0.016 Thread 0x000000072315c000 nmethod 1 0x000000010f328010 code [0x000000010f328180, 0x000000010f328298]
+Event: 0.017 Thread 0x000000072315c000    3       3       java.lang.String::hashCode (60 bytes)
+Event: 0.017 Thread 0x000000072315c000 nmethod 3 0x000000010f328310 code [0x000000010f328500, 0x000000010f3288b8]
+Event: 0.017 Thread 0x000000072315c000    4       3       java.lang.String::coder (15 bytes)
+Event: 0.017 Thread 0x000000072315c000 nmethod 4 0x000000010f328990 code [0x000000010f328b40, 0x000000010f328c90]
+Event: 0.017 Thread 0x000000072315c000    5       3       java.lang.String::length (11 bytes)
+Event: 0.017 Thread 0x000000072315c000 nmethod 5 0x000000010f328d10 code [0x000000010f328ec0, 0x000000010f329088]
+Event: 0.019 Thread 0x000000072315c000    6       3       jdk.internal.util.Preconditions::checkIndex (18 bytes)
+Event: 0.019 Thread 0x000000072315c000 nmethod 6 0x000000010f329190 code [0x000000010f329340, 0x000000010f3294e8]
+Event: 0.019 Thread 0x000000072315c000    7       3       java.lang.String::charAt (25 bytes)
+Event: 0.019 Thread 0x000000072315c000 nmethod 7 0x000000010f329610 code [0x000000010f329800, 0x000000010f329bd8]
+Event: 0.019 Thread 0x000000072315c000    8       3       java.lang.String::isLatin1 (19 bytes)
+Event: 0.019 Thread 0x000000072315c000 nmethod 8 0x000000010f329d90 code [0x000000010f329f40, 0x000000010f32a0c8]
+Event: 0.024 Thread 0x000000072315c000   13 %     3       Gc::main @ 27 (120 bytes)
+Event: 0.025 Thread 0x000000072315c000 nmethod 13% 0x000000010f32a190 code [0x000000010f32a600, 0x000000010f32bc38]
+Event: 0.025 Thread 0x000000072315c000   14       3       Gc::main (120 bytes)
+Event: 0.025 Thread 0x000000072315c000 nmethod 14 0x000000010f32c490 code [0x000000010f32c900, 0x000000010f32de80]
+
+GC Heap History (1 events):
+Event: 0.029 GC heap before
+{Heap before GC invocations=0 (full 0):
+ garbage-first heap   total 524288K, used 56351K [0x0000000335000000, 0x0000000355000000)
+  region size 1024K, 7 young (7168K), 0 survivors (0K)
+ Metaspace       used 153K, committed 384K, reserved 1114112K
+  class space    used 6K, committed 128K, reserved 1048576K
+}
+
+Dll operation events (1 events):
+Event: 0.003 Loaded shared library /opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home/lib/libjava.dylib
+
+Deoptimization events (0 events):
+No events
+
+Classes loaded (12 events):
+Event: 0.014 Loading class sun/nio/cs/UTF_8$Encoder
+Event: 0.014 Loading class sun/nio/cs/UTF_8$Encoder done
+Event: 0.016 Loading class jdk/internal/vm/PostVMInitHook
+Event: 0.016 Loading class jdk/internal/vm/PostVMInitHook done
+Event: 0.017 Loading class jdk/internal/loader/URLClassPath$FileLoader
+Event: 0.017 Loading class jdk/internal/loader/URLClassPath$FileLoader done
+Event: 0.017 Loading class jdk/internal/loader/URLClassPath$FileLoader$1
+Event: 0.017 Loading class jdk/internal/loader/URLClassPath$FileLoader$1 done
+Event: 0.017 Loading class sun/misc/Unsafe
+Event: 0.018 Loading class sun/misc/Unsafe done
+Event: 0.018 Loading class java/lang/invoke/DirectMethodHandle$StaticAccessor
+Event: 0.018 Loading class java/lang/invoke/DirectMethodHandle$StaticAccessor done
+
+Classes unloaded (0 events):
+No events
+
+Classes redefined (0 events):
+No events
+
+Internal exceptions (0 events):
+No events
+
+ZGC Phase Switch (0 events):
+No events
+
+VM Operations (1 events):
+Event: 0.029 Executing safepoint VM operation: G1CollectFull (System.gc())
+
+Memory protections (10 events):
+Event: 0.002 Protecting memory [0x000000016fcc8000,0x000000016fcd4000] with protection modes 0
+Event: 0.015 Protecting memory [0x0000000170e40000,0x0000000170e4c000] with protection modes 0
+Event: 0.015 Protecting memory [0x000000017104c000,0x0000000171058000] with protection modes 0
+Event: 0.015 Protecting memory [0x0000000171258000,0x0000000171264000] with protection modes 0
+Event: 0.015 Protecting memory [0x0000000171464000,0x0000000171470000] with protection modes 0
+Event: 0.015 Protecting memory [0x0000000171670000,0x000000017167c000] with protection modes 0
+Event: 0.015 Protecting memory [0x000000017187c000,0x0000000171888000] with protection modes 0
+Event: 0.015 Protecting memory [0x0000000171a88000,0x0000000171a94000] with protection modes 0
+Event: 0.016 Protecting memory [0x0000000171c94000,0x0000000171ca0000] with protection modes 0
+Event: 0.017 Protecting memory [0x0000000171ea0000,0x0000000171eac000] with protection modes 0
+
+Nmethod flushes (0 events):
+No events
+
+Events (10 events):
+Event: 0.008 Thread 0x0000000100ace4e0 Thread added: 0x0000000100ace4e0
+Event: 0.015 Thread 0x0000000100ace4e0 Thread added: 0x0000000722e4c000
+Event: 0.015 Thread 0x0000000100ace4e0 Thread added: 0x0000000722e4c700
+Event: 0.015 Thread 0x0000000100ace4e0 Thread added: 0x0000000722e4ce00
+Event: 0.015 Thread 0x0000000100ace4e0 Thread added: 0x0000000722e4d500
+Event: 0.015 Thread 0x0000000100ace4e0 Thread added: 0x0000000722e4dc00
+Event: 0.015 Thread 0x0000000100ace4e0 Thread added: 0x0000000100aea9c0
+Event: 0.015 Thread 0x0000000100ace4e0 Thread added: 0x000000072315c000
+Event: 0.016 Thread 0x0000000100ace4e0 Thread added: 0x0000000722e4e300
+Event: 0.017 Thread 0x0000000100ace4e0 Thread added: 0x0000000722e4ea00
+
+
+Dynamic libraries:
+0x00000001001fc000 	/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home/lib/libjli.dylib
+0x000000019812e000 	/usr/lib/libz.1.dylib
+0x00000001981e4000 	/usr/lib/libSystem.B.dylib
+0x000000018839c000 	/usr/lib/system/libsystem_platform.dylib
+0x000000018838f000 	/usr/lib/system/libsystem_pthread.dylib
+0x00000001882a5000 	/usr/lib/libc++.1.dylib
+0x0000000105d94000 	/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home/lib/server/libjvm.dylib
+0x00000001002b4000 	/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home/lib/libjava.dylib
+
+JVMTI agents: none
+
+
+VM Arguments:
+jvm_args: -Xmx512m -XX:ErrorFile=/Users/dev/app/hs_err_pid%p.log 
+java_command: Gc
+java_class_path (initial): .
+Launcher Type: SUN_STANDARD
+
+[Global flags]
+     intx CICompilerCount                          = 4                                         {product} {ergonomic}
+     uint ConcGCThreads                            = 2                                         {product} {ergonomic}
+    ccstr ErrorFile                                = /Users/dev/app/hs_err_pid%p.log            {product} {command line}
+     uint G1ConcRefinementThreads                  = 9                                         {product} {ergonomic}
+   size_t G1HeapRegionSize                         = 1048576                                   {product} {ergonomic}
+    uintx GCDrainStackTargetSize                   = 64                                        {product} {ergonomic}
+   size_t InitialHeapSize                          = 536870912                                 {product} {ergonomic}
+   size_t MarkStackSize                            = 4194304                                   {product} {ergonomic}
+   size_t MaxHeapSize                              = 536870912                                 {product} {command line}
+   size_t MaxNewSize                               = 321912832                                 {product} {ergonomic}
+   size_t MinHeapDeltaBytes                        = 1048576                                   {product} {ergonomic}
+   size_t MinHeapSize                              = 8388608                                   {product} {ergonomic}
+    uintx NonNMethodCodeHeapSize                   = 5839564                                {pd product} {ergonomic}
+    uintx NonProfiledCodeHeapSize                  = 122909338                              {pd product} {ergonomic}
+    uintx ProfiledCodeHeapSize                     = 122909338                              {pd product} {ergonomic}
+    uintx ReservedCodeCacheSize                    = 251658240                              {pd product} {ergonomic}
+     bool SegmentedCodeCache                       = true                                      {product} {ergonomic}
+   size_t SoftMaxHeapSize                          = 536870912                              {manageable} {ergonomic}
+     bool UseCompressedOops                        = true                           {product lp64_product} {ergonomic}
+     bool UseG1GC                                  = true                                      {product} {ergonomic}
+     bool UseNUMA                                  = false                                     {product} {ergonomic}
+     bool UseNUMAInterleaving                      = false                                     {product} {ergonomic}
+
+Logging:
+Log output configuration:
+ #0: stdout all=warning uptime,level,tags foldmultilines=false
+ #1: stderr all=off uptime,level,tags foldmultilines=false
+
+Release file:
+<release file has not been read>
+Environment Variables:
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/21.0.11/libexec/openjdk.jdk/Contents/Home
+
+Active Locale:
+LC_ALL=en_US.UTF-8
+LC_COLLATE=en_US.UTF-8
+LC_CTYPE=en_US.UTF-8
+LC_MESSAGES=en_US.UTF-8
+LC_MONETARY=en_US.UTF-8
+LC_NUMERIC=en_US.UTF-8
+LC_TIME=en_US.UTF-8
+
+---------------  S Y S T E M  ---------------
+
+OS:
+uname: Darwin 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:18:58 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T6000 arm64
+OS uptime: 27 days 3:34 hours
+rlimit (soft/hard): STACK 8176k/65520k , CORE 0k/infinity , NPROC 5333/5333 , NOFILE 1048576/infinity , AS infinity/infinity , CPU infinity/infinity , DATA infinity/infinity , FSIZE infinity/infinity , MEMLOCK infinity/infinity , RSS infinity/infinity
+load average: 3.58 3.47 3.75
+
+CPU: total 10 (initial active 10) 0x61:0x0:0x1b588bb3:0, fp, asimd, aes, pmull, sha1, sha256, crc32, lse, sha3, sha512
+machdep.cpu.brand_string:Apple M1 Max
+hw.cachelinesize:128
+hw.l1icachesize:131072
+hw.l1dcachesize:65536
+hw.l2cachesize:4194304
+
+Memory: 16k page, physical 33554432k(106320k free), swap 19922944k(1275392k free)
+
+vm_info: OpenJDK 64-Bit Server VM (21.0.11) for bsd-aarch64 JRE (21.0.11), built on 2026-04-17T19:09:35Z by "brew" with clang Apple LLVM 21.0.0 (clang-2100.0.123.102)
+
+END.

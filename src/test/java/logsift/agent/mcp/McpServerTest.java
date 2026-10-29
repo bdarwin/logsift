@@ -499,7 +499,8 @@ class McpServerTest {
         Answer opened = ok("open_log", "path", "orders/app");
         assertTrue(opened.text().startsWith("log:1  " + orders.resolve("app.log")), opened.text());
         Answer found = ok("search_folder", "folder", "orders", "query", "Database connection lost");
-        assertTrue(found.text().contains(orders.resolve("app.log").toString()), found.text());
+        // folder search names files by their real path (on Windows the temporary folder's long name)
+        assertTrue(found.text().contains(orders.toRealPath().resolve("app.log").toString()), found.text());
         assertTrue(call("open_log", "path", "billing/billing").error(), "outside the folders agents may read");
     }
 

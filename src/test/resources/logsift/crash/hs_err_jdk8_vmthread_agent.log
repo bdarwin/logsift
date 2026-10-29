@@ -1,0 +1,86 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007f0a5b2d1c3e, pid=2981, tid=0x00007f0a3c5f8700
+#
+# JRE version: Java(TM) SE Runtime Environment (8.0_181-b13) (build 1.8.0_181-b13)
+# Java VM: Java HotSpot(TM) 64-Bit Server VM (25.181-b13 mixed mode linux-amd64 compressed oops)
+# Problematic frame:
+# V  [libjvm.so+0x9a1c3e]  JvmtiEnvBase::get_stack_trace(JavaThread*, int, int, _jvmtiFrameInfo*, int*)+0x6e
+#
+# Failed to write core dump. Core dumps have been disabled. To enable core dumping, try "ulimit -c unlimited" before starting Java again
+#
+# If you would like to submit a bug report, please visit:
+#   http://bugreport.java.com/bugreport/crash.jsp
+#
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007f0a54012000):  VMThread [stack: 0x00007f0a3c4f9000,0x00007f0a3c5f9000] [id=2995]
+
+Stack: [0x00007f0a3c4f9000,0x00007f0a3c5f9000],  sp=0x00007f0a3c5f7a10,  free space=1018k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+V  [libjvm.so+0x9a1c3e]  JvmtiEnvBase::get_stack_trace(JavaThread*, int, int, _jvmtiFrameInfo*, int*)+0x6e
+V  [libjvm.so+0x9a2f10]  VM_GetAllStackTraces::doit()+0x110
+V  [libjvm.so+0xa8e4a1]  VM_Operation::evaluate()+0x61
+V  [libjvm.so+0xa8c5f9]  VMThread::evaluate_operation(VM_Operation*)+0x139
+V  [libjvm.so+0xa8d1e4]  VMThread::loop()+0x264
+V  [libjvm.so+0xa8d6a8]  VMThread::run()+0xb8
+V  [libjvm.so+0x90f6a2]  java_start(Thread*)+0x102
+
+VM_Operation (0x00007f0a2e9f5a40): GetAllStackTraces, mode: safepoint, requested by thread 0x00007f0a5418b000
+
+
+---------------  P R O C E S S  ---------------
+
+Java Threads: ( => current thread )
+  0x00007f0a5418b000 JavaThread "apm-sampler" daemon [_thread_blocked, id=3050, stack(0x00007f0a2e8f6000,0x00007f0a2e9f7000)]
+  0x00007f0a5400a000 JavaThread "main" [_thread_blocked, id=2982, stack(0x00007f0a5d2fe000,0x00007f0a5d3ff000)]
+  0x00007f0a541b2000 JavaThread "http-worker-7" [_thread_in_Java, id=3101, stack(0x00007f0a2e4f2000,0x00007f0a2e5f3000)]
+
+Other Threads:
+=>0x00007f0a54012000 VMThread [stack: 0x00007f0a3c4f9000,0x00007f0a3c5f9000] [id=2995]
+  0x00007f0a541a4800 WatcherThread [stack: 0x00007f0a2e7f5000,0x00007f0a2e8f6000] [id=3051]
+
+VM state:at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread:  ([mutex/lock_event])
+[0x00007f0a54009b50] Threads_lock - owner thread: 0x00007f0a54012000
+
+Heap:
+ PSYoungGen      total 305664K, used 120321K [0x00000000eab00000, 0x0000000100000000, 0x0000000100000000)
+ ParOldGen       total 699392K, used 412209K [0x00000000c0000000, 0x00000000eab00000, 0x00000000eab00000)
+ Metaspace       used 78211K, capacity 80123K, committed 80384K, reserved 1120256K
+
+Classes redefined (3 events):
+Event: 5012.120 Thread 0x00007f0a54012000 redefined class name=com.acme.web.Handler, count=1
+Event: 5012.122 Thread 0x00007f0a54012000 redefined class name=com.acme.web.Router, count=1
+Event: 5012.130 Thread 0x00007f0a54012000 redefined class name=com.acme.db.Pool, count=1
+
+Dynamic libraries:
+00400000-00401000 r-xp 00000000 fd:00 1180161                            /usr/java/jdk1.8.0_181/jre/bin/java
+7f0a5a800000-7f0a5b4f1000 r-xp 00000000 fd:00 1180210                    /usr/java/jdk1.8.0_181/jre/lib/amd64/server/libjvm.so
+7f0a3a000000-7f0a3a2a0000 r-xp 00000000 fd:00 2621442                    /opt/apm/lib/libapmagent.so
+
+VM Arguments:
+jvm_args: -Xmx1g -agentpath:/opt/apm/lib/libapmagent.so=port=7171 
+java_command: com.acme.web.Server
+java_class_path (initial): /opt/web/web.jar
+Launcher Type: SUN_STANDARD
+
+---------------  S Y S T E M  ---------------
+
+OS:CentOS Linux release 7.5.1804 (Core) 
+
+uname:Linux 3.10.0-862.el7.x86_64 #1 SMP Fri Apr 20 16:44:24 UTC 2018 x86_64
+libc:glibc 2.17 NPTL 2.17 
+rlimit: STACK 8192k, CORE 0k, NPROC 4096, NOFILE 65536, AS infinity
+
+Memory: 4k page, physical 16267236k(803392k free), swap 2097148k(2097148k free)
+
+vm_info: Java HotSpot(TM) 64-Bit Server VM (25.181-b13) for linux-amd64 JRE (1.8.0_181-b13), built on Jul  7 2018 00:56:38 by "java_re" with gcc 4.3.0 20080428 (Red Hat 4.3.0-8)
+
+time: Tue Mar  3 10:20:30 2020
+elapsed time: 5021 seconds (0d 1h 23m 41s)
+
+END.

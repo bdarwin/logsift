@@ -1,0 +1,95 @@
+#
+# There is insufficient memory for the Java Runtime Environment to continue.
+# Native memory allocation (mmap) failed to map 16777216 bytes for committing reserved memory.
+# Possible reasons:
+#   The system is out of physical RAM or swap space
+#   The process is running with CompressedOops enabled, and the Java Heap may be blocking the growth of the native heap
+# Possible solutions:
+#   Reduce memory load on the system
+#   Increase physical memory or swap space
+#   Check if swap backing store is full
+#   Decrease Java heap size (-Xmx/-Xms)
+#   Decrease number of Java threads
+#   Decrease Java thread stack sizes (-Xss)
+#   Set larger code cache with -XX:ReservedCodeCacheSize=
+# This output file may be truncated or incomplete.
+#
+#  Out of Memory Error (os_linux.cpp:2793), pid=1, tid=33
+#
+# JRE version: OpenJDK Runtime Environment Temurin-17.0.9+9 (17.0.9+9) (build 17.0.9+9)
+# Java VM: OpenJDK 64-Bit Server VM Temurin-17.0.9+9 (17.0.9+9, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, linux-amd64)
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport %p %s %c %d %P %E" (or dumping to /app/core.1)
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Xmx2g -jar /app/billing.jar
+
+Host: AMD EPYC 7R13 Processor, 2 cores, 2G, Ubuntu 22.04.3 LTS
+Time: Wed Oct  1 03:14:15 2025 UTC elapsed time: 7210.441921 seconds (0d 2h 0m 10s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007f8e4c2a1000):  VMThread "VM Thread" [stack: 0x00007f8e2d0fe000,0x00007f8e2d1fe000] [id=33]
+
+Stack: [0x00007f8e2d0fe000,0x00007f8e2d1fe000],  sp=0x00007f8e2d1fc560,  free space=1017k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+V  [libjvm.so+0xf0a8c1]  VMError::report_and_die(int, char const*, char const*, __va_list_tag*, Thread*, unsigned char*, void*, void*, char const*, int, unsigned long)+0x1a1
+V  [libjvm.so+0xf0b77e]  VMError::report_and_die(Thread*, char const*, int, unsigned long, VMErrorType, char const*, __va_list_tag*)+0x2e
+V  [libjvm.so+0x5f52c8]  report_vm_out_of_memory(char const*, int, unsigned long, VMErrorType, char const*, ...)+0xd8
+V  [libjvm.so+0xc4be1a]  os::pd_commit_memory_or_exit(char*, unsigned long, unsigned long, bool, char const*)+0xea
+V  [libjvm.so+0x758e4d]  G1PageBasedVirtualSpace::commit(unsigned long, unsigned long)+0x13d
+V  [libjvm.so+0x76d8a1]  G1RegionsLargerThanCommitSizeMapper::commit_regions(unsigned int, unsigned long, WorkerThreads*)+0x81
+V  [libjvm.so+0x7195d1]  G1CollectedHeap::expand(unsigned long, WorkerThreads*, double*)+0x111
+
+VM_Operation (0x00007f8e1a5fe4b0): G1CollectForAllocation, mode: safepoint, requested by thread 0x00007f8e4c0c3800
+
+---------------  P R O C E S S  ---------------
+
+Java Threads: ( => current thread )
+  0x00007f8e4c0c3800 JavaThread "invoice-batch-1" [_thread_blocked, id=61, stack(0x00007f8e1a500000,0x00007f8e1a600000)]
+  0x00007f8e4c0c5000 JavaThread "invoice-batch-2" [_thread_blocked, id=62, stack(0x00007f8e1a400000,0x00007f8e1a500000)]
+  0x00007f8e4c0c6800 JavaThread "Reference Handler" daemon [_thread_blocked, id=15, stack(0x00007f8e2c0fe000,0x00007f8e2c1ff000)]
+
+Other Threads:
+=>0x00007f8e4c2a1000 VMThread "VM Thread" [stack: 0x00007f8e2d0fe000,0x00007f8e2d1fe000] [id=33]
+  0x00007f8e4c02a1b0 GCTaskThread "GC Thread#0" [stack: 0x00007f8e2e1ae000,0x00007f8e2e2ae000] [id=8]
+
+VM state: at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread:  ([mutex/lock_event])
+[0x00007f8e5c0123a0] Threads_lock - owner thread: 0x00007f8e4c2a1000
+[0x00007f8e5c012b70] Heap_lock - owner thread: 0x00007f8e4c0c3800
+
+Heap:
+ garbage-first heap   total 1572864K, used 1498112K [0x0000000780000000, 0x0000000800000000)
+ Metaspace       used 112003K, committed 113152K, reserved 1150976K
+
+VM Arguments:
+jvm_args: -Xmx2g 
+java_command: /app/billing.jar
+Launcher Type: SUN_STANDARD
+
+[Global flags]
+   size_t MaxHeapSize                              = 2147483648                                {product} {command line}
+
+---------------  S Y S T E M  ---------------
+
+OS:
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=22.04
+uname: Linux 5.15.0-1047-aws #52-Ubuntu SMP x86_64
+rlimit (soft/hard): STACK 8192k/infinity , CORE infinity/infinity , NPROC infinity/infinity , NOFILE 1048576/1048576
+
+container (cgroup) information:
+container_type: cgroupv2
+active_processor_count: 2
+memory_limit_in_bytes: 2097152 k
+memory_and_swap_limit_in_bytes: 2097152 k
+memory_usage_in_bytes: 2088960 k
+
+Memory: 4k page, physical 2097152k(8192k free), swap 0k(0k free)
+
+vm_info: OpenJDK 64-Bit Server VM (17.0.9+9) for linux-amd64 JRE (17.0.9+9), built on 2023-10-17T00:00:00Z by "temurin" with gcc 11.2.0
+
+END.

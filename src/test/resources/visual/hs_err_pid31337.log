@@ -1,0 +1,169 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007f3a9c2f1b8c, pid=31337, tid=31402
+#
+# JRE version: OpenJDK Runtime Environment Temurin-17.0.6+10 (17.0.6+10) (build 17.0.6+10)
+# Java VM: OpenJDK 64-Bit Server VM Temurin-17.0.6+10 (17.0.6+10, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, linux-amd64)
+# Problematic frame:
+# C  [libc.so.6+0x18bb8c]  __memmove_avx_unaligned_erms+0x5c
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h" (or dumping to /srv/images/core.31337)
+#
+# If you would like to submit a bug report, please visit:
+#   https://github.com/adoptium/adoptium-support/issues
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Xms2g -Xmx2g -XX:+UseG1GC -Dimages.cache=/srv/images/cache com.acme.images.ImageServer --port 8080
+
+Host: img-prod-3, Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz, 8 cores, 15G, Ubuntu 22.04.2 LTS
+Time: Tue Oct 27 03:14:07 2026 UTC elapsed time: 186412.873519 seconds (2d 3h 46m 52s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007f3a50012800):  JavaThread "thumbnail-worker-3" [_thread_in_native, id=31402, stack(0x00007f3a2c7f8000,0x00007f3a2c8f9000)]
+
+Stack: [0x00007f3a2c7f8000,0x00007f3a2c8f9000],  sp=0x00007f3a2c8f6a48,  free space=1018k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+C  [libc.so.6+0x18bb8c]  __memmove_avx_unaligned_erms+0x5c
+C  [libturbojpeg.so.0+0x2f1a0]  tjDecompress2+0x120
+C  [libacme-imaging.so+0x41c8]  Java_com_acme_images_jpeg_NativeDecoder_decode+0x1d8
+J 4127  com.acme.images.jpeg.NativeDecoder.decode([BII)[I (0 bytes) @ 0x00007f3a8c94b2d4 [0x00007f3a8c94b200+0x00000000000000d4]
+J 5531 c2 com.acme.images.Thumbnailer.scale(Lcom/acme/images/Image;I)Lcom/acme/images/Image; (212 bytes) @ 0x00007f3a8ca1c4e0 [0x00007f3a8ca1c3c0+0x0000000000000120]
+J 5530 c2 com.acme.images.ThumbnailJob.run()V (96 bytes) @ 0x00007f3a8ca1b9f8 [0x00007f3a8ca1b8e0+0x0000000000000118]
+J 4880 c2 java.util.concurrent.ThreadPoolExecutor.runWorker(Ljava/util/concurrent/ThreadPoolExecutor$Worker;)V java.base@17.0.6 (187 bytes) @ 0x00007f3a8c9f2a6c [0x00007f3a8c9f2820+0x000000000000024c]
+j  java.util.concurrent.ThreadPoolExecutor$Worker.run()V+5 java.base@17.0.6
+j  java.lang.Thread.run()V+11 java.base@17.0.6
+v  ~StubRoutines::call_stub
+V  [libjvm.so+0x833b25]  JavaCalls::call_helper(JavaValue*, methodHandle const&, JavaCallArguments*, JavaThread*)+0x315
+V  [libjvm.so+0x8352b4]  JavaCalls::call_virtual(JavaValue*, Handle, Klass*, Symbol*, Symbol*, JavaThread*)+0x1d4
+V  [libjvm.so+0x8a7e1c]  thread_entry(JavaThread*, JavaThread*)+0x7c
+V  [libjvm.so+0xe1d3c8]  JavaThread::thread_main_inner()+0x1b8
+V  [libjvm.so+0xe20d40]  Thread::call_run()+0xc0
+V  [libjvm.so+0xc2b7d1]  thread_native_entry(Thread*)+0xe1
+C  [libc.so.6+0x94b43]
+
+Java frames: (J=compiled Java code, j=interpreted, Vv=VM code)
+J 4127  com.acme.images.jpeg.NativeDecoder.decode([BII)[I (0 bytes) @ 0x00007f3a8c94b2d4 [0x00007f3a8c94b200+0x00000000000000d4]
+J 5531 c2 com.acme.images.Thumbnailer.scale(Lcom/acme/images/Image;I)Lcom/acme/images/Image; (212 bytes) @ 0x00007f3a8ca1c4e0 [0x00007f3a8ca1c3c0+0x0000000000000120]
+J 5530 c2 com.acme.images.ThumbnailJob.run()V (96 bytes) @ 0x00007f3a8ca1b9f8 [0x00007f3a8ca1b8e0+0x0000000000000118]
+J 4880 c2 java.util.concurrent.ThreadPoolExecutor.runWorker(Ljava/util/concurrent/ThreadPoolExecutor$Worker;)V java.base@17.0.6 (187 bytes) @ 0x00007f3a8c9f2a6c [0x00007f3a8c9f2820+0x000000000000024c]
+j  java.util.concurrent.ThreadPoolExecutor$Worker.run()V+5 java.base@17.0.6
+j  java.lang.Thread.run()V+11 java.base@17.0.6
+v  ~StubRoutines::call_stub
+
+siginfo: si_signo: 11 (SIGSEGV), si_code: 1 (SEGV_MAPERR), si_addr: 0x00007f3a1f400000
+
+Registers:
+RAX=0x00007f3a1f3ff000, RBX=0x0000000000000000, RCX=0x0000000000001000, RDX=0x0000000000002000
+
+---------------  P R O C E S S  ---------------
+
+Threads class SMR info:
+_java_thread_list=0x00007f3a50019c40, length=14, elements={
+}
+
+Java Threads: ( => current thread )
+  0x00007f3a9802a000 JavaThread "main" [_thread_blocked, id=31338, stack(0x00007f3a9f6e1000,0x00007f3a9f7e2000)]
+  0x00007f3a98195000 JavaThread "Reference Handler" daemon [_thread_blocked, id=31346, stack(0x00007f3a7d5f6000,0x00007f3a7d6f7000)]
+  0x00007f3a98196800 JavaThread "Finalizer" daemon [_thread_blocked, id=31347, stack(0x00007f3a7d4f5000,0x00007f3a7d5f6000)]
+  0x00007f3a9819f000 JavaThread "Signal Dispatcher" daemon [_thread_blocked, id=31348, stack(0x00007f3a7d3f4000,0x00007f3a7d4f5000)]
+  0x00007f3a981a1000 JavaThread "C2 CompilerThread0" daemon [_thread_blocked, id=31350, stack(0x00007f3a7d1f2000,0x00007f3a7d2f3000)]
+  0x00007f3a981a3000 JavaThread "C1 CompilerThread0" daemon [_thread_blocked, id=31351, stack(0x00007f3a7d0f1000,0x00007f3a7d1f2000)]
+  0x00007f3a50010800 JavaThread "http-acceptor" [_thread_in_native, id=31399, stack(0x00007f3a2cafb000,0x00007f3a2cbfc000)]
+  0x00007f3a50011000 JavaThread "thumbnail-worker-1" [_thread_in_native, id=31400, stack(0x00007f3a2c9fa000,0x00007f3a2cafb000)]
+  0x00007f3a50011800 JavaThread "thumbnail-worker-2" [_thread_blocked, id=31401, stack(0x00007f3a2c8f9000,0x00007f3a2c9fa000)]
+=>0x00007f3a50012800 JavaThread "thumbnail-worker-3" [_thread_in_native, id=31402, stack(0x00007f3a2c7f8000,0x00007f3a2c8f9000)]
+  0x00007f3a50013000 JavaThread "thumbnail-worker-4" [_thread_in_native, id=31403, stack(0x00007f3a2c6f7000,0x00007f3a2c7f8000)]
+  0x00007f3a50014000 JavaThread "cache-evictor" [_thread_blocked, id=31404, stack(0x00007f3a2c5f6000,0x00007f3a2c6f7000)]
+  0x00007f3a50015000 JavaThread "metrics-reporter" [_thread_blocked, id=31405, stack(0x00007f3a2c4f5000,0x00007f3a2c5f6000)]
+  0x00007f3a50016000 JavaThread "http-worker-1" [_thread_in_Java, id=31406, stack(0x00007f3a2c3f4000,0x00007f3a2c4f5000)]
+Total: 14
+
+Other Threads:
+  0x00007f3a98191000 VMThread "VM Thread" [stack: 0x00007f3a7d6f8000,0x00007f3a7d7f8000] [id=31345]
+  0x00007f3a9802c000 WorkerThread "GC Thread#0" [stack: 0x00007f3a9c1e5000,0x00007f3a9c2e5000] [id=31339]
+  0x00007f3a98030000 ConcurrentGCThread "G1 Main Marker" [stack: 0x00007f3a9c0e4000,0x00007f3a9c1e4000] [id=31340]
+  0x00007f3a98032000 ConcurrentGCThread "G1 Refine#0" [stack: 0x00007f3a7e0f8000,0x00007f3a7e1f8000] [id=31342]
+  0x00007f3a981e8000 WatcherThread "VM Periodic Task Thread" [stack: 0x00007f3a7cbee000,0x00007f3a7ccee000] [id=31357]
+Total: 5
+
+Threads with active compile tasks:
+Total: 0
+
+VM state: not at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread: None
+
+Heap address: 0x0000000080000000, size: 2048 MB, Compressed Oops mode: 32-bit
+
+Heap:
+ garbage-first heap   total 2097152K, used 1503264K [0x0000000080000000, 0x0000000100000000)
+  region size 1024K, 412 young (421888K), 18 survivors (18432K)
+ Metaspace       used 61234K, committed 62080K, reserved 1105920K
+  class space    used 7302K, committed 7680K, reserved 1048576K
+
+Dll operation events (3 events):
+Event: 0.003 Loaded shared library /usr/lib/jvm/temurin-17/lib/libjava.so
+Event: 2.412 Loaded shared library /srv/images/native/libacme-imaging.so
+Event: 2.415 Loaded shared library /srv/images/native/libturbojpeg.so.0
+
+Internal exceptions (2 events):
+Event: 186401.552 Thread 0x00007f3a50011000 Exception <a 'java/io/IOException'{0x00000000f1a2b3c4}: Premature end of JPEG file> (0x00000000f1a2b3c4) thrown at [src/hotspot/share/prims/jni.cpp, line 516]
+Event: 186410.118 Thread 0x00007f3a50012800 Exception <a 'java/io/IOException'{0x00000000f1a2b4d8}: Premature end of JPEG file> (0x00000000f1a2b4d8) thrown at [src/hotspot/share/prims/jni.cpp, line 516]
+
+Events (2 events):
+Event: 186405.001 Thread 0x00007f3a50015000 Thread added: 0x00007f3a50016000
+Event: 186411.903 Executing VM operation: Cleanup
+
+Dynamic libraries:
+55d2c0e00000-55d2c0e01000 r-xp 00001000 103:01 2390185                   /usr/lib/jvm/temurin-17/bin/java
+7f3a1e000000-7f3a1e021000 r-xp 00000000 103:01 812331                    /srv/images/native/libturbojpeg.so.0
+7f3a1e200000-7f3a1e208000 r-xp 00000000 103:01 812330                    /srv/images/native/libacme-imaging.so
+7f3a9c166000-7f3a9c2fb000 r-xp 00028000 103:01 1847                      /usr/lib/x86_64-linux-gnu/libc.so.6
+7f3a9d000000-7f3a9e09c000 r-xp 00000000 103:01 2390212                   /usr/lib/jvm/temurin-17/lib/server/libjvm.so
+7f3a9f7f0000-7f3a9f80b000 r-xp 00000000 103:01 2390199                   /usr/lib/jvm/temurin-17/lib/libjava.so
+
+VM Arguments:
+jvm_args: -Xms2g -Xmx2g -XX:+UseG1GC -Dimages.cache=/srv/images/cache
+java_command: com.acme.images.ImageServer --port 8080
+java_class_path (initial): /srv/images/lib/images-server.jar
+Launcher Type: SUN_STANDARD
+
+[Global flags]
+   size_t MaxHeapSize                              = 2147483648                                {product} {command line}
+     bool UseG1GC                                  = true                                      {product} {command line}
+
+Environment Variables:
+JAVA_HOME=/usr/lib/jvm/temurin-17
+LANG=C.UTF-8
+
+---------------  S Y S T E M  ---------------
+
+OS:
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=22.04
+DISTRIB_DESCRIPTION="Ubuntu 22.04.2 LTS"
+uname: Linux 5.15.0-1031-aws #35-Ubuntu SMP Fri Feb 10 02:07:18 UTC 2023 x86_64
+OS uptime: 41 days 6:02 hours
+libc: glibc 2.35 NPTL 2.35
+rlimit (soft/hard): STACK 8192k/infinity , CORE infinity/infinity , NPROC 63363/63363 , NOFILE 1048576/1048576 , AS infinity/infinity , CPU infinity/infinity , DATA infinity/infinity , FSIZE infinity/infinity , MEMLOCK 64k/64k
+load average: 7.84 6.91 6.12
+
+container (cgroup) information:
+container_type: cgroupv2
+cpu_cpuset_cpus: not supported
+active_processor_count: 8
+memory_limit_in_bytes: 4194304 k
+memory_and_swap_limit_in_bytes: 4194304 k
+
+CPU: total 8 (initial active 8) (4 cores per cpu, 2 threads per core) family 6 model 85 stepping 7 microcode 0x5003501, cx8, cmov, fxsr, ht, mmx, sse, sse2, avx, avx2
+Memory: 4k page, physical 16008192k(1123456k free), swap 0k(0k free)
+
+vm_info: OpenJDK 64-Bit Server VM (17.0.6+10) for linux-amd64 JRE (17.0.6+10), built on Jan 18 2023 00:00:00 by "temurin" with gcc 10.3.0
+
+END.

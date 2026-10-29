@@ -1,0 +1,91 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007f1c9e3b2c41, pid=4242, tid=4260
+#
+# JRE version: OpenJDK Runtime Environment (21.0.1+12) (build 21.0.1+12-LTS)
+# Java VM: OpenJDK 64-Bit Server VM (21.0.1+12-LTS, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, parallel gc, linux-amd64)
+# Problematic frame:
+# V  [libjvm.so+0x7b2c41]  PhaseIdealLoop::build_loop_late_post_work(Node*, bool)+0x161
+#
+# No core dump will be written. Core dumps have been disabled. To enable core dumping, try "ulimit -c unlimited" before starting Java again
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -XX:+UseParallelGC -jar /srv/pricing/pricing.jar
+
+Host: Intel(R) Xeon(R) CPU E5-2686 v4 @ 2.30GHz, 16 cores, 62G, Red Hat Enterprise Linux release 9.2 (Plow)
+Time: Thu Feb  6 11:45:02 2025 CET elapsed time: 912.003114 seconds (0d 0h 15m 12s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007f1cb0144a30):  JavaThread "C2 CompilerThread0" daemon [_thread_in_native, id=4260, stack(0x00007f1c7c5fe000,0x00007f1c7c6ff000) (1028K)]
+
+
+Current CompileTask:
+C2:  91234 15321       4       com.acme.pricing.RuleEngine::evaluate (412 bytes)
+
+Stack: [0x00007f1c7c5fe000,0x00007f1c7c6ff000],  sp=0x00007f1c7c6f9b70,  free space=1006k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+V  [libjvm.so+0x7b2c41]  PhaseIdealLoop::build_loop_late_post_work(Node*, bool)+0x161
+V  [libjvm.so+0x7b3122]  PhaseIdealLoop::build_loop_late(VectorSet&, Node_List&, Node_Stack&)+0x82
+V  [libjvm.so+0x7b9e70]  PhaseIdealLoop::build_and_optimize()+0x7c0
+V  [libjvm.so+0x5a1d2e]  Compile::Optimize()+0x9ee
+V  [libjvm.so+0x5a4f0b]  Compile::Compile(ciEnv*, ciMethod*, int, Options, DirectiveSet*)+0x10eb
+V  [libjvm.so+0x4cf3a8]  C2Compiler::compile_method(ciEnv*, ciMethod*, int, bool, DirectiveSet*)+0x128
+V  [libjvm.so+0x5b7a0d]  CompileBroker::invoke_compiler_on_method(CompileTask*)+0x86d
+V  [libjvm.so+0x5b8640]  CompileBroker::compiler_thread_loop()+0x5a0
+V  [libjvm.so+0x86c1ab]  JavaThread::thread_main_inner()+0xcb
+V  [libjvm.so+0xe5b37a]  Thread::call_run()+0xba
+V  [libjvm.so+0xc4d4c1]  thread_native_entry(Thread*)+0xe1
+C  [libc.so.6+0x89c02]
+
+
+siginfo: si_signo: 11 (SIGSEGV), si_code: 1 (SEGV_MAPERR), si_addr: 0x0000000000000008
+
+---------------  P R O C E S S  ---------------
+
+Java Threads: ( => current thread )
+  0x00007f1cb0012000 JavaThread "main" [_thread_blocked, id=4243, stack(0x00007f1cb6a00000,0x00007f1cb6b00000) (1028K)]
+=>0x00007f1cb0144a30 JavaThread "C2 CompilerThread0" daemon [_thread_in_native, id=4260, stack(0x00007f1c7c5fe000,0x00007f1c7c6ff000) (1028K)]
+  0x00007f1cb0146a40 JavaThread "C1 CompilerThread0" daemon [_thread_blocked, id=4261, stack(0x00007f1c7c4fd000,0x00007f1c7c5fe000) (1028K)]
+  0x00007f1cb0221000 JavaThread "pricing-worker-1" [_thread_in_Java, id=4301, stack(0x00007f1c5a2fe000,0x00007f1c5a3ff000) (1028K)]
+
+Other Threads:
+  0x00007f1cb0131000 VMThread "VM Thread" [id=4255, stack(0x00007f1c7d0ff000,0x00007f1c7d200000) (1028K)]
+
+Threads with active compile tasks:
+C2 CompilerThread0  91240 15321       4       com.acme.pricing.RuleEngine::evaluate (412 bytes)
+Total: 1
+
+VM state: not at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread: None
+
+Heap:
+ PSYoungGen      total 611840K, used 301234K [0x00000000d5580000, 0x0000000100000000, 0x0000000100000000)
+ ParOldGen       total 1398272K, used 402211K [0x0000000080000000, 0x00000000d5580000, 0x00000000d5580000)
+ Metaspace       used 71234K, committed 72000K, reserved 1114112K
+
+Dynamic libraries:
+7f1c9d800000-7f1c9e9a1000 r-xp 00000000 fd:00 3409123                    /usr/lib/jvm/java-21-openjdk/lib/server/libjvm.so
+7f1cb7000000-7f1cb7028000 r--p 00000000 fd:00 1050212                    /usr/lib64/libc.so.6
+
+VM Arguments:
+jvm_args: -XX:+UseParallelGC 
+java_command: /srv/pricing/pricing.jar
+Launcher Type: SUN_STANDARD
+
+---------------  S Y S T E M  ---------------
+
+OS:
+Red Hat Enterprise Linux release 9.2 (Plow)
+uname: Linux 5.14.0-284.11.1.el9_2.x86_64 #1 SMP x86_64
+rlimit (soft/hard): STACK 8192k/unlimited , CORE 0k/unlimited , NPROC 254823/254823 , NOFILE 65536/65536
+
+Memory: 4k page, physical 65842292k(26413052k free), swap 8388604k(8388604k free)
+
+vm_info: OpenJDK 64-Bit Server VM (21.0.1+12-LTS) for linux-amd64 JRE (21.0.1+12-LTS), built on 2023-10-17T00:00:00Z by "mockbuild" with gcc 11.3.1
+
+END.

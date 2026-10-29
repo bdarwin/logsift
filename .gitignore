@@ -8,3 +8,6 @@ out/
 
 # recordings a test JVM might write into its working folder
 /hotspot-pid-*.jfr
+
+# test samples are logs too: keep them
+!src/test/resources/**/*.log

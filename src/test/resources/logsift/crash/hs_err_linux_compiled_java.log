@@ -1,0 +1,87 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007fa1b4c2e5d8, pid=5150, tid=5199
+#
+# JRE version: OpenJDK Runtime Environment (21.0.2+13) (build 21.0.2+13-58)
+# Java VM: OpenJDK 64-Bit Server VM (21.0.2+13-58, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, linux-amd64)
+# Problematic frame:
+# J 18877 c2 com.acme.feed.Decoder.decodeVarint(Ljava/nio/ByteBuffer;)J (96 bytes) @ 0x00007fa1b4c2e5d8 [0x00007fa1b4c2e4a0+0x0000000000000138]
+#
+# No core dump will be written. Core dumps have been disabled. To enable core dumping, try "ulimit -c unlimited" before starting Java again
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Xmx4g com.acme.feed.FeedMain
+
+Host: AMD EPYC 7763 64-Core Processor, 8 cores, 31G, Ubuntu 24.04 LTS
+Time: Mon Mar  3 07:41:22 2025 UTC elapsed time: 412.500213 seconds (0d 0h 6m 52s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00007fa1c8a3b000):  JavaThread "feed-decoder-2" [_thread_in_Java, id=5199, stack(0x00007fa1a0efe000,0x00007fa1a0fff000) (1028K)]
+
+Stack: [0x00007fa1a0efe000,0x00007fa1a0fff000],  sp=0x00007fa1a0ffd7a0,  free space=1021k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+J 18877 c2 com.acme.feed.Decoder.decodeVarint(Ljava/nio/ByteBuffer;)J (96 bytes) @ 0x00007fa1b4c2e5d8 [0x00007fa1b4c2e4a0+0x0000000000000138]
+J 18890 c2 com.acme.feed.Decoder.next()Lcom/acme/feed/Message; (240 bytes) @ 0x00007fa1b4c31a0c [0x00007fa1b4c31840+0x00000000000001cc]
+j  com.acme.feed.FeedLoop.run()V+31
+j  java.lang.Thread.run()V+11 java.base@21.0.2
+v  ~StubRoutines::call_stub 0x00007fa1b3c3dcc6
+V  [libjvm.so+0x86a1b5]  JavaCalls::call_helper(JavaValue*, methodHandle const&, JavaCallArguments*, JavaThread*)+0x315
+
+siginfo: si_signo: 11 (SIGSEGV), si_code: 1 (SEGV_MAPERR), si_addr: 0x00007fa0e1000010
+
+---------------  P R O C E S S  ---------------
+
+Java Threads: ( => current thread )
+=>0x00007fa1c8a3b000 JavaThread "feed-decoder-2" [_thread_in_Java, id=5199, stack(0x00007fa1a0efe000,0x00007fa1a0fff000) (1028K)]
+  0x00007fa1c8a3c800 JavaThread "feed-decoder-1" [_thread_in_Java, id=5198, stack(0x00007fa1a0ffe000,0x00007fa1a10ff000) (1028K)]
+  0x00007fa1c8a3e000 JavaThread "shm-reader" [_thread_in_native, id=5201, stack(0x00007fa1a0dfd000,0x00007fa1a0efe000) (1028K)]
+
+Other Threads:
+  0x00007fa1c80e1a20 VMThread "VM Thread" [id=5160, stack(0x00007fa1b01ff000,0x00007fa1b0300000) (1028K)]
+
+Threads with active compile tasks:
+C2 CompilerThread1  412431 18911       4       com.acme.feed.Decoder::nextField (77 bytes)
+Total: 1
+
+VM state: not at safepoint (normal execution)
+
+VM Mutex/Monitor currently owned by a thread: None
+
+Heap:
+ garbage-first heap   total 4194304K, used 4190208K [0x0000000700000000, 0x0000000800000000)
+  region size 2048K, 0 young (0K), 0 survivors (0K)
+ Metaspace       used 30212K, committed 30976K, reserved 1114112K
+
+Internal exceptions (2 events):
+Event: 410.120 Thread 0x00007fa1c8a3c800 Exception <a 'java/lang/NoSuchFieldError'{0x00000007f00a1b20}: 'int com.acme.feed.Message.kind'> (0x00000007f00a1b20) 
+thrown [src/hotspot/share/interpreter/linkResolver.cpp, line 773]
+Event: 412.402 Thread 0x00007fa1c8a3b000 Exception <a 'java/lang/OutOfMemoryError'{0x00000007f1a2b3c4}: Java heap space> (0x00000007f1a2b3c4) 
+thrown [src/hotspot/share/gc/shared/memAllocator.cpp, line 138]
+
+Dynamic libraries:
+7fa1b8000000-7fa1b91a1000 r-xp 00000000 08:01 131388                     /usr/lib/jvm/jdk-21/lib/server/libjvm.so
+7fa1a2000000-7fa1a2020000 r-xp 00000000 08:01 52113                      /opt/feed/lib/libshmring.so
+
+VM Arguments:
+jvm_args: -Xmx4g 
+java_command: com.acme.feed.FeedMain
+Launcher Type: SUN_STANDARD
+
+JVMTI agents:
+/opt/profiler/libasyncProfiler.so path:/opt/profiler/libasyncProfiler.so, loaded, initialized, initialization time: 3 ms
+
+---------------  S Y S T E M  ---------------
+
+OS:
+PRETTY_NAME="Ubuntu 24.04 LTS"
+uname: Linux 6.8.0-31-generic #31-Ubuntu SMP x86_64
+
+Memory: 4k page, physical 32876544k(9203144k free), swap 0k(0k free)
+
+vm_info: OpenJDK 64-Bit Server VM (21.0.2+13-58) for linux-amd64 JRE (21.0.2+13-58), built on 2024-01-05T18:32:24Z by "openjdk" with gcc 11.2.0
+
+END.
