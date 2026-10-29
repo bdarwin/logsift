@@ -152,18 +152,30 @@ class TraceToolsTest {
 
     @Test
     void explainsAFlightRecording() throws Exception {
+        // some machines (virtual ARM ones) take a while to give CPU samples: record until there are some
         Path jfr = logs.resolve("cpu.jfr");
-        try (jdk.jfr.Recording r = new jdk.jfr.Recording()) {
-            r.enable("jdk.ExecutionSample").withPeriod(java.time.Duration.ofMillis(1));
-            r.start();
-            long end = System.nanoTime() + 600_000_000L;
-            double x = 0;
-            while (System.nanoTime() < end) {
-                x += Math.sqrt(x + 1);
+        long samples = 0;
+        for (int round = 0; round < 5 && samples == 0; round++) {
+            try (jdk.jfr.Recording r = new jdk.jfr.Recording()) {
+                r.enable("jdk.ExecutionSample").withPeriod(java.time.Duration.ofMillis(1));
+                r.start();
+                long end = System.nanoTime() + 1_000_000_000L;
+                double x = 0;
+                while (System.nanoTime() < end) {
+                    x += Math.sqrt(x + 1);
+                }
+                assertTrue(x > 0);
+                r.stop();
+                r.dump(jfr);
             }
-            assertTrue(x > 0);
-            r.stop();
-            r.dump(jfr);
+            samples = jdk.jfr.consumer.RecordingFile.readAllEvents(jfr).stream()
+                    .filter(e -> e.getEventType().getName().equals("jdk.ExecutionSample")).count();
+        }
+        if (samples == 0) {
+            // this machine gives no samples at all: the tool says so plainly
+            Exception e = assertThrows(Exception.class, () -> run(TraceTools.ANALYZE_PROFILE, "path", jfr.toString()));
+            assertTrue(e.getMessage().contains("no samples"), e.getMessage());
+            return;
         }
         String a = run(TraceTools.ANALYZE_PROFILE, "path", jfr.toString());
         assertTrue(a.contains("samples."), a);
