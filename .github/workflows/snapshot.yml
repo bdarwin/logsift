@@ -210,7 +210,8 @@ jobs:
           # the package's platform must be the machine's: an x64 package on Arm64 can't load its
           # Arm64 helper DLL ("A DLL required for this install to complete could not be run")
           $installer = New-Object -ComObject WindowsInstaller.Installer
-          $template = $installer.SummaryInformation($msi.FullName, 0).Property(7)
+          $info = $installer.GetType().InvokeMember('SummaryInformation', 'GetProperty', $null, $installer, @($msi.FullName, 0))
+          $template = $info.GetType().InvokeMember('Property', 'GetProperty', $null, $info, @(7))
           Write-Host "Package template: $template"
           $want = if ('${{ matrix.target }}' -eq 'windows-arm64') { 'Arm64' } else { 'x64' }
           if (-not $template.StartsWith("$want;")) { throw "package is for '$template', not $want" }
