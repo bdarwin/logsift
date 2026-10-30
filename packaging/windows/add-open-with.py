@@ -1,6 +1,6 @@
 """Adds "Open with Logsift" to the Windows installer that jpackage makes.
 
-Usage: add-open-with.py <jpackage's main.wxs> <patched main.wxs>
+Usage: add-open-with.py <jpackage's main.wxs> <patched main.wxs> [x64|arm64]
 
 Instead of taking over .log files (their icon, double-click and type name stay as they
 are), the installer adds:
@@ -12,6 +12,11 @@ Everything is under HKCU and is removed again on uninstall.
 It also makes every build replace the one installed (snapshots share a version number, so
 each build gets its own product code and same-version upgrades are allowed), and closes a
 running Logsift before its files are replaced or removed.
+
+For arm64 it marks the package as an Arm64 one: jpackage always says x64, and its helper
+DLL (built for Arm64 by an Arm64 JDK) then can't be loaded by the x64 helper process that
+Windows starts for an x64 package ("A DLL required for this install to complete could not
+be run").
 """
 import re
 import sys
@@ -63,7 +68,7 @@ CLOSE = '''
 '''
 
 
-def main(src, dst):
+def main(src, dst, arch='x64'):
     s = open(src, encoding='utf-8').read()
     if '</Product>' not in s or '</Feature>' not in s or 'INSTALLDIR' not in s:
         sys.exit(f'{src}: not the main.wxs this script knows (no Product, Feature or INSTALLDIR)')
@@ -87,13 +92,28 @@ def main(src, dst):
     if n < 2 or 'IncludeMaximum="yes"' not in s or 'IncludeMinimum="no"' not in s:
         sys.exit(f'{src}: Upgrade table not as expected')
 
+    if arch == 'arm64':
+        def arm64(m):
+            tag = re.sub(r'\s+Platform="[^"]*"', '', m.group(0))
+            # Arm64 packages need Windows Installer 5.0
+            tag = re.sub(r'InstallerVersion="(\d+)"',
+                         lambda v: f'InstallerVersion="{max(500, int(v.group(1)))}"', tag)
+            if 'InstallerVersion=' not in tag:
+                tag = tag.replace('<Package', '<Package InstallerVersion="500"', 1)
+            return tag.replace('<Package', '<Package Platform="arm64"', 1)
+        s, n = re.subn(r'<Package\b[^>]*>', arm64, s, count=1, flags=re.S)
+        if n != 1:
+            sys.exit(f'{src}: no Package element')
+    elif arch != 'x64':
+        sys.exit(f'unknown architecture: {arch}')
+
     if UTIL_NS not in s:
         s, n = re.subn(r'<Wix\b', f'<Wix xmlns:util="{UTIL_NS}"', s, count=1)
         if n != 1:
             sys.exit(f'{src}: no Wix element')
     open(dst, 'w', encoding='utf-8').write(s)
-    print(f'{dst}: added Open with Logsift, same-version upgrades, closing a running Logsift')
+    print(f'{dst}: added Open with Logsift, same-version upgrades, closing a running Logsift ({arch})')
 
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], *sys.argv[3:4])

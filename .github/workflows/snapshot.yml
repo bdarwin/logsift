@@ -130,7 +130,7 @@ jobs:
                    --win-upgrade-uuid 2cf55e2a-4bbe-4a4c-8397-7b68517646a0)
               jpackage --type msi --dest msi-first --temp msi-temp "${MSI[@]}" "${COMMON[@]}"
               mkdir -p msi-res
-              python packaging/windows/add-open-with.py msi-temp/config/main.wxs msi-res/main.wxs
+              python packaging/windows/add-open-with.py msi-temp/config/main.wxs msi-res/main.wxs "${{ matrix.target == 'windows-arm64' && 'arm64' || 'x64' }}"
               jpackage --type msi --dest dist --resource-dir msi-res "${MSI[@]}" "${COMMON[@]}"
               mv dist/Logsift-*.msi "dist/$NAME.msi"
               ;;
@@ -203,10 +203,17 @@ jobs:
           rm -rf mcp-try mcp-out.txt
 
       - name: Try the Windows installer (install, check, uninstall)
-        if: matrix.target == 'windows-x64' && !startsWith(github.ref_name, 'beta/')
+        if: startsWith(matrix.target, 'windows-') && !startsWith(github.ref_name, 'beta/')
         shell: pwsh
         run: |
           $msi = Get-ChildItem dist/*.msi | Select-Object -First 1
+          # the package's platform must be the machine's: an x64 package on Arm64 can't load its
+          # Arm64 helper DLL ("A DLL required for this install to complete could not be run")
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $template = $installer.SummaryInformation($msi.FullName, 0).Property(7)
+          Write-Host "Package template: $template"
+          $want = if ('${{ matrix.target }}' -eq 'windows-arm64') { 'Arm64' } else { 'x64' }
+          if (-not $template.StartsWith("$want;")) { throw "package is for '$template', not $want" }
           $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v install.log" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 40; throw "install failed: $($p.ExitCode)" }
           $exe = Get-ChildItem "$env:LOCALAPPDATA" -Recurse -Filter Logsift.exe -ErrorAction SilentlyContinue | Select-Object -First 1
