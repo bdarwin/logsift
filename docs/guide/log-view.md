@@ -88,7 +88,7 @@ Right: *MATCHING ONLY*, the line number (*Ln 1,234*), the current line's time, *
 
 ## Columns
 
-**Columns** (View → Columns, Ctrl+Shift+K) shows lines as columns: Time, Level, Thread, Logger, Message, or whatever the format has (host, process, status, …). Stack traces show under the message.
+**Columns** (View → Columns, Ctrl+Shift+K) shows lines as columns: Time, Level, Thread, Logger, Message, or whatever the format has (host, process, status, …). Stack traces show under the message. A table (a CSV or TSV file) opens with Columns on. Turning them off in a table is remembered for tables, apart from logs. A title longer than its column is cut with "…": hover it, or widen the column, to read all of it.
 
 ![Parsed columns with top messages below](../screenshots/columns-and-messages.png)
 
@@ -121,7 +121,7 @@ A quoted value may hold line breaks (`"line one` on one line, `line two"` on the
 
 The header and the rows needn't have the same number of fields. Names can have spaces and values can be empty. A header can name a column that no row fills, such as an empty last column some exports add: it's still a column, and it stays empty. A separator at the end of the header names nothing, so it adds no column. When rows have a value past the header's last name, that value gets its own column, called *column 5* for example. All of this works in Profile, Pivot, Values and Query.
 
-- In the Columns view the header row isn't shown as a row: its names are the column titles. Line numbers are those of the file, so the first row is line 2. The titles are the header's names as written (*order_id*, *timestamp*), in the tree, the filters and their chips too. Logsift still knows which column holds the time, level, thread, logger or message (*timestamp*, *severity*, *msg*…): hover such a title to see it. The plain view shows the header line as it is.
+- In the Columns view the header row isn't shown as a row: its names are the column titles. Line numbers are those of the file, so the first row is line 2. The titles are the header's names as written (*order_id*, *timestamp*), in the tree, the filters and their chips too. Logsift still knows which column holds the time, level, thread, logger or message (*timestamp*, *severity*, *msg*…): hover such a title to see it. This is also true of a header longer than a line is shown (64 KB, thousands of columns): its names are all column titles. The plain view shows the header line as it is.
 - Right-click a value to show only (or hide) the rows with it, or a column title for **Filter by …**: see [Filters on a column](filters.md#filters-on-a-column).
 - The [Profile](profile.md) tab shows what each column holds, with a chart per column. The **Messages** tab groups rows by the message column (a table without one has no messages to group). The [Metrics](metrics.md#columns) tab charts the columns of numbers, and how many rows each value of a column like *host* or *status* has over time.
 

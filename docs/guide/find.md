@@ -16,6 +16,8 @@ description: The find bar, Find All, several searches at once with their colours
 - Inside the box: **Aa** (match case), **W** (whole word), **.\*** (regular expression).
 - The count: *3 of 1,240* when you are on a match, else *1,240 matches*. *…* means it is still counting; *+* means there are more than it counts. *no matches* outlines the box in amber; *invalid regex* outlines it in red (hover for why).
 - **Enter** / **Shift+Enter** (or ▼ ▲) go to the next and previous match. **F3** / **Shift+F3** do the same from anywhere (also ⌘G / ⇧⌘G on macOS).
+  - They go match by match. A line or table row with several matches is stepped through first, and then the next line.
+  - The current match is selected (outlined in the Columns view) and scrolled into view, even when it is far to the right, such as in column 650 of a wide table or at the end of a long line.
 - **Find All** (Ctrl+Enter) lists every match in **Find results** below the log.
 - **Filter ▾** turns the search into a filter: **Show Only Matching Lines**, **Hide Matching Lines** or **Color Matching Lines** (see [Filters](filters.md)).
 - The folder button searches for it in a whole folder, zips included (see [Folder search](folder-search.md)).

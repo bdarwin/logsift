@@ -99,10 +99,16 @@ public final class LogFormat {
 
     /** CSV: whether a line is the header row (which names the columns, and has no values). */
     public boolean isHeader(String line) {
-        return header != null && line != null
-                && (line.equals(header) || line.length() == header.length() + 1 && line.startsWith("\uFEFF")
-                        && line.endsWith(header));
+        if (header == null || line == null) {
+            return false;
+        }
+        String l = line.startsWith("\uFEFF") ? line.substring(1) : line;
+        // a header longer than a line is shown (64 KB, thousands of columns) comes cut short
+        return l.equals(header) || l.length() >= CUT_HEADER && l.length() < header.length() && header.startsWith(l);
     }
+
+    /** A line at least this long that begins the header is the header, cut short. */
+    private static final int CUT_HEADER = 4096;
 
     /** The built-in layouts, for choosing one by hand. */
     public static List<LogFormat> presets() {
@@ -512,7 +518,9 @@ public final class LogFormat {
         if (delimiter == 0 || !isHeader(line)) {
             return null;
         }
-        String[] v = Csv.split(line, delimiter, starts).toArray(new String[0]);
+        boolean bom = line.startsWith("\uFEFF");
+        // all the names, also where the line shown is cut short
+        String[] v = Csv.split(bom ? "\uFEFF" + header : header, delimiter, starts).toArray(new String[0]);
         if (v.length > 0 && v[0].startsWith("\uFEFF")) {
             v[0] = v[0].substring(1);
             if (starts != null && starts.length > 0) {

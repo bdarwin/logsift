@@ -502,6 +502,102 @@ public final class LogView extends JPanel {
         listeners.forEach(l -> l.selectionEdited(this));
     }
 
+    /**
+     * Selects characters {@code start} to {@code end} of a row's text (a match) and scrolls
+     * them into view: the row near the middle, and sideways to the match, which in a wide table
+     * or a long line may be far to the right.
+     */
+    public void revealRange(int row, int start, int end) {
+        int n = source.rowCount();
+        if (n == 0) {
+            return;
+        }
+        row = Math.max(firstRow(), Math.min(n - 1, row));
+        Line l = lineAt(row);
+        start = Math.max(0, Math.min(start, l.raw.length()));
+        end = Math.max(start, Math.min(end, l.raw.length()));
+        anchor = lead = row;
+        anchorCol = start;
+        leadCol = end;
+        lineMode = false;
+        int seg = 0;
+        if (wrap) {
+            int c = l.col(start);
+            while (seg + 1 < l.segCount() && l.segStart[seg + 1] <= c) {
+                seg++;
+            }
+        }
+        int[] pos = advance(row, seg, -(visibleRows() / 2));
+        setTop(pos[0], pos[1]);
+        if (!wrap) {
+            int[] span = contentSpan(l, start, end);
+            int textWidth = canvas.getWidth() - gutterWidth();
+            if (span != null && textWidth > 0 && (span[0] < hOffset || span[1] > hOffset + textWidth)) {
+                // keep a little of what comes before the match in view
+                maxColumns = Math.max(maxColumns, (span[1] + textWidth) / Math.max(1, charWidth));
+                hOffset = Math.max(0, span[0] - Math.min(textWidth / 4, 12 * charWidth));
+                updateScrollbars();
+            }
+        }
+        updateFollowFromPosition();
+        canvas.repaint();
+        header.repaint();
+        listeners.forEach(lis -> lis.selectionEdited(this));
+    }
+
+    /** {from, to} x of raw chars {@code start..end} in the scrolled content (no gutter, no offset). */
+    private int[] contentSpan(Line l, int start, int end) {
+        ColumnLayout cl = columns;
+        if (cl != null && l.cells != null && l.cellStarts != null) {
+            // the cell the match is in: the last shown one starting at or before it (where each
+            // cell starts is known from reading the row, quotes and all)
+            int[] visible = cl.visible();
+            int best = -1;
+            int bestStart = -1;
+            int bestX = 0;
+            int x = 0;
+            for (int c = 0; c < visible.length; c++) {
+                int col = visible[c];
+                int s0 = col < l.cellStarts.length ? l.cellStarts[col] : -1;
+                if (s0 >= 0 && s0 <= start && s0 >= bestStart) {
+                    best = c;
+                    bestStart = s0;
+                    bestX = x;
+                }
+                if (c < visible.length - 1) {
+                    x += cl.width(c, charWidth);
+                }
+            }
+            if (best >= 0 && best < visible.length - 1) {
+                int w = cl.width(best, charWidth);
+                int from = bestX + Math.min(w - charWidth, (start - bestStart) * charWidth);
+                int to = Math.min(bestX + w, Math.max(from + charWidth, bestX + (end - bestStart) * charWidth));
+                return new int[] {bestX, Math.max(from, to)};
+            }
+        }
+        int base = cl != null && !(l.cells == null && cl.leftOfAll()) ? cl.messageX(charWidth) : 0;
+        int c0 = l.col(start);
+        int c1 = Math.max(c0 + 1, l.col(end));
+        return new int[] {base + c0 * charWidth, base + c1 * charWidth};
+    }
+
+    /** {start, end} of the selection on the current row (raw chars); null if it spans rows. */
+    public int[] selectedRange() {
+        if (lead < 0 || anchor != lead || lineMode) {
+            return null;
+        }
+        return new int[] {Math.min(anchorCol, leadCol), Math.max(anchorCol, leadCol)};
+    }
+
+    /** The text of a row as shown (a line, or a row's first line), or null. */
+    public String rowText(int row) {
+        return textOf(row);
+    }
+
+    int hOffsetForTest() {
+        return hOffset;
+    }
+
     public void focusView() {
         canvas.requestFocusInWindow();
     }
@@ -1916,9 +2012,15 @@ public final class LogView extends JPanel {
                         if (selHere) {
                             int a = l.row == sel[0] ? Math.min(sel[1], l.raw.length()) : 0;
                             int b = l.row == sel[2] ? Math.min(sel[3], l.raw.length()) : l.raw.length();
-                            paintColumnsSelection(gt, l, seg, y, a, b, l.row < sel[2], selColor);
+                            paintColumnsSelection(gt, l, seg, y, a, b, l.row < sel[2], selColor, false);
                         }
                         paintColumnsRow(gt, l, seg, y, lineFg[k]);
+                        if (selHere && sel[0] == sel[2] && sel[3] > sel[1]) {
+                            // a selection inside a row (such as Find's current match): outlined,
+                            // as the cells' match highlights are drawn over it
+                            paintColumnsSelection(gt, l, seg, y, sel[1], sel[3], false,
+                                    Theme.uiColor("Component.accentColor", new Color(0x2563EB)), true);
+                        }
                         paintGutter(g, l, seg, i, y, gutter, fg);
                         continue;
                     }
@@ -2181,8 +2283,19 @@ public final class LogView extends JPanel {
 
         /** Columns view: the selected characters {@code [a, b)} of a line, in its cells and message. */
         private void paintColumnsSelection(Graphics2D g, Line l, int seg, int y, int a, int b, boolean toNext,
-                                           Color color) {
+                                           Color color, boolean outline) {
             g.setColor(color);
+            java.util.function.IntBinaryOperator box = (x0, x1) -> {
+                if (outline) {
+                    java.awt.Stroke was = g.getStroke();
+                    g.setStroke(new BasicStroke(2f));
+                    g.drawRoundRect(x0 - 1, y + 1, x1 - x0 + 1, rowHeight - 3, 4, 4);
+                    g.setStroke(was);
+                } else {
+                    g.fillRect(x0, y, x1 - x0, rowHeight);
+                }
+                return 0;
+            };
             ColumnLayout cl = columns;
             if (l.cells != null && seg == 0) {
                 int x = gutterWidth() - hOffset;
@@ -2191,18 +2304,23 @@ public final class LogView extends JPanel {
                     int col = visible[c];
                     int w = cl.width(c, charWidth);
                     String v = l.cells[col] == null ? "" : l.cells[col].replace('\t', ' ');
-                    int start = l.startOf(col);
+                    // where the cell's text starts in the line (known from reading it, quotes and all)
+                    int start = l.cellStarts != null && col < l.cellStarts.length && l.cellStarts[col] >= 0
+                            && l.cells[col] != null ? l.cellStarts[col] : l.startOf(col);
                     int i0 = Math.max(0, a - start);
                     int i1 = Math.min(v.length(), b - start);
                     if (start < l.raw.length() && i1 > i0) {
                         int x0 = x + metrics.stringWidth(v.substring(0, i0));
                         int x1 = Math.min(x + w - charWidth, x + metrics.stringWidth(v.substring(0, i1)));
                         if (x1 > x0) {
-                            g.fillRect(x0, y, x1 - x0, rowHeight);
+                            box.applyAsInt(x0, x1);
                         }
                     }
                     x += w;
                 }
+            }
+            if (outline && l.cells != null && b <= l.textBase) {
+                return; // the selection is in a cell, not in the last column
             }
             int s0 = l.segStart[seg];
             int s1 = l.segEnd(seg);
@@ -2215,7 +2333,7 @@ public final class LogView extends JPanel {
                 x1 += charWidth / 2; // the line break is selected too
             }
             if (x1 > x0) {
-                g.fillRect(x0, y, x1 - x0, rowHeight);
+                box.applyAsInt(x0, x1);
             }
         }
 
@@ -2322,6 +2440,20 @@ public final class LogView extends JPanel {
                     return "Logsift reads “" + asWritten + "” as the " + col + " column · " + super.getToolTipText(e);
                 }
             }
+            if (col != null) {
+                // a title cut to fit its column: all of it
+                int[] visible = columns.visible();
+                int idx = columns.format().columns().indexOf(col);
+                for (int c = 0; c < visible.length - 1; c++) {
+                    if (visible[c] == idx) {
+                        String title = columns.title(idx);
+                        java.awt.FontMetrics fm = getFontMetrics(getFont().deriveFont(Font.BOLD));
+                        if (fm.stringWidth(title) > columns.width(c, charWidth) - charWidth) {
+                            return title + " · " + super.getToolTipText(e);
+                        }
+                    }
+                }
+            }
             return super.getToolTipText(e);
         }
 
@@ -2375,6 +2507,16 @@ public final class LogView extends JPanel {
             return new Dimension(100, rowHeight + 6);
         }
 
+        /** A title cut with "…" to fit {@code room} pixels. */
+        private static String fit(String name, java.awt.FontMetrics fm, int room) {
+            String dots = "…";
+            int n = name.length();
+            while (n > 0 && fm.stringWidth(name.substring(0, n)) + fm.stringWidth(dots) > room) {
+                n--;
+            }
+            return n == 0 ? "" : name.substring(0, n) + dots;
+        }
+
         @Override
         protected void paintComponent(Graphics g0) {
             Graphics2D g = (Graphics2D) g0.create();
@@ -2397,11 +2539,22 @@ public final class LogView extends JPanel {
                 int[] visible = columns.visible();
                 java.awt.FontMetrics fm = g.getFontMetrics();
                 for (int c = 0; c < visible.length; c++) {
-                    String name = columns.title(visible[c]);
-                    g.setColor(Theme.foreground());
-                    g.drawString(name, x, (getHeight() + fm.getAscent()) / 2 - 2);
-                    if (c < visible.length - 1) {
-                        int w = columns.width(c, charWidth);
+                    boolean last = c == visible.length - 1;
+                    int w = last ? Integer.MAX_VALUE / 4 : columns.width(c, charWidth);
+                    if (x >= getWidth()) {
+                        break; // the rest are off to the right
+                    }
+                    if (x + w > gutter - 4) {
+                        String name = columns.title(visible[c]);
+                        g.setColor(Theme.foreground());
+                        int room = w - charWidth;
+                        if (!last && fm.stringWidth(name) > room) {
+                            // a title longer than its column: cut, so it doesn't run over the next
+                            name = fit(name, fm, room);
+                        }
+                        g.drawString(name, x, (getHeight() + fm.getAscent()) / 2 - 2);
+                    }
+                    if (!last) {
                         g.setColor(Theme.gutterForeground());
                         g.drawLine(x + w - charWidth / 2, 4, x + w - charWidth / 2, getHeight() - 4);
                         x += w;

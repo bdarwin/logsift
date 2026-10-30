@@ -149,6 +149,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private volatile logsift.core.TimeIndex timeIndex;
     private volatile logsift.core.LogFormat logFormat; // columns; null = none found
     private boolean columnsWanted;
+    private boolean columnsChosen;  // turned on or off in this tab: kept as chosen
+    private boolean tableColumns = true; // a table shows as one unless turned off
     private final TimelineBar timeline;
     private long[] timeRange;                       // selected {from, to} times, or null
     private boolean timelineWanted = true;
@@ -653,6 +655,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 logsift.core.Levels.lineRegex(logFormat, List.of("ERROR")),
                 logsift.core.Levels.lineRegex(lf, List.of("ERROR")));
         logFormat = lf;
+        if (lf != null && lf.isCsv() && !columnsChosen) {
+            // a table reads as a table: its header names the columns, not a line of text
+            columnsWanted = tableColumns;
+        }
         if (levelsChanged) { // the user's format reads levels from its level column
             configureLevelSearch(errorLines, List.of(logsift.core.Levels.ERROR), lf);
             configureLevelSearch(warningLines, List.of(logsift.core.Levels.WARN), lf);
@@ -1213,6 +1219,16 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             return -1;
         }
         return matchingOnly ? filterResult.lineAt(Math.min(row, filterResult.count() - 1)) : row;
+    }
+
+    /** Shows a file line with chars {@code start..end} selected and scrolled into view (a match). */
+    void showMatch(long line, int start, int end) {
+        if (matchingOnly && !filterResult.contains(line)) {
+            setMatchingOnly(false);
+        }
+        long row = matchingOnly ? filterResult.rowAtOrAfter(line) : line;
+        main.revealRange((int) Math.min(row, Integer.MAX_VALUE - 1), start, end);
+        host.tabStatusChanged(this);
     }
 
     /** Shows a file line; if the filters hide it, switches to showing all lines first. */
@@ -2842,7 +2858,19 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     /** Shows lines as columns when the log has a known layout. */
     void setColumnsVisible(boolean on) {
+        columnsChosen = true;
         columnsWanted = on;
+        applyColumns();
+        syncLogBar();
+    }
+
+    /**
+     * The view settings a new tab starts with: columns for a log, and for a table (a CSV file,
+     * known once read) whether it shows as a table, which it does unless turned off.
+     */
+    void setColumnsDefaults(boolean forLogs, boolean forTables) {
+        columnsWanted = forLogs;
+        tableColumns = forTables;
         applyColumns();
         syncLogBar();
     }
@@ -3671,6 +3699,27 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             @Override
             public void showLine(long line) {
                 LogTab.this.showLine(line);
+            }
+
+            @Override
+            public String lineText(long line) {
+                long row = matchingOnly ? filterResult.rowAtOrAfter(line) : line;
+                if (row < 0 || row > Integer.MAX_VALUE - 1 || (matchingOnly && !filterResult.contains(line))) {
+                    String[] one = new String[1];
+                    doc.readLines(line, 1, one);
+                    return one[0];
+                }
+                return main.rowText((int) row);
+            }
+
+            @Override
+            public int[] selectedRange() {
+                return main.selectedRange();
+            }
+
+            @Override
+            public void showMatch(long line, int start, int end) {
+                LogTab.this.showMatch(line, start, end);
             }
 
             @Override

@@ -49,6 +49,21 @@ final class FindBar extends JPanel {
 
         void showLine(long line);
 
+        /** A line's text as shown, or null. */
+        default String lineText(long line) {
+            return null;
+        }
+
+        /** {start, end} of the selection on the selected line, or null. */
+        default int[] selectedRange() {
+            return null;
+        }
+
+        /** Shows a line with chars {@code start..end} selected and scrolled into view. */
+        default void showMatch(long line, int start, int end) {
+            showLine(line);
+        }
+
         /** The search or its hits changed: repaint highlights and marks. */
         void searchChanged();
 
@@ -320,10 +335,10 @@ final class FindBar extends JPanel {
             int i = hits.firstAtOrAfter(anchor);
             if (i < n) {
                 jumpPending = false;
-                host.showLine(hits.get(i));
+                showMatchOn(hits.get(i), true);
             } else if (!s.isRunning()) {
                 jumpPending = false;
-                host.showLine(hits.get(0)); // none after: from the top
+                showMatchOn(hits.get(0), true); // none after: from the top
             }
         }
         updateCount();
@@ -370,6 +385,11 @@ final class FindBar extends JPanel {
         }
         jumpPending = false;
         long cur = host.currentLine();
+        // first the line's other matches: a row of a wide table, or a long line, may have several
+        if (cur >= 0 && nextInLine(cur, forward)) {
+            updateCount();
+            return true;
+        }
         if (cur < 0) {
             cur = host.firstVisibleLine() - 1;
         }
@@ -385,9 +405,60 @@ final class FindBar extends JPanel {
                 i = n - 1;
             }
         }
-        host.showLine(hits.get(i));
+        showMatchOn(hits.get(i), forward);
         updateCount();
         return true;
+    }
+
+    /** Selects the match after (or before) the selection on the same line; false if none. */
+    private boolean nextInLine(long line, boolean forward) {
+        String text = host.lineText(line);
+        int[] sel = host.selectedRange();
+        if (text == null || sel == null || query == null) {
+            return false;
+        }
+        java.util.regex.Matcher m = query.toPattern().matcher(text);
+        if (forward) {
+            int from = sel[1] > sel[0] ? sel[1] : sel[0] + 1;
+            if (from <= text.length() && m.find(from) && m.end() > m.start()) {
+                host.showMatch(line, m.start(), m.end());
+                return true;
+            }
+            return false;
+        }
+        int[] last = null;
+        while (m.find() && m.start() < sel[0]) {
+            if (m.end() > m.start()) {
+                last = new int[] {m.start(), m.end()};
+            }
+        }
+        if (last == null) {
+            return false;
+        }
+        host.showMatch(line, last[0], last[1]);
+        return true;
+    }
+
+    /** Shows a line with its first (or last) match selected, in view. */
+    private void showMatchOn(long line, boolean first) {
+        String text = host.lineText(line);
+        if (text != null && query != null) {
+            java.util.regex.Matcher m = query.toPattern().matcher(text);
+            int[] at = null;
+            while (m.find()) {
+                if (m.end() > m.start()) {
+                    at = new int[] {m.start(), m.end()};
+                    if (first) {
+                        break;
+                    }
+                }
+            }
+            if (at != null) {
+                host.showMatch(line, at[0], at[1]);
+                return;
+            }
+        }
+        host.showLine(line);
     }
 
     private void findAll() {

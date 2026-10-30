@@ -631,7 +631,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tab.mainView().setStripes(PREFS.getBoolean("stripes", true));
         tab.resultsView().setStripes(PREFS.getBoolean("stripes", true));
         tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
-        tab.setColumnsVisible(PREFS.getBoolean("columns", false));
+        tab.setColumnsDefaults(PREFS.getBoolean("columns", false), PREFS.getBoolean("tableColumns", true));
         tab.setAutoReload(PREFS.getBoolean("autoReload", false));
         tabs.addTab(tab.title(), tab);
         int idx = tabs.getTabCount() - 1;
@@ -3847,8 +3847,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Shows the current log's lines as columns (time, level, thread, ...). */
     public void setColumns(boolean on) {
-        PREFS.putBoolean("columns", on);
         LogTab t = currentTab();
+        PREFS.putBoolean(t != null && t.isCsv() ? "tableColumns" : "columns", on);
         if (t != null) {
             t.setColumnsVisible(on);
         }

@@ -7079,6 +7079,132 @@ class VisualTest {
         });
     }
 
+    @Test
+    @Order(61)
+    void findStepsThroughEachMatchAndScrollsToIt() throws Exception {
+        // a table of 700 columns whose header is longer than a line is shown (64 KB): the header
+        // isn't a row, and Find goes match by match, also to ones far to the right
+        Path f = dir.resolve("wide-find.csv");
+        try (var w = Files.newBufferedWriter(f)) {
+            StringBuilder head = new StringBuilder("id,customer");
+            for (int c = 2; c < 700; c++) {
+                head.append(",Customer account balance adjusted for currency, fees and rounding ")
+                        .append("in the reporting period for the North-West region ").append(c).append(" (EUR)");
+            }
+            w.write(head.append("\n").toString().replace(", fees", " fees"));
+            for (int r = 0; r < 40; r++) {
+                StringBuilder row = new StringBuilder().append(r).append(',')
+                        .append(r % 2 == 0 ? "\"Smith, Ann\"" : "Lee");
+                for (int c = 2; c < 700; c++) {
+                    row.append(',').append(c == 650 && r % 2 == 0 ? "Smith again" : "v" + c);
+                }
+                w.write(row.append("\n").toString());
+            }
+        }
+        assertTrue(Files.readAllLines(f).get(0).length() > 65_536, "a header over 64 KB");
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                        && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the table");
+        LogTab tab = onEdt(frame::currentTab);
+        assertTrue(onEdt(tab::isColumnsWanted), "a table opens as a table");
+        LogView view = onEdt(tab::mainView);
+        assertEquals(1, onEdt(view::firstRow), "the header (cut short as shown) is the titles, not a row");
+        assertEquals(700, onEdt(() -> tab.logFormat().columns().size()));
+
+        onEdt(() -> {
+            view.goToRow(1, true);
+            frame.openFind();
+            tab.findBar().field().setText("Smith");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.findBar().countText().startsWith("1 of 20"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the first match");
+        assertEquals(1L, (long) onEdt(tab::currentLine));
+        assertTrue(onEdt(view::hOffsetForTest) < 200, "the first match is in view, at the left");
+        int[] first = onEdt(view::selectedRange);
+        assertEquals("Smith", onEdt(() -> view.rowText(1).substring(first[0], first[1])), "the match is selected");
+
+        // Enter: the row's other match, 650 columns to the right, scrolled to
+        onEdt(() -> tab.findBar().next(true));
+        assertEquals(1L, (long) onEdt(tab::currentLine), "the same row's next match");
+        int[] second = onEdt(view::selectedRange);
+        assertTrue(second[0] > first[1], java.util.Arrays.toString(second));
+        assertTrue(onEdt(view::hOffsetForTest) > 10_000, "scrolled right to it: " + onEdt(view::hOffsetForTest));
+        settle();
+        shot("119-find-scrolls-to-the-match");
+
+        // then the next row's first match, back at the left
+        onEdt(() -> tab.findBar().next(true));
+        assertEquals(3L, (long) onEdt(tab::currentLine));
+        assertTrue(onEdt(view::hOffsetForTest) < 200, "back at the left");
+        // Shift+Enter: back to the far one
+        onEdt(() -> tab.findBar().next(false));
+        assertEquals(1L, (long) onEdt(tab::currentLine));
+        assertArrayEquals(second, onEdt(view::selectedRange));
+        onEdt(() -> {
+            tab.findBar().close();
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+
+        // a log with long lines: a match past the window's right edge is scrolled to as well
+        Path log = dir.resolve("long-lines-find.log");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 50; i++) {
+            sb.append("2026-10-21 10:00:").append(String.format("%02d", i)).append(",000 INFO  [main] c.a.App - payload ")
+                    .append("x".repeat(600)).append(i % 10 == 3 ? " needle at the far end" : "").append('\n');
+        }
+        Files.writeString(log, sb.toString());
+        onEdt(() -> {
+            frame.openFile(log);
+            return null;
+        });
+        LogTab lt = waitForTab("long-lines-find.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !lt.document().isIndexing() && lt.logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the log");
+        onEdt(() -> {
+            lt.mainView().goToRow(0, true);
+            frame.openFind();
+            lt.findBar().field().setText("needle");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> lt.findBar().countText().startsWith("1 of 5"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the first needle");
+        assertEquals(3L, (long) onEdt(lt::currentLine));
+        assertTrue(onEdt(() -> lt.mainView().hOffsetForTest()) > 1000, "scrolled to the far end of the line");
+        onEdt(() -> lt.findBar().next(true));
+        assertEquals(13L, (long) onEdt(lt::currentLine));
+        onEdt(() -> {
+            lt.findBar().close();
+            frame.closeTab(frame.tabsForTest().indexOfComponent(lt));
+            return null;
+        });
+    }
+
     /** Cells as shown, with a missing trailing value as empty. */
     private static String[] padded(String[] cells, int n) {
         String[] out = java.util.Arrays.copyOf(cells, n);
@@ -7139,7 +7265,8 @@ class VisualTest {
         });
 
         // the same dump as .mdmp (as Windows Error Reporting and many crash handlers name it)
-        Path mdmp = Files.copy(dmp, box.resolve("OrdersService.exe.4812.mdmp"));
+        Path mdmp = Files.copy(dmp, box.resolve("OrdersService.exe.4812.mdmp"),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         onEdt(() -> {
             frame.openFile(mdmp);
             return null;

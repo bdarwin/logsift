@@ -158,4 +158,23 @@ class CsvTest {
         assertNull(LogFormat.detectCsv(List.of("2026-10-21 10:00:01 INFO started, ok", "2026-10-21 10:00:02 WARN slow, very",
                 "2026-10-21 10:00:03 INFO a, b, c", "2026-10-21 10:00:04 INFO done", "2026-10-21 10:00:05 INFO x, y"), false));
     }
+
+    @Test
+    void aHeaderCutShortAsShownIsStillTheHeader() {
+        StringBuilder h = new StringBuilder("id");
+        for (int c = 1; c < 3000; c++) {
+            h.append(",Customer account balance ").append(c);
+        }
+        String header = h.toString();
+        LogFormat f = LogFormat.detectCsv(List.of(header, "1" + ",x".repeat(2999), "2" + ",y".repeat(2999)), true);
+        assertNotNull(f);
+        String cut = header.substring(0, 65_536);
+        assertTrue(f.isHeader(cut), "the first 64 KB of the header, as a line is shown");
+        assertTrue(f.isHeader("\uFEFF" + cut));
+        assertNull(f.split(cut, null), "not a row");
+        String[] names = f.headerCells(cut, null);
+        assertEquals(3000, names.length, "all the names, also those past the cut");
+        assertEquals("Customer account balance 2999", names[2999]);
+        assertFalse(f.isHeader("id,Customer"), "a short line that begins like the header is a row");
+    }
 }
