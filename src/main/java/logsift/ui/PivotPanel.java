@@ -109,9 +109,24 @@ final class PivotPanel extends JPanel {
         Pivot.Agg agg = Pivot.Agg.SUM;
         Pivot.ShowAs showAs = Pivot.ShowAs.VALUE;
         Set<String> keep; // filters: the values kept (null: all)
+        /** Values: several fields summed up as one (empty: just {@code column}), and what they're called. */
+        List<Integer> columns = List.of();
+        String pattern;
 
         Item(int column) {
             this.column = column;
+        }
+
+        /** Several fields as one value, called by the pattern that found them. */
+        static Item several(List<Integer> columns, String pattern) {
+            Item it = new Item(columns.get(0));
+            it.columns = List.copyOf(columns);
+            it.pattern = pattern;
+            return it;
+        }
+
+        boolean isSeveral() {
+            return pattern != null;
         }
     }
 
@@ -449,9 +464,17 @@ final class PivotPanel extends JPanel {
             JButton b = new JButton(a == Area.VALUES ? "Values" : a == Area.ROWS ? "Rows" : a == Area.COLUMNS ? "Columns"
                     : "Filters");
             b.putClientProperty("JButton.buttonType", "toolBarButton");
-            b.setToolTipText("Puts every field the filter shows in " + b.getText());
+            b.setToolTipText("Puts every field the filter shows in " + b.getText() + ", each on its own");
             b.addActionListener(e -> addMatching(a));
             addMatching.add(b);
+            if (a == Area.VALUES) {
+                oneValue.putClientProperty("JButton.buttonType", "toolBarButton");
+                oneValue.setName("pivotOneValue");
+                oneValue.setToolTipText("Puts the fields the filter shows in Values as one: every row's values of "
+                        + "all of them summed up in a single column (Sum of cpu_*)");
+                oneValue.addActionListener(e -> addMatchingAsOne());
+                addMatching.add(oneValue);
+            }
         }
         addMatching.setVisible(false);
         head.add(addMatching, BorderLayout.SOUTH);
@@ -478,13 +501,21 @@ final class PivotPanel extends JPanel {
         JScrollPane fs = new JScrollPane(fieldList);
         fs.setPreferredSize(new Dimension(220, 160));
         JLabel hint = new JLabel("Drag fields between the areas:");
+        clearAll.setName("pivotClearAll");
+        clearAll.putClientProperty("JButton.buttonType", "toolBarButton");
+        clearAll.setToolTipText("Takes every field out of every area, to start again");
+        clearAll.setEnabled(false);
+        clearAll.addActionListener(e -> clearArea(null));
         hint.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
         JPanel grid = new JPanel(new GridLayout(2, 2, 6, 6));
         for (Area a : List.of(Area.FILTERS, Area.COLUMNS, Area.ROWS, Area.VALUES)) {
             grid.add(areaBox(a));
         }
         JPanel lower = new JPanel(new BorderLayout(0, 4));
-        lower.add(hint, BorderLayout.NORTH);
+        JPanel hintRow = new JPanel(new BorderLayout());
+        hintRow.add(hint, BorderLayout.WEST);
+        hintRow.add(clearAll, BorderLayout.EAST);
+        lower.add(hintRow, BorderLayout.NORTH);
         lower.add(grid, BorderLayout.CENTER);
         JSplitPane s = new JSplitPane(JSplitPane.VERTICAL_SPLIT, fs, lower);
         s.setBorder(BorderFactory.createEmptyBorder());
@@ -503,7 +534,40 @@ final class PivotPanel extends JPanel {
             case VALUES -> "Σ Values";
         });
         l.setFont(l.getFont().deriveFont(Font.BOLD, l.getFont().getSize2D() - 1f));
-        p.add(l, BorderLayout.NORTH);
+        JButton clear = new JButton("Clear");
+        clear.setName("pivotClear" + a.name());
+        clear.putClientProperty("JButton.buttonType", "toolBarButton");
+        clear.setFont(clear.getFont().deriveFont(clear.getFont().getSize2D() - 1f));
+        clear.setMargin(new java.awt.Insets(0, 4, 0, 4));
+        clear.setToolTipText(a == Area.FILTERS ? "Takes every filter out: all rows count again"
+                : "Takes every field out of " + a.label);
+        clear.addActionListener(e -> clearArea(a));
+        clear.setEnabled(false);
+        areas.get(a).addListDataListener(new javax.swing.event.ListDataListener() {
+            private void update() {
+                clear.setEnabled(!areas.get(a).isEmpty());
+                clearAll.setEnabled(areas.values().stream().anyMatch(x -> !x.isEmpty()));
+            }
+
+            @Override
+            public void intervalAdded(javax.swing.event.ListDataEvent e) {
+                update();
+            }
+
+            @Override
+            public void intervalRemoved(javax.swing.event.ListDataEvent e) {
+                update();
+            }
+
+            @Override
+            public void contentsChanged(javax.swing.event.ListDataEvent e) {
+                update();
+            }
+        });
+        JPanel head = new JPanel(new BorderLayout());
+        head.add(l, BorderLayout.WEST);
+        head.add(clear, BorderLayout.EAST);
+        p.add(head, BorderLayout.NORTH);
         JList<Item> list = new JList<>(areas.get(a));
         list.setCellRenderer(new ItemRenderer(a));
         list.setDragEnabled(true);
@@ -569,6 +633,7 @@ final class PivotPanel extends JPanel {
         addMatching.setVisible(many);
         if (many) {
             addMatchingText.setText("Add the " + n + " to:");
+            oneValue.setText("Values as One");
         }
         revalidate();
     }
@@ -600,10 +665,55 @@ final class PivotPanel extends JPanel {
         }
     }
 
+    private final JButton oneValue = new JButton("Values as One");
+    private final JButton clearAll = new JButton("Clear All");
+
+    /** Puts every field the filter shows in Values as one value, named by the filter ("Sum of cpu_*"). */
+    void addMatchingAsOne() {
+        List<Integer> cols = new ArrayList<>();
+        boolean numbers = true;
+        for (int i = 0; i < fieldModel.size(); i++) {
+            int c = fieldModel.get(i);
+            cols.add(c);
+            numbers &= fields.kind(c) == Pivot.Kind.NUMBER;
+        }
+        if (cols.isEmpty()) {
+            return;
+        }
+        String q = fieldFilter.getText().strip();
+        Item it = Item.several(cols, q.indexOf('*') >= 0 || q.indexOf('?') >= 0 ? q : "*" + q + "*");
+        it.agg = numbers ? Pivot.Agg.SUM : Pivot.Agg.COUNT;
+        areas.get(Area.VALUES).addElement(it);
+        changed();
+    }
+
+    /** The fields a pattern names, as the field filter finds them. */
+    List<Integer> matching(String pattern) {
+        List<Integer> out = new ArrayList<>();
+        for (int c = 0; fields != null && c < fields.titles().size(); c++) {
+            if (fieldMatches(fields.titles().get(c), pattern)) {
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
+    /** Empties an area (null: every area). */
+    void clearArea(Area a) {
+        boolean any = false;
+        for (Area x : a == null ? List.of(Area.values()) : List.of(a)) {
+            any |= !areas.get(x).isEmpty();
+            areas.get(x).clear();
+        }
+        if (any) {
+            changed();
+        }
+    }
+
     private boolean used(int column) {
         for (DefaultListModel<Item> m : areas.values()) {
             for (int i = 0; i < m.size(); i++) {
-                if (m.get(i).column == column) {
+                if (m.get(i).column == column && !m.get(i).isSeveral()) {
                     return true;
                 }
             }
@@ -616,7 +726,7 @@ final class PivotPanel extends JPanel {
         if (used(column)) {
             for (DefaultListModel<Item> m : areas.values()) {
                 for (int i = m.size() - 1; i >= 0; i--) {
-                    if (m.get(i).column == column) {
+                    if (m.get(i).column == column && !m.get(i).isSeveral()) {
                         m.remove(i);
                     }
                 }
@@ -657,7 +767,7 @@ final class PivotPanel extends JPanel {
             javax.swing.ButtonGroup g = new javax.swing.ButtonGroup();
             for (Pivot.Agg agg : Pivot.Agg.values()) {
                 JRadioButtonMenuItem r = new JRadioButtonMenuItem(agg.label, it.agg == agg);
-                r.setEnabled(!agg.numeric() || fields.kind(it.column) == Pivot.Kind.NUMBER);
+                r.setEnabled(!agg.numeric() || numeric(it));
                 r.addActionListener(e -> {
                     it.agg = agg;
                     changed();
@@ -678,6 +788,23 @@ final class PivotPanel extends JPanel {
                 show.add(r);
             }
             menu.add(show);
+            if (it.isSeveral()) {
+                JMenuItem split = new JMenuItem("Split into " + it.columns.size() + " Values");
+                split.setToolTipText("Each of the fields summed up in its own column");
+                split.setEnabled(it.columns.size() <= MAX_ADD);
+                split.addActionListener(e -> {
+                    m.remove(index);
+                    int at = index;
+                    for (int c : it.columns) {
+                        Item one = new Item(c);
+                        one.agg = !it.agg.numeric() || fields.kind(c) == Pivot.Kind.NUMBER ? it.agg : Pivot.Agg.COUNT;
+                        one.showAs = it.showAs;
+                        m.add(at++, one);
+                    }
+                    changed();
+                });
+                menu.add(split);
+            }
         }
         if ((a == Area.ROWS || a == Area.COLUMNS) && fields.kind(it.column) == Pivot.Kind.TIME) {
             JMenu group = new JMenu("Group by");
@@ -725,7 +852,7 @@ final class PivotPanel extends JPanel {
         menu.add(up);
         menu.add(down);
         for (Area to : Area.values()) {
-            if (to != a) {
+            if (to != a && !it.isSeveral()) {
                 JMenuItem mv = new JMenuItem("Move to " + to.label);
                 mv.addActionListener(e -> {
                     m.remove(index);
@@ -743,6 +870,16 @@ final class PivotPanel extends JPanel {
         });
         menu.add(remove);
         menu.show(over, x, y);
+    }
+
+    /** Whether a value's fields all hold numbers. */
+    private boolean numeric(Item it) {
+        for (int c : it.isSeveral() ? it.columns : List.of(it.column)) {
+            if (fields.kind(c) != Pivot.Kind.NUMBER) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** A filter's values, ticked in a list (with a filter box). */
@@ -852,6 +989,10 @@ final class PivotPanel extends JPanel {
             if (i < 0 || i >= m.size()) {
                 return false;
             }
+            if (m.get(i).isSeveral() && to != null && to != Area.VALUES) {
+                status.setText("Several fields as one go in Values only. Split it (its menu) to use them elsewhere.");
+                return false;
+            }
             moved = m.remove(i);
             if (to == null) {
                 changed(); // dragged out: removed
@@ -928,7 +1069,9 @@ final class PivotPanel extends JPanel {
         }
         DefaultListModel<Item> v = areas.get(Area.VALUES);
         for (int i = 0; i < v.size(); i++) {
-            vals.add(new Pivot.Value(v.get(i).column, v.get(i).agg, v.get(i).showAs));
+            Item it = v.get(i);
+            vals.add(it.isSeveral() ? Pivot.Value.of(it.columns, it.pattern, it.agg, it.showAs)
+                    : new Pivot.Value(it.column, it.agg, it.showAs));
         }
         DefaultListModel<Item> f = areas.get(Area.FILTERS);
         for (int i = 0; i < f.size(); i++) {
@@ -1064,16 +1207,37 @@ final class PivotPanel extends JPanel {
         if (key == null || fields == null) {
             return;
         }
+        rememberText(key, layoutText());
+    }
+
+    /** The areas as remembered: one line per field. */
+    private StringBuilder layoutText() {
         StringBuilder b = new StringBuilder();
+        if (fields == null) {
+            return b;
+        }
         for (Area a : Area.values()) {
             DefaultListModel<Item> m = areas.get(a);
             for (int i = 0; i < m.size(); i++) {
                 Item it = m.get(i);
-                b.append(a.name().charAt(0)).append(':').append(fields.titles().get(it.column)).append(':')
-                        .append(it.group.name()).append(':').append(it.agg.name()).append(':').append(it.showAs.name())
-                        .append('\n');
+                // several fields as one: kept by their pattern, so it finds them again
+                b.append(a.name().charAt(0)).append(':').append(it.isSeveral() ? it.pattern : fields.titles().get(it.column))
+                        .append(':').append(it.isSeveral() ? PATTERN : it.group.name()).append(':').append(it.agg.name())
+                        .append(':').append(it.showAs.name()).append('\n');
             }
         }
+        return b;
+    }
+
+    String layoutForTest() {
+        return layoutText().toString();
+    }
+
+    Pivot.Spec restoredSpecForTest() {
+        return restoredSpec(fields);
+    }
+
+    private void rememberText(String key, StringBuilder b) {
         try {
             String k = "pivot." + Integer.toHexString(key.hashCode());
             if (b.length() == 0) {
@@ -1085,6 +1249,9 @@ final class PivotPanel extends JPanel {
             // not remembered
         }
     }
+
+    /** In a remembered layout: a value of several fields, found by its pattern. */
+    private static final String PATTERN = "PATTERN";
 
     /** The layout last used for this file (by column title), or nothing. */
     private Pivot.Spec restoredSpec(Pivot.Fields f) {
@@ -1098,6 +1265,22 @@ final class PivotPanel extends JPanel {
             for (String line : saved.split("\n")) {
                 String[] p = line.split(":", -1);
                 if (p.length < 5) {
+                    continue;
+                }
+                if (p[0].equals("V") && p[2].equals(PATTERN)) {
+                    List<Integer> several = new ArrayList<>();
+                    for (int c = 0; c < f.titles().size(); c++) {
+                        if (fieldMatches(f.titles().get(c), p[1])) {
+                            several.add(c);
+                        }
+                    }
+                    try {
+                        if (!several.isEmpty()) {
+                            vals.add(Pivot.Value.of(several, p[1], Pivot.Agg.valueOf(p[3]), Pivot.ShowAs.valueOf(p[4])));
+                        }
+                    } catch (IllegalArgumentException e) {
+                        // an old layout: skip it
+                    }
                     continue;
                 }
                 int col = f.titles().indexOf(p[1]);
@@ -1136,7 +1319,8 @@ final class PivotPanel extends JPanel {
             areas.get(Area.COLUMNS).addElement(it);
         }
         for (Pivot.Value v : s.values()) {
-            Item it = new Item(v.column());
+            Item it = v.several() ? Item.several(v.read(), v.name() != null ? v.name() : "fields")
+                    : new Item(v.column());
             it.agg = v.agg();
             it.showAs = v.showAs();
             areas.get(Area.VALUES).addElement(it);
@@ -1803,7 +1987,9 @@ final class PivotPanel extends JPanel {
         public Component getListCellRendererComponent(JList<?> l, Object v, int i, boolean sel, boolean focus) {
             Item it = (Item) v;
             String text = switch (area) {
-                case VALUES -> it.agg.label + " of " + title(it.column) + (it.showAs != Pivot.ShowAs.VALUE ? " (%)" : "");
+                case VALUES -> it.agg.label + " of " + (it.isSeveral() ? it.pattern + " (" + it.columns.size()
+                        + (it.columns.size() == 1 ? " field)" : " fields)") : title(it.column))
+                        + (it.showAs != Pivot.ShowAs.VALUE ? " (%)" : "");
                 case FILTERS -> title(it.column) + (it.keep == null ? ": all" : ": " + it.keep.size() + " values");
                 default -> title(it.column) + (it.group != Pivot.Group.NONE ? " (" + it.group.label + ")" : "");
             };
@@ -1819,6 +2005,33 @@ final class PivotPanel extends JPanel {
     }
 
     // ---------------------------------------------------------------- tests
+
+    Pivot.Result resultForTest() {
+        return result;
+    }
+
+    JButton clearButtonForTest(Area a) {
+        return findButton(this, a == null ? "pivotClearAll" : "pivotClear" + a.name());
+    }
+
+    JButton oneValueButtonForTest() {
+        return oneValue;
+    }
+
+    private static JButton findButton(java.awt.Container c, String name) {
+        for (Component k : c.getComponents()) {
+            if (k instanceof JButton b && name.equals(b.getName())) {
+                return b;
+            }
+            if (k instanceof java.awt.Container sub) {
+                JButton f = findButton(sub, name);
+                if (f != null) {
+                    return f;
+                }
+            }
+        }
+        return null;
+    }
 
     JTable tableForTest() {
         return table;

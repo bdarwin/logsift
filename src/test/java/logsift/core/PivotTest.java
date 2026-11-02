@@ -78,6 +78,34 @@ class PivotTest {
     }
 
     @Test
+    void severalColumnsSummedUpAsOneValue() {
+        // group by host, and every abc* column's numbers in one column
+        List<String> l = List.of("host,abc1,abc2,abc3,other",
+                "a,1,2,3,100",
+                "a,4,,6,100",
+                "b,10,20,30,100");
+        Pivot.Value abc = Pivot.Value.of(List.of(1, 2, 3), "abc*", Pivot.Agg.SUM, Pivot.ShowAs.VALUE);
+        Pivot.Result r = run(l, new Pivot.Spec(List.of(new Pivot.Field(0)), List.of(),
+                List.of(abc, Pivot.Value.of(List.of(1, 2, 3), "abc*", Pivot.Agg.COUNT, Pivot.ShowAs.VALUE),
+                        Pivot.Value.of(List.of(1, 2, 3), "abc*", Pivot.Agg.AVERAGE, Pivot.ShowAs.VALUE),
+                        Pivot.Value.of(List.of(1, 2, 3), "abc*", Pivot.Agg.MAX, Pivot.ShowAs.VALUE),
+                        new Pivot.Value(4, Pivot.Agg.SUM)), Map.of()));
+        Pivot.Node a = r.root().kids().stream().filter(k -> k.label().equals("a")).findFirst().orElseThrow();
+        Pivot.Node b = r.root().kids().stream().filter(k -> k.label().equals("b")).findFirst().orElseThrow();
+        assertEquals(16, r.value(a, -1, 0), 1e-9, "1+2+3+4+6");
+        assertEquals(60, r.value(b, -1, 0), 1e-9);
+        assertEquals(76, r.value(r.root(), -1, 0), 1e-9, "the total");
+        assertEquals(5, r.value(a, -1, 1), 1e-9, "the values counted, not the blank one");
+        assertEquals(16 / 5.0, r.value(a, -1, 2), 1e-9, "the average of every value");
+        assertEquals(30, r.value(b, -1, 3), 1e-9);
+        assertEquals(200, r.value(a, -1, 4), 1e-9, "a field of its own, as before");
+        assertEquals("Sum of abc* (3 fields)", r.valueTitle(0));
+        assertEquals("Sum of other", r.valueTitle(4));
+        assertEquals(1, abc.column(), "the first of them");
+        assertEquals(List.of(4), new Pivot.Value(4, Pivot.Agg.SUM).read());
+    }
+
+    @Test
     void medianAndPercentiles() {
         List<String> l = new ArrayList<>();
         l.add("host,ms");

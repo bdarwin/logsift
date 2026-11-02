@@ -80,10 +80,42 @@ public final class Pivot {
         }
     }
 
-    /** A column summed up in the cells. */
-    public record Value(int column, Agg agg, ShowAs showAs) {
+    /**
+     * A column summed up in the cells, or several as one: every value of each of {@code columns}
+     * pooled ("Sum of cpu_*": all the cpu_ columns' numbers added up).
+     *
+     * @param column  the column (with several: the first)
+     * @param columns several columns summed up as one (empty: just {@code column})
+     * @param name    what the several are called ("cpu_*"; null: just the column)
+     */
+    public record Value(int column, Agg agg, ShowAs showAs, List<Integer> columns, String name) {
+        public Value {
+            columns = columns == null ? List.of() : List.copyOf(columns);
+            if (!columns.isEmpty()) {
+                column = columns.get(0);
+            }
+        }
+
+        public Value(int column, Agg agg, ShowAs showAs) {
+            this(column, agg, showAs, List.of(), null);
+        }
+
         public Value(int column, Agg agg) {
             this(column, agg, ShowAs.VALUE);
+        }
+
+        /** Several columns as one value. */
+        public static Value of(List<Integer> columns, String name, Agg agg, ShowAs showAs) {
+            return new Value(columns.isEmpty() ? -1 : columns.get(0), agg, showAs, columns, name);
+        }
+
+        /** The columns read: several, or the one. */
+        public List<Integer> read() {
+            return columns.isEmpty() ? List.of(column) : columns;
+        }
+
+        public boolean several() {
+            return columns.size() > 1 || name != null;
         }
     }
 
@@ -389,7 +421,9 @@ public final class Pivot {
         /** A value's title: "Sum of amount", "Count of rows". */
         public String valueTitle(int v) {
             Value val = spec.cellValues().get(v);
-            String of = val.column() < 0 ? "rows" : val.column() < titles.size() ? titles.get(val.column()) : "?";
+            String of = val.several() ? (val.name() != null ? val.name() : "fields") + " (" + val.read().size()
+                    + (val.read().size() == 1 ? " field)" : " fields)")
+                    : val.column() < 0 ? "rows" : val.column() < titles.size() ? titles.get(val.column()) : "?";
             String t = val.agg().label + " of " + of;
             return val.showAs() == ShowAs.VALUE ? t : t + " (%)";
         }
@@ -675,6 +709,17 @@ public final class Pivot {
         for (int v = 0; v < nv; v++) {
             distinct[v] = values.get(v).agg();
         }
+        // the cells read for the values: one per column, several for a value of several columns
+        List<Integer> slotList = new ArrayList<>();
+        List<Integer> slotValueList = new ArrayList<>();
+        for (int v = 0; v < nv; v++) {
+            for (int c : values.get(v).read()) {
+                slotList.add(c);
+                slotValueList.add(v);
+            }
+        }
+        Slots slots = new Slots(slotList.stream().mapToInt(Integer::intValue).toArray(),
+                slotValueList.stream().mapToInt(Integer::intValue).toArray(), nv);
         Node root = new Node("Grand Total", null, 0);
         int[] groups = {0};
         boolean[] rowsCapped = {false};
@@ -709,16 +754,16 @@ public final class Pivot {
                 read += k;
                 long at = first;
                 java.util.concurrent.Callable<Prepared[]> job = () -> prepare(buf, at, include, format, spec, fields, zone,
-                        values, filterCols);
+                        slots, filterCols);
                 if (pool == null) {
                     Prepared[] p = job.call();
                     rows += consume(p, spec, filterCols, seen, colIndex, colKeys, root, groups, rowsCapped, distinct,
-                            colsCappedHolder);
+                            colsCappedHolder, slots);
                 } else {
                     pending.add(pool.submit(job));
                     while (pending.size() >= threads * 2) {
                         rows += consume(pending.poll().get(), spec, filterCols, seen, colIndex, colKeys, root, groups,
-                                rowsCapped, distinct, colsCappedHolder);
+                                rowsCapped, distinct, colsCappedHolder, slots);
                     }
                 }
                 if (progress != null) {
@@ -730,7 +775,7 @@ public final class Pivot {
                     return null;
                 }
                 rows += consume(pending.poll().get(), spec, filterCols, seen, colIndex, colKeys, root, groups, rowsCapped,
-                        distinct, colsCappedHolder);
+                        distinct, colsCappedHolder, slots);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -800,14 +845,17 @@ public final class Pivot {
     static final int PARALLEL_LINES = 50_000;
     static final int MAX_THREADS = 8;
 
+    /** The cells read for the values: slot s reads {@code column[s]} into value {@code value[s]}. */
+    private record Slots(int[] column, int[] value, int values) {}
+
     /** One row, split and worked out (in parallel); added to the table in file order. */
     private record Prepared(String[] filterValues, String[] rowKey, String[] colKey, String[] texts, double[] nums) {}
 
     /** The rows of a block of lines: splitting, labels and numbers, which take the time. */
     private static Prepared[] prepare(String[] buf, long first, LongPredicate include, LogFormat format, Spec spec,
-                                      Fields fields, ZoneId zone, List<Value> values, List<Integer> filterCols) {
+                                      Fields fields, ZoneId zone, Slots slots, List<Integer> filterCols) {
         List<Prepared> out = new ArrayList<>(buf.length);
-        int nv = values.size();
+        int nv = slots.column().length;
         for (int i = 0; i < buf.length; i++) {
             String t = buf[i];
             if (t == null || t.isBlank() || (include != null && !include.test(first + i))) {
@@ -832,7 +880,7 @@ public final class Pivot {
             String[] texts = new String[nv];
             double[] nums = new double[nv];
             for (int v = 0; v < nv; v++) {
-                int c = values.get(v).column();
+                int c = slots.column()[v];
                 texts[v] = c < 0 ? "" : cell(cells, c);
                 if (c >= 0 && texts[v].equals(BLANK)) {
                     texts[v] = null; // a blank cell isn't counted
@@ -847,7 +895,7 @@ public final class Pivot {
     /** Adds prepared rows to the table, in order; returns how many were kept by the filters. */
     private static long consume(Prepared[] rowsIn, Spec spec, List<Integer> filterCols, Map<Integer, Set<String>> seen,
                                 Map<String, Integer> colIndex, List<List<String>> colKeys, Node root, int[] groups,
-                                boolean[] rowsCapped, Agg[] distinct, boolean[] colsCapped) {
+                                boolean[] rowsCapped, Agg[] distinct, boolean[] colsCapped, Slots slots) {
         long kept = 0;
         row:
         for (Prepared p : rowsIn) {
@@ -889,10 +937,10 @@ public final class Pivot {
                 ci = at;
             }
             Node n = root;
-            add(n, ci, colKeys.size(), p.texts(), p.nums(), distinct);
+            add(n, ci, colKeys.size(), p.texts(), p.nums(), distinct, slots);
             for (String rk : p.rowKey()) {
                 n = child(n, rk, groups, rowsCapped);
-                add(n, ci, colKeys.size(), p.texts(), p.nums(), distinct);
+                add(n, ci, colKeys.size(), p.texts(), p.nums(), distinct, slots);
             }
         }
         return kept;
@@ -938,17 +986,17 @@ public final class Pivot {
         return k;
     }
 
-    private static void add(Node n, int col, int cols, String[] texts, double[] nums, Agg[] distinct) {
+    private static void add(Node n, int col, int cols, String[] texts, double[] nums, Agg[] distinct, Slots slots) {
         n.rows++;
         if (n.cells == null) {
             n.cells = new Acc[Math.max(cols + 1, 4)][];
         }
-        addTo(n, cols > 0 ? col : -1, texts, nums, distinct);
-        addTo(n, -2, texts, nums, distinct);
+        addTo(n, cols > 0 ? col : -1, texts, nums, distinct, slots);
+        addTo(n, -2, texts, nums, distinct, slots);
     }
 
     /** Adds to a column group's cell ({@code col}), or (-2) the row's total, kept at {@link #TOTAL}. */
-    private static void addTo(Node n, int col, String[] texts, double[] nums, Agg[] distinct) {
+    private static void addTo(Node n, int col, String[] texts, double[] nums, Agg[] distinct, Slots slots) {
         if (col == -1) {
             return; // no column fields: only the total
         }
@@ -958,15 +1006,17 @@ public final class Pivot {
         }
         Acc[] a = n.cells[at];
         if (a == null) {
-            a = new Acc[texts.length];
+            a = new Acc[slots.values()];
             for (int v = 0; v < a.length; v++) {
                 a[v] = new Acc();
             }
             n.cells[at] = a;
         }
-        for (int v = 0; v < a.length; v++) {
-            if (texts[v] != null) {
-                a[v].add(texts[v], nums[v], distinct[v]);
+        int[] into = slots.value();
+        for (int k = 0; k < texts.length; k++) {
+            if (texts[k] != null) {
+                int v = into[k];
+                a[v].add(texts[k], nums[k], distinct[v]);
             }
         }
     }

@@ -36,6 +36,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.SwingUtilities;
 import logsift.core.FilterResult;
+import logsift.core.Pivot;
 import logsift.core.LogDocument;
 import logsift.core.SearchQuery;
 import logsift.core.SearchSession;
@@ -7428,6 +7429,49 @@ class VisualTest {
         assertTrue(onEdt(() -> pp.areaForTest(PivotPanel.Area.VALUES)).get(0).startsWith("Sum of cpu_1"));
         settle();
         shot("115-pivot-wide-wildcards");
+        // the ten as one value: every host's cpu_1? numbers summed up in a single column
+        Pivot.Result ten = onEdt(pp::resultForTest);
+        double sumOfTen = 0;
+        for (int v = 0; v < 10; v++) {
+            sumOfTen += ten.value(ten.root(), -1, v);
+        }
+        javax.swing.JButton clearValues = onEdt(() -> pp.clearButtonForTest(PivotPanel.Area.VALUES));
+        assertTrue(onEdt(clearValues::isEnabled));
+        onEdt(() -> {
+            clearValues.doClick();
+            return null;
+        });
+        assertTrue(onEdt(() -> pp.areaForTest(PivotPanel.Area.VALUES)).isEmpty(), "Values cleared");
+        assertEquals(1, onEdt(() -> pp.areaForTest(PivotPanel.Area.ROWS)).size(), "the other areas kept");
+        assertFalse(onEdt(clearValues::isEnabled), "nothing left to clear");
+        assertTrue(onEdt(() -> pp.oneValueButtonForTest().isShowing()));
+        onEdt(() -> {
+            pp.oneValueButtonForTest().doClick();
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(List.of("Sum of cpu_1? (10 fields)"), onEdt(() -> pp.areaForTest(PivotPanel.Area.VALUES)));
+        Pivot.Result one = onEdt(pp::resultForTest);
+        assertEquals(1, one.spec().cellValues().size(), "one value column");
+        assertEquals(sumOfTen, one.value(one.root(), -1, 0), Math.abs(sumOfTen) * 1e-9, "the ten summed up");
+        assertEquals("Sum of cpu_1? (10 fields)", one.valueTitle(0));
+        settle();
+        shot("115b-pivot-values-as-one");
+        // remembered for the file by its pattern, so it finds the fields again
+        assertTrue(onEdt(pp::layoutForTest).contains("V:cpu_1?:PATTERN:SUM:VALUE\n"), onEdt(pp::layoutForTest));
+        Pivot.Spec back = onEdt(pp::restoredSpecForTest);
+        assertEquals(1, back.values().size());
+        assertEquals(10, back.values().get(0).read().size(), "the ten found again");
+        assertEquals("cpu_1?", back.values().get(0).name());
+        javax.swing.JButton clearAll = onEdt(() -> pp.clearButtonForTest(null));
+        onEdt(() -> {
+            clearAll.doClick();
+            return null;
+        });
+        for (PivotPanel.Area a : PivotPanel.Area.values()) {
+            assertTrue(onEdt(() -> pp.areaForTest(a)).isEmpty(), "Clear All: " + a);
+        }
+        assertFalse(onEdt(clearAll::isEnabled));
         assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "nothing failed: "
                 + ErrorReporter.sessionForTest());
         assertTrue(PivotPanel.fieldMatches("disk_42", "DISK_*"));

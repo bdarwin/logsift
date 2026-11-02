@@ -12,7 +12,7 @@ The **Pivot** tab (below the log, next to Profile) makes a pivot table of a tabl
 
 ## Fields and areas
 
-On the right, **Fields** lists the file's columns, each with its kind: **#** numbers, **◷** times, **Aa** text. **find a field** narrows a long list. It takes part of a name, or a pattern: `*` is any text and `?` one character. For example, `cpu_*` is every column starting with *cpu_*, `*_ms` every column ending in *_ms*, and `cpu_1?` is *cpu_10* to *cpu_19*. With more than one field shown, **Add the 10 to: Values · Rows · Columns · Filters** puts them all in that area at once (at most 200 at a time), which helps with tables of hundreds or thousands of columns. Put fields in the four areas below it:
+On the right, **Fields** lists the file's columns, each with its kind: **#** numbers, **◷** times, **Aa** text. **find a field** narrows a long list. It takes part of a name, or a pattern: `*` is any text and `?` one character. For example, `cpu_*` is every column starting with *cpu_*, `*_ms` every column ending in *_ms*, and `cpu_1?` is *cpu_10* to *cpu_19*. With more than one field shown, **Add the 10 to: Values · Values as One · Rows · Columns · Filters** puts them all in that area at once (at most 200 at a time), which helps with tables of hundreds or thousands of columns. Put fields in the four areas below it:
 
 | Area | What it does |
 |---|---|
@@ -25,6 +25,17 @@ On the right, **Fields** lists the file's columns, each with its kind: **#** num
 - **Drag** a field from the list to an area, or from one area to another; drag it out of the areas to remove it.
 - **Click** a field in an area for its options: **Summarize by** (values), **Show values as** *% of the grand total*, *% of the row's total* or *% of the column's total*, **Group by** (times: *Year*, *Quarter*, *Month*, *Week*, *Day*, *Hour*, *Minute*, *Day of the week*, *Hour of the day*), **Move Up** / **Move Down**, **Move to** another area, **Remove**.
 - Before any field is placed, a button offers a quick start, like *Sum of amount by region*.
+- **Clear** at the top of an area takes every field out of it (in **Filters**: every filter, so all rows count again). **Clear All** empties every area, to start again.
+
+### Many fields as one value
+
+To see all of `abc_1`, `abc_2`, … `abc_40` summed up in one column, type `abc_*` in **find a field** and click **Values as One**. Values gets one field, *Sum of abc_\* (40 fields)*, and each cell holds every value of those fields for its group: put a field in **Rows** (say *host*) and each host's line has the sum of all its `abc_` numbers.
+
+- **Summarize by** works on all their values together: *Count* counts the values that aren't blank, *Average* is the average of every value, *Max* the largest of any of them, and so on.
+- Its menu has **Split into 40 Values**, to get each field in its own column again.
+- It stays in **Values** (it can't be moved to Rows or Columns). It is remembered by its pattern, so when the file comes back with more `abc_` columns, they are counted too.
+
+![Pivot: one host per row, and every cpu_1? field summed up in one column](../screenshots/pivot-values-as-one.png)
 
 The layout is remembered for each file (which fields are where, how they sum up and group), and comes back when you open the file again. A filter's chosen values aren't remembered.
 
