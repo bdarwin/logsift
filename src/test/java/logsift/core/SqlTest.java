@@ -172,6 +172,39 @@ class SqlTest {
     }
 
     @Test
+    void writesHiddenInAQueryAreRefused() throws Exception {
+        Path f = dir.resolve("orders.csv");
+        Files.writeString(f, "order_id,amount,region\n1,10,North\n2,20,South\n3,30,North\n");
+        try (LogAnalysis la = LogAnalysis.open(f, List.of()); Sql sql = Sql.open(new Sql.Options(List.of(), dir.resolve("t3")))) {
+            la.awaitReady(() -> false);
+            LogFormat fmt = la.formats().columns();
+            Pivot.Fields fields = Pivot.fields(fmt, la.document().lineCount(), la.document()::readLines, 2026);
+            Sql.LogTable t = sql.table("orders", la.document(), fmt, fields);
+            assertTrue(t.update(() -> false, null));
+            // the first word is WITH, a query's: only DuckDB's parser sees what is inside
+            for (String bad : List.of("WITH d AS (DELETE FROM orders RETURNING *) SELECT * FROM d",
+                    "WITH i AS (INSERT INTO orders (line) VALUES (99) RETURNING *) SELECT * FROM i",
+                    "WITH u AS (UPDATE orders SET amount = 0 RETURNING *) SELECT count(*) FROM u",
+                    "(SELECT 1); DROP TABLE orders", "SELECT 1 /* ; */ ; DELETE FROM orders")) {
+                SQLException e = assertThrows(SQLException.class, () -> sql.query("t", t, bad, 10, null), bad);
+                assertTrue(e.getMessage().startsWith("Only queries can run here") || e.getMessage().startsWith("One query"),
+                        bad + ": " + e.getMessage());
+            }
+            Sql.Result r = sql.query("t", t, "SELECT count(*), sum(amount) FROM orders", 10, null);
+            assertEquals(List.of(3L, 60.0), List.of(r.rows().get(0)), "nothing changed");
+            // what reads still runs
+            assertEquals(2, sql.query("t", t, "SELECT region, sum(amount) FROM t GROUP BY ALL", 10, null).rows().size());
+            assertEquals(1, sql.query("t", t, "PIVOT (SELECT region, amount FROM t) ON region USING sum(amount)", 10, null)
+                    .rows().size());
+            assertEquals(4, sql.query("t", t, "DESCRIBE t", 10, null).rows().size());
+            assertEquals(4, sql.query("t", t, "SUMMARIZE t", 10, null).rows().size());
+            assertEquals(3, sql.query("t", t, "FROM t SELECT order_id", 10, null).rows().size());
+            assertEquals(1, sql.query("t", t, "-- a comment first\nWITH x AS (SELECT 1 AS a) SELECT * FROM x", 10, null)
+                    .rows().size());
+        }
+    }
+
+    @Test
     void readsOnlyTheFoldersGiven() throws Exception {
         Path outside = Files.createTempFile("logsift-sql-outside", ".csv");
         try (Sql sql = open()) {

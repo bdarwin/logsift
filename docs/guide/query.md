@@ -55,7 +55,7 @@ At most 10,000 rows are shown. The bar says how many there were and how long the
 
 ## Read-only
 
-Only queries run: `SELECT`, `WITH`, `FROM`, `PIVOT`, `SUMMARIZE`, `DESCRIBE`. Anything else (`COPY`, `ATTACH`, `INSTALL`, `SET`, `CREATE`…) is refused, so a query never writes a file or changes a setting.
+Only queries run: `SELECT`, `WITH`, `FROM`, `PIVOT`, `SUMMARIZE`, `DESCRIBE`. Anything else (`COPY`, `ATTACH`, `INSTALL`, `SET`, `CREATE`…) is refused, so a query never writes a file or changes a setting. DuckDB's own parser checks each query before it runs, so a change hidden inside a query (a `WITH` that deletes or inserts, a second statement after a `;`) is refused too.
 
 A query can read other files, for example to join this log with a CSV of orders: `read_csv('…/orders.csv')`. It can only read them in the log's folder and your home folder, and nothing on the network. DuckDB never downloads anything.
 

@@ -21,8 +21,9 @@ import java.util.function.DoubleConsumer;
 /**
  * SQL over tables and logs, with DuckDB. A CSV or TSV file is a view read in place; a log is
  * loaded once into a table (by Logsift's own reading: its line numbers, times and columns) and
- * kept up to date as it grows. Everything is read-only: a query runs as
- * {@code SELECT * FROM (query) LIMIT n}, so nothing else (COPY, ATTACH, INSTALL, SET…) can run;
+ * kept up to date as it grows. Everything is read-only: DuckDB's parser (through quackjvm's
+ * guard) lets only a single query through, and it runs as {@code SELECT * FROM (query) LIMIT n},
+ * so nothing else (COPY, ATTACH, INSTALL, SET, a WITH that deletes…) can run;
  * files can be read only in the folders given, and nothing on the network.
  */
 public final class Sql implements AutoCloseable {
@@ -556,6 +557,28 @@ public final class Sql implements AutoCloseable {
         return s;
     }
 
+    /**
+     * The query as one statement that only reads, or an exception saying why not: Logsift's own
+     * words first, then DuckDB's parser (through quackjvm's guard), which also finds what words
+     * can't, such as a {@code WITH} whose part deletes.
+     */
+    static String check(Connection conn, String sql) throws SQLException {
+        String q = single(sql);
+        String why;
+        try {
+            why = io.quackjvm.agent.guard.GuardedQuery.on(conn, io.quackjvm.agent.guard.QueryPolicy.readOnly()
+                    .allowUnverified(io.quackjvm.agent.guard.QueryPolicy.PIVOT)).whyRejected(q);
+        } catch (RuntimeException e) {
+            // not known to only read: not run
+            throw new SQLException("The query couldn't be checked: " + e.getMessage(), e);
+        }
+        if (why != null) {
+            throw new SQLException(why.startsWith("Only one statement") ? "One query at a time, please."
+                    : "Only queries can run here (SELECT, WITH, FROM, PIVOT, SUMMARIZE, DESCRIBE): Logsift only reads.");
+        }
+        return q;
+    }
+
     private static final java.util.Set<String> QUERY_WORDS = java.util.Set.of("SELECT", "WITH", "FROM", "PIVOT", "UNPIVOT",
             "SUMMARIZE", "DESCRIBE", "SHOW", "VALUES", "TABLE", "(");
 
@@ -597,7 +620,7 @@ public final class Sql implements AutoCloseable {
     }
 
     public synchronized Result query(String sql, int maxRows, BooleanSupplier stop) throws SQLException {
-        String q = single(sql);
+        String q = check(conn, sql);
         String wrapped = "SELECT * FROM (\n" + q + "\n) AS logsift_query LIMIT " + ((long) maxRows + 1);
         long t0 = System.nanoTime();
         try (Statement st = conn.createStatement()) {
