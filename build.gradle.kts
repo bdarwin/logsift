@@ -32,6 +32,9 @@ dependencies {
     // DuckDB (MIT) for the Query tab: SQL over tables and logs. Only this system's native
     // library: each installer is built on its own system.
     implementation("org.duckdb:duckdb_jdbc:1.5.6.0:$duckdbClassifier")
+    // the Pivot cache: DuckDB tables written and read through quackjvm; DuckDB itself stays the one above
+    implementation("io.github.bdarwin:quackjvm-core:1.1.0") { exclude(group = "org.duckdb") }
+    implementation("io.github.bdarwin:quackjvm-agent:1.1.0") { exclude(group = "org.duckdb") }
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

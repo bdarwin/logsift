@@ -504,6 +504,48 @@ final class SettingsDialog extends JDialog {
         add(p, l, f, "Check files for changes", poll);
         note(p, l, f, "Less often uses less power with many open files, or files on network drives.");
 
+        SpinnerNumberModel cacheModel = new SpinnerNumberModel(PivotCaches.limitGb(), 0, 1000, 1);
+        JSpinner cacheGb = new JSpinner(cacheModel);
+        cacheGb.setName("pivotCacheGb");
+        cacheGb.addChangeListener(e -> PivotCaches.setLimitGb(cacheModel.getNumber().intValue()));
+        JLabel cacheUsed = new JLabel();
+        cacheUsed.setName("pivotCacheUsed");
+        Runnable showUsed = () -> {
+            long bytes;
+            try {
+                bytes = logsift.core.PivotCache.size(PivotCaches.dir());
+            } catch (java.io.IOException e) {
+                bytes = 0;
+            }
+            cacheUsed.setText(String.format(java.util.Locale.ROOT, "GB · %,.1f MB in use", bytes / 1048576.0));
+        };
+        showUsed.run();
+        javax.swing.JButton empty = new javax.swing.JButton("Empty");
+        empty.setName("pivotCacheEmpty");
+        empty.addActionListener(e -> {
+            java.util.Set<String> inUse = new java.util.HashSet<>();
+            for (LogTab t : frame.openLogs()) {
+                String k = t.pivotCacheKey();
+                if (k != null) {
+                    inUse.add(k);
+                }
+            }
+            try {
+                logsift.core.PivotCache.clear(PivotCaches.dir(), inUse);
+            } catch (java.io.IOException ex) {
+                logsift.core.Problems.unexpected(ex);
+            }
+            showUsed.run();
+        });
+        JPanel cacheRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        cacheRow.setOpaque(false);
+        cacheRow.add(cacheGb);
+        cacheRow.add(cacheUsed);
+        cacheRow.add(empty);
+        add(p, l, f, "Pivot cache", cacheRow);
+        note(p, l, f, "For tables over 200 MB, Pivot keeps the columns it used, so the next pivots take "
+                + "milliseconds. Kept in " + PivotCaches.dir() + "; the oldest go first. 0: no cache.");
+
         String[] twoValues = {"ask", "compare", "tabs"};
         JComboBox<String> two = new JComboBox<>(new String[] {"Ask each time", "Compare them", "Open each in a tab"});
         two.setSelectedIndex(java.util.Arrays.asList(twoValues).indexOf(MainFrame.twoFilesDropped()));

@@ -1926,6 +1926,69 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
     }
 
+    /** The cache of this file's columns for Pivot (big tables only); null until needed. */
+    private logsift.core.PivotCache pivotCache;
+    /** Set when the cache failed: this tab pivots from the file. */
+    private volatile boolean pivotCacheBroken;
+
+    /**
+     * The pivot from the cache of the file's columns, storing the columns it needs first (one read
+     * of the file); null when the file is small, the cache can't answer, or it failed.
+     */
+    private logsift.core.Pivot.Result fromCache(logsift.core.Pivot.Spec spec, logsift.core.Pivot.Fields fields,
+                                                java.util.function.BooleanSupplier stop,
+                                                java.util.function.DoubleConsumer progress,
+                                                java.util.function.Consumer<String> say) {
+        if (pivotCacheBroken || !PivotCaches.enabled() || !logFormat.isCsv() || doc.fileSize() < PivotCaches.minBytes()
+                || !logsift.core.PivotCache.canCache(spec)) {
+            return null;
+        }
+        try {
+            logsift.core.PivotCache c;
+            synchronized (this) {
+                String read = doc.charset().name();
+                if (pivotCache != null && !pivotCache.isFor(path, logFormat, read)) {
+                    pivotCache.close(); // the file changed, or is read another way
+                    pivotCache = null;
+                }
+                if (pivotCache == null) {
+                    pivotCache = logsift.core.PivotCache.open(path, logFormat, read, PivotCaches.dir(),
+                            PivotCaches.limit());
+                }
+                c = pivotCache;
+            }
+            java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+            if (!c.has(spec)) {
+                say.accept("Preparing these columns for quick pivots (once, for this file)…");
+                if (!c.build(spec, fields, logsift.core.CsvRows.reader(doc, logFormat), doc.lineCount(), stop, progress)) {
+                    return null;
+                }
+                say.accept("Counting…");
+            }
+            return c.compute(spec, fields, zone, doc.lineCount());
+        } catch (java.io.IOException | RuntimeException e) {
+            logsift.core.Problems.unexpected(e);
+            pivotCacheBroken = true;
+            return null;
+        }
+    }
+
+    private synchronized void closePivotCache() {
+        if (pivotCache != null) {
+            pivotCache.close();
+            pivotCache = null;
+        }
+    }
+
+    /** The cache this tab has open, if any (to keep it when the others are emptied). */
+    synchronized String pivotCacheKey() {
+        try {
+            return pivotCache == null ? null : pivotCache.key();
+        } catch (java.io.IOException e) {
+            return null;
+        }
+    }
+
     private PivotPanel.Host pivotHost() {
         return new PivotPanel.Host() {
             /** Waits for the file to be indexed and its format known; false if cancelled. */
@@ -1955,14 +2018,22 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
             @Override
             public logsift.core.Pivot.Result compute(logsift.core.Pivot.Spec spec, logsift.core.Pivot.Fields fields,
-                                                     AtomicBoolean cancel, java.util.function.DoubleConsumer progress) {
+                                                     AtomicBoolean cancel, java.util.function.DoubleConsumer progress,
+                                                     java.util.function.Consumer<String> say) {
                 if (!ready(cancel)) {
                     return null;
                 }
                 FilterResult r = filterResult;
                 java.util.function.LongPredicate include = matchingOnly && r.isFiltering() ? r::contains : null;
-                return logsift.core.Pivot.compute(logFormat, doc.lineCount(), logsift.core.CsvRows.reader(doc, logFormat), include, spec, fields,
-                        () -> cancel.get() || closed, progress);
+                java.util.function.BooleanSupplier stop = () -> cancel.get() || closed;
+                if (include == null) {
+                    logsift.core.Pivot.Result cached = fromCache(spec, fields, stop, progress, say);
+                    if (cached != null || stop.getAsBoolean()) {
+                        return cached;
+                    }
+                }
+                return logsift.core.Pivot.compute(logFormat, doc.lineCount(), logsift.core.CsvRows.reader(doc, logFormat),
+                        include, spec, fields, stop, progress);
             }
 
             @Override
@@ -3842,6 +3913,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     void close() {
         closed = true;
+        closePivotCache();
         treePanel.dispose();
         if (alertTimer != null) {
             alertTimer.stop();

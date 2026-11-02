@@ -216,6 +216,12 @@ public final class Pivot {
         Set<String> distinct;
         boolean distinctCapped;
 
+        /** From the cache: distinct values and quantiles DuckDB counted (-1 and null: not given). */
+        long fixedDistinct = -1;
+        double fixedMedian = Double.NaN;
+        double fixedP95 = Double.NaN;
+        double fixedP99 = Double.NaN;
+
         /** The numbers, for median and percentiles: all of them, or a fair sample past {@link #MAX_KEPT}. */
         double[] kept;
         int nKept;
@@ -284,11 +290,11 @@ public final class Pivot {
 
         double get(Agg agg) {
             return switch (agg) {
-                case MEDIAN -> quantile(0.5);
-                case P95 -> quantile(0.95);
-                case P99 -> quantile(0.99);
+                case MEDIAN -> kept == null && !Double.isNaN(fixedMedian) ? fixedMedian : quantile(0.5);
+                case P95 -> kept == null && !Double.isNaN(fixedP95) ? fixedP95 : quantile(0.95);
+                case P99 -> kept == null && !Double.isNaN(fixedP99) ? fixedP99 : quantile(0.99);
                 case COUNT -> count;
-                case COUNT_DISTINCT -> distinct == null ? 0 : distinct.size();
+                case COUNT_DISTINCT -> fixedDistinct >= 0 ? fixedDistinct : distinct == null ? 0 : distinct.size();
                 case SUM -> numbers == 0 ? Double.NaN : sum;
                 case AVERAGE -> numbers == 0 ? Double.NaN : sum / numbers;
                 case MIN -> numbers == 0 ? Double.NaN : min;
@@ -374,6 +380,13 @@ public final class Pivot {
         public long millis() {
             return millis;
         }
+
+        /** Whether it came from the cache of the file's columns ({@link PivotCache}). */
+        public boolean cached() {
+            return cached;
+        }
+
+        boolean cached;
 
         /**
          * A cell's value as shown (a % when asked for).
@@ -725,7 +738,6 @@ public final class Pivot {
         boolean[] rowsCapped = {false};
         Map<String, Integer> colIndex = new HashMap<>();
         List<List<String>> colKeys = new ArrayList<>();
-        boolean colsCapped = false;
         boolean[] colsCappedHolder = {false};
         Map<Integer, Set<String>> seen = new HashMap<>();
         for (Integer f : spec.filters().keySet()) {
@@ -798,13 +810,21 @@ public final class Pivot {
                 pool.shutdownNow();
             }
         }
-        colsCapped = colsCappedHolder[0];
-        // the total column: cells were kept by column group; the row's total is its own cell
         Map<Integer, List<String>> filterValues = new HashMap<>();
         for (Map.Entry<Integer, Set<String>> e : seen.entrySet()) {
-            List<String> l = new ArrayList<>(e.getValue());
+            filterValues.put(e.getKey(), new ArrayList<>(e.getValue()));
+        }
+        return finish(spec, titles, root, colKeys, rows, read, rowsCapped[0], colsCappedHolder[0], filterValues, t0);
+    }
+
+    /**
+     * The table, finished: filter values and column groups sorted, cells moved to match, rows in
+     * label order. Cells are at column group g + 1 and the row's total at 0 until then.
+     */
+    static Result finish(Spec spec, List<String> titles, Node root, List<List<String>> colKeys, long rows, long read,
+                         boolean rowsCapped, boolean colsCapped, Map<Integer, List<String>> filterValues, long t0) {
+        for (List<String> l : filterValues.values()) {
             l.sort(Pivot::compareLabels);
-            filterValues.put(e.getKey(), l);
         }
         // column groups in order (numbers and dates sorted), cells moved to match
         Integer[] order = new Integer[colKeys.size()];
@@ -834,7 +854,7 @@ public final class Pivot {
             sortedKeys.add(colKeys.get(order[i]));
         }
         reorder(root, newAt, colKeys.size());
-        Result res = new Result(spec, titles, root, sortedKeys, rows, read, rowsCapped[0], colsCapped, filterValues,
+        Result res = new Result(spec, titles, root, sortedKeys, rows, read, rowsCapped, colsCapped, filterValues,
                 (System.nanoTime() - t0) / 1_000_000);
         res.sort(-1, -1, false);
         return res;

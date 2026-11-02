@@ -7579,6 +7579,147 @@ class VisualTest {
 
     @Test
     @Order(61)
+    void pivotsABigTableFromTheCache() throws Exception {
+        // a big table's columns are kept after the first pivot: the next ones take milliseconds
+        Path f = dir.resolve("big-pivot-cache.csv");
+        java.util.Random rnd = new java.util.Random(9);
+        StringBuilder b = new StringBuilder("time,host,status,ms,bytes,\r\n");
+        for (int i = 0; i < 300_000; i++) {
+            b.append(String.format("2026-10-%02d %02d:%02d:%02d", 1 + i / 20_000, i / 3600 % 24, i / 60 % 60, i % 60))
+                    .append(",web-").append(rnd.nextInt(6)).append(',').append(rnd.nextInt(7) == 0 ? "error" : "ok")
+                    .append(',').append(rnd.nextInt(5000)).append(',').append(rnd.nextInt(100_000)).append(",\r\n");
+        }
+        Files.writeString(f, b);
+        System.setProperty("logsift.pivotCacheMinBytes", "1000000"); // this file counts as big
+        Path cacheDir = Path.of(System.getProperty("logsift.home")).resolve("cache").resolve("pivot");
+        try {
+            onEdt(() -> {
+                frame.openFile(f);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                            && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "the big table");
+            LogTab tab = onEdt(frame::currentTab);
+            PivotPanel pp = onEdt(tab::pivotPanel);
+            onEdt(() -> {
+                tab.showPivot();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> pp.fieldsForTest().size() >= 5 && !pp.isRunning());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "the pivot's fields");
+            int errorsBefore = ErrorReporter.sessionForTest().size();
+            onEdt(() -> {
+                pp.clearButtonForTest(null).doClick();
+                pp.addField(PivotPanel.Area.ROWS, pp.columnForTest("host"));
+                pp.addField(PivotPanel.Area.VALUES, pp.columnForTest("ms"));
+                return null;
+            });
+            waitForPivot(pp);
+            Pivot.Result first = onEdt(pp::resultForTest);
+            assertTrue(first.cached(), "from the cache: " + onEdt(pp::statusForTest));
+            assertTrue(onEdt(pp::statusForTest).contains("from the cache"), onEdt(pp::statusForTest));
+            assertEquals(300_000, first.rows());
+            assertEquals(6, first.root().kids().size());
+            assertTrue(logsift.core.PivotCache.size(cacheDir) > 0, "kept in " + cacheDir);
+            // another layout over the same columns: no reading of the file, quick
+            onEdt(() -> {
+                pp.addField(PivotPanel.Area.COLUMNS, pp.columnForTest("status"));
+                return null;
+            });
+            waitForPivot(pp);
+            Pivot.Result second = onEdt(pp::resultForTest);
+            assertTrue(second.cached());
+            assertTrue(second.millis() < 3000, second.millis() + " ms");
+            // the same as reading the file
+            Pivot.Result fromFile = Pivot.compute(tab.logFormat(), tab.document().lineCount(),
+                    logsift.core.CsvRows.reader(tab.document(), tab.logFormat()), null, second.spec(),
+                    Pivot.fields(tab.logFormat(), tab.document().lineCount(),
+                            logsift.core.CsvRows.reader(tab.document(), tab.logFormat()), 2026), () -> false, null);
+            assertEquals(fromFile.value(fromFile.root(), -1, 0), second.value(second.root(), -1, 0), 1e-6);
+            assertEquals(fromFile.colKeys(), second.colKeys());
+            shot("115d-pivot-from-the-cache");
+            // the file changes: Refresh reads it again, into a new cache
+            Files.writeString(f, "2026-10-20 10:00:00,web-9,ok,7,1,\r\n", java.nio.file.StandardOpenOption.APPEND);
+            onEdt(() -> {
+                tab.reload();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> !tab.document().isIndexing() && tab.document().lineCount() >= 300_002);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the line added");
+            onEdt(() -> {
+                pp.start();
+                return null;
+            });
+            waitForPivot(pp);
+            Pivot.Result after = onEdt(pp::resultForTest);
+            assertTrue(after.cached());
+            assertEquals(300_001, after.rows(), "the new row counted");
+            assertEquals(7, after.root().kids().size(), "web-9 too");
+            assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "nothing failed: "
+                    + ErrorReporter.sessionForTest());
+            // Settings → General: how much the caches take; Empty keeps the one in use
+            SettingsDialog before = SettingsDialog.lastForTest();
+            javax.swing.SwingUtilities.invokeLater(() -> frame.showSettings(null));
+            waitFor(() -> SettingsDialog.lastForTest() != before && SettingsDialog.lastForTest() != null
+                    && SettingsDialog.lastForTest().isShowing(), 10_000, "Settings");
+            SettingsDialog settings = SettingsDialog.lastForTest();
+            settle();
+            javax.swing.JLabel used = (javax.swing.JLabel) findNamed(settings.getRootPane(), "pivotCacheUsed");
+            assertNotNull(used);
+            assertTrue(onEdt(used::getText).matches("GB · [0-9,.]+ MB in use"), onEdt(used::getText));
+            assertNotNull(findNamed(settings.getRootPane(), "pivotCacheGb"));
+            long inUse = logsift.core.PivotCache.size(cacheDir);
+            onEdt(() -> {
+                ((javax.swing.JButton) findNamed(settings.getRootPane(), "pivotCacheEmpty")).doClick();
+                return null;
+            });
+            long left = logsift.core.PivotCache.size(cacheDir);
+            assertTrue(left > 0 && left < inUse, "the open file's cache stays, the old one goes: " + inUse + " → " + left);
+            onEdt(() -> {
+                settings.dispose();
+                frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+                return null;
+            });
+            logsift.core.PivotCache.clear(cacheDir, java.util.Set.of());
+            assertEquals(0, logsift.core.PivotCache.size(cacheDir), "closed, it can go too");
+        } finally {
+            System.clearProperty("logsift.pivotCacheMinBytes");
+        }
+    }
+
+    private static java.awt.Component findNamed(java.awt.Container c, String name) {
+        for (java.awt.Component k : c.getComponents()) {
+            if (name.equals(k.getName())) {
+                return k;
+            }
+            if (k instanceof java.awt.Container cc) {
+                java.awt.Component f = findNamed(cc, name);
+                if (f != null) {
+                    return f;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
+    @Order(61)
     void handlesAVeryWideTable() throws Exception {
         // 2,000 columns once ran Profile, Insights and Pivot out of memory together
         Path f = dir.resolve("wide-2000.csv");

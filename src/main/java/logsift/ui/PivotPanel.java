@@ -79,8 +79,12 @@ final class PivotPanel extends JPanel {
         /** What the columns hold (on a background thread; waits for the file); null if cancelled. */
         Pivot.Fields fields(AtomicBoolean cancel);
 
-        /** Computes the pivot (on a background thread); null if cancelled. */
-        Pivot.Result compute(Pivot.Spec spec, Pivot.Fields fields, AtomicBoolean cancel, DoubleConsumer progress);
+        /**
+         * Computes the pivot (on a background thread); null if cancelled. {@code say} tells what
+         * it is doing, when that's more than counting (preparing the cache of a big file).
+         */
+        Pivot.Result compute(Pivot.Spec spec, Pivot.Fields fields, AtomicBoolean cancel, DoubleConsumer progress,
+                             java.util.function.Consumer<String> say);
 
         /** Shows only the rows where a column has this value (a cell was opened). */
         void filter(String column, ColumnFilter.Op op, String text);
@@ -1112,7 +1116,12 @@ final class PivotPanel extends JPanel {
                     if (spec == null) {
                         s = restoredSpec(f);
                     }
-                    r = host.compute(s, f, cancel, p -> SwingUtilities.invokeLater(() -> bar.setValue((int) (p * 100))));
+                    r = host.compute(s, f, cancel, p -> SwingUtilities.invokeLater(() -> bar.setValue((int) (p * 100))),
+                            text -> SwingUtilities.invokeLater(() -> {
+                                if (running == cancel) {
+                                    status.setText(text);
+                                }
+                            }));
                 }
             } catch (RuntimeException e) {
                 logsift.core.Problems.unexpected(e);
@@ -1154,7 +1163,8 @@ final class PivotPanel extends JPanel {
 
     private void show(Pivot.Result r) {
         result = r;
-        status.setText(String.format(Locale.ROOT, "%,d rows · %,d ms%s", r.rows(), r.millis(),
+        status.setText(String.format(Locale.ROOT, "%,d rows · %,d ms%s%s", r.rows(), r.millis(),
+                r.cached() ? " · from the cache" : "",
                 r.rowsCapped() || r.colsCapped() ? " · too many groups: the rest are in (other)" : ""));
         if (sortValue >= r.spec().cellValues().size()) {
             sortValue = -1;
