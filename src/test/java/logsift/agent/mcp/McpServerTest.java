@@ -211,7 +211,7 @@ class McpServerTest {
     void listsReadOnlyTools() throws Exception {
         List<Object> tools = list(map(request("tools/list", Map.of()).get("result")).get("tools"));
         assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines",
-                "top_messages", "metrics", "query", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
+                "top_messages", "metrics", "query", "pivot", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
                 "merge_logs", "analyze_profile", "compare_files", "compare_folders", "compare_logs", "analyze_crash",
                 "crash_threads", "crash_modules"),
                 tools.stream().map(t -> map(t).get("name")).toList());
@@ -538,6 +538,21 @@ class McpServerTest {
         Answer file = call("query", "log", f.toString(), "sql", "SELECT * FROM read_csv('" + csv + "')");
         assertTrue(file.error(), "no file access from SQL: " + file.text());
         assertTrue(call("query", "log", f.toString(), "sql", "SELECT 1; SELECT 2").text().startsWith("One query at a time"));
+    }
+
+    @Test
+    void pivotsATable() throws Exception {
+        Path csv = logs.resolve("orders.csv");
+        Files.writeString(csv, "order_id,placed_at,amount,region\n1,2026-10-21 10:00:00,12.50,North\n"
+                + "2,2026-10-21 10:05:00,3,South\n3,2026-10-21 11:00:00,4.5,North\n");
+        Answer a = ok("pivot", "log", csv.toString(), "rows", "region", "columns", "placed_at:hour",
+                "values", "sum(amount)");
+        assertTrue(a.text().startsWith("3 rows in "), a.text());
+        assertTrue(a.text().contains("region | 2026-10-21 10:00 | 2026-10-21 11:00 | Total\n"), a.text());
+        assertTrue(a.text().contains("North | 12.5 | 4.5 | 17\n"), a.text());
+        assertTrue(a.text().contains("Grand Total | 15.5 | 4.5 | 20"), a.text());
+        Answer bad = call("pivot", "log", csv.toString(), "rows", "country");
+        assertTrue(bad.error() && bad.text().startsWith("There is no field “country”."), bad.text());
     }
 
     @Test

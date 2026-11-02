@@ -1957,7 +1957,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 }
                 c = pivotCache;
             }
-            java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+            java.time.ZoneId zone = java.time.ZoneOffset.UTC; // log times are kept as written, as UTC
             if (!c.has(spec)) {
                 say.accept("Preparing these columns for quick pivots (once, for this file)…");
                 if (!c.build(spec, fields, logsift.core.CsvRows.reader(doc, logFormat), doc.lineCount(), stop, progress)) {

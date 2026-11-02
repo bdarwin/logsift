@@ -326,6 +326,30 @@ class PivotTest {
     }
 
     @Test
+    void timesGroupAsWrittenWhateverTheComputersZone() {
+        // log times are kept as written (as UTC): 23:30 is the 28th's 23:00 hour on any computer
+        java.util.TimeZone was = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Singapore"));
+            List<String> l = List.of("time,n", "2026-10-28 23:30:00,1", "2026-10-29 00:10:00,2", "2026-10-29 00:20:00,4");
+            LogFormat f = format(l);
+            Pivot.Fields fields = Pivot.fields(f, l.size(), lines(l), 2026);
+            for (Pivot.Group g : List.of(Pivot.Group.HOUR, Pivot.Group.DAY, Pivot.Group.HOUR_OF_DAY)) {
+                Pivot.Result r = Pivot.compute(f, l.size(), lines(l), null, new Pivot.Spec(List.of(new Pivot.Field(0, g)),
+                        List.of(), List.of(new Pivot.Value(1, Pivot.Agg.SUM)), Map.of()), fields, () -> false, null);
+                List<String> labels = r.root().kids().stream().map(Pivot.Node::label).toList();
+                assertEquals(switch (g) {
+                    case HOUR -> List.of("2026-10-28 23:00", "2026-10-29 00:00");
+                    case DAY -> List.of("2026-10-28", "2026-10-29");
+                    default -> List.of("00", "23");
+                }, labels.stream().sorted().toList(), g + ": " + labels);
+            }
+        } finally {
+            java.util.TimeZone.setDefault(was);
+        }
+    }
+
+    @Test
     void cancelledAndLabels() {
         List<String> l = sales();
         LogFormat f = format(l);

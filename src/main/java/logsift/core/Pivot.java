@@ -701,7 +701,8 @@ public final class Pivot {
     /** Lines of the table, as {@link ColumnProfile#analyze} reads them. */
     public static Result compute(LogFormat format, long lineCount, ColumnProfile.Lines lines, LongPredicate include,
                                  Spec spec, Fields fields, BooleanSupplier cancelled, DoubleConsumer progress) {
-        return compute(format, lineCount, lines, include, spec, fields, ZoneId.systemDefault(), cancelled, progress);
+        // log times are kept as UTC (as written, see TimeFormat): their groups are labelled in UTC too
+        return compute(format, lineCount, lines, include, spec, fields, java.time.ZoneOffset.UTC, cancelled, progress);
     }
 
     /**

@@ -109,7 +109,8 @@ public final class Skill {
 
                 For a problem: `insights` (what happened), `exceptions` (root causes), `query` (exact counts over \
                 time with SQL), then `search`, `read_lines` and `follow_request` around what you found. A failed \
-                run: `compare_logs` with a good one. Slow: `metrics`. Java: `analyze_gc`, `analyze_threads`. \
+                run: `compare_logs` with a good one. Slow: `metrics`. A table (CSV): `pivot` (totals by group), \
+                `query`. Java: `analyze_gc`, `analyze_threads`. \
                 A crash: `analyze_crash`.
 
                 Step-by-step plans for common jobs: `%s prompt NAME name=value`, with NAME one of \

@@ -1533,24 +1533,9 @@ final class PivotPanel extends JPanel {
         }
     }
 
-    /** A number for people: 1,234 or 1,234.57 (at most 2 decimals; small ones keep 3 significant digits). */
+    /** A number for people: 1,234 or 1,234.57 (as agents get it too). */
     static String format(double v) {
-        if (Double.isNaN(v)) {
-            return "";
-        }
-        if (Double.isInfinite(v)) {
-            return v > 0 ? "∞" : "-∞";
-        }
-        if (v == Math.rint(v) && Math.abs(v) < 1e15) {
-            return String.format(Locale.ROOT, "%,d", (long) v);
-        }
-        double a = Math.abs(v);
-        String s = a >= 1 ? String.format(Locale.ROOT, "%,.2f", v)
-                : new java.math.BigDecimal(v).round(new java.math.MathContext(3)).toPlainString();
-        if (s.contains(".")) {
-            s = s.replaceAll("0+$", "").replaceAll("\\.$", "");
-        }
-        return s;
+        return logsift.core.PivotText.number(v);
     }
 
     private void toggle(Pivot.Node n) {

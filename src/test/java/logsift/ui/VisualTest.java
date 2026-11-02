@@ -7661,6 +7661,44 @@ class VisualTest {
             assertEquals(fromFile.value(fromFile.root(), -1, 0), second.value(second.root(), -1, 0), 1e-6);
             assertEquals(fromFile.colKeys(), second.colKeys());
             shot("115d-pivot-from-the-cache");
+            // times group as written whatever the computer's zone (log times are kept as UTC): 00:00 is 00
+            java.util.TimeZone zoneWas = java.util.TimeZone.getDefault();
+            try {
+                java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Singapore"));
+                onEdt(() -> {
+                    pp.clearButtonForTest(null).doClick();
+                    pp.addField(PivotPanel.Area.ROWS, pp.columnForTest("time"));
+                    pp.setGroupForTest(PivotPanel.Area.ROWS, 0, Pivot.Group.HOUR_OF_DAY);
+                    pp.addField(PivotPanel.Area.VALUES, pp.columnForTest("ms"));
+                    return null;
+                });
+                waitForPivot(pp);
+                Pivot.Result byHour = onEdt(pp::resultForTest);
+                assertTrue(byHour.cached());
+                long midnight = 0;
+                for (int i = 0; i < 300_000; i++) {
+                    midnight += i / 3600 % 24 == 0 ? 1 : 0;
+                }
+                Pivot.Node zero = byHour.root().kids().stream().filter(k -> k.label().equals("00")).findFirst()
+                        .orElseThrow();
+                assertEquals(midnight, zero.rows(), "the rows written at 00:xx");
+                Pivot.Result hourFromFile = Pivot.compute(tab.logFormat(), tab.document().lineCount(),
+                        logsift.core.CsvRows.reader(tab.document(), tab.logFormat()), null, byHour.spec(),
+                        Pivot.fields(tab.logFormat(), tab.document().lineCount(),
+                                logsift.core.CsvRows.reader(tab.document(), tab.logFormat()), 2026), () -> false, null);
+                assertEquals(hourFromFile.root().kids().stream().map(k -> k.label() + "=" + k.rows()).sorted().toList(),
+                        byHour.root().kids().stream().map(k -> k.label() + "=" + k.rows()).sorted().toList());
+            } finally {
+                java.util.TimeZone.setDefault(zoneWas);
+            }
+            onEdt(() -> {
+                pp.clearButtonForTest(null).doClick();
+                pp.addField(PivotPanel.Area.ROWS, pp.columnForTest("host"));
+                pp.addField(PivotPanel.Area.VALUES, pp.columnForTest("ms"));
+                pp.addField(PivotPanel.Area.COLUMNS, pp.columnForTest("status"));
+                return null;
+            });
+            waitForPivot(pp);
             // the file changes: Refresh reads it again, into a new cache
             Files.writeString(f, "2026-10-20 10:00:00,web-9,ok,7,1,\r\n", java.nio.file.StandardOpenOption.APPEND);
             onEdt(() -> {

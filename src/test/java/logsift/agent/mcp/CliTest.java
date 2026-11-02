@@ -76,6 +76,16 @@ class CliTest {
     }
 
     @Test
+    void pivotsWithListsInOneArgument() throws Exception {
+        Path csv = logs.resolve("orders.csv");
+        Files.writeString(csv, "region,amount\nNorth,12.5\nSouth,3\nNorth,4.5\n");
+        Result r = cli("", "run", "pivot", "log=" + csv, "rows=region", "values=sum(amount), count", "--root",
+                logs.toString());
+        assertEquals(0, r.code(), r.err());
+        assertTrue(r.out().contains("region | Sum of amount | Count of rows\nNorth | 17 | 2\nSouth | 3 | 1\n"), r.out());
+    }
+
+    @Test
     void takesArgumentsAsJsonOnStandardInput() throws Exception {
         String json = "{\"log\": \"" + log.toString().replace("\\", "\\\\") + "\", \"sql\": "
                 + "\"SELECT count(*) AS n FROM log WHERE level = 'ERROR'\"}";

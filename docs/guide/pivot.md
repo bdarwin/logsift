@@ -23,7 +23,7 @@ On the right, **Fields** lists the file's columns, each with its kind: **#** num
 
 - **Tick** a field (or double-click it): numbers go to **Values** (summed), times and text to **Rows**. Untick it to take it out.
 - **Drag** a field from the list to an area, or from one area to another; drag it out of the areas to remove it.
-- **Click** a field in an area for its options: **Summarize by** (values), **Show values as** *% of the grand total*, *% of the row's total* or *% of the column's total*, **Group by** (times: *Year*, *Quarter*, *Month*, *Week*, *Day*, *Hour*, *Minute*, *Day of the week*, *Hour of the day*), **Move Up** / **Move Down**, **Move to** another area, **Remove**.
+- **Click** a field in an area for its options: **Summarize by** (values), **Show values as** *% of the grand total*, *% of the row's total* or *% of the column's total*, **Group by** (times: *Year*, *Quarter*, *Month*, *Week*, *Day*, *Hour*, *Minute*, *Day of the week*, *Hour of the day*, by the times as the file writes them, whatever your computer's time zone), **Move Up** / **Move Down**, **Move to** another area, **Remove**.
 - Before any field is placed, a button offers a quick start, like *Sum of amount by region*.
 - **Clear** at the top of an area takes every field out of it (in **Filters**: every filter, so all rows count again). **Clear All** empties every area, to start again.
 
@@ -72,3 +72,7 @@ A table of millions of rows, or of thousands of columns, is read once for the fi
 - Tables from 200 MB on are cached. **Settings → General → Pivot cache** sets how much room caches may take (5 GB at first; 0: no cache) and shows how much they use; **Empty** removes them (those of open files stay). They're kept in `.logsift/cache/pivot` in your home folder, and the oldest used go first when there's no room.
 
 ![A pivot of 300,000 rows from the cache, in 34 ms](../screenshots/pivot-from-the-cache.png)
+
+## For coding agents
+
+Agents get the same Pivot through the **pivot** tool ([Coding agents](agents.md)): rows by one or more fields (`host`, `timestamp:hour`), columns by another, values such as `count`, `sum(ms)`, `avg(bytes)`, `median(ms)`, `p95(ms)`, `count_distinct(user)`, and a pattern for many fields as one (`sum(cpu_*)`). Filters keep some values (`status=500; host=web-1|web-2`), values can show as a % of the grand total, the row or the column, and groups can be sorted by their total. The answer is the table as text, with the same numbers as the Pivot tab.

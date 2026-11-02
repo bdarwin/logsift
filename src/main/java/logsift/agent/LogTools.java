@@ -41,6 +41,7 @@ public final class LogTools {
     public static List<Tool> all() {
         List<Tool> all = new ArrayList<>(List.of(LIST_LOGS, OPEN_LOG, LIST_OPEN, INSIGHTS, EXCEPTIONS, SEARCH,
                 READ_LINES, TOP_MESSAGES, METRICS, QUERY, SEARCH_FOLDER, ANALYZE_GC, ANALYZE_THREADS));
+        all.add(all.indexOf(QUERY) + 1, TableTools.PIVOT);
         all.addAll(TraceTools.all());
         all.addAll(CompareTools.all());
         all.addAll(CrashTools.all());
@@ -61,7 +62,7 @@ public final class LogTools {
         String run(Tool.Args a, Workspace w) throws Exception;
     }
 
-    private static final String LOG_ARG = "A handle from open_log (like log:1), or the log file's path.";
+    static final String LOG_ARG = "A handle from open_log (like log:1), or the log file's path.";
 
     // ---------------------------------------------------------------- words
 
@@ -93,14 +94,14 @@ public final class LogTools {
         return s.length() <= max ? s : s.substring(0, max) + "… (" + n(s.length() - max) + " more characters)";
     }
 
-    private static int maxChars(Tool.Args a) throws Tool.Failure {
+    static int maxChars(Tool.Args a) throws Tool.Failure {
         return (int) a.number("max_chars", Workspace.DEFAULT_MAX_CHARS, 500, Workspace.HARD_MAX_CHARS);
     }
 
-    private static final BooleanSupplier INTERRUPTED = () -> Thread.currentThread().isInterrupted();
+    static final BooleanSupplier INTERRUPTED = () -> Thread.currentThread().isInterrupted();
 
     /** The log, read and its format known (waits a while; "still working" for big files). */
-    private static LogAnalysis ready(Tool.Args a, Workspace w) throws Exception {
+    static LogAnalysis ready(Tool.Args a, Workspace w) throws Exception {
         LogAnalysis log = w.log(a.string("log"));
         String h = w.handleOf(log);
         w.await(h + ":ready", "reading " + log.path().getFileName() + " (" + n(log.document().lineCount())
