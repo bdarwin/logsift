@@ -102,6 +102,12 @@ class AppPlumbingTest {
         StdinCapture.start(new ByteArrayInputStream(new byte[0]), dir.resolve("stdin"));
         assertFalse(Files.exists(old), "week-old captures are cleaned up");
         assertTrue(Files.exists(f));
+        // the copying threads end with their input; wait, so the temporary folder isn't removed under them
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if (t.getName().equals("logsift-stdin")) {
+                t.join(10_000);
+            }
+        }
     }
 
     private static void waitForSize(Path f, long size) throws Exception {

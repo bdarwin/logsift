@@ -278,9 +278,14 @@ jobs:
           if ($all -match 'abc123secret') { throw "secret not masked" }
           if ($all -match 'ΓÇ|â€') { throw "garbled symbols: $all" }
           if ($all -notmatch 'first') { throw "no query answer" }
+          # a mistake exits 2 (without stopping this script: PowerShell would treat it as an error)
+          $PSNativeCommandUseErrorActionPreference = $false
+          $ErrorActionPreference = 'Continue'
           & $mcp run serch 2>$null
           if ($LASTEXITCODE -ne 2) { throw "a wrong tool should exit 2, not $LASTEXITCODE" }
+          $ErrorActionPreference = 'Stop'
           Remove-Item -Recurse -Force skill-try, "$HOME\logs\orders.log"
+          $global:LASTEXITCODE = 0 # the step ends with the last program's exit code
 
       - name: Try the Windows installer (install, check, uninstall)
         if: startsWith(matrix.target, 'windows-') && !startsWith(github.ref_name, 'beta/')
