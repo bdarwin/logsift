@@ -116,14 +116,18 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
         return m;
     }
 
-    LineMatcher matcher(java.nio.charset.Charset cs) {
+    /**
+     * Whether a value (a line's, as {@link LogFormat#value} gives it) passes: what every line is
+     * tested with, whether the line is read from the file or its column from a cache.
+     */
+    public java.util.function.Predicate<String> valueTest() {
         Pattern p = op == Op.CONTAINS ? query.toPattern() : null;
         String hint = unitHint(format, column);
         double limit = op == Op.MORE || op == Op.LESS ? number(query.text(), hint) : Double.NaN;
         double[] range = op == Op.BETWEEN ? range(query.text(), hint) : null;
         String text = query.text().strip();
         boolean exact = query.matchCase();
-        java.util.function.Predicate<String> test = switch (op) {
+        return switch (op) {
             case CONTAINS -> v -> p.matcher(v).find();
             case EQUALS -> v -> exact ? v.strip().equals(text) : v.strip().equalsIgnoreCase(text);
             case MORE -> v -> number(v, hint) > limit;
@@ -133,6 +137,11 @@ public record ColumnFilter(LogFormat format, String column, Op op, SearchQuery q
                 return x >= range[0] && (range[2] == 1 ? x <= range[1] : x < range[1]);
             };
         };
+    }
+
+    LineMatcher matcher(java.nio.charset.Charset cs) {
+        String text = query.text().strip();
+        java.util.function.Predicate<String> test = valueTest();
         // a line can only match if it has the text somewhere: a fast byte search finds those first
         boolean literal = (op == Op.EQUALS || op == Op.CONTAINS) && !text.isEmpty()
                 && new SearchQuery(text, query.matchCase(), false, false).isPlainBytes()

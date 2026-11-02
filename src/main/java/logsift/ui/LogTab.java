@@ -183,6 +183,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 : logsift.core.Encoding.label(doc.charset());
         this.doc = doc;
         this.engine = new FilterEngine(doc);
+        engine.setColumnHits(this::columnHits);
         this.filterResult = engine.result();
         docUpdate = coalesced(this::onDocChanged);
         filterUpdate = coalesced(this::onFilterResult);
@@ -1944,19 +1945,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             return null;
         }
         try {
-            logsift.core.PivotCache c;
-            synchronized (this) {
-                String read = doc.charset().name();
-                if (pivotCache != null && !pivotCache.isFor(path, logFormat, read)) {
-                    pivotCache.close(); // the file changed, or is read another way
-                    pivotCache = null;
-                }
-                if (pivotCache == null) {
-                    pivotCache = logsift.core.PivotCache.open(path, logFormat, read, PivotCaches.dir(),
-                            PivotCaches.limit());
-                }
-                c = pivotCache;
-            }
+            logsift.core.PivotCache c = cache(logFormat);
             java.time.ZoneId zone = java.time.ZoneOffset.UTC; // log times are kept as written, as UTC
             if (!c.has(spec)) {
                 say.accept("Preparing these columns for quick pivots (once, for this file)…");
@@ -1971,6 +1960,113 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             pivotCacheBroken = true;
             return null;
         }
+    }
+
+    /** The cache of this file as it is now, read with this format (opened, or opened again if it changed). */
+    private synchronized logsift.core.PivotCache cache(logsift.core.LogFormat format) throws java.io.IOException {
+        String read = doc.charset().name();
+        if (pivotCache != null && !pivotCache.isFor(path, format, read)) {
+            pivotCache.close(); // the file changed, or is read another way
+            pivotCache = null;
+        }
+        if (pivotCache == null) {
+            pivotCache = logsift.core.PivotCache.open(path, format, read, PivotCaches.dir(), PivotCaches.limit());
+        }
+        return pivotCache;
+    }
+
+    /** Whether this tab's file is a table big enough for the cache, and the cache works. */
+    private boolean cacheable(logsift.core.LogFormat f) {
+        return !pivotCacheBroken && !closed && f != null && f.isCsv() && PivotCaches.enabled()
+                && doc.fileSize() >= PivotCaches.minBytes();
+    }
+
+    /**
+     * A column filter's lines from the cache, when its column's values are stored for the file as
+     * it is now (else null: the file is read, and the column is stored afterwards for next time).
+     */
+    private long[] columnHits(logsift.core.ColumnFilter f, long upTo, java.util.function.BooleanSupplier stop) {
+        logsift.core.LogFormat fmt = logFormat;
+        if (!cacheable(fmt) || !f.format().equals(fmt) || doc.isIndexing() || upTo > doc.lineCount()) {
+            return null;
+        }
+        int col = fmt.columns().indexOf(f.column());
+        if (col < 0) {
+            return null;
+        }
+        try {
+            logsift.core.PivotCache c = cache(fmt);
+            long[] hits = c.matchingLines(col, f.valueTest(), upTo, () -> stop.getAsBoolean() || closed);
+            if (hits == null && !stop.getAsBoolean()) {
+                storeValuesLater(c, fmt, col);
+            } else if (hits != null) {
+                filterCacheAnswers.incrementAndGet();
+            }
+            return hits;
+        } catch (java.io.IOException | RuntimeException e) {
+            if (!closed) {
+                logsift.core.Problems.unexpected(e);
+                pivotCacheBroken = true;
+            }
+            return null;
+        }
+    }
+
+    /** Stores columns' values for filters, one at a time, once the filters have read the file. */
+    private final java.util.concurrent.ExecutorService valueStore = java.util.concurrent.Executors
+            .newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "logsift-filter-values");
+                t.setDaemon(true);
+                t.setPriority(Thread.MIN_PRIORITY);
+                return t;
+            });
+    private final java.util.Set<Integer> valuesAsked = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private void storeValuesLater(logsift.core.PivotCache c, logsift.core.LogFormat fmt, int col) {
+        if (!valuesAsked.add(col)) {
+            return;
+        }
+        String read = doc.charset().name();
+        java.util.function.BooleanSupplier stale = () -> closed || logFormat != fmt || !c.isFor(path, fmt, read);
+        valueStore.execute(() -> {
+            try {
+                // after the filters have read the file: they come first
+                while (!stale.getAsBoolean() && (engine.isRunning() || doc.isIndexing())) {
+                    Thread.sleep(200);
+                }
+                if (!stale.getAsBoolean()) {
+                    c.buildValues(List.of(col), logsift.core.CsvRows.reader(doc, fmt), doc.lineCount(), stale, null);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (RuntimeException e) {
+                if (!stale.getAsBoolean()) {
+                    logsift.core.Problems.unexpected(e);
+                    pivotCacheBroken = true;
+                }
+            } finally {
+                valuesAsked.remove(col);
+            }
+        });
+    }
+
+    private final java.util.concurrent.atomic.AtomicInteger filterCacheAnswers = new java.util.concurrent.atomic.AtomicInteger();
+
+    /** How many column filters the cache has answered (tests). */
+    int filterCacheAnswersForTest() {
+        return filterCacheAnswers.get();
+    }
+
+    /** Waits until the columns asked for filters are stored (tests). */
+    boolean awaitFilterValuesForTest(long millis) throws InterruptedException {
+        long end = System.currentTimeMillis() + millis;
+        while (!valuesAsked.isEmpty()) {
+            if (System.currentTimeMillis() > end) {
+                return false;
+            }
+            Thread.sleep(20);
+        }
+        return true;
     }
 
     private synchronized void closePivotCache() {
@@ -3913,6 +4009,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
 
     void close() {
         closed = true;
+        valueStore.shutdownNow();
         closePivotCache();
         treePanel.dispose();
         if (alertTimer != null) {

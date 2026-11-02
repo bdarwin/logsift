@@ -76,7 +76,24 @@ public final class SearchSession implements AutoCloseable {
                 new LineMatcher.Continuations(format));
     }
 
+    /**
+     * The hits of lines {@code [0, upTo)} found another way, for the file as it is now (a cache of
+     * a big table's column): in order, or null to read the file.
+     */
+    @FunctionalInterface
+    public interface Prefill {
+        long[] hits(long upTo, BooleanSupplier stop);
+    }
+
+    /** Asked before the file is first read (and again after it is replaced). */
+    private final Prefill prefill;
+
     SearchSession(LogDocument doc, SearchQuery query, LineMatcher matcher) {
+        this(doc, query, matcher, null);
+    }
+
+    SearchSession(LogDocument doc, SearchQuery query, LineMatcher matcher, Prefill prefill) {
+        this.prefill = prefill;
         this.doc = doc;
         this.query = query;
         this.matcher = matcher;
@@ -202,6 +219,9 @@ public final class SearchSession implements AutoCloseable {
                     tentativeLine = -1;
                 }
             }
+            if (searchedLines == 0 && complete > 0 && prefill != null && !cancelled) {
+                prefilled(complete);
+            }
             if (complete > searchedLines) {
                 searchLines(s, searchedLines, complete);
                 searchedLines = complete;
@@ -229,6 +249,43 @@ public final class SearchSession implements AutoCloseable {
                 l.failed(this, e);
             }
         }
+    }
+
+    /** The hits of the lines before {@code complete}, if found another way; the file is read for the rest. */
+    private void prefilled(long complete) {
+        int gen = generation;
+        long[] found;
+        try {
+            found = prefill.hits(complete, () -> cancelled || doc.generation() != gen);
+        } catch (RuntimeException e) {
+            logsift.core.Problems.unexpected(e);
+            return; // read the file
+        }
+        if (found == null || cancelled || doc.generation() != gen) {
+            return;
+        }
+        long last = -1;
+        for (long line : found) {
+            if (line <= last || line >= complete) {
+                logsift.core.Problems.unexpected(new IllegalStateException("hits out of order: " + line + " after "
+                        + last + " of " + complete));
+                return; // read the file
+            }
+            last = line;
+        }
+        for (long line : found) {
+            if (hits.size() >= MAX_HITS) {
+                limitReached = true;
+                break;
+            }
+            hits.add(line);
+        }
+        if (!limitReached) {
+            coveredLines = complete;
+        }
+        searchedLines = complete;
+        progressLine = complete;
+        notifyUpdated(true);
     }
 
     private record Range(long firstLine, long endLine, long startByte, long endByte) {}

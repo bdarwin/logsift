@@ -7770,6 +7770,158 @@ class VisualTest {
 
     @Test
     @Order(61)
+    void filtersABigTableFromTheCache() throws Exception {
+        // a column filter reads the file; the column is kept after, and the next filters on it come from the cache
+        Path f = dir.resolve("big-filter-cache.csv");
+        java.util.Random rnd = new java.util.Random(4);
+        String[] notes = {"plain", "\"two\r\nlines\"", "\"a, b\"", ""};
+        StringBuilder b = new StringBuilder("time,host,ms,note\r\n");
+        for (int i = 0; i < 120_000; i++) {
+            b.append(String.format("2026-10-%02d %02d:%02d:%02d", 1 + i / 20_000, i / 3600 % 24, i / 60 % 60, i % 60))
+                    .append(',').append(rnd.nextInt(9) == 0 ? " web-1 " : "web-" + rnd.nextInt(6)).append(',')
+                    .append(rnd.nextInt(5000)).append(rnd.nextInt(4) == 0 ? " ms" : "").append(',')
+                    .append(notes[rnd.nextInt(notes.length)]).append("\r\n");
+        }
+        Files.writeString(f, b);
+        System.setProperty("logsift.pivotCacheMinBytes", "1000000"); // this file counts as big
+        Path cacheDir = Path.of(System.getProperty("logsift.home")).resolve("cache").resolve("pivot");
+        try {
+            onEdt(() -> {
+                frame.openFile(f);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                            && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "the big table");
+            LogTab tab = onEdt(frame::currentTab);
+            logsift.core.LogFormat fmt = onEdt(tab::logFormat);
+            String host = fmt.columns().get(1);
+            String ms = fmt.columns().get(2);
+            int errorsBefore = ErrorReporter.sessionForTest().size();
+            // what reading the file finds, for each filter
+            java.util.function.BiFunction<String, logsift.core.ColumnFilter, List<Long>> read = (what, cf) -> {
+                try (logsift.core.FilterEngine e = new logsift.core.FilterEngine(tab.document())) {
+                    e.configure(List.of(new logsift.core.FilterEngine.Spec('A', cf.query(), cf)),
+                            new logsift.core.Formula.Ref('A'));
+                    assertTrue(e.awaitIdle(60_000));
+                    List<Long> out = new ArrayList<>();
+                    for (long i = 0; i < e.result().count(); i++) {
+                        out.add(e.result().lineAt(i));
+                    }
+                    return out;
+                }
+            };
+            java.util.function.Supplier<List<Long>> shown = () -> {
+                try {
+                    return onEdt(() -> {
+                        FilterResult r = tab.filterResultForTest();
+                        List<Long> out = new ArrayList<>();
+                        for (long i = 0; i < r.count(); i++) {
+                            out.add(r.lineAt(i));
+                        }
+                        return out;
+                    });
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            };
+            // the first filter on a column: the file is read
+            onEdt(() -> {
+                tab.filterByColumn(host, logsift.core.ColumnFilter.Op.EQUALS, "web-1", FilterDef.Action.SHOW);
+                return null;
+            });
+            waitForFilter(tab);
+            assertEquals(0, tab.filterCacheAnswersForTest(), "not stored yet");
+            List<Long> first = shown.get();
+            // = matches case (as the filter row sets it)
+            assertEquals(read.apply("", new logsift.core.ColumnFilter(fmt, host, logsift.core.ColumnFilter.Op.EQUALS,
+                    new logsift.core.SearchQuery("web-1", true, false, false))), first);
+            assertTrue(first.size() > 10_000, first.size() + " lines");
+            assertTrue(tab.awaitFilterValuesForTest(60_000), "the column stored for next time");
+            // the next ones on it come from the cache, with the very lines reading the file gives
+            for (String[] x : new String[][] {{"EQUALS", "web-2"}, {"CONTAINS", " web"}, {"CONTAINS", "B-3"}}) {
+                onEdt(() -> {
+                    tab.logBar().clearAllButtonForTest().doClick();
+                    return null;
+                });
+                waitForFilter(tab);
+                int before = tab.filterCacheAnswersForTest();
+                logsift.core.ColumnFilter.Op op = logsift.core.ColumnFilter.Op.valueOf(x[0]);
+                onEdt(() -> {
+                    tab.filterByColumn(host, op, x[1], FilterDef.Action.SHOW);
+                    return null;
+                });
+                waitForFilter(tab);
+                assertEquals(before + 1, tab.filterCacheAnswersForTest(), "from the cache: " + x[1]);
+                List<Long> expected = read.apply("", new logsift.core.ColumnFilter(fmt, host, op,
+                        new logsift.core.SearchQuery(x[1], op == logsift.core.ColumnFilter.Op.EQUALS, false, false)));
+                assertEquals(expected, shown.get(), x[1]);
+                assertTrue(!expected.isEmpty(), x[1] + " finds lines");
+            }
+            shot("115e-filter-from-the-cache");
+            // numbers with units, on another column: read once, then from the cache
+            onEdt(() -> {
+                tab.logBar().clearAllButtonForTest().doClick();
+                tab.filterByColumn(ms, logsift.core.ColumnFilter.Op.MORE, "4000", FilterDef.Action.SHOW);
+                return null;
+            });
+            waitForFilter(tab);
+            assertTrue(tab.awaitFilterValuesForTest(60_000));
+            int before = tab.filterCacheAnswersForTest();
+            onEdt(() -> {
+                tab.logBar().clearAllButtonForTest().doClick();
+                tab.filterByColumn(ms, logsift.core.ColumnFilter.Op.BETWEEN, "100..<200", FilterDef.Action.SHOW);
+                return null;
+            });
+            waitForFilter(tab);
+            assertEquals(before + 1, tab.filterCacheAnswersForTest());
+            assertEquals(read.apply("", new logsift.core.ColumnFilter(fmt, ms, logsift.core.ColumnFilter.Op.BETWEEN,
+                    new logsift.core.SearchQuery("100..<200", false, false, false))), shown.get());
+            // the file grows: the cache was for the file as it was, so the file is read again
+            Files.writeString(f, "2026-10-20 10:00:00,web-2,150,new\r\n", java.nio.file.StandardOpenOption.APPEND);
+            onEdt(() -> {
+                tab.reload();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> !tab.document().isIndexing() && tab.document().lineCount() >= 120_002);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the line added");
+            int beforeGrown = tab.filterCacheAnswersForTest();
+            onEdt(() -> {
+                tab.logBar().clearAllButtonForTest().doClick();
+                tab.filterByColumn(host, logsift.core.ColumnFilter.Op.EQUALS, "web-2", FilterDef.Action.SHOW);
+                return null;
+            });
+            waitForFilter(tab);
+            assertEquals(beforeGrown, tab.filterCacheAnswersForTest(), "not from the old file's cache");
+            List<Long> grown = shown.get();
+            assertEquals(read.apply("", new logsift.core.ColumnFilter(fmt, host, logsift.core.ColumnFilter.Op.EQUALS,
+                    new logsift.core.SearchQuery("web-2", true, false, false))), grown);
+            assertEquals(tab.document().lineCount() - 1, (long) grown.get(grown.size() - 1), "the new line found");
+            assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "nothing failed: "
+                    + ErrorReporter.sessionForTest());
+            onEdt(() -> {
+                tab.logBar().clearAllButtonForTest().doClick();
+                frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+                return null;
+            });
+        } finally {
+            System.clearProperty("logsift.pivotCacheMinBytes");
+            logsift.core.PivotCache.clear(cacheDir, java.util.Set.of());
+        }
+    }
+
+    @Test
+    @Order(61)
     void handlesAVeryWideTable() throws Exception {
         // 2,000 columns once ran Profile, Insights and Pivot out of memory together
         Path f = dir.resolve("wide-2000.csv");

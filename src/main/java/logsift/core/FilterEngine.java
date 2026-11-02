@@ -27,6 +27,22 @@ public final class FilterEngine implements AutoCloseable {
         }
     }
 
+    /**
+     * The lines a column filter matches, found without reading the file (a cache of a big table's
+     * columns): lines {@code [0, upTo)} in order, or null when it can't tell.
+     */
+    @FunctionalInterface
+    public interface ColumnHits {
+        long[] hits(ColumnFilter filter, long upTo, java.util.function.BooleanSupplier stop);
+    }
+
+    private volatile ColumnHits columnHits;
+
+    /** Where column filters' lines may come from before the file is read (filters set after this). */
+    public void setColumnHits(ColumnHits h) {
+        columnHits = h;
+    }
+
     /** Called on a background thread whenever {@link #result()} changed. */
     public interface Listener {
         void resultChanged(FilterEngine engine);
@@ -110,8 +126,10 @@ public final class FilterEngine implements AutoCloseable {
         for (var e : wanted.entrySet()) {
             if (!sessions.containsKey(e.getKey())) {
                 Spec spec = e.getValue();
+                ColumnHits ch = columnHits;
                 SearchSession s = spec.column() == null ? new SearchSession(doc, spec.query())
-                        : new SearchSession(doc, spec.query(), spec.column().matcher(doc));
+                        : new SearchSession(doc, spec.query(), spec.column().matcher(doc),
+                                ch == null ? null : (upTo, stop) -> ch.hits(spec.column(), upTo, stop));
                 this.specs.put(e.getKey(), spec);
                 s.addListener(new SearchSession.Listener() {
                     @Override

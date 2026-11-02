@@ -554,6 +554,245 @@ public final class PivotCache implements AutoCloseable {
         return rows.size();
     }
 
+    // ---------------------------------------------------------------- column filters
+
+    /**
+     * Whether column {@code c}'s values are stored as column filters read them: each row's value
+     * as {@link LogFormat#value} gives it (not stripped), by the row's first line.
+     */
+    public synchronized boolean hasValues(int c) {
+        return tables.containsKey("v" + c);
+    }
+
+    /**
+     * Reads the file once and stores the values of these columns as filters read them ({@code rows}
+     * gives each row whole by its first line, null where a line continues the row above). Gives
+     * false when cancelled (nothing half-built is kept).
+     */
+    public boolean buildValues(List<Integer> columns, ColumnProfile.Lines rows, long lineCount,
+                               BooleanSupplier cancelled, DoubleConsumer progress) {
+        buildLock.lock();
+        try {
+            List<Integer> cols = new ArrayList<>();
+            for (int c : new TreeSet<>(columns)) {
+                if (c >= 0 && c < format.columns().size() && !hasValues(c)) {
+                    cols.add(c);
+                }
+            }
+            if (cols.isEmpty()) {
+                return true;
+            }
+            List<String> names = new ArrayList<>();
+            List<TableWriter> writers = new ArrayList<>();
+            for (int c : cols) {
+                names.add("v" + c);
+                writers.add(new TableWriter("v" + c, List.of(new ColumnDef("line", Long.class),
+                        new ColumnDef("v", String.class)), false, 16));
+            }
+            try (Connection con = db.connection()) {
+                for (int i = 0; i < names.size(); i++) {
+                    try (Statement st = con.createStatement()) {
+                        st.execute("DROP TABLE IF EXISTS \"" + names.get(i) + "\"");
+                    }
+                    writers.get(i).createTable(con, false);
+                }
+                List<TableWriter.AppenderHandle> aps = new ArrayList<>();
+                boolean done = false;
+                try {
+                    for (TableWriter w : writers) {
+                        aps.add(w.openAppender(con));
+                    }
+                    done = appendValues(cols, rows, lineCount, cancelled, progress, aps);
+                } finally {
+                    for (TableWriter.AppenderHandle a : aps) {
+                        try {
+                            a.close();
+                        } catch (RuntimeException e) {
+                            done = false;
+                        }
+                    }
+                    if (!done) {
+                        for (String t : names) {
+                            try (Statement st = con.createStatement()) {
+                                st.execute("DROP TABLE IF EXISTS \"" + t + "\"");
+                            }
+                        }
+                    }
+                }
+                if (!done) {
+                    return false;
+                }
+                try (var ps = con.prepareStatement("INSERT OR REPLACE INTO built VALUES (?, ?)")) {
+                    for (String t : names) {
+                        ps.setString(1, t);
+                        ps.setLong(2, lineCount);
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+                synchronized (this) {
+                    for (String t : names) {
+                        tables.put(t, lineCount);
+                    }
+                }
+                return true;
+            } catch (SQLException e) {
+                throw new IllegalStateException("The cache couldn't be written: " + e.getMessage(), e);
+            }
+        } finally {
+            buildLock.unlock();
+        }
+    }
+
+    /** Lines read at a time for column values, each block on one of several threads. */
+    private static final int VALUE_BLOCK = 4096;
+
+    private boolean appendValues(List<Integer> cols, ColumnProfile.Lines rows, long lineCount,
+                                 BooleanSupplier cancelled, DoubleConsumer progress,
+                                 List<TableWriter.AppenderHandle> aps) {
+        List<String> names = new ArrayList<>();
+        for (int c : cols) {
+            names.add(format.columns().get(c));
+        }
+        int threads = Math.max(1, Math.min(Pivot.MAX_THREADS, Runtime.getRuntime().availableProcessors() - 1));
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads, r -> {
+            Thread t = new Thread(r, "logsift-filter-cache");
+            t.setDaemon(true);
+            return t;
+        });
+        java.util.ArrayDeque<java.util.concurrent.Future<List<Object[][]>>> pending = new java.util.ArrayDeque<>();
+        try {
+            for (long first = 0; first < lineCount; first += VALUE_BLOCK) {
+                if (cancelled.getAsBoolean()) {
+                    return false;
+                }
+                long at = first;
+                int k = (int) Math.min(VALUE_BLOCK, lineCount - first);
+                pending.add(pool.submit(() -> valuesOf(rows, at, k, names)));
+                while (pending.size() >= threads * 2) {
+                    appendValueRows(pending.poll().get(), aps);
+                }
+                if (progress != null) {
+                    progress.accept((double) (first + k) / Math.max(1, lineCount));
+                }
+            }
+            while (!pending.isEmpty()) {
+                if (cancelled.getAsBoolean()) {
+                    return false;
+                }
+                appendValueRows(pending.poll().get(), aps);
+            }
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw e.getCause() instanceof RuntimeException re ? re : new IllegalStateException(e.getCause());
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** A block of rows as {@code [column][line, value]}: the rows a column filter would test. */
+    private List<Object[][]> valuesOf(ColumnProfile.Lines rows, long first, int k, List<String> names) {
+        String[] buf = new String[k];
+        rows.read(first, k, buf);
+        List<Object[][]> out = new ArrayList<>(names.size());
+        for (int c = 0; c < names.size(); c++) {
+            List<Object[]> col = new ArrayList<>();
+            for (int i = 0; i < k; i++) {
+                if (buf[i] == null) {
+                    continue; // continues the row above: a row is matched at its first line
+                }
+                String v = format.value(buf[i], names.get(c));
+                if (v != null) {
+                    col.add(new Object[] {first + i, v});
+                }
+            }
+            out.add(col.toArray(new Object[0][]));
+        }
+        return out;
+    }
+
+    private static void appendValueRows(List<Object[][]> block, List<TableWriter.AppenderHandle> aps) {
+        for (int c = 0; c < block.size(); c++) {
+            for (Object[] row : block.get(c)) {
+                aps.get(c).appendRow(row);
+            }
+        }
+    }
+
+    /** The tests of the filters being answered, by id, for the function SQL calls. */
+    private final Map<Long, java.util.function.Predicate<String>> tests = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong nextTest = new java.util.concurrent.atomic.AtomicLong();
+    private boolean testRegistered;
+
+    /**
+     * The lines before {@code upTo} whose value in column {@code c} passes {@code test}, in order;
+     * null when the column's values aren't stored. The test runs once for each different value,
+     * so it is exactly the filter's own (regexes, units, case).
+     */
+    public long[] matchingLines(int c, java.util.function.Predicate<String> test, long upTo, BooleanSupplier stop) {
+        if (!hasValues(c)) {
+            return null;
+        }
+        synchronized (this) {
+            if (!testRegistered) {
+                db.register(root -> Udfs.register(root, "logsift_keep", Boolean.class, Long.class, String.class,
+                        (id, v) -> {
+                            java.util.function.Predicate<String> t = tests.get(id);
+                            return t != null && v != null && t.test(v);
+                        }));
+                testRegistered = true;
+            }
+        }
+        long id = nextTest.incrementAndGet();
+        tests.put(id, test);
+        String sql = "SELECT line FROM v" + c + " WHERE line < " + upTo + " AND v IN (SELECT v FROM (SELECT DISTINCT v "
+                + "FROM v" + c + ") WHERE logsift_keep(" + id + ", v)) ORDER BY line";
+        try (Connection con = db.connection(); Statement st = con.createStatement()) {
+            Thread watcher = new Thread(() -> {
+                while (!Thread.currentThread().isInterrupted()) {
+                    if (stop.getAsBoolean()) {
+                        try {
+                            st.cancel();
+                        } catch (SQLException e) {
+                            // finished meanwhile
+                        }
+                        return;
+                    }
+                    try {
+                        Thread.sleep(50);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                }
+            }, "logsift-filter-cache-cancel");
+            watcher.setDaemon(true);
+            watcher.start();
+            try (ResultSet rs = st.executeQuery(sql)) {
+                long[] out = new long[1024];
+                int n = 0;
+                while (rs.next()) {
+                    if (n == out.length) {
+                        out = java.util.Arrays.copyOf(out, n * 2);
+                    }
+                    out[n++] = rs.getLong(1);
+                }
+                return stop.getAsBoolean() ? null : java.util.Arrays.copyOf(out, n);
+            } finally {
+                watcher.interrupt();
+            }
+        } catch (SQLException e) {
+            if (stop.getAsBoolean()) {
+                return null;
+            }
+            throw new IllegalStateException("The cache couldn't be read: " + e.getMessage(), e);
+        } finally {
+            tests.remove(id);
+        }
+    }
+
     // ---------------------------------------------------------------- answering
 
     /**
