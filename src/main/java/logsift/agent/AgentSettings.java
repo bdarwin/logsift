@@ -79,7 +79,8 @@ public record AgentSettings(Masking.Options masking, List<Path> roots) {
         VSCODE("VS Code (GitHub Copilot)"),
         COPILOT_CLI("GitHub Copilot CLI"),
         VISUAL_STUDIO("Visual Studio, JetBrains IDEs (GitHub Copilot)"),
-        OTHER("Other agents (MCP)");
+        OTHER("Other agents (MCP)"),
+        SKILL("A skill, where MCP servers are blocked (Copilot, Claude Code…)");
 
         private final String label;
 
@@ -135,6 +136,10 @@ public record AgentSettings(Masking.Options masking, List<Path> roots) {
             case VISUAL_STUDIO -> "Visual Studio: %USERPROFILE%\\.mcp.json, or Chat → Agent → Tools → + . "
                     + "JetBrains: Settings → GitHub Copilot → MCP → Edit in mcp.json.";
             case OTHER -> "Add a local (stdio) MCP server called logsift that runs this command, with no arguments.";
+            case SKILL -> "No MCP server: the agent runs logsift-mcp in its terminal, with the same tools and masking. "
+                    + "Install for Me saves it as " + Skill.personalDir().resolve(Skill.NAME).resolve("SKILL.md")
+                    + " (GitHub Copilot CLI and VS Code). Claude Code: ~/.claude/skills/logsift/SKILL.md. "
+                    + "A project: .github/skills/logsift/SKILL.md.";
         };
     }
 
@@ -163,6 +168,7 @@ public record AgentSettings(Masking.Options masking, List<Path> roots) {
                       }
                     }""".formatted(cmd);
             case OTHER -> launcher.toString();
+            case SKILL -> Skill.text(LogTools.all(), launcher, Skill.windows());
         };
     }
 }

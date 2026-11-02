@@ -674,7 +674,7 @@ public final class LogTools {
                 if (service != null && !looksLikePath(arg)) {
                     folders.addAll(service.folders());
                 } else {
-                    folders.add(Path.of(arg));
+                    folders.add(Workspace.path(arg));
                 }
                 List<Path> checked = new ArrayList<>();
                 for (Path f : folders) {

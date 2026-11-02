@@ -8517,6 +8517,31 @@ class VisualTest {
             });
             String cli = onEdt(ap::snippetText);
             assertTrue(cli.contains("\"mcpServers\"") && cli.contains("\"tools\": [\"*\"]"), cli);
+            // where MCP servers are blocked: the skill, saved where Copilot finds it (a test folder here)
+            Path skills = dir.resolve("skills-home");
+            System.setProperty("logsift.skillsDir", skills.toString());
+            onEdt(() -> {
+                ap.selectAgent(logsift.agent.AgentSettings.Agent.SKILL);
+                return null;
+            });
+            String skill = onEdt(ap::snippetText);
+            assertTrue(skill.startsWith("---\nname: logsift\n"), skill);
+            assertTrue(skill.contains("\"" + launcher + "\" run insights log="), "a path with a space, quoted: " + skill);
+            assertTrue(onEdt(() -> ap.installButton().isVisible() && ap.installButton().isEnabled()));
+            onEdt(() -> {
+                ap.installButton().doClick();
+                return null;
+            });
+            Path saved = skills.resolve("logsift").resolve("SKILL.md");
+            assertEquals(skill, Files.readString(saved));
+            assertTrue(onEdt(ap::installedText).contains(saved.toString()), onEdt(ap::installedText));
+            settle();
+            shotOf(sd.getRootPane(), "80b-settings-agents-skill");
+            onEdt(() -> {
+                ap.selectAgent(logsift.agent.AgentSettings.Agent.COPILOT_CLI);
+                return null;
+            });
+            assertFalse(onEdt(() -> ap.installButton().isVisible()), "only for the skill");
             assertTrue(onEdt(() -> ap.secretsBox().isSelected()), "secrets are masked by default");
             settle();
             shotOf(sd.getRootPane(), "80-settings-agents");
@@ -8534,6 +8559,7 @@ class VisualTest {
             assertTrue(logsift.agent.AgentSettings.load(AppState.home()).masking().secrets(), "back on");
         } finally {
             System.clearProperty("logsift.mcpLauncher");
+            System.clearProperty("logsift.skillsDir");
             Files.deleteIfExists(props);
         }
     }

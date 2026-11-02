@@ -39,6 +39,28 @@ public final class McpMain {
             System.out.println(USAGE);
             System.out.println("Speaks the Model Context Protocol on standard input and output: add it to your coding "
                     + "agent as a stdio MCP server.");
+            System.out.println();
+            System.out.println(Cli.USAGE);
+            System.out.println("For agents that can't use MCP servers: the skill tells them to run these.");
+            return;
+        }
+        if (Cli.isCommand(args)) {
+            // the answer alone on standard output: anything else printed goes to standard error
+            // UTF-8, but in a Windows terminal the console's own encoding, Logsift's symbols as plain text
+            boolean windows = logsift.agent.Skill.windows();
+            java.nio.charset.Charset cs = windows && System.console() != null ? System.console().charset()
+                    : StandardCharsets.UTF_8;
+            PrintStream answer = new PrintStream(new FileOutputStream(FileDescriptor.out), true, cs);
+            PrintStream err = new PrintStream(new FileOutputStream(FileDescriptor.err), true, cs);
+            if (windows) {
+                answer = Cli.plain(answer);
+                err = Cli.plain(err);
+            }
+            System.setOut(err);
+            logsift.core.Numbers.setOptions(logsift.core.Numbers.Options.load(home()));
+            int code = Cli.main(args, System.in, answer, err, home(), Path.of("").toAbsolutePath());
+            answer.flush();
+            System.exit(code);
             return;
         }
         // standard output carries the protocol only: anything else printed goes to standard error

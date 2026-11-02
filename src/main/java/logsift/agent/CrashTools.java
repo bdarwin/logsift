@@ -42,7 +42,7 @@ public final class CrashTools {
 
     /** The report of a file, worked out once per session (big dumps take a while). */
     private static CrashReport report(Tool.Args a, Workspace w) throws Exception {
-        Path file = w.options().scope().check(Path.of(a.string("path")).toAbsolutePath().normalize());
+        Path file = w.options().scope().check(Workspace.path(a.string("path")).toAbsolutePath().normalize());
         if (!Files.isRegularFile(file)) {
             throw new Tool.Failure("No such file: " + file);
         }

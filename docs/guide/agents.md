@@ -76,6 +76,38 @@ If logsift isn't listed, or its tools fail:
 - The file isn't valid JSON. A missing comma between two servers is the usual cause.
 - **What Agents Asked…** (below) stays empty until the agent calls a tool. Each call is listed there.
 
+## When MCP servers are blocked: the skill
+
+Some companies block MCP servers in their agents. Agents that support *skills* (GitHub Copilot CLI, Copilot in VS Code, Claude Code, and others) can use Logsift without one: the skill tells the agent to run `logsift-mcp` in its terminal, one tool at a time. The tools, the masking, the folders agents may read and **What Agents Asked…** are the same as with MCP.
+
+1. Open **Settings → Agents** and choose **A skill, where MCP servers are blocked** in the **Agent** list.
+2. Click **Install for Me**. Logsift saves the skill as `~/.copilot/skills/logsift/SKILL.md`, where Copilot CLI and VS Code look for your skills.
+   - Claude Code: click **Copy** and save it as `~/.claude/skills/logsift/SKILL.md`.
+   - For a whole project: save it as `.github/skills/logsift/SKILL.md` in the project. It names the path of `logsift-mcp` on your computer, so each person's may differ.
+3. Start the agent again, and ask as you would with MCP: *What went wrong in ~/logs/orders.log last night?* The agent asks before it runs a command; allow `logsift-mcp`.
+
+From a terminal, `logsift-mcp skill` prints the skill and `logsift-mcp skill --install` saves it (`--install FOLDER` saves it in `FOLDER/logsift/`).
+
+![Settings → Agents with the skill chosen: what it is, and Install for Me](../screenshots/agents-skill.png)
+
+The agent runs commands like these (you can too):
+
+```sh
+logsift-mcp run insights log=~/logs/orders.log
+logsift-mcp run search log=~/logs/orders.log query="timed out" limit=20
+logsift-mcp run read_lines log=~/logs/orders.log from=1200 count=40
+logsift-mcp tools                # the tools
+logsift-mcp tools search         # one tool's arguments
+logsift-mcp prompt investigate problem="orders failing since 10:00"
+```
+
+- Arguments are `name=value`, the same names as the [tools](#what-the-agent-can-ask) take.
+- For values with quotes in them, such as SQL, or with letters outside English, write the arguments as JSON to a file and add `--args FILE`: `logsift-mcp run query --args args.json`. Or give the JSON on standard input and add `-`.
+- On Windows the skill's commands are for PowerShell (`& "…\logsift-mcp.exe" run …`); they work in Windows PowerShell 5.1, PowerShell 7 and, without the `&`, in `cmd`. Logsift writes its own symbols as plain text there (`<masked:secret>`, `"`, `->`), because PowerShell reads a program's output in the console's old code page. If text from your logs shows as `?`, run `[Console]::OutputEncoding = [Text.Encoding]::UTF8` first.
+- The answer goes to standard output. A mistake goes to standard error, with exit code 1 (the tool refused: a wrong path, a folder agents may not read) or 2 (a wrong command: an unknown tool or argument).
+- Each run stands alone, so a log is named by its path (or a name from [Where your logs are](#where-your-logs-are)) every time. Slow work, such as a first look at a multi-GB log, is waited for.
+- `~` is your home folder, even inside quotes.
+
 ## Where your logs are
 
 Without help, an agent needs a path in every question. Tell Logsift where each service writes its logs, and ask *"why did orders fail last night?"*: the agent calls `list_logs`, sees that `orders` writes `app.log` (the application log, with 14 rotated copies) and `gc.log` in `/var/log/orders`, and opens the right file itself.
@@ -229,5 +261,7 @@ The answers themselves are never kept.
 | `--no-mask` | Don't mask secrets |
 | `--max-chars N` | The longest answer, in characters |
 | `--version` | Print the version |
+
+The commands for the skill (`run`, `tools`, `prompt`, `skill`) are under [When MCP servers are blocked](#when-mcp-servers-are-blocked-the-skill).
 
 *GitHub Copilot is a trademark of GitHub, Inc. Logsift is not affiliated with or endorsed by GitHub.*

@@ -149,8 +149,18 @@ final class AgentsPanel extends JPanel {
         activity.setToolTipText("Opens the list of every call agents made: when, which agent, which tool, how big "
                 + "the answer was and how much was masked (never the answers themselves)");
         activity.addActionListener(e -> openActivity.run());
+        install.setName("agentInstallSkill");
+        install.setToolTipText("Saves the skill in " + logsift.agent.Skill.personalDir() + ", where GitHub Copilot "
+                + "finds it");
+        install.addActionListener(e -> installSkill());
+        JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        left.add(copy);
+        left.add(Box.createHorizontalStrut(6));
+        left.add(install);
+        left.add(Box.createHorizontalStrut(8));
+        left.add(installed);
         JPanel buttons = new JPanel(new BorderLayout());
-        buttons.add(copy, BorderLayout.WEST);
+        buttons.add(left, BorderLayout.WEST);
         buttons.add(activity, BorderLayout.EAST);
         buttons.setAlignmentX(LEFT_ALIGNMENT);
         p.add(buttons);
@@ -159,8 +169,24 @@ final class AgentsPanel extends JPanel {
         return p;
     }
 
+    private final JButton install = new JButton("Install for Me", Icons.of("download"));
+    private final JLabel installed = new JLabel();
+
+    /** Saves the skill where Copilot finds a person's skills. */
+    private void installSkill() {
+        try {
+            Path f = logsift.agent.Skill.install(logsift.agent.Skill.personalDir(), snippet.getText());
+            installed.setText("Saved as " + f + ". Start the agent again.");
+        } catch (IOException e) {
+            installed.setText("Can't save it: " + e.getMessage());
+        }
+    }
+
     private void showSnippet() {
         AgentSettings.Agent a = (AgentSettings.Agent) agent.getSelectedItem();
+        install.setVisible(a == AgentSettings.Agent.SKILL);
+        install.setEnabled(launcher != null);
+        installed.setText("");
         if (launcher == null) {
             where.setText("<html>logsift-mcp comes with the installed app (and the zip that runs on any Java). "
                     + "This Logsift runs from a build, so there is nothing to point an agent at.</html>");
@@ -174,6 +200,14 @@ final class AgentsPanel extends JPanel {
 
     String snippetText() {
         return snippet.getText();
+    }
+
+    JButton installButton() {
+        return install;
+    }
+
+    String installedText() {
+        return installed.getText();
     }
 
     void selectAgent(AgentSettings.Agent a) {

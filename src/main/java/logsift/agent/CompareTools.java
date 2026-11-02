@@ -372,8 +372,8 @@ public final class CompareTools {
                     .integer("limit", "Most files listed (default 50).", false)
                     .integer("max_chars", "Longest answer (default 24000).", false).build(),
             (a, w) -> {
-                Path left = w.options().scope().check(Path.of(a.string("left")).toAbsolutePath().normalize());
-                Path right = w.options().scope().check(Path.of(a.string("right")).toAbsolutePath().normalize());
+                Path left = w.options().scope().check(Workspace.path(a.string("left")).toAbsolutePath().normalize());
+                Path right = w.options().scope().check(Workspace.path(a.string("right")).toAbsolutePath().normalize());
                 for (Path p : List.of(left, right)) {
                     if (!Files.isDirectory(p) && !logsift.core.Archives.isZip(p)) {
                         throw new Tool.Failure("Not a folder or a zip: " + p + ". Use compare_files for two files.");

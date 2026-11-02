@@ -95,7 +95,7 @@ public final class Workspace implements AutoCloseable {
      * the newest file of that log). A name that is neither stays a path (and fails as one).
      */
     public Path pathOf(String pathOrName) {
-        String s = pathOrName.strip();
+        String s = expandHome(pathOrName.strip());
         try {
             Path p = Path.of(s);
             if (p.isAbsolute() || Files.exists(p)) {
@@ -106,6 +106,22 @@ public final class Workspace implements AutoCloseable {
         }
         Path named = catalog().resolve(s);
         return named != null ? named : Path.of(s);
+    }
+
+    /**
+     * {@code ~} or {@code ~/…} as the home folder: a shell doesn't expand it inside quotes or
+     * JSON, and agents write it often.
+     */
+    public static String expandHome(String s) {
+        if (s.equals("~") || s.startsWith("~/") || s.startsWith("~\\")) {
+            return System.getProperty("user.home") + s.substring(1);
+        }
+        return s;
+    }
+
+    /** A path an agent gave ({@code ~} is the home folder). */
+    public static Path path(String s) {
+        return Path.of(expandHome(s.strip()));
     }
 
     /** The agent's name and version, as it said ("Visual Studio Code 1.106"). */

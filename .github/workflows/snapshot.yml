@@ -202,6 +202,86 @@ jobs:
           "$MCP" --version
           rm -rf mcp-try mcp-out.txt
 
+      - name: Try the skill's commands (agents where MCP servers are blocked)
+        if: ${{ !startsWith(matrix.target, 'windows-') }}
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            macos-*) MCP=$(ls -d pkg/*.app | head -1)/Contents/MacOS/logsift-mcp ;;
+            linux-*) MCP=pkg/Logsift/bin/logsift-mcp ;;
+          esac
+          mkdir -p ~/logs skill-try
+          for i in 1 2 3 4 5; do printf '2026-10-21 10:00:0%s.000 INFO [main] App - order %s ok\n' $i $i; done > ~/logs/orders.log
+          printf '2026-10-21 10:00:09.000 ERROR [main] App - Payment timed out token=abc123secret\n' >> ~/logs/orders.log
+          "$MCP" skill --install skill-try
+          # every example in the skill, run as it is written
+          awk '/^```sh$/{f=1;n++;next} /^```$/{f=0} f{print > ("skill-try/block" n ".sh")}' skill-try/logsift/SKILL.md
+          ls skill-try/block2.sh
+          : > skill-try/all.txt
+          for b in skill-try/block*.sh; do
+            echo "== $b"; cat "$b"
+            (cd skill-try && bash -euo pipefail "../$b") | tee -a skill-try/all.txt
+          done
+          grep -q 'Payment timed out' skill-try/all.txt
+          grep -q 'token=‹masked:secret›' skill-try/all.txt
+          grep -q 'first' skill-try/all.txt
+          if grep -q abc123secret skill-try/all.txt; then echo "secret not masked"; exit 1; fi
+          "$MCP" tools | grep -q '^read_lines'
+          if "$MCP" run serch 2> skill-try/err.txt; then echo "a wrong tool should fail"; exit 1; fi
+          grep -q 'no tool serch' skill-try/err.txt
+          rm -rf skill-try ~/logs/orders.log
+
+      - name: Try the skill's commands on Windows (PowerShell 7, Windows PowerShell 5.1, cmd)
+        if: startsWith(matrix.target, 'windows-')
+        shell: pwsh
+        run: |
+          $mcp = (Resolve-Path pkg/Logsift/logsift-mcp.exe).Path
+          New-Item -ItemType Directory -Force "$HOME\logs", skill-try | Out-Null
+          Set-Content -Path "$HOME\logs\orders.log" -Value @(
+            ((1..5 | ForEach-Object { "2026-10-21 10:00:0$_.000 INFO [main] App - order $_ ok" }) +
+             '2026-10-21 10:00:09.000 ERROR [main] App - Payment timed out token=abc123secret'))
+          & $mcp skill --install skill-try
+          if ($LASTEXITCODE -ne 0) { throw "skill --install failed" }
+          $md = Get-Content -Raw -Encoding utf8 skill-try\logsift\SKILL.md
+          # every example in the skill, run as it is written, in both PowerShells
+          $blocks = @([regex]::Matches($md, '(?s)```powershell\r?\n(.*?)```') | ForEach-Object { $_.Groups[1].Value })
+          if ($blocks.Count -lt 2) { throw "expected the skill's examples, found $($blocks.Count)" }
+          $all = ''
+          $i = 0
+          foreach ($b in $blocks) {
+            $i++
+            # stop at the first command that fails
+            $script = ($b -split "\r?\n" | Where-Object { $_ } | ForEach-Object { $_; 'if ($LASTEXITCODE) { exit $LASTEXITCODE }' }) -join "`r`n"
+            Set-Content -Encoding utf8 -Path "skill-try\block$i.ps1" -Value $script
+            foreach ($shell in 'pwsh', 'powershell') {
+              Write-Host "== block $i in $shell"; Write-Host $b
+              Push-Location skill-try
+              $out = & $shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "block$i.ps1" 2>&1 | Out-String
+              $code = $LASTEXITCODE
+              Pop-Location
+              Write-Host $out
+              if ($code -ne 0) { throw "block $i failed in $shell ($code)" }
+              $all += $out
+            }
+          }
+          # cmd, with the app's logsift-mcp.exe and with the zip's logsift-mcp.bat
+          $bat = (Resolve-Path build/install/logsift/bin/logsift-mcp.bat).Path
+          foreach ($exe in $mcp, $bat) {
+            Set-Content -Path skill-try\try.cmd -Value "@`"$exe`" run search log=~\logs\orders.log query=`"timed out`" limit=5"
+            $out = cmd /c skill-try\try.cmd 2>&1 | Out-String
+            Write-Host "== cmd: $exe"; Write-Host $out
+            if ($LASTEXITCODE -ne 0) { throw "cmd failed with $exe ($LASTEXITCODE)" }
+            $all += $out
+          }
+          if ($all -notmatch 'Payment timed out') { throw "no search answer" }
+          if ($all -notmatch 'token=<masked:secret>') { throw "not masked as plain text" }
+          if ($all -match 'abc123secret') { throw "secret not masked" }
+          if ($all -match 'ΓÇ|â€') { throw "garbled symbols: $all" }
+          if ($all -notmatch 'first') { throw "no query answer" }
+          & $mcp run serch 2>$null
+          if ($LASTEXITCODE -ne 2) { throw "a wrong tool should exit 2, not $LASTEXITCODE" }
+          Remove-Item -Recurse -Force skill-try, "$HOME\logs\orders.log"
+
       - name: Try the Windows installer (install, check, uninstall)
         if: startsWith(matrix.target, 'windows-') && !startsWith(github.ref_name, 'beta/')
         shell: pwsh
