@@ -87,4 +87,76 @@ public final class Csv {
         }
         return out;
     }
+
+    /**
+     * Like {@link #split}, but only the fields marked in {@code want} are made into text (into
+     * {@code out}, as far as it reaches); the others are skipped. Gives how many fields the line
+     * has. Reading a few columns of a table of thousands is this much quicker.
+     */
+    public static int pick(String line, char delimiter, boolean[] want, String[] out) {
+        int n = 0;
+        int i = 0;
+        int len = line.length();
+        while (true) {
+            boolean keep = n < want.length && want[n] && n < out.length;
+            int start = i;
+            while (start < len && line.charAt(start) == ' ' && delimiter != ' ') {
+                start++;
+            }
+            if (start < len && line.charAt(start) == '"') {
+                StringBuilder sb = keep ? new StringBuilder() : null;
+                int j = start + 1;
+                while (j < len) {
+                    char c = line.charAt(j);
+                    if (c == '"') {
+                        if (j + 1 < len && line.charAt(j + 1) == '"') {
+                            if (keep) {
+                                sb.append('"');
+                            }
+                            j += 2;
+                            continue;
+                        }
+                        j++;
+                        break;
+                    }
+                    if (keep) {
+                        sb.append(c);
+                    }
+                    j++;
+                }
+                while (j < len && line.charAt(j) != delimiter) {
+                    if (keep && line.charAt(j) != ' ') {
+                        sb.append(line.charAt(j));
+                    }
+                    j++;
+                }
+                if (keep) {
+                    out[n] = sb.toString();
+                }
+                i = j;
+            } else {
+                int j = line.indexOf(delimiter, i);
+                if (j < 0) {
+                    j = len;
+                }
+                if (keep) {
+                    out[n] = line.substring(i, j);
+                }
+                i = j;
+            }
+            n++;
+            if (i >= len) {
+                break;
+            }
+            i++; // the separator
+            if (i == len) {
+                if (n < want.length && want[n] && n < out.length) {
+                    out[n] = "";
+                }
+                n++; // a separator at the end: one more, empty, field
+                break;
+            }
+        }
+        return n;
+    }
 }

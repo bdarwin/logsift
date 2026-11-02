@@ -734,7 +734,8 @@ public final class Pivot {
         long rows = 0;
         long read = 0;
         List<Integer> filterCols = new ArrayList<>(spec.filters().keySet());
-        int threads = lineCount < PARALLEL_LINES ? 1
+        // in parallel past 50,000 rows, or fewer of a wide table
+        int threads = lineCount < PARALLEL_LINES && lineCount * Math.max(1, cols.size()) < PARALLEL_CELLS ? 1
                 : Math.max(1, Math.min(MAX_THREADS, Runtime.getRuntime().availableProcessors() - 1));
         java.util.concurrent.ExecutorService pool = threads == 1 ? null
                 : java.util.concurrent.Executors.newFixedThreadPool(threads, r -> {
@@ -855,6 +856,7 @@ public final class Pivot {
     /** Numbers kept per cell for median and percentiles; past this, a fair sample. */
     static final int MAX_KEPT = 1_000_000;
     static final int PARALLEL_LINES = 50_000;
+    static final long PARALLEL_CELLS = 2_000_000;
     static final int MAX_THREADS = 8;
 
     /** The cells read for the values: slot s reads {@code column[s]} into value {@code value[s]}. */
@@ -868,12 +870,13 @@ public final class Pivot {
                                       Fields fields, ZoneId zone, Slots slots, List<Integer> filterCols) {
         List<Prepared> out = new ArrayList<>(buf.length);
         int nv = slots.column().length;
+        boolean[] want = wanted(format, spec, slots, filterCols);
         for (int i = 0; i < buf.length; i++) {
             String t = buf[i];
             if (t == null || t.isBlank() || (include != null && !include.test(first + i))) {
                 continue;
             }
-            String[] cells = format.split(t, null);
+            String[] cells = format.splitSome(t, want);
             if (cells == null) {
                 continue;
             }
@@ -902,6 +905,23 @@ public final class Pivot {
             out.add(new Prepared(fv, rk, ck, texts, nums));
         }
         return out.toArray(new Prepared[0]);
+    }
+
+    /** The columns a pivot reads: its filters, rows, columns and values. */
+    private static boolean[] wanted(LogFormat format, Spec spec, Slots slots, List<Integer> filterCols) {
+        boolean[] want = new boolean[format.columns().size()];
+        java.util.function.IntConsumer mark = c -> {
+            if (c >= 0 && c < want.length) {
+                want[c] = true;
+            }
+        };
+        filterCols.forEach(mark::accept);
+        spec.rows().forEach(f -> mark.accept(f.column()));
+        spec.cols().forEach(f -> mark.accept(f.column()));
+        for (int c : slots.column()) {
+            mark.accept(c);
+        }
+        return want;
     }
 
     /** Adds prepared rows to the table, in order; returns how many were kept by the filters. */

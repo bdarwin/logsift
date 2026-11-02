@@ -14,6 +14,55 @@ import org.junit.jupiter.api.Test;
 class CsvTest {
 
     @Test
+    void picksSomeFieldsAsSplitDoes() {
+        // the quick reader of a few columns gives the same cells as the whole split
+        List<String> lines = List.of("a,\"b, c\",\"say \"\"hi\"\"\",", "x,y,z", "", ",", ",,,", "  \"q\" ,2, 3 ,4",
+                "1,\"open quote, to the end", "\"a\"\"\",b\"c,\"\"", "a;b,c", "one");
+        for (char d : new char[] {',', ';', '\t'}) {
+            for (String raw : lines) {
+                String line = d == ',' ? raw : raw.replace(',', d);
+                List<String> all = Csv.split(line, d, null);
+                for (int mask = 0; mask < 32; mask++) {
+                    boolean[] want = new boolean[5];
+                    for (int i = 0; i < 5; i++) {
+                        want[i] = (mask & (1 << i)) != 0;
+                    }
+                    String[] out = new String[4];
+                    int n = Csv.pick(line, d, want, out);
+                    assertEquals(all.size(), n, line);
+                    for (int i = 0; i < 4; i++) {
+                        assertEquals(want[i] && i < all.size() ? all.get(i) : null, out[i], line + " field " + i);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void splitsSomeColumnsOfATableAsSplitDoes() {
+        LogFormat f = LogFormat.detectCsv(List.of("a,b,c", "1,2,3", "4,5,6", "7,8,9"), true);
+        boolean[] all = {true, true, true};
+        for (String line : List.of("1,2,3", "1,2", "1,2,3,4,5", "1", "a,b,c", "\"x,y\",2,\"3\"", "1,,")) {
+            String[] whole = f.split(line, null);
+            for (int mask = 0; mask < 8; mask++) {
+                boolean[] want = {(mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0};
+                String[] some = f.splitSome(line, want);
+                if (whole == null) {
+                    assertNull(some, line);
+                    continue;
+                }
+                assertNotNull(some, line);
+                for (int i = 0; i < 3; i++) {
+                    if (want[i]) {
+                        assertEquals(whole[i], some[i], line + " column " + i);
+                    }
+                }
+            }
+            assertArrayEquals(whole, f.splitSome(line, all), line);
+        }
+    }
+
+    @Test
     void splitsQuotedFields() {
         assertEquals(List.of("a", "b, c", "say \"hi\"", ""), Csv.split("a,\"b, c\",\"say \"\"hi\"\"\",", ',', null));
         assertEquals(List.of("x", "y"), Csv.split("x;y", ';', null));

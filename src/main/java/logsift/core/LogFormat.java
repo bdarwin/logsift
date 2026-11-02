@@ -484,6 +484,33 @@ public final class LogFormat {
     }
 
     /**
+     * Like {@link #split}, but in a table only the columns marked in {@code want} are read (the
+     * others are null). For Pivot, which needs a few columns of thousands.
+     */
+    public String[] splitSome(String line, boolean[] want) {
+        if (delimiter == 0 || jsonKeys != null) {
+            return split(line, null);
+        }
+        if (isHeader(line)) {
+            return null;
+        }
+        int n = columns.size();
+        String[] out = new String[n];
+        int count = Csv.pick(line, delimiter, want, out);
+        if (count == n) {
+            return out;
+        }
+        int usual = Math.min(n, rowFields);
+        if (count < 2 || count < usual - usual / 2) {
+            return null;
+        }
+        if (count > n && n > 0 && want.length >= n && want[n - 1]) {
+            return split(line, null); // the extra fields are joined in the last column
+        }
+        return out;
+    }
+
+    /**
      * A CSV line's fields as the columns. A row with a few fields missing (or extra, joined in
      * the last column) is still a row: exports often differ from their header by a trailing
      * separator or two. A line with much fewer (one piece of a value written over several
