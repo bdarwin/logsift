@@ -106,6 +106,53 @@ class PivotTest {
     }
 
     @Test
+    void aWideTableOfManyRowsFitsInMemory() {
+        // 2,000 columns and enough rows to be worked on in parallel: read 4,096 lines at a time,
+        // 16 blocks at once, this needed several GB (6,000 columns crashed Logsift)
+        int cols = 2000;
+        int n = 55_000;
+        StringBuilder head = new StringBuilder("host");
+        for (int c = 0; c < cols; c++) {
+            head.append(",m").append(c);
+        }
+        String[] rows = new String[4];
+        for (int h = 0; h < 4; h++) {
+            StringBuilder r = new StringBuilder("web-" + h);
+            for (int c = 0; c < cols; c++) {
+                r.append(",1");
+            }
+            rows[h] = r.append(',').toString(); // and the extra comma some exports write
+        }
+        String header = head.append(',').toString();
+        ColumnProfile.Lines lines = (first, count, out) -> {
+            for (int i = 0; i < count; i++) {
+                long at = first + i;
+                out[i] = at == 0 ? header : at < n ? rows[(int) (at % 4)] : null;
+            }
+        };
+        List<String> sample = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            sample.add(i == 0 ? header : rows[i % 4]);
+        }
+        LogFormat f = LogFormat.detectCsv(sample, true);
+        assertEquals(cols + 2, f.columns().size(), "host, the metrics and an empty one");
+        List<Integer> metrics = new ArrayList<>();
+        for (int c = 1; c <= cols; c++) {
+            metrics.add(c);
+        }
+        Pivot.Fields fields = Pivot.fields(f, n, lines, 2026);
+        Pivot.Spec spec = new Pivot.Spec(List.of(new Pivot.Field(0)), List.of(),
+                List.of(Pivot.Value.of(metrics, "m*", Pivot.Agg.SUM, Pivot.ShowAs.VALUE),
+                        new Pivot.Value(cols + 1, Pivot.Agg.COUNT)), Map.of());
+        Pivot.Result r = Pivot.compute(f, n, lines, null, spec, fields, ZoneOffset.UTC, () -> false, null);
+        assertEquals(n - 1, r.rows());
+        assertEquals(4, r.root().kids().size());
+        assertEquals((double) cols * (n - 1), r.value(r.root(), -1, 0), 1e-6, "every cell summed");
+        assertTrue(Pivot.chunkLines(6003, 1700) < 100, "a wide table is read a few lines at a time");
+        assertEquals(Pivot.CHUNK, Pivot.chunkLines(10, 2), "a narrow one as before");
+    }
+
+    @Test
     void medianAndPercentiles() {
         List<String> l = new ArrayList<>();
         l.add("host,ms");

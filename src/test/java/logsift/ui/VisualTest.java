@@ -7331,8 +7331,9 @@ class VisualTest {
     @Order(61)
     void pivotsATableOfSixThousandColumns() throws Exception {
         // 6,000 columns (a header over 64 KB): Pivot crashed on such a table
-        int nRows = Integer.getInteger("wide6000.rows", 1500);
-        Path f = dir.resolve("wide-6000-" + nRows + ".csv");
+        // every line ends with an extra comma and CRLF, as some Windows exports write it
+        int nRows = Integer.getInteger("wide6000.rows", 5000);
+        Path f = dir.resolve("wide-6000-" + nRows + "-comma-crlf.csv");
         if (!Files.exists(f)) {
             java.util.Random rnd = new java.util.Random(6);
             StringBuilder head = new StringBuilder("timestamp,host");
@@ -7342,7 +7343,7 @@ class VisualTest {
                 }
             }
             try (var w = Files.newBufferedWriter(f)) {
-                w.write(head.append('\n').toString());
+                w.write(head.append(",\r\n").toString());
                 for (int r = 0; r < nRows; r++) {
                     StringBuilder row = new StringBuilder(String.format("2026-10-28 10:%02d:%02d,web-%d", r / 60 % 60,
                             r % 60, r % 4));
@@ -7353,7 +7354,7 @@ class VisualTest {
                             row.append(',').append(rnd.nextInt(10_000) / 100.0);
                         }
                     }
-                    w.write(row.append('\n').toString());
+                    w.write(row.append(",\r\n").toString());
                 }
             }
         }
@@ -7371,7 +7372,7 @@ class VisualTest {
             }
         }, 60_000, "the table of 6,000 columns");
         LogTab tab = onEdt(frame::currentTab);
-        assertEquals(6002, onEdt(() -> tab.logFormat().columns().size()));
+        assertEquals(6003, onEdt(() -> tab.logFormat().columns().size()));
         PivotPanel pp = onEdt(tab::pivotPanel);
         onEdt(() -> {
             tab.showPivot();
@@ -7379,11 +7380,11 @@ class VisualTest {
         });
         waitFor(() -> {
             try {
-                return onEdt(() -> pp.fieldsForTest().size() == 6002);
+                return onEdt(() -> pp.fieldsForTest().size() == 6003);
             } catch (Exception e) {
                 return false;
             }
-        }, 120_000, "the pivot's 6,002 fields");
+        }, 120_000, "the pivot's 6,003 fields");
         assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "fields: " + ErrorReporter.sessionForTest());
         // narrowing the fields as one types, key by key, odd characters too
         for (String typed : List.of("metric_cpu_00*", "m*_0??7", "[", "(cpu", "\\", "*", "?", "", "zzz", "")) {
@@ -7404,7 +7405,7 @@ class VisualTest {
                 });
             }
         }
-        assertEquals(6002, (int) onEdt(pp::shownFieldCountForTest), "all fields back");
+        assertEquals(6003, (int) onEdt(pp::shownFieldCountForTest), "all fields back");
         assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "typing: " + ErrorReporter.sessionForTest());
         // fields as filters: 200 of them at once, then one narrowed to some values
         onEdt(() -> {
@@ -7516,6 +7517,11 @@ class VisualTest {
         });
         waitForFilter(tab);
         onEdt(() -> {
+            tab.showPivot();
+            return null;
+        });
+        assertTrue(onEdt(pp::isShowing), "Pivot in front again");
+        onEdt(() -> {
             pp.setFieldFilterForTest("metric_mem_*");
             pp.addMatching(PivotPanel.Area.VALUES);
             return null;
@@ -7537,6 +7543,27 @@ class VisualTest {
         settle();
         assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "200 column fields: "
                 + ErrorReporter.sessionForTest());
+        // the empty column the extra comma makes, as a row, a filter and a value
+        System.out.println("last column: \"" + onEdt(() -> tab.logFormat().columns().get(6002)) + "\"");
+        onEdt(() -> {
+            tab.showPivot();
+            pp.clearButtonForTest(null).doClick();
+            pp.addField(PivotPanel.Area.ROWS, 6002);
+            pp.addField(PivotPanel.Area.FILTERS, 6002);
+            pp.addField(PivotPanel.Area.VALUES, 6002);
+            return null;
+        });
+        waitForPivot(pp);
+        ColumnPicker empty = onEdt(() -> pp.chooseValuesForTest(0));
+        settle();
+        onEdt(() -> {
+            empty.closeForTest();
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "the empty column: "
+                + ErrorReporter.sessionForTest());
+        assertEquals(nRows, onEdt(() -> pp.resultForTest().rows()));
         onEdt(() -> {
             pp.clearButtonForTest(null).doClick();
             return null;
@@ -7572,7 +7599,7 @@ class VisualTest {
                     for (int c = 0; c < 2000; c++) {
                         row.append(',').append(rnd.nextInt(101));
                     }
-                    w.write(row.append('\n').toString());
+                    w.write(row.append(",\r\n").toString());
                 }
             }
         }

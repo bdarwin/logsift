@@ -744,11 +744,12 @@ public final class Pivot {
                 });
         java.util.ArrayDeque<java.util.concurrent.Future<Prepared[]>> pending = new java.util.ArrayDeque<>();
         try {
-            for (long first = 0; first < lineCount; first += CHUNK) {
+            int chunk = chunkLines(cols.size(), slots.column().length);
+            for (long first = 0; first < lineCount; first += chunk) {
                 if (cancelled.getAsBoolean()) {
                     return null;
                 }
-                int k = (int) Math.min(CHUNK, lineCount - first);
+                int k = (int) Math.min(chunk, lineCount - first);
                 String[] buf = new String[k];
                 lines.read(first, k, buf);
                 read += k;
@@ -838,8 +839,19 @@ public final class Pivot {
         return res;
     }
 
-    /** Lines read at a time, and the parts done in parallel. */
+    /** Lines read at a time, and the parts done in parallel: fewer on a wide table. */
     static final int CHUNK = 4096;
+    /**
+     * The most cells in one block of lines (split, and read for the values). Up to 16 blocks are
+     * worked on at once: 4,096 lines of 6,000 columns each ran out of memory.
+     */
+    static final int CHUNK_CELLS = 256 * 1024;
+
+    /** Lines per block for a table of {@code columns} columns that reads {@code slots} cells a row. */
+    static int chunkLines(int columns, int slots) {
+        long perLine = Math.max(1L, (long) columns + slots);
+        return (int) Math.max(16, Math.min(CHUNK, CHUNK_CELLS / perLine));
+    }
     /** Numbers kept per cell for median and percentiles; past this, a fair sample. */
     static final int MAX_KEPT = 1_000_000;
     static final int PARALLEL_LINES = 50_000;
