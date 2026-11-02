@@ -7329,6 +7329,229 @@ class VisualTest {
 
     @Test
     @Order(61)
+    void pivotsATableOfSixThousandColumns() throws Exception {
+        // 6,000 columns (a header over 64 KB): Pivot crashed on such a table
+        int nRows = Integer.getInteger("wide6000.rows", 1500);
+        Path f = dir.resolve("wide-6000-" + nRows + ".csv");
+        if (!Files.exists(f)) {
+            java.util.Random rnd = new java.util.Random(6);
+            StringBuilder head = new StringBuilder("timestamp,host");
+            for (String g : List.of("cpu", "mem", "disk", "net")) {
+                for (int i = 0; i < 1500; i++) {
+                    head.append(',').append("metric_").append(g).append('_').append(String.format("%04d", i));
+                }
+            }
+            try (var w = Files.newBufferedWriter(f)) {
+                w.write(head.append('\n').toString());
+                for (int r = 0; r < nRows; r++) {
+                    StringBuilder row = new StringBuilder(String.format("2026-10-28 10:%02d:%02d,web-%d", r / 60 % 60,
+                            r % 60, r % 4));
+                    for (int c = 0; c < 6000; c++) {
+                        if (c % 1500 == 7) {
+                            row.append(",status ").append(rnd.nextInt(5) == 0 ? "degraded" : "ok"); // a text column
+                        } else {
+                            row.append(',').append(rnd.nextInt(10_000) / 100.0);
+                        }
+                    }
+                    w.write(row.append('\n').toString());
+                }
+            }
+        }
+        int errorsBefore = ErrorReporter.sessionForTest().size();
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                        && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the table of 6,000 columns");
+        LogTab tab = onEdt(frame::currentTab);
+        assertEquals(6002, onEdt(() -> tab.logFormat().columns().size()));
+        PivotPanel pp = onEdt(tab::pivotPanel);
+        onEdt(() -> {
+            tab.showPivot();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> pp.fieldsForTest().size() == 6002);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 120_000, "the pivot's 6,002 fields");
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "fields: " + ErrorReporter.sessionForTest());
+        // narrowing the fields as one types, key by key, odd characters too
+        for (String typed : List.of("metric_cpu_00*", "m*_0??7", "[", "(cpu", "\\", "*", "?", "", "zzz", "")) {
+            for (int i = 1; i <= typed.length(); i++) {
+                String part = typed.substring(0, i);
+                long t0 = System.nanoTime();
+                onEdt(() -> {
+                    pp.setFieldFilterForTest(part);
+                    return null;
+                });
+                long ms = (System.nanoTime() - t0) / 1_000_000;
+                assertTrue(ms < 2000, "typing \"" + part + "\" took " + ms + " ms");
+            }
+            if (typed.isEmpty()) {
+                onEdt(() -> {
+                    pp.setFieldFilterForTest("");
+                    return null;
+                });
+            }
+        }
+        assertEquals(6002, (int) onEdt(pp::shownFieldCountForTest), "all fields back");
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "typing: " + ErrorReporter.sessionForTest());
+        // fields as filters: 200 of them at once, then one narrowed to some values
+        onEdt(() -> {
+            pp.setFieldFilterForTest("metric_net_*");
+            pp.addMatching(PivotPanel.Area.FILTERS);
+            pp.setFieldFilterForTest("host");
+            pp.addMatching(PivotPanel.Area.FILTERS);
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "200 filters: " + ErrorReporter.sessionForTest());
+        assertEquals(201, onEdt(() -> pp.areaForTest(PivotPanel.Area.FILTERS)).size(), "200 at a time, and host");
+        List<String> hosts = onEdt(() -> pp.resultForTest().filterValues(pp.columnForTest("host")));
+        assertEquals(List.of("web-0", "web-1", "web-2", "web-3"), hosts);
+        // Choose Values… of a column of numbers: thousands of values, filtered as one types
+        long t0 = System.nanoTime();
+        ColumnPicker picker = onEdt(() -> pp.chooseValuesForTest(0));
+        settle();
+        long openMs = (System.nanoTime() - t0) / 1_000_000;
+        int nValues = onEdt(() -> picker.shownForTest().size());
+        assertTrue(nValues > 1000, "values listed: " + nValues);
+        assertTrue(openMs < 5000, nValues + " values took " + openMs + " ms to show");
+        for (String part : List.of("1", "12", "12.", "12.3")) {
+            long t1 = System.nanoTime();
+            onEdt(() -> {
+                picker.setFilterForTest(part);
+                return null;
+            });
+            long ms = (System.nanoTime() - t1) / 1_000_000;
+            assertTrue(ms < 2000, "filtering the values by " + part + " took " + ms + " ms");
+        }
+        System.out.println("Choose Values: " + nValues + " values shown in " + openMs + " ms");
+        shot("115c-pivot-choose-values-many");
+        onEdt(() -> {
+            picker.tickForTest(picker.shownForTest().get(0));
+            picker.closeForTest();
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "choose values: "
+                + ErrorReporter.sessionForTest());
+        onEdt(() -> {
+            pp.keepForTest(0, null);
+            pp.keepForTest(200, java.util.Set.of("web-1"));
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(nRows / 4, onEdt(() -> pp.resultForTest().rows()), "only web-1's rows");
+        onEdt(() -> {
+            pp.clearButtonForTest(PivotPanel.Area.FILTERS).doClick();
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(nRows, onEdt(() -> pp.resultForTest().rows()), "every row again");
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "filters: " + ErrorReporter.sessionForTest());
+        // group by host, every cpu column as one value, and 200 mem columns each on its own
+        onEdt(() -> {
+            pp.addField(PivotPanel.Area.ROWS, pp.columnForTest("host"));
+            pp.setFieldFilterForTest("metric_cpu_*");
+            pp.oneValueButtonForTest().doClick();
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "one value: " + ErrorReporter.sessionForTest());
+        assertEquals("Sum of metric_cpu_* (1500 fields)", onEdt(() -> pp.resultForTest().valueTitle(0)));
+        assertEquals(4, onEdt(() -> pp.resultForTest().root().kids().size()), "four hosts");
+        // a filter on one of the log's columns, with Pivot following the rows the filters keep
+        onEdt(() -> {
+            tab.addColumnFilter("host");
+            FilterDef d = tab.filterPanel().filters().get(tab.filterPanel().filters().size() - 1);
+            d.text = "web-2";
+            tab.filterPanel().setFilterAction(d, FilterDef.Action.SHOW);
+            tab.setMatchingOnly(true);
+            return null;
+        });
+        waitForFilter(tab);
+        onEdt(() -> {
+            tab.showPivot();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !pp.isRunning() && pp.resultForTest() != null
+                        && pp.resultForTest().rows() == nRows / 4);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 120_000, "the pivot of web-2's rows");
+        assertEquals(1, onEdt(() -> pp.resultForTest().root().kids().size()), "only web-2");
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "column filter: "
+                + ErrorReporter.sessionForTest());
+        // and one on a metric column, as a number
+        onEdt(() -> {
+            tab.addColumnFilter("metric_cpu_0001");
+            FilterDef d = tab.filterPanel().filters().get(tab.filterPanel().filters().size() - 1);
+            d.text = "5";
+            tab.filterPanel().setFilterAction(d, FilterDef.Action.SHOW);
+            return null;
+        });
+        waitForFilter(tab);
+        Thread.sleep(500);
+        waitForPivot(pp);
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "two column filters: "
+                + ErrorReporter.sessionForTest());
+        onEdt(() -> {
+            tab.filterPanel().clearAll();
+            tab.setMatchingOnly(false);
+            return null;
+        });
+        waitForFilter(tab);
+        onEdt(() -> {
+            pp.setFieldFilterForTest("metric_mem_*");
+            pp.addMatching(PivotPanel.Area.VALUES);
+            return null;
+        });
+        waitForPivot(pp);
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "201 values: " + ErrorReporter.sessionForTest());
+        assertEquals(201, onEdt(() -> pp.resultForTest().spec().cellValues().size()));
+        onEdt(() -> {
+            pp.setViewForTest("both");
+            return null;
+        });
+        settle();
+        onEdt(() -> {
+            pp.setFieldFilterForTest("metric_disk_*");
+            pp.addMatching(PivotPanel.Area.COLUMNS);
+            return null;
+        });
+        waitForPivot(pp);
+        settle();
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "200 column fields: "
+                + ErrorReporter.sessionForTest());
+        onEdt(() -> {
+            pp.clearButtonForTest(null).doClick();
+            return null;
+        });
+        settle();
+        assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "nothing failed: "
+                + ErrorReporter.sessionForTest());
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+    }
+
+    @Test
+    @Order(61)
     void handlesAVeryWideTable() throws Exception {
         // 2,000 columns once ran Profile, Insights and Pivot out of memory together
         Path f = dir.resolve("wide-2000.csv");

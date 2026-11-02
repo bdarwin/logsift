@@ -671,11 +671,11 @@ final class PivotPanel extends JPanel {
     /** Puts every field the filter shows in Values as one value, named by the filter ("Sum of cpu_*"). */
     void addMatchingAsOne() {
         List<Integer> cols = new ArrayList<>();
-        boolean numbers = true;
+        boolean numbers = false; // a sum skips what isn't a number, so one field of numbers is enough
         for (int i = 0; i < fieldModel.size(); i++) {
             int c = fieldModel.get(i);
             cols.add(c);
-            numbers &= fields.kind(c) == Pivot.Kind.NUMBER;
+            numbers |= fields.kind(c) == Pivot.Kind.NUMBER;
         }
         if (cols.isEmpty()) {
             return;
@@ -872,18 +872,23 @@ final class PivotPanel extends JPanel {
         menu.show(over, x, y);
     }
 
-    /** Whether a value's fields all hold numbers. */
+    /** Whether a value can be summed: its field holds numbers (of several, any one does). */
     private boolean numeric(Item it) {
         for (int c : it.isSeveral() ? it.columns : List.of(it.column)) {
-            if (fields.kind(c) != Pivot.Kind.NUMBER) {
-                return false;
+            if (fields.kind(c) == Pivot.Kind.NUMBER) {
+                return true;
             }
         }
-        return true;
+        return false;
+    }
+
+    /** Opens Choose Values… of a filter (tests). */
+    ColumnPicker chooseValuesForTest(int filterIndex) {
+        return chooseValues(areas.get(Area.FILTERS).get(filterIndex), areaLists.get(Area.FILTERS));
     }
 
     /** A filter's values, ticked in a list (with a filter box). */
-    private void chooseValues(Item it, JComponent over) {
+    private ColumnPicker chooseValues(Item it, JComponent over) {
         List<String> values = result == null ? List.of() : result.filterValues(it.column);
         List<Integer> ticked = new ArrayList<>();
         for (int i = 0; i < values.size(); i++) {
@@ -901,6 +906,7 @@ final class PivotPanel extends JPanel {
                     changed();
                 });
         p.show(over);
+        return p;
     }
 
     /** Something in the areas changed: compute again soon, remember the layout. */

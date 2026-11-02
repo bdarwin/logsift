@@ -208,6 +208,8 @@ val visualTest by tasks.registering(Test::class) {
     jvmArgs("-XX:+UseZGC", "--enable-native-access=ALL-UNNAMED")
     systemProperty("java.awt.headless", "false")
     systemProperty("logsift.visual.sizeMb", (project.findProperty("sizeMb") ?: "1024").toString())
+    // -Pwide6000Rows=20000: a bigger table of 6,000 columns for the pivot test
+    project.findProperty("wide6000Rows")?.let { systemProperty("wide6000.rows", it.toString()) }
     // -PvisualDir=/tmp/logs puts the test logs somewhere neutral (for README screenshots)
     systemProperty("logsift.visual.dir", (project.findProperty("visualDir")
             ?: layout.buildDirectory.dir("visual").get().asFile.absolutePath).toString())
