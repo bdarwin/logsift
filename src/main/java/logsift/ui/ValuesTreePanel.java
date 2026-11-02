@@ -78,10 +78,24 @@ final class ValuesTreePanel extends JPanel {
     private boolean updatingColumns;
     private int generation;
 
+    /** Counts a column's values (reading the file, or from a cache). */
+    @FunctionalInterface
+    interface Counter {
+        ColumnStats.Result count(LogFormat format, String column, java.util.function.BooleanSupplier cancelled);
+    }
+
+    private volatile Counter counter;
+
+    /** How the values are counted (by default, by reading the file). */
+    void setCounter(Counter c) {
+        counter = c != null ? c : (f, col, cancel) -> ColumnStats.count(doc, f, col, cancel);
+    }
+
     ValuesTreePanel(LogDocument doc, Listener listener) {
         super(new BorderLayout());
         this.doc = doc;
         this.listener = listener;
+        setCounter(null);
         setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.uiColor("Component.borderColor", Color.GRAY)));
         setPreferredSize(new Dimension(280, 300));
         setMinimumSize(new Dimension(160, 100));
@@ -293,7 +307,7 @@ final class ValuesTreePanel extends JPanel {
         COUNTER.execute(() -> {
             ColumnStats.Result r;
             try {
-                r = ColumnStats.count(doc, f, col, () -> gen != generation);
+                r = counter.count(f, col, () -> gen != generation);
             } catch (RuntimeException e) {
                 logsift.core.Problems.unexpected(e); // a bug, if not a read or connection failure
                 r = null;

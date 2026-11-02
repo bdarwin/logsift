@@ -458,6 +458,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 host.setValuesTree(false);
             }
         });
+        treePanel.setCounter(this::countValues);
         side = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, treePanel, logArea);
         side.setBorder(null);
         side.setContinuousLayout(true);
@@ -2055,6 +2056,42 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     /** How many column filters the cache has answered (tests). */
     int filterCacheAnswersForTest() {
         return filterCacheAnswers.get();
+    }
+
+    /**
+     * A column's values with their counts: from the cache when the column is stored for the file as
+     * it is now, else by reading the file (and the column is stored afterwards for next time).
+     */
+    logsift.core.ColumnStats.Result countValues(logsift.core.LogFormat f, String column,
+                                                java.util.function.BooleanSupplier cancelled) {
+        int col = f.columns().indexOf(column);
+        if (cacheable(f) && f.equals(logFormat) && col >= 0 && !doc.isIndexing()) {
+            try {
+                logsift.core.PivotCache c = cache(f);
+                logsift.core.ColumnStats.Result r = c.valueCounts(col, doc.snapshot().completeLineCount(),
+                        () -> cancelled.getAsBoolean() || closed);
+                if (r != null) {
+                    valueCacheAnswers.incrementAndGet();
+                    return r;
+                }
+                if (!cancelled.getAsBoolean()) {
+                    storeValuesLater(c, f, col);
+                }
+            } catch (java.io.IOException | RuntimeException e) {
+                if (!closed) {
+                    logsift.core.Problems.unexpected(e);
+                    pivotCacheBroken = true;
+                }
+            }
+        }
+        return logsift.core.ColumnStats.count(doc, f, column, cancelled);
+    }
+
+    private final java.util.concurrent.atomic.AtomicInteger valueCacheAnswers = new java.util.concurrent.atomic.AtomicInteger();
+
+    /** How many value counts the cache has answered (tests). */
+    int valueCacheAnswersForTest() {
+        return valueCacheAnswers.get();
     }
 
     /** Waits until the columns asked for filters are stored (tests). */

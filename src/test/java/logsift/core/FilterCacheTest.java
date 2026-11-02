@@ -116,6 +116,50 @@ class FilterCacheTest {
     }
 
     @Test
+    void valuesCountedAsReadingTheFile() throws Exception {
+        Path f = awkward(dir.resolve("t.csv"), 6000, 9);
+        PivotCacheTest.Opened o = PivotCacheTest.open(f);
+        try (LogDocument doc = o.doc();
+             PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), 1L << 30)) {
+            LogFormat fmt = o.format();
+            assertTrue(cache.buildValues(List.of(0, 1, 2, 3), CsvRows.reader(doc, fmt), doc.lineCount(), () -> false,
+                    null));
+            long upTo = doc.snapshot().completeLineCount();
+            for (int c = 0; c < 4; c++) {
+                ColumnStats.Result read = ColumnStats.count(doc, fmt, fmt.columns().get(c), () -> false);
+                ColumnStats.Result cached = cache.valueCounts(c, upTo, () -> false);
+                assertEquals(read.values(), cached.values(), fmt.columns().get(c));
+                assertEquals(read.lines(), cached.lines(), fmt.columns().get(c));
+                assertEquals(read.column(), cached.column());
+                assertFalse(cached.truncated());
+            }
+        }
+    }
+
+    @Test
+    void pastTheMostValuesTheFirstInTheFileAreKept() throws Exception {
+        StringBuilder b = new StringBuilder("id,n\n");
+        int n = ColumnStats.MAX_VALUES + 20_000;
+        for (int i = 0; i < n; i++) {
+            b.append("id-").append(i).append(',').append(i % 3).append('\n');
+        }
+        Path f = Files.writeString(dir.resolve("ids.csv"), b);
+        PivotCacheTest.Opened o = PivotCacheTest.open(f);
+        try (LogDocument doc = o.doc();
+             PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), 1L << 30)) {
+            assertTrue(cache.buildValues(List.of(0), CsvRows.reader(doc, o.format()), doc.lineCount(), () -> false, null));
+            ColumnStats.Result read = ColumnStats.count(doc, o.format(), o.format().columns().get(0), () -> false);
+            ColumnStats.Result cached = cache.valueCounts(0, doc.snapshot().completeLineCount(), () -> false);
+            assertTrue(read.truncated() && cached.truncated());
+            assertEquals(read.values().size(), cached.values().size());
+            assertEquals(n, cached.lines(), "every row counted");
+            assertEquals(read.lines(), cached.lines());
+            assertTrue(cached.values().stream().allMatch(v -> v.firstLine() <= ColumnStats.MAX_VALUES),
+                    "the first ones in the file");
+        }
+    }
+
+    @Test
     void storesOnlyWhatItIsAskedForAndCanStop() throws Exception {
         Path f = awkward(dir.resolve("t.csv"), 3000, 5);
         PivotCacheTest.Opened o = PivotCacheTest.open(f);

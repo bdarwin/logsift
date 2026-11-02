@@ -169,7 +169,7 @@ final class ValuesDialog {
             }
         });
         Thread t = new Thread(() -> {
-            ColumnStats.Result r = ColumnStats.count(tab.document(), format, column, cancel::get);
+            ColumnStats.Result r = tab.countValues(format, column, cancel::get);
             SwingUtilities.invokeLater(() -> {
                 result[0] = r;
                 busy.setVisible(false);

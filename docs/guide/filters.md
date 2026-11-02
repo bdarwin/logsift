@@ -73,7 +73,7 @@ The quick ways:
 
 A column filter shows as a chip like *Show: Host = web-1*. Lines that aren't rows (stack traces, a CSV's header row) don't match it themselves; with **Keep stack traces** they go with their entry.
 
-**Big tables:** in a CSV of 200 MB or more, the first filter on a column reads the file as usual; afterwards, while nothing else is running, Logsift keeps that column's values in the [Pivot cache](pivot.md#big-tables). The next filters on the column (another value, another comparison) come from there, with the very lines reading the file finds: on a table of 6,000 columns, about 20 ms instead of half a second, and the bigger the file, the bigger the difference. When the file grows or changes, filters read it again until the column is kept anew. **Settings → General → Pivot cache** sets its room, or turns it off.
+**Big tables:** in a CSV of 200 MB or more, the first filter on a column reads the file as usual; afterwards, while nothing else is running, Logsift keeps that column's values in the [Pivot cache](pivot.md#big-tables). The next filters on the column (another value, another comparison) come from there, with the very lines reading the file finds: on a table of 6,000 columns, about 20 ms instead of half a second, and the bigger the file, the bigger the difference. The values list on the left and **Count Values in …** count a kept column from there too (a few milliseconds). When the file grows or changes, filters read it again until the column is kept anew. **Settings → General → Pivot cache** sets its room, or turns it off.
 
 ## Combining filters
 

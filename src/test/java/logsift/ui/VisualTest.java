@@ -7882,6 +7882,28 @@ class VisualTest {
             assertEquals(before + 1, tab.filterCacheAnswersForTest());
             assertEquals(read.apply("", new logsift.core.ColumnFilter(fmt, ms, logsift.core.ColumnFilter.Op.BETWEEN,
                     new logsift.core.SearchQuery("100..<200", false, false, false))), shown.get());
+            // Count Values of a stored column: from the cache, as reading the file counts them
+            ValuesDialog.Last lastDialog = ValuesDialog.lastForTest();
+            int countsBefore = tab.valueCacheAnswersForTest();
+            onEdt(() -> {
+                tab.countValues(host);
+                return null;
+            });
+            waitFor(() -> ValuesDialog.lastForTest() != lastDialog && ValuesDialog.lastForTest().result()[0] != null,
+                    60_000, "host values counted");
+            assertEquals(countsBefore + 1, tab.valueCacheAnswersForTest(), "from the cache");
+            logsift.core.ColumnStats.Result counted = ValuesDialog.lastForTest().result()[0];
+            logsift.core.ColumnStats.Result byReading = logsift.core.ColumnStats.count(tab.document(), fmt, host,
+                    () -> false);
+            assertEquals(byReading.values(), counted.values());
+            assertEquals(byReading.lines(), counted.lines());
+            assertEquals(7, counted.values().size(), "web-0 to web-5, and \" web-1 \"");
+            settle();
+            shotOf(ValuesDialog.lastForTest().dialog().getRootPane(), "115f-values-from-the-cache");
+            onEdt(() -> {
+                ValuesDialog.lastForTest().dialog().dispose();
+                return null;
+            });
             // the file grows: the cache was for the file as it was, so the file is read again
             Files.writeString(f, "2026-10-20 10:00:00,web-2,150,new\r\n", java.nio.file.StandardOpenOption.APPEND);
             onEdt(() -> {

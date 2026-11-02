@@ -24,7 +24,7 @@ public final class ColumnStats {
     public record Result(String column, List<Value> values, long lines, long millis,
                          boolean truncated) {}
 
-    private static final int MAX_VALUES = 100_000;
+    static final int MAX_VALUES = 100_000;
 
     public static Result count(LogDocument doc, LogFormat format, String column,
                                BooleanSupplier cancelled) {

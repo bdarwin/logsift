@@ -722,6 +722,51 @@ public final class PivotCache implements AutoCloseable {
         }
     }
 
+    /**
+     * The values of column {@code c} in the rows before {@code upTo} with their counts and first
+     * lines, as {@link ColumnStats#count} gives them reading the file; null when the column's
+     * values aren't stored. Past {@link ColumnStats#MAX_VALUES} different values, those that come
+     * first in the file are kept.
+     */
+    public ColumnStats.Result valueCounts(int c, long upTo, BooleanSupplier stop) {
+        if (!hasValues(c)) {
+            return null;
+        }
+        long t0 = System.nanoTime();
+        String where = " FROM v" + c + " WHERE line < " + upTo;
+        List<ColumnStats.Value> values = new ArrayList<>();
+        long lines;
+        long distinct;
+        try (Connection con = db.connection(); Statement st = con.createStatement()) {
+            try (ResultSet rs = st.executeQuery("SELECT count(*), count(DISTINCT v)" + where)) {
+                rs.next();
+                lines = rs.getLong(1);
+                distinct = rs.getLong(2);
+            }
+            if (stop.getAsBoolean()) {
+                return null;
+            }
+            try (ResultSet rs = st.executeQuery("SELECT v, count(*), min(line) AS first_line" + where
+                    + " GROUP BY v ORDER BY first_line LIMIT " + ColumnStats.MAX_VALUES)) {
+                while (rs.next()) {
+                    values.add(new ColumnStats.Value(rs.getString(1), rs.getLong(2), rs.getLong(3)));
+                }
+            }
+        } catch (SQLException e) {
+            if (stop.getAsBoolean()) {
+                return null;
+            }
+            throw new IllegalStateException("The cache couldn't be read: " + e.getMessage(), e);
+        }
+        if (stop.getAsBoolean()) {
+            return null;
+        }
+        values.sort(java.util.Comparator.comparingLong((ColumnStats.Value v) -> -v.count())
+                .thenComparing(ColumnStats.Value::value));
+        return new ColumnStats.Result(format.columns().get(c), values, lines, (System.nanoTime() - t0) / 1_000_000,
+                distinct > values.size());
+    }
+
     /** The tests of the filters being answered, by id, for the function SQL calls. */
     private final Map<Long, java.util.function.Predicate<String>> tests = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong nextTest = new java.util.concurrent.atomic.AtomicLong();
