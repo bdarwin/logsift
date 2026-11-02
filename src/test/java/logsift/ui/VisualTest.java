@@ -7740,7 +7740,7 @@ class VisualTest {
                     for (int c = 0; c < 2000; c++) {
                         row.append(',').append(rnd.nextInt(101));
                     }
-                    w.write(row.append(",\r\n").toString());
+                    w.write(row.append('\n').toString());
                 }
             }
         }
