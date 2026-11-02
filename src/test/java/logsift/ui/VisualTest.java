@@ -6507,6 +6507,15 @@ class VisualTest {
         });
         LogTab again = waitForTab("sales.csv");
         PivotPanel pp2 = onEdt(again::pivotPanel);
+        // Pivot joins the tabs below once the reopened file is known to be a table
+        waitFor(() -> {
+            try {
+                return onEdt(() -> javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JTabbedPane.class,
+                        pp2) != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "Pivot among the reopened table's tabs");
         onEdt(() -> {
             setBottomFor(again, pp2);
             return null;
