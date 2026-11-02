@@ -605,19 +605,24 @@ final class PivotPanel extends JPanel {
 
     /** Whether a field's name matches the filter: a part of it, or a pattern with * and ?. */
     static boolean fieldMatches(String title, String filter) {
+        return fieldMatcher(filter).test(title);
+    }
+
+    /** The filter as a test of field names, made once for all the fields. */
+    static java.util.function.Predicate<String> fieldMatcher(String filter) {
         String q = filter.strip().toLowerCase(Locale.ROOT);
         if (q.isEmpty()) {
-            return true;
+            return t -> true;
         }
-        String t = title.toLowerCase(Locale.ROOT);
         if (q.indexOf('*') < 0 && q.indexOf('?') < 0) {
-            return t.contains(q);
+            return t -> t.toLowerCase(Locale.ROOT).contains(q);
         }
         StringBuilder re = new StringBuilder();
         for (char ch : q.toCharArray()) {
             re.append(ch == '*' ? ".*" : ch == '?' ? "." : java.util.regex.Pattern.quote(String.valueOf(ch)));
         }
-        return t.matches(re.toString());
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(re.toString());
+        return t -> pattern.matcher(t.toLowerCase(Locale.ROOT)).matches();
     }
 
     private void fillFields() {
@@ -627,11 +632,15 @@ final class PivotPanel extends JPanel {
             return;
         }
         String q = fieldFilter.getText();
+        java.util.function.Predicate<String> match = fieldMatcher(q);
+        List<Integer> shown = new ArrayList<>();
         for (int c = 0; c < fields.titles().size(); c++) {
-            if (fieldMatches(fields.titles().get(c), q)) {
-                fieldModel.addElement(c);
+            if (match.test(fields.titles().get(c))) {
+                shown.add(c);
             }
         }
+        sizeFieldCells(shown);
+        fieldModel.addAll(shown); // one change for the list, not one per field
         int n = fieldModel.size();
         boolean many = !q.isBlank() && n > 1;
         addMatching.setVisible(many);
@@ -640,6 +649,27 @@ final class PivotPanel extends JPanel {
             oneValue.setText("Values as One");
         }
         revalidate();
+    }
+
+    /**
+     * Gives the field list a fixed cell size, so it doesn't lay out each of thousands of fields (each an HTML label)
+     * whenever the filter changes: the height of one rendered field, the width of the widest name in bold.
+     */
+    private void sizeFieldCells(List<Integer> shown) {
+        if (shown.isEmpty()) {
+            return;
+        }
+        Component probe = fieldList.getCellRenderer().getListCellRendererComponent(fieldList, shown.get(0), 0, false,
+                false);
+        Dimension one = probe.getPreferredSize();
+        java.awt.FontMetrics fm = fieldList.getFontMetrics(fieldList.getFont().deriveFont(Font.BOLD));
+        int widest = 0;
+        for (int c : shown) {
+            widest = Math.max(widest, fm.stringWidth(title(c)));
+        }
+        int textNow = fm.stringWidth(title(shown.get(0)));
+        fieldList.setFixedCellHeight(one.height);
+        fieldList.setFixedCellWidth(one.width - Math.min(textNow, one.width) + widest + fm.charWidth('m'));
     }
 
     /** The most fields one click puts in an area. */
@@ -694,8 +724,9 @@ final class PivotPanel extends JPanel {
     /** The fields a pattern names, as the field filter finds them. */
     List<Integer> matching(String pattern) {
         List<Integer> out = new ArrayList<>();
+        java.util.function.Predicate<String> match = fieldMatcher(pattern);
         for (int c = 0; fields != null && c < fields.titles().size(); c++) {
-            if (fieldMatches(fields.titles().get(c), pattern)) {
+            if (match.test(fields.titles().get(c))) {
                 out.add(c);
             }
         }

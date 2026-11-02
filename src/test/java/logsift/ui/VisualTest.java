@@ -7387,6 +7387,7 @@ class VisualTest {
         }, 120_000, "the pivot's 6,003 fields");
         assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "fields: " + ErrorReporter.sessionForTest());
         // narrowing the fields as one types, key by key, odd characters too
+        long[] slowestKey = {0};
         for (String typed : List.of("metric_cpu_00*", "m*_0??7", "[", "(cpu", "\\", "*", "?", "", "zzz", "")) {
             for (int i = 1; i <= typed.length(); i++) {
                 String part = typed.substring(0, i);
@@ -7396,6 +7397,7 @@ class VisualTest {
                     return null;
                 });
                 long ms = (System.nanoTime() - t0) / 1_000_000;
+                slowestKey[0] = Math.max(slowestKey[0], ms);
                 assertTrue(ms < 2000, "typing \"" + part + "\" took " + ms + " ms");
             }
             if (typed.isEmpty()) {
@@ -7405,6 +7407,7 @@ class VisualTest {
                 });
             }
         }
+        System.out.println("    slowest key in the field filter: " + slowestKey[0] + " ms");
         assertEquals(6003, (int) onEdt(pp::shownFieldCountForTest), "all fields back");
         assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "typing: " + ErrorReporter.sessionForTest());
         // fields as filters: 200 of them at once, then one narrowed to some values
