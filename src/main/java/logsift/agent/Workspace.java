@@ -401,6 +401,23 @@ public final class Workspace implements AutoCloseable {
             return query.whyNot(cache, sql);
         }
 
+        /**
+         * A pivot from the cache, storing the columns it needs first (one read of the file); null
+         * when the cache can't answer it (it's added up from the file then).
+         */
+        public logsift.core.Pivot.Result pivot(logsift.core.Pivot.Spec spec, logsift.core.Pivot.Fields fields,
+                                               java.util.function.BooleanSupplier stop) {
+            if (!logsift.core.PivotCache.canCache(spec)) {
+                return null;
+            }
+            if (!cache.has(spec) && !cache.build(spec, fields, logsift.core.CsvRows.reader(doc, format), doc.lineCount(),
+                    stop, null)) {
+                return null;
+            }
+            // log times are kept as written, as UTC (as the Pivot tab groups them)
+            return cache.compute(spec, fields, java.time.ZoneOffset.UTC, doc.lineCount());
+        }
+
         /** Throws DuckDB's refusal of a mistake in the query, reading nothing. */
         public void tryOnEmpty(String sql) throws java.sql.SQLException {
             query.tryOnEmpty(sql);

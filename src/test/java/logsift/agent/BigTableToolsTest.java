@@ -147,4 +147,40 @@ class BigTableToolsTest {
             assertTrue(many.startsWith("1 row in "), many);
         }
     }
+
+    private static String pivot(Workspace w, Path f, Object... kv) throws Exception {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("log", f.toString());
+        for (int i = 0; i < kv.length; i += 2) {
+            m.put((String) kv[i], kv[i + 1]);
+        }
+        return TableTools.PIVOT.run(new Tool.Args(m), w);
+    }
+
+    @Test
+    void pivotsFromTheCacheAsFromTheFile() throws Exception {
+        Path f = sales(3000);
+        List<Object[]> asks = List.of(
+                new Object[] {"rows", "host", "values", "count, sum(ms), avg(bytes), median(ms)"},
+                new Object[] {"rows", "at:day", "columns", "status", "values", "max(ms)"},
+                new Object[] {"rows", "note", "filters", "host=web-1|web-2", "values", "count_distinct(status)"});
+        List<String> fromFile = new java.util.ArrayList<>();
+        try (Workspace w = workspace()) {
+            for (Object[] kv : asks) {
+                fromFile.add(rows(pivot(w, f, kv)));
+            }
+        }
+        Path caches = dir.resolve("logsift").resolve("cache").resolve("pivot");
+        assertTrue(!Files.exists(caches) || logsift.core.PivotCache.size(caches) == 0, "no cache for a small file");
+        System.setProperty("logsift.pivotCacheMinBytes", "1");
+        try (Workspace w = workspace()) {
+            for (int i = 0; i < asks.size(); i++) {
+                assertEquals(fromFile.get(i), rows(pivot(w, f, asks.get(i))), java.util.Arrays.toString(asks.get(i)));
+            }
+            logsift.core.LogAnalysis log = LogTools.ready(new Tool.Args(Map.of("log", f.toString())), w);
+            Workspace.BigTable big = w.bigTable(w.handleOf(log), log);
+            assertTrue(big.cache.hasColumn(0) && big.cache.hasColumn(2), "host and ms kept");
+        }
+        assertTrue(logsift.core.PivotCache.size(caches) > 0, "kept in the app's cache");
+    }
 }

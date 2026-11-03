@@ -79,9 +79,14 @@ public final class TableTools {
                         fieldsOf(a.string("columns", ""), fields), valuesOf(a.string("values", "count"), fields, show),
                         filtersOf(a.string("filters", ""), fields));
                 int limit = (int) a.number("limit", 100, 1, 2000);
+                Workspace.BigTable big = f.isCsv() ? w.bigTable(h, log) : null;
                 Pivot.Result r = w.await(h + ":pivot:" + doc.generation() + ":" + doc.lineCount() + ":" + spec,
-                        "adding up " + log.path().getFileName(), () -> Pivot.compute(f, doc.lineCount(),
-                                CsvRows.reader(doc, f), null, spec, fields, LogTools.INTERRUPTED, null));
+                        "adding up " + log.path().getFileName() + (big == null ? ""
+                                : " (its columns are kept, so the next pivots over them take milliseconds)"), () -> {
+                            Pivot.Result cached = big == null ? null : big.pivot(spec, fields, LogTools.INTERRUPTED);
+                            return cached != null ? cached : Pivot.compute(f, doc.lineCount(), CsvRows.reader(doc, f), null,
+                                    spec, fields, LogTools.INTERRUPTED, null);
+                        });
                 if (r == null) {
                     throw new Tool.Failure("Stopped before the pivot finished.");
                 }

@@ -101,30 +101,17 @@ public final class Sql implements AutoCloseable {
             throw new SQLException(unavailableReason());
         }
         Path temp = o.temp() == null ? Files.createTempDirectory("logsift-sql-") : Files.createDirectories(o.temp());
-        Connection c = DriverManager.getConnection("jdbc:duckdb:");
-        try (Statement s = c.createStatement()) {
-            long max = physicalMemory();
-            long limit = Math.max(256L << 20, Math.min(4L << 30, max > 0 ? max * 3 / 10 : 1L << 30));
-            s.execute("SET memory_limit='" + (limit >> 20) + "MB'");
-            s.execute("SET threads=" + Math.max(1, Math.min(16, Runtime.getRuntime().availableProcessors() - 1)));
-            s.execute("SET temp_directory='" + quote(temp.toString()) + "'");
-            s.execute("SET autoinstall_known_extensions=false");
-            s.execute("SET autoload_known_extensions=false");
-            StringBuilder dirs = new StringBuilder();
-            List<Path> readable = new ArrayList<>(o.readable());
-            readable.add(temp);
-            for (Path p : readable) {
-                dirs.append(dirs.length() == 0 ? "" : ", ").append('\'').append(quote(p.toAbsolutePath().normalize().toString()))
-                        .append('\'');
-            }
-            s.execute("SET allowed_directories=[" + dirs + "]");
-            s.execute("SET enable_external_access=false");
-            s.execute("SET lock_configuration=true");
-        } catch (SQLException e) {
-            c.close();
-            throw e;
+        long max = physicalMemory();
+        long limit = Math.max(256L << 20, Math.min(4L << 30, max > 0 ? max * 3 / 10 : 1L << 30));
+        // locked down from the start (quackjvm's hardening): files only in the folders given (not the
+        // spill folder, which DuckDB uses anyway), no network, no extensions, no settings changed
+        io.quackjvm.agent.guard.Hardening.Options h = io.quackjvm.agent.guard.Hardening.options()
+                .tempFolder(temp.toString()).memoryLimit((limit >> 20) + "MB")
+                .threads(Math.max(1, Math.min(16, Runtime.getRuntime().availableProcessors() - 1)));
+        for (Path p : o.readable()) {
+            h = h.allowedFolders(p.toString());
         }
-        return new Sql(c, temp);
+        return new Sql(DriverManager.getConnection("jdbc:duckdb:", h.properties()), temp);
     }
 
     private static long physicalMemory() {
