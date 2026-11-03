@@ -127,4 +127,15 @@ class QueryExamplesTest {
                 "Errors and warnings by logger", "Durations in messages (… 345 ms): slowest first", "Lines with a text",
                 "Lines per hour"), titles);
     }
+
+    @Test
+    void otherOpenTablesAreJoinedByAColumnTheyShare() {
+        List<QueryExamples.Example> ex = QueryExamples.withOthers("t", List.of("line", "order_id", "customer_id", "amount"),
+                new java.util.LinkedHashMap<>(Map.of("customers", List.of("line", "customer_id", "name"))));
+        assertEquals("Rows with their match in customers (by customer_id)", ex.get(0).title());
+        assertEquals("SELECT *\nFROM t\nJOIN customers USING (customer_id)\nLIMIT 100", ex.get(0).sql());
+        List<QueryExamples.Example> none = QueryExamples.withOthers("log", List.of("line", "time", "message"),
+                Map.of("prices", List.of("line", "sku", "price")));
+        assertEquals("SELECT * FROM prices LIMIT 100", none.get(0).sql(), "only line in common: its rows");
+    }
 }

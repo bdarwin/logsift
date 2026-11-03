@@ -27,6 +27,22 @@ The **Query** tab (below the log) asks a log or a table anything you can write i
 
 Use `"double quotes"` for a column name with spaces or capitals: `SELECT "Order Id" FROM t`.
 
+### Other open tables
+
+Every other table open in Logsift can be named in a query too, by its file's name: `orders.csv` is `orders`, `Sales 2026-Q4.tsv` is `sales_2026_q4`. The hint above the box lists them. Join one with this table or log:
+
+```sql
+SELECT country, count(*) AS orders, sum(amount) AS total
+FROM t
+JOIN customers USING (customer_id)
+GROUP BY country
+ORDER BY total DESC
+```
+
+**Examples** offers the join when the two tables share a column's name (here `customer_id`). A table closed since is no longer there.
+
+![Orders joined with customers, from two open tables](../screenshots/query-across-tables.png)
+
 ## Big tables
 
 A table of 200 MB or more is queried from the [Pivot cache](pivot.md#big-tables). The first query over some columns reads the file once and keeps those columns. After that, queries over them take milliseconds, however wide the table is: on 6,000 columns, a query that reads three of them reads only those three. DuckDB's plan of the query tells which columns it reads, before anything runs. The bar says *from the cache*.
@@ -89,7 +105,7 @@ A query can read other files, for example to join this log with a CSV of orders:
 
 ## For coding agents
 
-Agents have the same with the **query** tool: they give a log (or a CSV file) and a query over `log` or `t`. The **query_examples** tool gives them the examples above for the file. For them, SQL reads no file at all. Logsift reads the log, after checking the [folders agents may read](agents.md#what-it-cant-do), and secrets in the answer are masked.
+Agents have the same with the **query** tool: they give a log (or a CSV file) and a query over `log` or `t`. The **query_examples** tool gives them the examples above for the file. To join tables, they list the other files in `tables` (`tables=customers.csv`), and each is a table named after its file, as in the app. For them, SQL reads no file at all. Logsift reads the log, after checking the [folders agents may read](agents.md#what-it-cant-do), and secrets in the answer are masked.
 
 A big table comes from the same cache as in the app, so what one has kept, the other uses. A table of more than 64 columns is too big for agents to load whole, so their queries there name the columns they need: `SELECT *` or a `PIVOT` is refused with a hint to name columns (`COLUMNS('cpu_.*')` for many alike) or use the **pivot** tool. A mistake, such as a column that isn't there, is told at once, with DuckDB's list of the columns that are.
 

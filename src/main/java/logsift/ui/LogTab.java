@@ -130,6 +130,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final QueryPanel query;
     private logsift.core.Sql.LogTable queryTable;
     private logsift.core.LogFormat queryCsvFor;
+    /** The session {@link #queryTable} and {@link #queryCsvFor} are in: a new one starts again. */
+    private logsift.core.Sql querySql;
     private boolean profileAsked; // the user opened Profile for a log that isn't CSV
     private boolean pivotAsked;   // the user opened Pivot for a log that isn't CSV
     private int insightsGeneration = -1;
@@ -1900,6 +1902,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     Thread.sleep(100);
                 }
                 logsift.core.LogFormat f = logFormat;
+                if (sql != querySql) {
+                    querySql = sql;
+                    queryCsvFor = null;
+                    queryTable = null;
+                }
                 if (f != null && f.isCsv()) {
                     if (queryCsvFor != f) {
                         sql.csv("t", doc.path(), f.delimiter(), f.titles(), doc.charset());
@@ -1911,6 +1918,24 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     queryTable = sql.log("log", doc, f, timeFormat, entryFormat);
                 }
                 return queryTable.update(stop::get, progress) ? null : "Stopped.";
+            }
+
+            @Override
+            public List<QueryPanel.Other> others() {
+                List<QueryPanel.Other> out = new ArrayList<>();
+                java.util.Set<String> taken = new java.util.HashSet<>();
+                for (LogTab o : host.openLogs()) {
+                    logsift.core.LogFormat f = o.logFormat;
+                    if (o == LogTab.this || o.closed || f == null || !f.isCsv() || o.doc.isIndexing()) {
+                        continue;
+                    }
+                    String name = logsift.core.Sql.tableName(o.doc.path(), taken);
+                    taken.add(name);
+                    List<String> cols = new ArrayList<>(List.of("line"));
+                    cols.addAll(f.headerNames() != null ? f.headerNames() : f.columns());
+                    out.add(new QueryPanel.Other(name, o.doc.path(), f.delimiter(), f.titles(), o.doc.charset(), cols));
+                }
+                return out;
             }
 
             @Override

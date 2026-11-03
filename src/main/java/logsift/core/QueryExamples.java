@@ -218,6 +218,28 @@ public final class QueryExamples {
         return ex;
     }
 
+    /**
+     * Examples that use the other open tables: a join where {@code table} and another share a
+     * column name, else the other's first rows. {@code others}: each one's columns, by its name.
+     */
+    public static List<Example> withOthers(String table, List<String> columns, Map<String, List<String>> others) {
+        List<Example> ex = new ArrayList<>();
+        java.util.Set<String> mine = new java.util.HashSet<>(columns);
+        mine.remove("line");
+        for (var o : others.entrySet()) {
+            String shared = o.getValue().stream().filter(c -> !c.equals("line") && mine.contains(c)).findFirst()
+                    .orElse(null);
+            if (shared != null) {
+                ex.add(new Example("Rows with their match in " + o.getKey() + " (by " + shared + ")",
+                        "SELECT *\nFROM " + table + "\nJOIN " + o.getKey() + " USING (" + name(shared) + ")\nLIMIT 100"));
+            } else {
+                ex.add(new Example("The first rows of " + o.getKey() + " (another open table)",
+                        "SELECT * FROM " + o.getKey() + " LIMIT 100"));
+            }
+        }
+        return ex;
+    }
+
     /** Examples for a log, the table {@code log} with these columns. */
     public static List<Example> forLog(List<String> cols) {
         List<Example> ex = new ArrayList<>();

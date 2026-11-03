@@ -181,7 +181,7 @@ The file is plain JSON, if you prefer to write it by hand:
 | **read_lines** | Lines from a line number on |
 | **top_messages** | The most frequent messages, with numbers replaced by placeholders |
 | **metrics** | How long things took, and numbers in messages |
-| **query** | A read-only SQL query over a log (the table `log`: line, time, level, logger, message, text…) or a CSV/TSV file (the table `t`): exact counts, groups, time buckets, percentiles. A big table comes from the app's cache, reading only the columns the query names. See [Query](query.md) |
+| **query** | A read-only SQL query over a log (the table `log`: line, time, level, logger, message, text…) or a CSV/TSV file (the table `t`): exact counts, groups, time buckets, percentiles. A big table comes from the app's cache, reading only the columns the query names. `tables` adds other CSV files, each named after its file (`customers.csv` → `customers`), to join with. See [Query](query.md) |
 | **query_examples** | Queries to start from, made for the file's columns: the Query tab's **Examples**, with those for wide tables (`COLUMNS('^cpu_[0-9]+$')`) |
 | **pivot** | Pivot a table (CSV/TSV) or a log's columns, as the Pivot tab: rows by fields (`host`, `time:hour`), columns by another, values like `count`, `sum(ms)`, `p95(ms)`, `sum(cpu_*)`, filters and percentages. See [Pivot](pivot.md#for-coding-agents) |
 | **search_folder** | Every file in a folder that contains a text, inside zips and `.gz` files too; give a service's name to search all its folders |

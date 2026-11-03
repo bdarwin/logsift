@@ -495,6 +495,9 @@ public final class LogTools {
                     + "ORDER BY minute. Only queries run (no COPY, ATTACH, SET…), and SQL can't read files itself.",
             new Tool.Schema().string("log", LOG_ARG, true)
                     .string("sql", "One SELECT (or WITH, FROM, PIVOT, SUMMARIZE, DESCRIBE) query over log or t.", true)
+                    .string("tables", "Other CSV/TSV files to use in the query too (paths, handles or names from "
+                            + "list_logs, separated by commas): each is a table named after its file, orders.csv → "
+                            + "orders, to join with t or log.", false)
                     .integer("limit", "Most rows shown (default 100, at most 1000).", false)
                     .integer("max_chars", "Longest answer (default 24000).", false).build(),
             (a, w) -> {
@@ -508,6 +511,9 @@ public final class LogTools {
                 LogDocument doc = log.document();
                 var f = log.formats();
                 boolean table = f != null && f.columns() != null && f.columns().isCsv();
+                if (a.has("tables") && !a.string("tables").isBlank()) {
+                    return queryTables(a, w, log, h, q, limit, table);
+                }
                 Workspace.BigTable big = table ? w.bigTable(h, log) : null;
                 if (big != null) {
                     // a big table: from the cache, which stores only the columns the query reads
@@ -534,18 +540,7 @@ public final class LogTools {
                         return w.finish(sqlText(r, limit, "t", big.sqlColumns()), maxChars(a));
                     }
                 }
-                logsift.core.Sql.LogTable t = w.sqlTable(h, log, sql -> {
-                    String name = "file_" + h.replaceAll("\\W", "_");
-                    if (table) {
-                        logsift.core.Pivot.Fields fields = logsift.core.Pivot.fields(f.columns(), doc.lineCount(),
-                                logsift.core.CsvRows.reader(doc, f.columns()), java.time.Year.now().getValue());
-                        return sql.table(name, doc, f.columns(), fields);
-                    }
-                    return sql.log(name, doc, f == null ? null : f.columns(), f == null ? null : f.times(),
-                            f == null ? null : f.entries());
-                });
-                w.await(h + ":sql:" + doc.generation() + ":" + doc.lineCount(), "getting " + log.path().getFileName()
-                        + " ready for SQL (once; new lines are added as it grows)", () -> t.update(INTERRUPTED, null));
+                logsift.core.Sql.LogTable t = sqlTableOf(w, h, log);
                 logsift.core.Sql.Result r;
                 try {
                     r = w.await("sql:" + h + ":" + t.loaded() + ":" + q + ":" + limit, "running the query",
@@ -590,6 +585,62 @@ public final class LogTools {
                 }
                 return b.toString().stripTrailing();
             });
+
+    /** A log or table loaded for SQL in the workspace's session, up to date. */
+    static logsift.core.Sql.LogTable sqlTableOf(Workspace w, String h, LogAnalysis log) throws Exception {
+        LogDocument doc = log.document();
+        var f = log.formats();
+        boolean table = f != null && f.columns() != null && f.columns().isCsv();
+        logsift.core.Sql.LogTable t = w.sqlTable(h, log, sql -> {
+            String name = "file_" + h.replaceAll("\\W", "_");
+            if (table) {
+                logsift.core.Pivot.Fields fields = logsift.core.Pivot.fields(f.columns(), doc.lineCount(),
+                        logsift.core.CsvRows.reader(doc, f.columns()), java.time.Year.now().getValue());
+                return sql.table(name, doc, f.columns(), fields);
+            }
+            return sql.log(name, doc, f == null ? null : f.columns(), f == null ? null : f.times(),
+                    f == null ? null : f.entries());
+        });
+        w.await(h + ":sql:" + doc.generation() + ":" + doc.lineCount(), "getting " + log.path().getFileName()
+                + " ready for SQL (once; new lines are added as it grows)", () -> t.update(INTERRUPTED, null));
+        return t;
+    }
+
+    /** A query over a log or table and other tables, each named after its file. */
+    private static String queryTables(Tool.Args a, Workspace w, LogAnalysis log, String h, String q, int limit,
+                                      boolean table) throws Exception {
+        java.util.Map<String, logsift.core.Sql.LogTable> views = new java.util.LinkedHashMap<>();
+        String main = table ? "t" : "log";
+        logsift.core.Sql.LogTable mt = sqlTableOf(w, h, log);
+        views.put(main, mt);
+        java.util.Set<String> taken = new java.util.HashSet<>();
+        StringBuilder named = new StringBuilder(main + " is " + log.path().getFileName());
+        for (String spec : a.string("tables").split(",")) {
+            if (spec.isBlank()) {
+                continue;
+            }
+            LogAnalysis o = w.log(spec.strip());
+            String oh = w.handleOf(o);
+            w.await(oh + ":ready", "reading " + o.path().getFileName(), () -> o.awaitReady(INTERRUPTED));
+            var of = o.formats();
+            if (of == null || of.columns() == null || !of.columns().isCsv()) {
+                throw new Tool.Failure(o.path().getFileName() + " isn't a table (CSV/TSV), so it can't be one in a query. "
+                        + "Query it on its own as log.");
+            }
+            String name = logsift.core.Sql.tableName(o.path(), taken);
+            taken.add(name);
+            views.put(name, sqlTableOf(w, oh, o));
+            named.append(", ").append(name).append(" is ").append(o.path().getFileName());
+        }
+        logsift.core.Sql.Result r;
+        try {
+            r = w.await("sql:" + views.keySet() + ":" + mt.loaded() + ":" + q + ":" + limit, "running the query",
+                    () -> w.sql().query(views, q, limit, INTERRUPTED));
+        } catch (java.sql.SQLException e) {
+            throw new Tool.Failure(e.getMessage() + "\n(" + named + ".)");
+        }
+        return w.finish("Tables: " + named + ".\n" + sqlText(r, limit, main, mt.sqlColumns()), maxChars(a));
+    }
 
     static String sqlText(logsift.core.Sql.Result r, int limit, String table, List<String> columns) {
         StringBuilder b = new StringBuilder();

@@ -8529,6 +8529,89 @@ class VisualTest {
 
     @Test
     @Order(65)
+    void queriesAcrossOpenTables() throws Exception {
+        // two tables open, in two folders: a query in one names the other by its file's name
+        Path a = Files.createDirectories(dir.resolve("join").resolve("sales"));
+        Path b = Files.createDirectories(dir.resolve("join").resolve("crm"));
+        StringBuilder o = new StringBuilder("order_id,customer_id,amount\n");
+        for (int i = 1; i <= 60; i++) {
+            o.append(i).append(',').append(100 + i % 6).append(',').append(i * 3 % 50).append('\n');
+        }
+        Path orders = Files.writeString(a.resolve("orders.csv"), o.toString());
+        Path customers = Files.writeString(b.resolve("customers.csv"),
+                "customer_id,name,country\n100,Ann,NZ\n101,Bo,SE\n102,Cy,FR\n103,Di,NZ\n104,Ed,SE\n105,Flo,FR\n");
+        for (Path f : List.of(customers, orders)) {
+            onEdt(() -> {
+                frame.openFile(f);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                            && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, f.getFileName().toString());
+        }
+        LogTab tab = onEdt(frame::currentTab);
+        QueryPanel q = onEdt(tab::queryPanel);
+        onEdt(() -> {
+            tab.showQuery();
+            return null;
+        });
+        settle();
+        // (tables other tests left open are named too)
+        java.util.regex.Pattern named = java.util.regex.Pattern.compile("Other open tables: <b>[^<]*\\bcustomers\\b");
+        assertTrue(named.matcher(onEdt(q::hintForTest)).find(), onEdt(q::hintForTest));
+        String join = onEdt(q::examples).stream().filter(e -> e[0].equals("Rows with their match in customers (by customer_id)"))
+                .findFirst().orElseThrow()[1];
+        assertEquals("SELECT *\nFROM t\nJOIN customers USING (customer_id)\nLIMIT 100", join);
+        onEdt(() -> {
+            q.setQueryForTest(join);
+            return null;
+        });
+        assertEquals(60, runQuery(q).rows().size(), "each order with its customer");
+        onEdt(() -> {
+            javax.swing.JSplitPane sp = (javax.swing.JSplitPane) SwingUtilities.getAncestorOfClass(
+                    javax.swing.JSplitPane.class, SwingUtilities.getAncestorOfClass(JTabbedPane.class, q));
+            sp.setDividerLocation(260); // room for the results
+            q.setQueryForTest("SELECT country, count(*) AS orders, sum(amount) AS total\nFROM t\n"
+                    + "JOIN customers USING (customer_id)\nGROUP BY country\nORDER BY total DESC");
+            return null;
+        });
+        logsift.core.Sql.Result byCountry = runQuery(q);
+        assertEquals(3, byCountry.rows().size());
+        assertEquals(60L, byCountry.rows().stream().mapToLong(r -> ((Number) r[1]).longValue()).sum());
+        settle();
+        shot("117g-query-across-tables");
+        // closed: no longer a table here
+        LogTab other = onEdt(() -> frame.openLogs().stream().filter(t -> t.path().equals(customers)).findFirst()
+                .orElseThrow());
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(other));
+            q.setQueryForTest("SELECT * FROM customers");
+            q.run();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !q.runningForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the query");
+        assertTrue(String.valueOf(onEdt(q::failureForTest)).contains("customers"), String.valueOf(onEdt(q::failureForTest)));
+        assertFalse(named.matcher(onEdt(q::hintForTest)).find(), onEdt(q::hintForTest));
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    @Test
+    @Order(65)
     void queriesABigTableFromTheCache() throws Exception {
         // a wide table: a query stores the columns it reads, once, and the next ones over them come from the cache
         Path f = dir.resolve("big-query-cache.csv");

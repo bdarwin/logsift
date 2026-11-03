@@ -221,4 +221,27 @@ class BigTableToolsTest {
             }
         }
     }
+
+    @Test
+    void aQueryJoinsOtherTablesNamedAfterTheirFiles() throws Exception {
+        Path orders = Files.writeString(logs.resolve("orders.csv"), "order_id,customer_id,amount\n1,7,10\n2,8,20\n3,7,5\n");
+        Path customers = Files.writeString(logs.resolve("customers.csv"), "customer_id,name\n7,Ann\n8,Bo\n");
+        Path log = Files.writeString(logs.resolve("app.log"), "2026-10-28 10:00:00 INFO start\n");
+        Path outside = Files.writeString(dir.resolve("secret.csv"), "customer_id,ssn\n7,123\n");
+        try (Workspace w = workspace()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("log", orders.toString());
+            m.put("tables", customers.toString());
+            m.put("sql", "SELECT name, sum(amount) AS total FROM t JOIN customers USING (customer_id) GROUP BY name "
+                    + "ORDER BY name");
+            String answer = LogTools.QUERY.run(new Tool.Args(m), w);
+            assertTrue(answer.startsWith("Tables: t is orders.csv, customers is customers.csv.\n2 rows"), answer);
+            assertTrue(answer.endsWith("name | total\nAnn | 15.0\nBo | 20.0"), answer);
+            m.put("tables", log.toString());
+            String notTable = assertThrows(Tool.Failure.class, () -> LogTools.QUERY.run(new Tool.Args(m), w)).getMessage();
+            assertTrue(notTable.contains("app.log isn't a table"), notTable);
+            m.put("tables", outside.toString());
+            assertThrows(Exception.class, () -> LogTools.QUERY.run(new Tool.Args(m), w), "only the folders agents may read");
+        }
+    }
 }

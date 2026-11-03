@@ -380,6 +380,45 @@ public final class Sql implements AutoCloseable {
     }
 
     /** Makes {@code view} show a table: queries say {@code log} or {@code t} whichever file they are about. */
+    /**
+     * The name a file goes by as a table beside {@code t} or {@code log}: its name without the
+     * extension, as SQL writes a name bare ({@code orders-2026.csv} → {@code orders_2026}), and not
+     * one of {@code taken} (then {@code orders_2}).
+     */
+    public static String tableName(Path file, java.util.Set<String> taken) {
+        String n = file.getFileName().toString();
+        for (String ext : List.of(".gz", ".csv", ".tsv", ".txt", ".log")) {
+            if (n.toLowerCase(Locale.ROOT).endsWith(ext) && n.length() > ext.length()) {
+                n = n.substring(0, n.length() - ext.length());
+            }
+        }
+        n = n.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]+", "_").replaceAll("^_+|_+$", "");
+        if (n.isEmpty() || Character.isDigit(n.charAt(0))) {
+            n = "table_" + n;
+        }
+        String name = n;
+        for (int k = 2; taken.contains(name) || name.equals("t") || name.equals("log"); k++) {
+            name = n + "_" + k;
+        }
+        return name;
+    }
+
+    /** Takes a view away (a table no longer open). */
+    public void dropView(String name) throws SQLException {
+        try (Statement s = conn.createStatement()) {
+            s.execute("DROP VIEW IF EXISTS " + ident(name));
+        }
+    }
+
+    /** As {@link #query(String, LogTable, String, int, BooleanSupplier)}, with several tables by name. */
+    public synchronized Result query(java.util.Map<String, LogTable> views, String sql, int maxRows, BooleanSupplier stop)
+            throws SQLException {
+        for (var e : views.entrySet()) {
+            alias(e.getKey(), e.getValue());
+        }
+        return query(sql, maxRows, stop);
+    }
+
     public void alias(String view, LogTable t) throws SQLException {
         try (Statement s = conn.createStatement()) {
             s.execute("CREATE OR REPLACE VIEW " + ident(view) + " AS SELECT * FROM " + ident(t.name));

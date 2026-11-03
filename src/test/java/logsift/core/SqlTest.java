@@ -285,4 +285,33 @@ class SqlTest {
             assertEquals(1, sql.query("SELECT 1", 10, null).rows().size());
         }
     }
+
+    @Test
+    void otherTablesGoByTheirFilesNames() {
+        java.util.Set<String> taken = new java.util.HashSet<>();
+        assertEquals("orders", Sql.tableName(Path.of("/x/orders.csv"), taken));
+        taken.add("orders");
+        assertEquals("orders_2", Sql.tableName(Path.of("/y/Orders.CSV"), taken), "another orders");
+        assertEquals("sales_2026_q4", Sql.tableName(Path.of("Sales 2026-Q4.tsv"), taken));
+        assertEquals("table_2026", Sql.tableName(Path.of("2026.csv"), taken), "a name SQL can write bare");
+        assertEquals("t_2", Sql.tableName(Path.of("t.csv"), taken), "never t or log");
+        assertEquals("log_2", Sql.tableName(Path.of("log.csv.gz"), taken));
+    }
+
+    @Test
+    void aQueryJoinsTablesByName() throws Exception {
+        Path orders = Files.writeString(dir.resolve("orders.csv"), "order_id,customer_id,amount\n1,7,10\n2,8,20\n3,7,5\n");
+        Path customers = Files.writeString(dir.resolve("customers.csv"), "customer_id,name\n7,Ann\n8,Bo\n");
+        try (Sql sql = open()) {
+            sql.csv("t", orders, ',', true, java.nio.charset.StandardCharsets.UTF_8);
+            sql.csv("customers", customers, ',', true, java.nio.charset.StandardCharsets.UTF_8);
+            Sql.Result r = sql.query("SELECT name, sum(amount) AS total FROM t JOIN customers USING (customer_id) "
+                    + "GROUP BY name ORDER BY name", 10, null);
+            assertEquals(2, r.rows().size());
+            assertEquals("Ann", r.rows().get(0)[0]);
+            assertEquals(15L, ((Number) r.rows().get(0)[1]).longValue());
+            sql.dropView("customers");
+            assertThrows(SQLException.class, () -> sql.query("SELECT * FROM customers", 10, null), "gone");
+        }
+    }
 }
