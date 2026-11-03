@@ -337,27 +337,50 @@ public final class Sql implements AutoCloseable {
      */
     public LogTable table(String name, LogDocument doc, LogFormat format, Pivot.Fields fields) throws SQLException {
         LogTable t = new LogTable(name, doc, format, null, null, fields);
-        StringBuilder ddl = new StringBuilder("CREATE OR REPLACE TABLE " + ident(name) + " (line BIGINT");
+        List<String> names = tableColumns(fields.titles());
+        for (int c = 0; c < names.size(); c++) {
+            t.columns.set(c, names.get(c));
+        }
+        try (Statement s = conn.createStatement()) {
+            s.execute(tableDdl(name, fields));
+        }
+        return t;
+    }
+
+    /**
+     * A table's columns as SQL names them, by the titles: a name that comes again (in any case)
+     * gets {@code _2}, {@code _3}…, and none is {@code line}, the first column.
+     */
+    public static List<String> tableColumns(List<String> titles) {
+        List<String> out = new ArrayList<>();
         java.util.Set<String> used = new java.util.HashSet<>(java.util.Set.of("line"));
-        for (int c = 0; c < fields.titles().size(); c++) {
-            String title = fields.titles().get(c);
+        for (String title : titles) {
             String n = title;
             for (int k = 2; !used.add(n.toLowerCase(Locale.ROOT)); k++) {
                 n = title + "_" + k; // two columns with one name
             }
-            t.columns.set(c, n);
-            String type = switch (fields.kind(c)) {
-                case NUMBER -> "DOUBLE";
-                case TIME -> "TIMESTAMP";
-                case TEXT -> "VARCHAR";
-            };
-            ddl.append(", ").append(ident(n)).append(' ').append(type);
+            out.add(n);
         }
-        ddl.append(")");
-        try (Statement s = conn.createStatement()) {
-            s.execute(ddl.toString());
+        return out;
+    }
+
+    /** A table column's SQL type: numbers, times and text as Pivot reads them. */
+    static String sqlType(Pivot.Kind kind) {
+        return switch (kind) {
+            case NUMBER -> "DOUBLE";
+            case TIME -> "TIMESTAMP";
+            case TEXT -> "VARCHAR";
+        };
+    }
+
+    /** The table {@code name} of a CSV: {@code line}, then its columns, typed. */
+    static String tableDdl(String name, Pivot.Fields fields) {
+        StringBuilder ddl = new StringBuilder("CREATE OR REPLACE TABLE " + ident(name) + " (line BIGINT");
+        List<String> names = tableColumns(fields.titles());
+        for (int c = 0; c < names.size(); c++) {
+            ddl.append(", ").append(ident(names.get(c))).append(' ').append(sqlType(fields.kind(c)));
         }
-        return t;
+        return ddl.append(")").toString();
     }
 
     /** Makes {@code view} show a table: queries say {@code log} or {@code t} whichever file they are about. */
@@ -620,6 +643,14 @@ public final class Sql implements AutoCloseable {
     }
 
     public synchronized Result query(String sql, int maxRows, BooleanSupplier stop) throws SQLException {
+        return run(conn, sql, maxRows, stop);
+    }
+
+    /**
+     * Runs a query on {@code conn}, read-only, giving at most {@code maxRows} rows. {@code stop}
+     * cancels it (checked while it runs).
+     */
+    static Result run(Connection conn, String sql, int maxRows, BooleanSupplier stop) throws SQLException {
         String q = check(conn, sql);
         String wrapped = "SELECT * FROM (\n" + q + "\n) AS logsift_query LIMIT " + ((long) maxRows + 1);
         long t0 = System.nanoTime();

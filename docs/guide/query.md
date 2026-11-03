@@ -23,9 +23,22 @@ The **Query** tab (below the log) asks a log or a table anything you can write i
   | `text` | The whole line |
 
   The first query on a big log gets it ready: Logsift reads it into a table, on several processor cores, about 5 seconds for 300 MB. It does this once. When the log grows, only the new lines are added. A log that was replaced (rotated, truncated) is read again.
-- **A table (CSV, TSV) is the table `t`.** It has `line` and then its columns, named as in its header. DuckDB reads the file itself, so even big files answer at once.
+- **A table (CSV, TSV) is the table `t`.** It has `line` and then its columns, named as in its header. DuckDB reads the file itself, so even big files answer at once; the biggest ones are kept in a cache (see [Big tables](#big-tables)).
 
 Use `"double quotes"` for a column name with spaces or capitals: `SELECT "Order Id" FROM t`.
+
+## Big tables
+
+A table of 200 MB or more is queried from the [Pivot cache](pivot.md#big-tables). The first query over some columns reads the file once and keeps those columns. After that, queries over them take milliseconds, however wide the table is: on 6,000 columns, a query that reads three of them reads only those three. DuckDB's plan of the query tells which columns it reads, before anything runs. The bar says *from the cache*.
+
+![Rows per host of a table of 200 columns, from the cache: 5 rows in 2 ms](../screenshots/query-from-the-cache.png)
+
+- There, `t` is the table as Pivot reads it: numbers are numbers, times are times, values have their spaces trimmed, and a line break inside a quoted value is one line break (`\n`). `line` is the line each row starts at.
+- Every column can still be named and described (`DESCRIBE t`); only the ones a query reads are kept.
+- Some queries read the file in place, as for a smaller table: one that reads more than 64 columns not kept yet (`SELECT *` on a very wide table), a `PIVOT`, or one that reads another file.
+- **Settings → General → Pivot cache** sets how much room the cache may take, or turns it off.
+
+The hint above the box names the first 24 columns of a wide table; its tooltip has them all.
 
 ## Writing a query
 
@@ -62,6 +75,8 @@ A query can read other files, for example to join this log with a CSV of orders:
 ## For coding agents
 
 Agents have the same with the **query** tool: they give a log (or a CSV file) and a query over `log` or `t`. For them, SQL reads no file at all. Logsift reads the log, after checking the [folders agents may read](agents.md#what-it-cant-do), and secrets in the answer are masked.
+
+A big table comes from the same cache as in the app, so what one has kept, the other uses. A table of more than 64 columns is too big for agents to load whole, so their queries there name the columns they need: `SELECT *` or a `PIVOT` is refused with a hint to name columns (`COLUMNS('cpu_.*')` for many alike) or use the **pivot** tool. A mistake, such as a column that isn't there, is told at once, with DuckDB's list of the columns that are.
 
 ## Where it doesn't work
 

@@ -56,6 +56,8 @@ public final class PivotCache implements AutoCloseable {
     private final LogFormat format;
     /** Tables built: name to rows. */
     private final Map<String, Long> tables = new HashMap<>();
+    /** The column tables that have times ({@code e}). */
+    private final Set<String> timed = new HashSet<>();
     private ZoneId udfZone;
     /** The name it was opened by. */
     private String key;
@@ -117,7 +119,7 @@ public final class PivotCache implements AutoCloseable {
      */
     private static Quack open(Path db) {
         try {
-            return Quack.open(db.toString());
+            return locked(db);
         } catch (io.quackjvm.core.DatabaseInUse e) {
             throw e;
         } catch (RuntimeException e) {
@@ -127,8 +129,16 @@ public final class PivotCache implements AutoCloseable {
             } catch (IOException gone) {
                 throw e;
             }
-            return Quack.open(db.toString());
+            return locked(db);
         }
+    }
+
+    /**
+     * The database, locked down: SQL run in it (queries over a big table) reaches no file, folder,
+     * extension or network, and its settings can't be changed.
+     */
+    private static Quack locked(Path db) {
+        return Quack.builder(db.toString()).settings(io.quackjvm.agent.guard.Hardening.options().properties()).open();
     }
 
     /** The file of a cache: the first copy {@code <key>.duckdb}, then {@code <key>.duckdb.2} and so on. */
@@ -270,6 +280,8 @@ public final class PivotCache implements AutoCloseable {
                 db.execute("DROP TABLE IF EXISTS \"" + t + "\"");
             }
         }
+        timed.addAll(db.query("SELECT table_name FROM duckdb_columns() WHERE schema_name = 'main' AND column_name = 'e'")
+                .list(String.class));
     }
 
     // ---------------------------------------------------------------- what a pivot needs
@@ -518,6 +530,11 @@ public final class PivotCache implements AutoCloseable {
             synchronized (this) {
                 for (String t : names) {
                     tables.put(t, rows);
+                }
+                for (int i = 0; i < cols.size(); i++) {
+                    if (time[i]) {
+                        timed.add("c" + cols.get(i));
+                    }
                 }
             }
             return true;
@@ -887,6 +904,74 @@ public final class PivotCache implements AutoCloseable {
         }
     }
 
+    // ---------------------------------------------------------------- SQL
+
+    /** Whether column {@code c} is stored as Pivot reads it (and the rows' lines too). */
+    public synchronized boolean hasColumn(int c) {
+        return tables.containsKey("lines") && tables.containsKey("c" + c);
+    }
+
+    /** Whether the rows' lines are stored. */
+    public synchronized boolean hasLines() {
+        return tables.containsKey("lines");
+    }
+
+    /** One query at a time, on a connection of their own, which has the table {@code t}. */
+    private final Object queryLock = new Object();
+    private Connection queryConnection;
+    /** The table {@code t} as last made (made again when a query reads other columns). */
+    private String view;
+
+    /**
+     * Runs a query (read-only) over the table {@code t}: {@code line} (where the row starts,
+     * 1-based), then every column under its name in {@code names}, numbers, times and text as
+     * Pivot reads them, as {@link Sql#table} makes it. Only the columns {@code read} have their
+     * values, and they must be stored ({@link #hasColumn}); the others are there for the query to
+     * name (DESCRIBE, a {@code WHERE false}) and are empty.
+     */
+    public Sql.Result query(String sql, java.util.Collection<Integer> read, List<String> names, Pivot.Fields fields,
+                            int maxRows, BooleanSupplier stop) throws SQLException {
+        Set<Integer> with = new TreeSet<>(read);
+        StringBuilder ddl = new StringBuilder("CREATE OR REPLACE TEMP VIEW t AS SELECT lines.line + 1 AS line");
+        StringBuilder from = new StringBuilder(" FROM lines");
+        synchronized (this) {
+            if (!tables.containsKey("lines")) {
+                throw new IllegalStateException("the rows aren't stored");
+            }
+            for (int c = 0; c < names.size(); c++) {
+                String x = "x" + c;
+                String value;
+                if (!with.contains(c)) {
+                    value = "NULL::" + Sql.sqlType(fields.kind(c));
+                } else if (!tables.containsKey("c" + c)) {
+                    throw new IllegalStateException("column " + c + " isn't stored");
+                } else {
+                    value = switch (fields.kind(c)) {
+                        case NUMBER -> x + ".n";
+                        case TIME -> timed.contains("c" + c) ? "epoch_ms(" + x + ".e)" : "NULL::TIMESTAMP";
+                        case TEXT -> x + ".t";
+                    };
+                    from.append(" POSITIONAL JOIN c").append(c).append(" AS ").append(x);
+                }
+                ddl.append(", ").append(value).append(" AS ").append(Sql.ident(names.get(c)));
+            }
+        }
+        String make = ddl.append(from).toString();
+        synchronized (queryLock) {
+            if (queryConnection == null) {
+                queryConnection = db.connection();
+            }
+            if (!make.equals(view)) {
+                view = null;
+                try (Statement st = queryConnection.createStatement()) {
+                    st.execute(make);
+                }
+                view = make;
+            }
+            return Sql.run(queryConnection, sql, maxRows, stop);
+        }
+    }
+
     // ---------------------------------------------------------------- answering
 
     /**
@@ -1161,6 +1246,16 @@ public final class PivotCache implements AutoCloseable {
 
     @Override
     public void close() {
+        synchronized (queryLock) {
+            if (queryConnection != null) {
+                try {
+                    queryConnection.close();
+                } catch (SQLException e) {
+                    // closing anyway
+                }
+                queryConnection = null;
+            }
+        }
         db.close();
     }
 }

@@ -8448,6 +8448,141 @@ class VisualTest {
         return onEdt(q::resultForTest);
     }
 
+    /** A result's values as text, numbers as numbers whatever their type (the cache's are DOUBLE). */
+    private static List<String> values(logsift.core.Sql.Result r) {
+        List<String> out = new ArrayList<>();
+        out.add(String.join(" | ", r.columns()));
+        for (Object[] row : r.rows()) {
+            StringBuilder b = new StringBuilder();
+            for (Object v : row) {
+                b.append(v instanceof Number n ? String.format(java.util.Locale.ROOT, "%.9g", n.doubleValue())
+                        : String.valueOf(v).replace("\r", "\\r").replace("\n", "\\n")).append(" | ");
+            }
+            out.add(b.toString());
+        }
+        return out;
+    }
+
+    @Test
+    @Order(65)
+    void queriesABigTableFromTheCache() throws Exception {
+        // a wide table: a query stores the columns it reads, once, and the next ones over them come from the cache
+        Path f = dir.resolve("big-query-cache.csv");
+        java.util.Random rnd = new java.util.Random(5);
+        String[] notes = {"plain", "\"two\r\nlines\"", "\"a, b\"", ""};
+        StringBuilder b = new StringBuilder("time,host,ms,note");
+        for (int c = 1; c <= 196; c++) {
+            b.append(",m_").append(c);
+        }
+        b.append("\r\n");
+        for (int i = 0; i < 20_000; i++) {
+            b.append(String.format("2026-10-%02d %02d:%02d:%02d", 1 + i / 5000, i / 3600 % 24, i / 60 % 60, i % 60))
+                    .append(',').append("web-").append(rnd.nextInt(5)).append(',').append(rnd.nextInt(5000)).append(',')
+                    .append(notes[rnd.nextInt(notes.length)]);
+            for (int c = 1; c <= 196; c++) {
+                b.append(',').append(rnd.nextInt(100));
+            }
+            b.append("\r\n");
+        }
+        Files.writeString(f, b);
+        Path cacheDir = Path.of(System.getProperty("logsift.home")).resolve("cache").resolve("pivot");
+        try {
+            onEdt(() -> {
+                frame.openFile(f);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                            && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 60_000, "the wide table");
+            LogTab tab = onEdt(frame::currentTab);
+            QueryPanel q = onEdt(tab::queryPanel);
+            int errorsBefore = ErrorReporter.sessionForTest().size();
+            List<String> queries = List.of(
+                    "SELECT host, count(*) AS rows, sum(ms) AS ms, avg(m_7) AS m7, max(m_196) AS m196\nFROM t\n"
+                            + "GROUP BY host\nORDER BY host",
+                    "SELECT line, host, note, m_3 FROM t WHERE note LIKE 'two%' ORDER BY line LIMIT 30",
+                    "SELECT date_trunc('day', time) AS day, count(*) FROM t WHERE m_3 > 90 GROUP BY day ORDER BY day");
+            // what reading the file in place gives (as for a small table)
+            List<List<String>> inPlace = new ArrayList<>();
+            for (String sql : queries) {
+                onEdt(() -> {
+                    tab.showQuery();
+                    q.setQueryForTest(sql);
+                    return null;
+                });
+                inPlace.add(values(runQuery(q)));
+                assertFalse(onEdt(q::statusForTest).contains("from the cache"));
+            }
+            assertEquals(0, tab.queryCacheAnswersForTest());
+            System.setProperty("logsift.pivotCacheMinBytes", "1000000"); // this file counts as big
+            for (int i = 0; i < queries.size(); i++) {
+                String sql = queries.get(i);
+                onEdt(() -> {
+                    q.setQueryForTest(sql);
+                    return null;
+                });
+                List<String> cached = values(runQuery(q));
+                // a line break inside a quoted value is one \n, as Logsift reads it everywhere (Pivot,
+                // filters, agents); DuckDB reading the file in place keeps the file's \r\n
+                assertEquals(inPlace.get(i).stream().map(x -> x.replace("\\r\\n", "\\n")).toList(), cached, sql);
+                assertTrue(onEdt(q::statusForTest).contains("from the cache"), onEdt(q::statusForTest));
+                assertEquals(i + 1, tab.queryCacheAnswersForTest());
+            }
+            assertTrue(inPlace.get(1).size() > 5, "rows with a value over two lines: " + inPlace.get(1));
+            onEdt(() -> {
+                q.setQueryForTest(queries.get(1));
+                return null;
+            });
+            assertTrue(values(runQuery(q)).get(1).contains("| two\\nlines |"), "one \\n");
+            // every column can be named and described, though few are stored
+            onEdt(() -> {
+                q.setQueryForTest("DESCRIBE t");
+                return null;
+            });
+            logsift.core.Sql.Result described = runQuery(q);
+            assertEquals(201, described.rows().size(), "line and the 200 columns");
+            // the first query again: from the cache, and what the screenshot shows
+            onEdt(() -> {
+                javax.swing.JSplitPane sp = (javax.swing.JSplitPane) SwingUtilities.getAncestorOfClass(
+                        javax.swing.JSplitPane.class, SwingUtilities.getAncestorOfClass(JTabbedPane.class, q));
+                sp.setDividerLocation(260); // room for the results
+                q.setQueryForTest(queries.get(0));
+                return null;
+            });
+            assertEquals(inPlace.get(0), values(runQuery(q)));
+            String hint = onEdt(q::hintForTest);
+            assertTrue(hint.contains("m_19… and 177 more: DESCRIBE t lists them"), "the hint doesn't hide the results: "
+                    + hint);
+            assertTrue(onEdt(() -> q.tableForTest().isShowing() && q.tableForTest().getVisibleRect().height > 60),
+                    "the results show");
+            settle();
+            shot("117c-query-from-the-cache");
+            // all 200 at once: more than are stored at a time, so the file is read in place
+            int before = tab.queryCacheAnswersForTest();
+            onEdt(() -> {
+                q.setQueryForTest("SELECT * FROM t LIMIT 5");
+                return null;
+            });
+            assertEquals(5, runQuery(q).rows().size());
+            assertEquals(before, tab.queryCacheAnswersForTest(), "read in place");
+            assertFalse(onEdt(q::statusForTest).contains("from the cache"));
+            assertEquals(errorsBefore, ErrorReporter.sessionForTest().size(), "nothing failed: "
+                    + ErrorReporter.sessionForTest());
+            onEdt(() -> {
+                frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+                return null;
+            });
+        } finally {
+            System.clearProperty("logsift.pivotCacheMinBytes");
+            logsift.core.PivotCache.clear(cacheDir, java.util.Set.of());
+        }
+    }
+
     @Test
     @Order(65)
     void queriesLogsAndTablesWithSql() throws Exception {

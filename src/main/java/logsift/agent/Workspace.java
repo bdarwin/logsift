@@ -350,6 +350,109 @@ public final class Workspace implements AutoCloseable {
         return sql;
     }
 
+    // ---------------------------------------------------------------- big tables
+
+    /**
+     * A big table's cache of columns (the one the app uses, in {@code ~/.logsift/cache/pivot}),
+     * for SQL and pivots that read only the columns they need.
+     */
+    public static final class BigTable implements AutoCloseable {
+        final logsift.core.PivotCache cache;
+        final logsift.core.LogFormat format;
+        final logsift.core.Pivot.Fields fields;
+        final logsift.core.TableQuery query;
+        final logsift.core.LogDocument doc;
+
+        BigTable(logsift.core.PivotCache cache, logsift.core.LogDocument doc, logsift.core.LogFormat format,
+                 logsift.core.Pivot.Fields fields) throws java.sql.SQLException {
+            this.cache = cache;
+            this.doc = doc;
+            this.format = format;
+            this.fields = fields;
+            this.query = new logsift.core.TableQuery(fields);
+        }
+
+        /** The cache's name: another when the file changed. */
+        String key() throws IOException {
+            return cache.key();
+        }
+
+        /** The table's columns as SQL names them. */
+        public List<String> sqlColumns() {
+            List<String> out = new ArrayList<>(List.of("line"));
+            out.addAll(logsift.core.Sql.tableColumns(fields.titles()));
+            return out;
+        }
+
+        /** A query's answer from the cache (storing the columns it reads first); null: ask the usual way. */
+        public logsift.core.Sql.Result query(String sql, int maxRows, java.util.function.BooleanSupplier stop)
+                throws java.sql.SQLException {
+            return query.query(cache, sql, maxRows, logsift.core.CsvRows.reader(doc, format), doc.lineCount(), stop,
+                    null, null);
+        }
+
+        /** How many columns the table has. */
+        public int width() {
+            return fields.titles().size();
+        }
+
+        /** Why the cache can't answer this query; null when it can. */
+        public String whyNot(String sql) throws java.sql.SQLException {
+            return query.whyNot(cache, sql);
+        }
+
+        /** Throws DuckDB's refusal of a mistake in the query, reading nothing. */
+        public void tryOnEmpty(String sql) throws java.sql.SQLException {
+            query.tryOnEmpty(sql);
+        }
+
+        @Override
+        public void close() {
+            query.close();
+            cache.close();
+        }
+    }
+
+    private final Map<String, BigTable> bigTables = new LinkedHashMap<>();
+
+    /**
+     * The cache of an open table big enough for one (a CSV or TSV from 200 MB, as in the app),
+     * opened the first time and again when the file changed; null when it's smaller, caches are
+     * off (Settings → General → Pivot cache), or the cache can't be used.
+     */
+    public synchronized BigTable bigTable(String handle, LogAnalysis log) {
+        var formats = log.formats();
+        logsift.core.LogFormat f = formats == null ? null : formats.columns();
+        logsift.core.LogDocument doc = log.document();
+        if (f == null || !f.isCsv() || !logsift.core.CacheSettings.enabled()
+                || doc.fileSize() < logsift.core.CacheSettings.minBytes() || doc.isIndexing()) {
+            return null;
+        }
+        String read = doc.charset().name();
+        BigTable t = bigTables.get(handle);
+        if (t != null && (t.format != f || !t.cache.isFor(log.path(), f, read))) {
+            t.close(); // the file changed
+            bigTables.remove(handle);
+            t = null;
+        }
+        if (t == null) {
+            logsift.core.PivotCache c = null;
+            try {
+                c = logsift.core.PivotCache.open(log.path(), f, read, logsift.core.CacheSettings.dir(),
+                        logsift.core.CacheSettings.limit());
+                t = new BigTable(c, doc, f, logsift.core.Pivot.fields(f, doc.lineCount(),
+                        logsift.core.CsvRows.reader(doc, f), java.time.Year.now().getValue()));
+            } catch (IOException | java.sql.SQLException | RuntimeException e) {
+                if (c != null) {
+                    c.close();
+                }
+                return null; // read the usual way
+            }
+            bigTables.put(handle, t);
+        }
+        return t;
+    }
+
     /** Makes a log's table. */
     @FunctionalInterface
     public interface BooleanSupplierEx {
@@ -363,6 +466,8 @@ public final class Workspace implements AutoCloseable {
                 sql.close();
                 sql = null;
             }
+            bigTables.values().forEach(BigTable::close);
+            bigTables.clear();
         }
         pool.shutdownNow();
         List<LogAnalysis> all;

@@ -507,6 +507,32 @@ public final class LogTools {
                 LogDocument doc = log.document();
                 var f = log.formats();
                 boolean table = f != null && f.columns() != null && f.columns().isCsv();
+                Workspace.BigTable big = table ? w.bigTable(h, log) : null;
+                if (big != null) {
+                    // a big table: from the cache, which stores only the columns the query reads
+                    logsift.core.Sql.Result r;
+                    try {
+                        r = w.await("sqlcache:" + h + ":" + big.key() + ":" + q + ":" + limit,
+                                "storing the columns this query reads (once, for this file; later queries over them "
+                                        + "take milliseconds)", () -> big.query(q, limit, INTERRUPTED));
+                        if (r == null) {
+                            big.tryOnEmpty(q); // a mistake is told now, not after loading the whole table
+                            if (big.width() > logsift.core.TableQuery.MAX_NEW_COLUMNS) {
+                                // too wide to load whole: only the columns a query names can be read
+                                throw new Tool.Failure("This table has " + n(big.width()) + " columns and "
+                                        + n(doc.lineCount()) + " lines, too big to load whole, so a query here reads only "
+                                        + "the columns it names, and this one can't be answered that way: "
+                                        + big.whyNot(q) + ". Name the columns you need (SELECT host, sum(ms) …; "
+                                        + "COLUMNS('cpu_.*') for many alike), or use the pivot tool.");
+                            }
+                        }
+                    } catch (java.sql.SQLException e) {
+                        throw new Tool.Failure(e.getMessage());
+                    }
+                    if (r != null) {
+                        return w.finish(sqlText(r, limit, "t", big.sqlColumns()), maxChars(a));
+                    }
+                }
                 logsift.core.Sql.LogTable t = w.sqlTable(h, log, sql -> {
                     String name = "file_" + h.replaceAll("\\W", "_");
                     if (table) {
@@ -526,10 +552,10 @@ public final class LogTools {
                 } catch (java.sql.SQLException e) {
                     throw new Tool.Failure(e.getMessage());
                 }
-                return w.finish(sqlText(r, limit, table ? "t" : "log", t), maxChars(a));
+                return w.finish(sqlText(r, limit, table ? "t" : "log", t.sqlColumns()), maxChars(a));
             });
 
-    static String sqlText(logsift.core.Sql.Result r, int limit, String table, logsift.core.Sql.LogTable t) {
+    static String sqlText(logsift.core.Sql.Result r, int limit, String table, List<String> columns) {
         StringBuilder b = new StringBuilder();
         b.append(n(r.rows().size())).append(r.rows().size() == 1 ? " row" : " rows")
                 .append(r.more() ? " (the first " + n(limit) + "; raise limit or narrow the query)" : "")
@@ -543,7 +569,7 @@ public final class LogTools {
             b.append('\n');
         }
         if (r.rows().isEmpty()) {
-            b.append("(no rows) Columns of ").append(table).append(": ").append(String.join(", ", t.sqlColumns()))
+            b.append("(no rows) Columns of ").append(table).append(": ").append(String.join(", ", columns))
                     .append('.');
         }
         return b.toString().stripTrailing();

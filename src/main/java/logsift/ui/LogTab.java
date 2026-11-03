@@ -1915,7 +1915,69 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 showLine(line - 1);
                 mainView().focusView();
             }
+
+            @Override
+            public logsift.core.Sql.Result fromCache(String q, int maxRows, AtomicBoolean stop,
+                                                     java.util.function.DoubleConsumer progress,
+                                                     java.util.function.Consumer<String> say) throws Exception {
+                return queryFromCache(q, maxRows, stop, progress, say);
+            }
         };
+    }
+
+    /** SQL over this big table from the cache, with the columns it was made for (null: none yet). */
+    private logsift.core.TableQuery tableQuery;
+    /** The cache {@link #tableQuery} was made for. */
+    private logsift.core.PivotCache tableQueryCache;
+    /** Answers the Query tab gave from the cache (for tests). */
+    private final java.util.concurrent.atomic.AtomicInteger queryCacheAnswers = new java.util.concurrent.atomic.AtomicInteger();
+
+    int queryCacheAnswersForTest() {
+        return queryCacheAnswers.get();
+    }
+
+    /**
+     * A query's answer from the cache of this big table, storing the columns it reads first; null
+     * when the file is small, the cache can't answer it, or the cache failed (the file is queried).
+     */
+    private logsift.core.Sql.Result queryFromCache(String q, int maxRows, AtomicBoolean stop,
+                                                   java.util.function.DoubleConsumer progress,
+                                                   java.util.function.Consumer<String> say) throws java.sql.SQLException {
+        logsift.core.LogFormat f = logFormat;
+        if (!cacheable(f) || doc.isIndexing()) {
+            return null;
+        }
+        java.util.function.BooleanSupplier stopped = () -> stop.get() || closed;
+        try {
+            logsift.core.PivotCache c = cache(f);
+            logsift.core.TableQuery tq = tableQuery(c, f);
+            logsift.core.Sql.Result r = tq.query(c, q, maxRows, logsift.core.CsvRows.reader(doc, f), doc.lineCount(),
+                    stopped, progress, say);
+            if (r != null) {
+                queryCacheAnswers.incrementAndGet();
+            }
+            return r;
+        } catch (java.io.IOException | RuntimeException e) {
+            if (!closed) {
+                logsift.core.Problems.unexpected(e);
+                pivotCacheBroken = true;
+            }
+            return null;
+        }
+    }
+
+    /** The cache's SQL for this file as it is now (made the first time, and again when the file changed). */
+    private synchronized logsift.core.TableQuery tableQuery(logsift.core.PivotCache c, logsift.core.LogFormat f)
+            throws java.sql.SQLException {
+        if (tableQuery == null || tableQueryCache != c) {
+            if (tableQuery != null) {
+                tableQuery.close();
+            }
+            tableQuery = new logsift.core.TableQuery(logsift.core.Pivot.fields(f, doc.lineCount(),
+                    logsift.core.CsvRows.reader(doc, f), java.time.Year.now().getValue()));
+            tableQueryCache = c;
+        }
+        return tableQuery;
     }
 
     /** Shows the Pivot tab (added for a log that isn't CSV). */
@@ -2107,6 +2169,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     private synchronized void closePivotCache() {
+        if (tableQuery != null) {
+            tableQuery.close();
+            tableQuery = null;
+            tableQueryCache = null;
+        }
         if (pivotCache != null) {
             pivotCache.close();
             pivotCache = null;

@@ -67,9 +67,22 @@ final class QueryPanel extends JPanel {
         default long lineOfRow(long row) {
             return row;
         }
+
+        /**
+         * The query's answer from the cache of a big table (its {@code line}s the lines rows start
+         * at), after {@link #prepare}; null to query the table the usual way.
+         */
+        default Sql.Result fromCache(String query, int maxRows, AtomicBoolean stop,
+                                     java.util.function.DoubleConsumer progress,
+                                     java.util.function.Consumer<String> say) throws Exception {
+            return null;
+        }
     }
 
     static final int MAX_ROWS = 10_000;
+
+    /** Whether the last answer came from the cache of a big table. */
+    private volatile boolean cached;
 
     private final Host host;
     private final JTextArea editor = new JTextArea(5, 60);
@@ -230,10 +243,28 @@ final class QueryPanel extends JPanel {
         typed = false;
     }
 
+    /** Columns named in the hint; a wider table's others are counted (they'd hide the results). */
+    static final int HINT_COLUMNS = 24;
+
     private void refreshHint() {
-        String name = host.isTable() ? "t" : "log";
-        hint.setText("<html>SQL over this " + (host.isTable() ? "table" : "log") + ": <b>" + name + "</b> ("
-                + esc(String.join(", ", host.columns())) + "). Read-only. Ctrl+Enter runs.</html>");
+        List<String> cols = host.columns();
+        hint.setText(hintText(host.isTable(), cols));
+        hint.setToolTipText(cols.size() > HINT_COLUMNS ? "<html><p width='600'>" + esc(String.join(", ", cols)) + "</p></html>"
+                : null);
+    }
+
+    static String hintText(boolean table, List<String> cols) {
+        String name = table ? "t" : "log";
+        String shown = String.join(", ", cols.subList(0, Math.min(cols.size(), HINT_COLUMNS)));
+        if (cols.size() > HINT_COLUMNS) {
+            shown += String.format(Locale.ROOT, "… and %,d more: DESCRIBE %s lists them", cols.size() - HINT_COLUMNS, name);
+        }
+        return "<html>SQL over this " + (table ? "table" : "log") + ": <b>" + name + "</b> (" + esc(shown)
+                + "). Read-only. Ctrl+Enter runs.</html>";
+    }
+
+    String hintForTest() {
+        return hint.getText();
     }
 
     /** {title, query} for the file. */
@@ -307,6 +338,7 @@ final class QueryPanel extends JPanel {
         bar.setVisible(true);
         bar.setIndeterminate(true);
         status.setText("Running…");
+        cached = false;
         Thread t = new Thread(() -> {
             Sql.Result r = null;
             String err = null;
@@ -326,9 +358,19 @@ final class QueryPanel extends JPanel {
                         bar.setIndeterminate(true);
                         status.setText("Running…");
                     });
-                    r = sql.query(q, MAX_ROWS, stopNow::get);
-                    if (host.isTable()) {
-                        linesOfRows(r);
+                    r = host.fromCache(q, MAX_ROWS, stopNow, p -> SwingUtilities.invokeLater(() -> {
+                        bar.setIndeterminate(false);
+                        bar.setValue((int) (p * 100));
+                    }), say -> SwingUtilities.invokeLater(() -> {
+                        bar.setIndeterminate(true);
+                        status.setText(say);
+                    }));
+                    cached = r != null;
+                    if (r == null) {
+                        r = sql.query(q, MAX_ROWS, stopNow::get);
+                        if (host.isTable()) {
+                            linesOfRows(r);
+                        }
                     }
                 }
             } catch (java.sql.SQLException e) {
@@ -380,9 +422,9 @@ final class QueryPanel extends JPanel {
             table.getColumnModel().getColumn(c).setPreferredWidth(width(c));
         }
         boolean hasLine = r.columns().stream().anyMatch(c -> c.equalsIgnoreCase("line"));
-        status.setText(String.format(Locale.ROOT, "%,d %s%s in %,d ms%s", r.rows().size(), r.rows().size() == 1 ? "row" : "rows",
+        status.setText(String.format(Locale.ROOT, "%,d %s%s in %,d ms%s%s", r.rows().size(), r.rows().size() == 1 ? "row" : "rows",
                 r.more() ? " (the first " + String.format(Locale.ROOT, "%,d", MAX_ROWS) + ")" : "", r.millis(),
-                hasLine ? " · double-click a row to see its line" : ""));
+                cached ? ", from the cache" : "", hasLine ? " · double-click a row to see its line" : ""));
     }
 
     static String esc(String s) {
