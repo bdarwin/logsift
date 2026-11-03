@@ -8528,6 +8528,92 @@ class VisualTest {
     }
 
     @Test
+    @Order(64)
+    void selectsATablesCellsAsAGrid() throws Exception {
+        // a table is a grid: a click picks a cell, Shift or a drag a block, arrows move, copy gives tab-separated text
+        Path f = dir.resolve("grid-cells.csv");
+        StringBuilder b = new StringBuilder("id,region,amount,note\n");
+        for (int i = 1; i <= 30; i++) {
+            String note = i == 3 ? "\"two\nlines\"" : i == 4 ? "a\ttab" : "n" + i;
+            b.append(i).append(',').append(i % 2 == 0 ? "North" : "South").append(',').append(i * 10).append(',')
+                    .append(note).append('\n');
+        }
+        Files.writeString(f, b.toString());
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                        && !frame.currentTab().document().isIndexing() && frame.currentTab().logFormat() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the table");
+        LogTab tab = onEdt(frame::currentTab);
+        LogView mv = onEdt(tab::mainView);
+        javax.swing.JComponent canvas = onEdt(mv::canvasForTest);
+        settle();
+        assertTrue(onEdt(mv::isGrid));
+        java.util.function.BiConsumer<int[], Boolean> click = (at, shift) -> {
+            java.awt.event.MouseEvent e = new java.awt.event.MouseEvent(canvas, java.awt.event.MouseEvent.MOUSE_PRESSED,
+                    System.currentTimeMillis(), shift ? java.awt.event.InputEvent.SHIFT_DOWN_MASK : 0, at[0], at[1], 1, false,
+                    java.awt.event.MouseEvent.BUTTON1);
+            for (java.awt.event.MouseListener l : canvas.getMouseListeners()) {
+                l.mousePressed(e);
+            }
+        };
+        // line 2 is the first row (line 1 the header): row 1 of the view
+        int[] region1 = onEdt(() -> new int[] {mv.xForCellForTest("region"), mv.yForRowForTest(1)});
+        onEdt(() -> {
+            click.accept(region1, false);
+            return null;
+        });
+        assertArrayEquals(new int[] {1, 1, 1, 1}, onEdt(mv::cellSelection), "one cell");
+        assertEquals("South", onEdt(mv::selectedCellsText));
+        int[] note4 = onEdt(() -> new int[] {mv.xForCellForTest("note"), mv.yForRowForTest(5)});
+        onEdt(() -> {
+            click.accept(note4, true);
+            return null;
+        });
+        int[] block = onEdt(mv::cellSelection);
+        assertEquals(1, block[0]);
+        assertEquals(1, block[1]);
+        assertEquals(3, block[3], "region to note");
+        String nl = System.lineSeparator();
+        assertEquals("South\t10\tn1" + nl + "North\t20\tn2" + nl + "South\t30\t\"two\nlines\"" + nl
+                + "North\t40\t\"a\ttab\"", onEdt(mv::selectedCellsText), "a row over two lines is one; quoted where needed");
+        // keys: the lead cell moves, Shift grows the block
+        onEdt(() -> {
+            canvas.getActionMap().get("left").actionPerformed(null);
+            canvas.getActionMap().get("s-up").actionPerformed(null);
+            return null;
+        });
+        // id 4 is on line 6 (row 5); up from it, past the second line of id 3's note, is id 3 (row 3)
+        assertArrayEquals(new int[] {3, 2, 5, 2}, onEdt(mv::cellSelection), "amount of ids 3 and 4");
+        assertEquals("30" + nl + "40", onEdt(mv::selectedCellsText));
+        onEdt(() -> {
+            mv.copySelection();
+            return null;
+        });
+        settle();
+        shot("24d-table-cells");
+        // the line numbers still pick whole lines
+        int gutterX = 4;
+        onEdt(() -> {
+            click.accept(new int[] {gutterX, mv.yForRowForTest(2)}, false);
+            return null;
+        });
+        assertNull(onEdt(mv::cellSelection), "lines, not cells");
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    @Test
     @Order(65)
     void queriesAcrossOpenTables() throws Exception {
         // two tables open, in two folders: a query in one names the other by its file's name

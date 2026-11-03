@@ -47,7 +47,7 @@ In the **Columns** view the row keeps these colours, and the **Level** cell is c
 
 ## Selecting and copying
 
-Drag to select. Double-click selects a word; triple-click, or a click on the line number, the whole line. Shift+click extends. **Ctrl+C** copies (with nothing selected, the current line). **Ctrl+A** selects all.
+Drag to select (in a table, cells: see [CSV files](#csv-files)). Double-click selects a word; triple-click, or a click on the line number, the whole line. Shift+click extends. **Ctrl+C** copies (with nothing selected, the current line). **Ctrl+A** selects all.
 
 Right-click a line for: Copy, **Bookmark This Line**, **Follow** its request ID, **Open … in Editor** (on a stack line), **Show Thread "…" in Threads**, **Show Only Lines of Thread "…"**, **Open the Heap Dump** (on an out-of-memory line); with text selected, **Find All**, **Show / Hide / Mark lines with "…"**. In the Columns view, right-click a value for **Show Only Rows Where Host = web-1** and **Hide Rows Where Host = web-1** (see [Filters on a column](filters.md#filters-on-a-column)).
 
@@ -122,6 +122,7 @@ A quoted value may hold line breaks (`"line one` on one line, `line two"` on the
 The header and the rows needn't have the same number of fields. Names can have spaces and values can be empty. A header can name a column that no row fills, such as an empty last column some exports add: it's still a column, and it stays empty. A separator at the end of the header names nothing, so it adds no column. When rows have a value past the header's last name, that value gets its own column, called *column 5* for example. All of this works in Profile, Pivot, Values and Query.
 
 - In the Columns view the header row isn't shown as a row: its names are the column titles. Line numbers are those of the file, so the first row is line 2. The titles are the header's names as written (*order_id*, *timestamp*), in the tree, the filters and their chips too. Logsift still knows which column holds the time, level, thread, logger or message (*timestamp*, *severity*, *msg*…): hover such a title to see it. This is also true of a header longer than a line is shown (64 KB, thousands of columns): its names are all column titles. The plain view shows the header line as it is.
+- A table is a grid of cells. A click selects a cell; **Shift+click** or a drag selects a block of them, and the arrow keys move (with Shift, grow the block). **Ctrl+C** (⌘C) copies the cells as tab-separated text, ready to paste into a spreadsheet. A row over several lines is one row, and a value with a tab, line break or quote is quoted. A click on a line number still selects whole lines, and a double-click selects a word.
 - Right-click a value to show only (or hide) the rows with it, or a column title for **Filter by …**: see [Filters on a column](filters.md#filters-on-a-column).
 - The [Profile](profile.md) tab shows what each column holds, with a chart per column. The **Messages** tab groups rows by the message column (a table without one has no messages to group). The [Metrics](metrics.md#columns) tab charts the columns of numbers, and how many rows each value of a column like *host* or *status* has over time.
 

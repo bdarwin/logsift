@@ -76,6 +76,8 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Select all | Ctrl+A |
 | Select a word / a line | Double-click / triple-click, or click the line number |
 | Extend the selection | Shift+click, Shift+arrows, or drag in the line numbers |
+| A table: select a cell / a block of cells | Click / Shift+click or drag; arrows move, Shift+arrows grow it |
+| A table: copy the cells (tab-separated, for a spreadsheet) | Ctrl+C |
 
 ## JVMs
 

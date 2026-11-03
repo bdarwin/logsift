@@ -185,7 +185,17 @@ public final class LogView extends JPanel {
     private static final int BY_CHAR = 0;
     private static final int BY_WORD = 1;
     private static final int BY_LINE = 2;
+    private static final int BY_CELL = 3;
     private int dragUnit = BY_CHAR;
+
+    /**
+     * A table's cells selected as a block, from the anchor cell to the lead's row and
+     * {@link #cellLeadCol} (columns as places in {@code columns.visible()}); off: no cells.
+     */
+    private boolean cellsSelected;
+    private int cellAnchorRow;
+    private int cellAnchorCol;
+    private int cellLeadCol;
     private int wordRow;
     private int wordStart;
     private int wordEnd;
@@ -642,7 +652,7 @@ public final class LogView extends JPanel {
             return;
         }
         Toolkit.getDefaultToolkit().getSystemClipboard()
-                .setContents(new StringSelection(selectedText()), null);
+                .setContents(new StringSelection(cellsSelected ? selectedCellsText() : selectedText()), null);
     }
 
     /** True if some text (not just a caret) is selected. */
@@ -750,6 +760,7 @@ public final class LogView extends JPanel {
         anchor = 0;
         lead = n - 1;
         lineMode = true;
+        cellsSelected = false;
         canvas.repaint();
         listeners.forEach(l -> l.selectionEdited(this));
     }
@@ -1288,6 +1299,136 @@ public final class LogView extends JPanel {
 
     private boolean clicking;
 
+    /** A table (CSV, TSV) shown as columns: a click selects a cell, not text. */
+    boolean isGrid() {
+        ColumnLayout cl = columns;
+        return cl != null && cl.format().isCsv();
+    }
+
+    /** The place in {@code columns.visible()} of the column at x, or -1 (the gutter, or no columns). */
+    private int visibleColumnAt(int x) {
+        ColumnLayout cl = columns;
+        if (cl == null || inGutter(x)) {
+            return -1;
+        }
+        int[] visible = cl.visible();
+        int cx = gutterWidth() - hOffset;
+        for (int c = 0; c < visible.length - 1; c++) {
+            cx += cl.width(c, charWidth);
+            if (x < cx) {
+                return c;
+            }
+        }
+        return visible.length - 1;
+    }
+
+    /** Selects a cell, or the block from the anchor cell to it. */
+    private void selectCell(int row, int col, boolean extend) {
+        ColumnLayout cl = columns;
+        int n = source.rowCount();
+        if (cl == null || n == 0) {
+            return;
+        }
+        row = Math.max(firstRow(), Math.min(n - 1, row));
+        col = Math.max(0, Math.min(cl.visible().length - 1, col));
+        boolean rowChanged = row != lead;
+        if (!extend || !cellsSelected) {
+            cellAnchorRow = row;
+            cellAnchorCol = col;
+        }
+        cellLeadCol = col;
+        cellsSelected = true;
+        lead = row;
+        anchor = row; // no text selected: the cells are
+        anchorCol = leadCol = 0;
+        lineMode = false;
+        ensureVisible(row);
+        ensureCellVisible(col);
+        updateFollowFromPosition();
+        canvas.repaint();
+        int r = row;
+        if (rowChanged || !extend) {
+            listeners.forEach(l -> l.selectionChanged(this, r));
+        }
+        listeners.forEach(l -> l.selectionEdited(this));
+    }
+
+    /** Scrolls sideways so that the column at this place shows. */
+    private void ensureCellVisible(int col) {
+        ColumnLayout cl = columns;
+        if (cl == null || wrap) {
+            return;
+        }
+        int x0 = 0;
+        for (int c = 0; c < col; c++) {
+            x0 += cl.width(c, charWidth);
+        }
+        int w = col < cl.visible().length - 1 ? cl.width(col, charWidth) : charWidth * 20;
+        int room = canvas.getWidth() - gutterWidth();
+        if (room <= 0) {
+            return;
+        }
+        if (x0 < hOffset) {
+            hbarScroll(x0 - hOffset);
+        } else if (x0 + w > hOffset + room) {
+            hbarScroll(Math.min(x0, x0 + w - room) - hOffset);
+        }
+    }
+
+    /** The selected cells, {firstRow, firstCol, lastRow, lastCol} (places in visible()); null if none. */
+    int[] cellSelection() {
+        if (!cellsSelected || lead < 0 || columns == null) {
+            return null;
+        }
+        return new int[] {Math.min(cellAnchorRow, lead), Math.min(cellAnchorCol, cellLeadCol),
+                Math.max(cellAnchorRow, lead), Math.max(cellAnchorCol, cellLeadCol)};
+    }
+
+    /** A value as a spreadsheet takes it from tab-separated text: quoted when it holds a tab, a line break or a quote. */
+    private static String tsv(String v) {
+        if (v == null) {
+            return "";
+        }
+        return v.indexOf('\t') >= 0 || v.indexOf('\n') >= 0 || v.indexOf('\r') >= 0 || v.indexOf('"') >= 0
+                ? '"' + v.replace("\"", "\"\"") + '"' : v;
+    }
+
+    /** The selected cells as tab-separated text, a row per line (rows over several lines are one). */
+    String selectedCellsText() {
+        int[] s = cellSelection();
+        ColumnLayout cl = columns;
+        if (s == null || cl == null) {
+            return "";
+        }
+        int[] visible = cl.visible();
+        String nl = System.lineSeparator();
+        StringBuilder sb = new StringBuilder();
+        int to = Math.min(s[2], s[0] + MAX_COPY_ROWS - 1);
+        String[] buf = new String[Math.min(to - s[0] + 1, 4096)];
+        boolean first = true;
+        for (int from = s[0]; from <= to; from += buf.length) {
+            int k = Math.min(buf.length, to - from + 1);
+            source.texts(from, k, buf);
+            for (int i = 0; i < k; i++) {
+                String raw = buf[i] == null ? "" : buf[i];
+                String whole = source.cellsText(from + i, raw);
+                String[] cells = whole == null ? null : cl.format().split(whole, null);
+                if (cells == null) {
+                    continue; // the rest of a row over several lines: it's in its first line
+                }
+                if (!first) {
+                    sb.append(nl);
+                }
+                first = false;
+                for (int c = s[1]; c <= s[3] && c < visible.length; c++) {
+                    int col = visible[c];
+                    sb.append(c > s[1] ? "\t" : "").append(tsv(col < cells.length ? cells[col] : null));
+                }
+            }
+        }
+        return sb.toString();
+    }
+
     private void ensureVisible(int row) {
         if (clicking) {
             return;
@@ -1367,6 +1508,7 @@ public final class LogView extends JPanel {
         }
         row = Math.max(firstRow(), Math.min(n - 1, row));
         lead = row;
+        cellsSelected = false;
         if (!extend || anchor < 0) {
             anchor = row;
             anchorCol = leadCol = 0;
@@ -1392,6 +1534,7 @@ public final class LogView extends JPanel {
         boolean rowChanged = row != lead;
         lead = row;
         leadCol = col;
+        cellsSelected = false;
         if (!extend || anchor < 0) {
             anchor = row;
             anchorCol = col;
@@ -1422,6 +1565,7 @@ public final class LogView extends JPanel {
         switch (dragUnit) {
             case BY_LINE -> moveLead(row, true);
             case BY_WORD -> extendByWord(row, col);
+            case BY_CELL -> selectCell(row, cellLeadCol, true);
             default -> selectTo(row, col, true);
         }
     }
@@ -1571,6 +1715,9 @@ public final class LogView extends JPanel {
                     selectTo(row, w[1], true);
                     int r = row;
                     listeners.forEach(l -> l.rowActivated(LogView.this, r));
+                } else if (isGrid() && !belowLast && visibleColumnAt(e.getX()) >= 0) {
+                    dragUnit = BY_CELL; // a table: a cell, and a drag makes a block of them
+                    selectCell(row, visibleColumnAt(e.getX()), e.isShiftDown());
                 } else {
                     dragUnit = BY_CHAR;
                     int col = belowLast ? Integer.MAX_VALUE : colAt(e.getX(), e.getY());
@@ -1580,8 +1727,8 @@ public final class LogView extends JPanel {
 
             @Override
             public void mouseMoved(MouseEvent e) {
-                canvas.setCursor(Cursor.getPredefinedCursor(inGutter(e.getX())
-                        ? Cursor.DEFAULT_CURSOR : Cursor.TEXT_CURSOR));
+                canvas.setCursor(Cursor.getPredefinedCursor(inGutter(e.getX()) || isGrid()
+                        ? Cursor.DEFAULT_CURSOR : Cursor.TEXT_CURSOR)); // a table's cells are picked, not text
             }
 
             @Override
@@ -1616,7 +1763,10 @@ public final class LogView extends JPanel {
                         }
                     }
                     int row = rowAt(e.getY());
-                    if (row >= 0) {
+                    if (dragUnit == BY_CELL) {
+                        int c = visibleColumnAt(Math.max(gutterWidth(), e.getX()));
+                        selectCell(row >= 0 ? row : rowAtClamped(e.getY()), c < 0 ? cellLeadCol : c, true);
+                    } else if (row >= 0) {
                         dragTo(row, colAt(e.getX(), e.getY()));
                     } else if (source.rowCount() > 0) {
                         dragTo(rowAtClamped(e.getY()), Integer.MAX_VALUE);
@@ -1733,8 +1883,20 @@ public final class LogView extends JPanel {
         // Ctrl, or ⌘ on macOS; Ctrl when there is no screen (tests on a build server)
         int menu = java.awt.GraphicsEnvironment.isHeadless() ? java.awt.event.InputEvent.CTRL_DOWN_MASK
                 : Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
-        bind(im, am, "up", KeyEvent.VK_UP, 0, () -> moveLead(currentRow() - 1, false));
-        bind(im, am, "down", KeyEvent.VK_DOWN, 0, () -> moveLead(currentRow() + 1, false));
+        bind(im, am, "up", KeyEvent.VK_UP, 0, () -> {
+            if (cellsSelected) {
+                selectCell(nextRowUp(), cellLeadCol, false);
+            } else {
+                moveLead(currentRow() - 1, false);
+            }
+        });
+        bind(im, am, "down", KeyEvent.VK_DOWN, 0, () -> {
+            if (cellsSelected) {
+                selectCell(nextRowDown(), cellLeadCol, false);
+            } else {
+                moveLead(currentRow() + 1, false);
+            }
+        });
         bind(im, am, "pgup", KeyEvent.VK_PAGE_UP, 0, () -> page(-1, false));
         bind(im, am, "pgdn", KeyEvent.VK_PAGE_DOWN, 0, () -> page(1, false));
         bind(im, am, "home", KeyEvent.VK_HOME, 0, () -> moveLead(0, false));
@@ -1744,14 +1906,38 @@ public final class LogView extends JPanel {
         bind(im, am, "home3", KeyEvent.VK_UP, menu, () -> moveLead(0, false));
         bind(im, am, "end3", KeyEvent.VK_DOWN, menu, this::endKey);
         int sh = InputEvent.SHIFT_DOWN_MASK;
-        bind(im, am, "s-up", KeyEvent.VK_UP, sh, () -> moveLead(currentRow() - 1, true));
-        bind(im, am, "s-down", KeyEvent.VK_DOWN, sh, () -> moveLead(currentRow() + 1, true));
+        bind(im, am, "s-up", KeyEvent.VK_UP, sh, () -> {
+            if (cellsSelected) {
+                selectCell(nextRowUp(), cellLeadCol, true);
+            } else {
+                moveLead(currentRow() - 1, true);
+            }
+        });
+        bind(im, am, "s-down", KeyEvent.VK_DOWN, sh, () -> {
+            if (cellsSelected) {
+                selectCell(nextRowDown(), cellLeadCol, true);
+            } else {
+                moveLead(currentRow() + 1, true);
+            }
+        });
+        bind(im, am, "s-left", KeyEvent.VK_LEFT, sh, () -> {
+            if (cellsSelected) {
+                selectCell(lead, cellLeadCol - 1, true);
+            }
+        });
+        bind(im, am, "s-right", KeyEvent.VK_RIGHT, sh, () -> {
+            if (cellsSelected) {
+                selectCell(lead, cellLeadCol + 1, true);
+            }
+        });
         bind(im, am, "s-pgup", KeyEvent.VK_PAGE_UP, sh, () -> page(-1, true));
         bind(im, am, "s-pgdn", KeyEvent.VK_PAGE_DOWN, sh, () -> page(1, true));
         bind(im, am, "s-home", KeyEvent.VK_HOME, sh, () -> moveLead(0, true));
         bind(im, am, "s-end", KeyEvent.VK_END, sh, () -> moveLead(source.rowCount() - 1, true));
         bind(im, am, "left", KeyEvent.VK_LEFT, 0, () -> {
-            if (lead >= 0 && Boolean.FALSE.equals(source.folded(lead))) {
+            if (cellsSelected) {
+                selectCell(lead, cellLeadCol - 1, false);
+            } else if (lead >= 0 && Boolean.FALSE.equals(source.folded(lead))) {
                 int r = lead;
                 listeners.forEach(l -> l.foldToggled(this, r)); // fold an open group
             } else {
@@ -1759,7 +1945,9 @@ public final class LogView extends JPanel {
             }
         });
         bind(im, am, "right", KeyEvent.VK_RIGHT, 0, () -> {
-            if (lead >= 0 && Boolean.TRUE.equals(source.folded(lead))) {
+            if (cellsSelected) {
+                selectCell(lead, cellLeadCol + 1, false);
+            } else if (lead >= 0 && Boolean.TRUE.equals(source.folded(lead))) {
                 int r = lead;
                 listeners.forEach(l -> l.foldToggled(this, r)); // open a folded group
             } else {
@@ -1778,6 +1966,25 @@ public final class LogView extends JPanel {
         });
         bind(im, am, "copy", KeyEvent.VK_C, menu, this::copySelection);
         bind(im, am, "selectAll", KeyEvent.VK_A, menu, this::selectAll);
+    }
+
+    /** The row above the lead's that starts a row of the table (a row over several lines is one). */
+    private int nextRowUp() {
+        int r = lead - 1;
+        while (r > firstRow() && source.cellsText(r, textOf(r) == null ? "" : textOf(r)) == null) {
+            r--;
+        }
+        return r;
+    }
+
+    /** The next row below the lead's that starts a row of the table. */
+    private int nextRowDown() {
+        int n = source.rowCount();
+        int r = lead + 1;
+        while (r < n - 1 && source.cellsText(r, textOf(r) == null ? "" : textOf(r)) == null) {
+            r++;
+        }
+        return r;
     }
 
     private void endKey() {
@@ -2278,6 +2485,8 @@ public final class LogView extends JPanel {
             java.awt.Rectangle clip = gt.getClipBounds();
             int left = clip == null ? Integer.MIN_VALUE : clip.x;
             int right = clip == null ? Integer.MAX_VALUE : clip.x + clip.width;
+            int[] cellSel = cellSelection();
+            Color cellColor = isFocusOwner() ? Theme.selection() : Theme.selectionInactive();
             if (l.cells != null && seg == 0) {
                 int x = x0;
                 int[] visible = cl.visible();
@@ -2289,6 +2498,14 @@ public final class LogView extends JPanel {
                         continue;
                     }
                     String v = l.cells[col] == null ? "" : l.cells[col].replace('\t', ' ');
+                    if (cellSel != null && l.row >= cellSel[0] && l.row <= cellSel[2] && c >= cellSel[1] && c <= cellSel[3]) {
+                        gt.setColor(cellColor);
+                        gt.fillRect(x - charWidth / 2, y, w, rowHeight);
+                        if (l.row == lead && c == cellLeadCol) {
+                            gt.setColor(Theme.marker());
+                            gt.drawRect(x - charWidth / 2, y, w - 1, rowHeight - 1);
+                        }
+                    }
                     Graphics2D cg = (Graphics2D) gt.create();
                     try {
                         cg.clipRect(x, y, Math.max(0, w - charWidth), rowHeight);
