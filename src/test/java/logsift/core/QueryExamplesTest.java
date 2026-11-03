@@ -120,6 +120,24 @@ class QueryExamplesTest {
     }
 
     @Test
+    void theRestOfARowOverTwoLinesIsNotARow() throws Exception {
+        // read line by line, before the rows over several lines are known (as on a slower machine)
+        Path f = Files.writeString(dir.resolve("multi.csv"), "time,host,note,ms\n2026-10-01 00:00:00,web-1,plain,5\n"
+                + "2026-10-01 00:00:01,web-2,\"two\nlines\",7\n2026-10-01 00:00:02,web-1,x,9\n");
+        PivotCacheTest.Opened o = PivotCacheTest.open(f);
+        String[] raw = Files.readString(f).split("\n");
+        ColumnProfile.Lines byLine = (first, count, into) -> {
+            for (int i = 0; i < count; i++) {
+                into[i] = first + i < raw.length ? raw[(int) first + i] : null;
+            }
+        };
+        Map<String, Pivot.Kind> k = QueryExamples.kinds(List.of("time", "host", "note", "ms"), o.format(), byLine, raw.length);
+        assertEquals(Pivot.Kind.TIME, k.get("time"), k.toString());
+        assertEquals(Pivot.Kind.NUMBER, k.get("ms"), k.toString());
+        o.doc().close();
+    }
+
+    @Test
     void aLogKeepsItsExamples() {
         List<String> titles = QueryExamples.forLog(List.of("line", "starts", "time", "level", "logger", "message", "text"))
                 .stream().map(QueryExamples.Example::title).toList();

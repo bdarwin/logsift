@@ -296,13 +296,29 @@ public final class QueryExamples {
         if (want > 0) {
             lines.read(0, want, buf);
         }
+        List<String[]> rows = new ArrayList<>();
+        List<Boolean> full = new ArrayList<>();
+        int whole = 0;
         for (int i = 0; i < want; i++) {
             String t = buf[i];
             if (t == null || t.isBlank() || format.isHeader(t)) {
                 continue;
             }
             String[] cells = format.split(t, null);
-            for (int c = 0; cells != null && c < n && c < cells.length; c++) {
+            if (cells != null) {
+                // a part of a row over several lines (read before those rows are known) has fewer fields
+                boolean f = Csv.fieldCount(t, format.delimiter()) >= n;
+                rows.add(cells);
+                full.add(f);
+                whole += f ? 1 : 0;
+            }
+        }
+        for (int r = 0; r < rows.size(); r++) {
+            String[] cells = rows.get(r);
+            if (whole > 0 && !full.get(r)) {
+                continue;
+            }
+            for (int c = 0; c < n && c < cells.length; c++) {
                 String v = cells[c] == null ? "" : cells[c].strip();
                 if (v.isEmpty()) {
                     continue;
