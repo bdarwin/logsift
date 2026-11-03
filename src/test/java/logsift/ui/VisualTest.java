@@ -9435,6 +9435,28 @@ class VisualTest {
             Path saved = skills.resolve("logsift").resolve("SKILL.md");
             assertEquals(skill, Files.readString(saved));
             assertTrue(onEdt(ap::installedText).contains(saved.toString()), onEdt(ap::installedText));
+            assertTrue(skill.contains("## Where the logs are\n"), "the skill says where the logs are");
+            // a service described: the installed skill is saved again, naming it
+            Path userList = logsift.agent.LogCatalog.userFile(AppState.home());
+            String hadList = Files.exists(userList) ? Files.readString(userList) : null;
+            try {
+                List<logsift.agent.LogCatalog.Service> services = new ArrayList<>(hadList == null ? List.of()
+                        : logsift.agent.LogCatalog.read(userList));
+                services.add(new logsift.agent.LogCatalog.Service("checkout", "Checkout service",
+                        List.of(dir.resolve("checkout-logs").toString()), List.of(), "UTC", ""));
+                logsift.agent.LogCatalog.save(userList, services);
+                LogLocationsDialog.refreshSkill();
+                String refreshed = Files.readString(saved);
+                assertTrue(refreshed.contains("- **checkout**: Checkout service\n"), refreshed);
+                assertTrue(refreshed.lines().filter(l -> l.startsWith("description: ")).findFirst().orElseThrow()
+                        .contains("checkout"), "named in the description");
+            } finally {
+                if (hadList == null) {
+                    Files.deleteIfExists(userList);
+                } else {
+                    Files.writeString(userList, hadList);
+                }
+            }
             settle();
             shotOf(sd.getRootPane(), "80b-settings-agents-skill");
             onEdt(() -> {

@@ -106,7 +106,8 @@ final class Cli {
             return switch (command) {
                 case "tools" -> tools(rest, tools, out, err);
                 case "prompt" -> prompt(rest, out, err);
-                case "skill" -> skill(s.install, tools, out, err);
+                case "skill" -> skill(s.install, tools, logsift.agent.LogCatalog.load(logsiftHome, cwd, List.of()), out,
+                        err);
                 default -> run(rest, s.options, s.argFiles, in, out, err, logsiftHome, cwd, tools);
             };
         } catch (IllegalArgumentException e) {
@@ -271,8 +272,9 @@ final class Cli {
         return 0;
     }
 
-    private static int skill(String install, List<Tool> tools, PrintStream out, PrintStream err) {
-        String text = Skill.text(tools, AgentSettings.launcher(), Skill.windows());
+    private static int skill(String install, List<Tool> tools, logsift.agent.LogCatalog catalog, PrintStream out,
+                             PrintStream err) {
+        String text = Skill.text(tools, AgentSettings.launcher(), Skill.windows(), catalog);
         if (install == null) {
             out.print(text);
             return 0;

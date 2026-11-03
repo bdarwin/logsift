@@ -146,8 +146,18 @@ public final class McpServer {
         info.put("title", "Logsift");
         info.put("version", version);
         r.put("serverInfo", info);
-        r.put("instructions", INSTRUCTIONS);
+        r.put("instructions", instructions(workspace.catalog()));
         return r;
+    }
+
+    /** The instructions, naming the person's services when they described where their logs are. */
+    static String instructions(logsift.agent.LogCatalog catalog) {
+        if (catalog == null || catalog.isEmpty()) {
+            return INSTRUCTIONS + "\nNo log locations are described yet, so logs are opened by path. The person can "
+                    + "describe their services in Logsift (File → Log Locations for Agents…).";
+        }
+        return INSTRUCTIONS + "\nThe person described where the logs of these services are: "
+                + logsift.agent.Skill.serviceNames(catalog) + ". For those, start with list_logs even without a path.";
     }
 
     private List<Object> toolList() {

@@ -194,7 +194,8 @@ final class AgentsPanel extends JPanel {
             return;
         }
         where.setText("<html>" + AgentSettings.where(a) + "</html>");
-        snippet.setText(AgentSettings.snippet(a, launcher));
+        snippet.setText(AgentSettings.snippet(a, launcher, logsift.agent.LogCatalog.load(AppState.home(), null,
+                AppState.logLocationProjects())));
         snippet.setCaretPosition(0);
     }
 

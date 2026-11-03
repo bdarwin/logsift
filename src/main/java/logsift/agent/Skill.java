@@ -33,6 +33,19 @@ public final class Skill {
         return f;
     }
 
+    /**
+     * Saves the skill again where it was installed, if it was (so that it names the services as
+     * they are now); a SKILL.md there that isn't Logsift's is left alone. Gives the file, or null.
+     */
+    public static Path refreshInstalled(Path skillsDir, String text) throws IOException {
+        Path f = skillsDir.resolve(NAME).resolve("SKILL.md");
+        if (!Files.isRegularFile(f) || !Files.readString(f, StandardCharsets.UTF_8).startsWith("---\nname: " + NAME + "\n")) {
+            return null;
+        }
+        Files.writeString(f, text, StandardCharsets.UTF_8);
+        return f;
+    }
+
     public static boolean windows() {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
     }
@@ -47,8 +60,80 @@ public final class Skill {
         return quote ? "\"" + s + "\"" : s;
     }
 
-    /** {@code SKILL.md} for these tools and this launcher ({@code null}: on the PATH). */
+    /** {@code SKILL.md} for these tools and this launcher ({@code null}: on the PATH), no locations known. */
     public static String text(List<Tool> tools, Path launcher, boolean windows) {
+        return text(tools, launcher, windows, LogCatalog.EMPTY);
+    }
+
+    /** At most this many services are named in the skill's description (the rest by list_logs). */
+    static final int NAMED = 8;
+
+    /** The services' names, for a line of text: "orders, billing and 3 more". */
+    public static String serviceNames(LogCatalog c) {
+        List<String> names = c.entries().stream().map(e -> e.service().name()).filter(n -> !n.isEmpty()).toList();
+        if (names.size() <= NAMED) {
+            return names.size() == 1 ? names.get(0)
+                    : String.join(", ", names.subList(0, names.size() - 1)) + " and " + names.get(names.size() - 1);
+        }
+        return String.join(", ", names.subList(0, NAMED)) + " and " + (names.size() - NAMED) + " more";
+    }
+
+    /**
+     * Where the person's logs are, as they described them in Logsift: each service, its folders,
+     * time zone and notes. What the files hold now (sizes, newest) is list_logs' to tell.
+     */
+    static String locations(LogCatalog c, String cmd) {
+        StringBuilder b = new StringBuilder("## Where the logs are\n\n");
+        if (c.isEmpty()) {
+            b.append("""
+                    No log locations are described yet, so a log is found by its path. The person can describe \
+                    their services in Logsift (File → Log Locations for Agents…, or Describe for Agents… on a \
+                    folder's tab), or a project can list its own in `.logsift/logs.json`; `list_logs` then names \
+                    them, and this skill does too once Logsift saves it again.
+
+                    """);
+            return b.toString();
+        }
+        b.append("The person described these services in Logsift. `").append(cmd).append(" run list_logs` tells "
+                + "which files each has now, their sizes, what each holds and when it last changed (`service=NAME` "
+                + "for all of one service's files).\n\n");
+        for (LogCatalog.Entry e : c.entries()) {
+            LogCatalog.Service sv = e.service();
+            b.append("- **").append(sv.name()).append("**");
+            if (!sv.description().isEmpty()) {
+                b.append(": ").append(sv.description());
+            }
+            b.append('\n');
+            if (!sv.folders().isEmpty()) {
+                b.append("  - Folders: ").append(String.join(", ", sv.folders().stream().map(f -> "`" + f + "`")
+                        .toList())).append('\n');
+            }
+            for (LogCatalog.FileKind k : sv.files()) {
+                b.append("  - `").append(k.pattern()).append('`').append(k.description().isBlank() ? ""
+                        : ": " + k.description().strip()).append('\n');
+            }
+            if (!sv.timeZone().isEmpty()) {
+                b.append("  - Times in its logs are ").append(sv.timeZone()).append('\n');
+            }
+            if (!sv.notes().isEmpty()) {
+                b.append("  - Notes: ").append(sv.notes().replace('\n', ' ')).append('\n');
+            }
+            if (e.project()) {
+                b.append("  - From the project's list, `").append(e.file()).append("`\n");
+            }
+        }
+        LogCatalog.Entry first = c.entries().get(0);
+        String svc = first.service().name();
+        String kind = first.service().files().isEmpty() ? "app"
+                : first.service().files().get(0).pattern().replaceAll("[*?].*$", "").replaceAll("[._-]+$", "");
+        b.append("\nOpen a service's newest log by name: `log=").append(svc).append('/').append(kind.isEmpty() ? "app" : kind)
+                .append("`. Search all of a service's folders at once: `").append(cmd).append(" run search_folder folder=")
+                .append(svc).append(" query=\"timed out\"`.\n\n");
+        return b.toString();
+    }
+
+    /** {@code SKILL.md} for these tools and this launcher, naming the services in {@code catalog}. */
+    public static String text(List<Tool> tools, Path launcher, boolean windows, LogCatalog catalog) {
         String cmd = command(launcher, windows);
         String shell = windows ? "PowerShell" : "the shell";
         String fence = windows ? "```powershell\n" : "```sh\n";
@@ -60,7 +145,10 @@ public final class Skill {
                 + "(Windows .dmp/.mdmp, Java hs_err_pid) and profiles (.jfr) on this computer, fast on gigabytes. "
                 + "Use it when the user asks about a log or crash file, such as what went wrong, errors and exceptions, "
                 + "when a problem started, slow requests, one request or id across logs, comparing a bad run with "
-                + "a good one, or exact counts with SQL. Read-only.\n");
+                + "a good one, or exact counts with SQL. Read-only."
+                + (catalog.isEmpty() ? "" : " Knows where the person's logs are, for their services "
+                        + serviceNames(catalog) + ": use it for those services' logs even without a path.")
+                + "\n");
         b.append("---\n\n");
         b.append("# Logsift\n\n");
         b.append("Logsift answers questions about logs with short summaries and 1-based line numbers, never whole "
@@ -102,7 +190,7 @@ public final class Skill {
         }
         b.append("""
 
-                ## How to go about it
+                %s## How to go about it
 
                 Without a path, run `list_logs` first: it names the person's services, where their logs are and \
                 what each file holds. `log=orders/app` then opens the newest `app.log` of the service `orders`.
@@ -126,7 +214,7 @@ public final class Skill {
 
                 ## Tools
 
-                """.formatted(cmd, masked));
+                """.formatted(locations(catalog, cmd), cmd, masked));
         for (Tool t : tools) {
             b.append("### ").append(t.name()).append("\n\n").append(t.description().strip()).append("\n\n");
             for (Map.Entry<String, Map<String, Object>> a : properties(t).entrySet()) {

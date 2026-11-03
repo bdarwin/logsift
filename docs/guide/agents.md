@@ -88,6 +88,8 @@ Some companies block MCP servers in their agents. Agents that support *skills* (
 
 From a terminal, `logsift-mcp skill` prints the skill and `logsift-mcp skill --install` saves it (`--install FOLDER` saves it in `FOLDER/logsift/`).
 
+The skill says where your logs are: the services you described in [Log Locations for Agents](#where-your-logs-are), each with its folders, kinds of files, time zone and notes. Their names are in the skill's description too, so the agent uses the skill for *Why did orders fail last night?* without a path. When you change the locations, Logsift saves the installed skill again. A copy you saved elsewhere by hand needs **Copy** again. With no locations described, the skill tells the agent how you can describe them.
+
 ![Settings → Agents with the skill chosen: what it is, and Install for Me](../screenshots/agents-skill.png)
 
 The agent runs commands like these (you can too):

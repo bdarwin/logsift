@@ -1,6 +1,7 @@
 package logsift.agent.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -207,6 +208,45 @@ class CliTest {
         Path f = skills.resolve("logsift").resolve("SKILL.md");
         assertTrue(saved.out().contains(f.toString()), saved.out());
         assertEquals(printed.out(), Files.readString(f));
+    }
+
+    @Test
+    void theSkillSaysWhereTheLogsAre() throws Exception {
+        // none described: how to describe them
+        String none = cli("", "skill").out();
+        assertTrue(none.contains("## Where the logs are\n\nNo log locations are described yet"), none);
+        assertTrue(none.contains("File → Log Locations for Agents…"), none);
+        // described: named in the description (so the agent picks the skill for them) and listed
+        logsift.agent.LogCatalog.save(logsift.agent.LogCatalog.userFile(home), List.of(
+                new logsift.agent.LogCatalog.Service("orders", "Order service", List.of("/var/log/orders"),
+                        List.of(new logsift.agent.LogCatalog.FileKind("app*.log*", "Application log")), "UTC",
+                        "Timeouts before 06:00 are normal."),
+                new logsift.agent.LogCatalog.Service("billing", "", List.of("/srv/billing/logs"), List.of(), "", "")));
+        String md = cli("", "skill").out();
+        String description = md.lines().filter(l -> l.startsWith("description: ")).findFirst().orElseThrow();
+        assertTrue(description.contains("for their services orders and billing"), description);
+        assertTrue(md.contains("- **orders**: Order service\n  - Folders: `/var/log/orders`\n  - `app*.log*`: Application log\n"
+                + "  - Times in its logs are UTC\n  - Notes: Timeouts before 06:00 are normal.\n- **billing**\n"
+                + "  - Folders: `/srv/billing/logs`\n"), md);
+        assertTrue(md.contains("`log=orders/app`"), md);
+        assertTrue(md.contains("run search_folder folder=orders query="), md);
+        assertTrue(md.indexOf("## Where the logs are") < md.indexOf("## How to go about it"));
+        // agents on MCP are told the same names
+        assertTrue(McpServer.instructions(logsift.agent.LogCatalog.load(home, null, List.of()))
+                .endsWith("these services are: orders and billing. For those, start with list_logs even without a path."));
+    }
+
+    @Test
+    void anInstalledSkillIsSavedAgainButNoOtherOne() throws Exception {
+        Path skills = dir.resolve("skills");
+        assertNull(Skill.refreshInstalled(skills, "new"), "not installed: nothing written");
+        assertFalse(Files.exists(skills));
+        Path f = Skill.install(skills, Skill.text(List.of(), null, false));
+        assertEquals(f, Skill.refreshInstalled(skills, "---\nname: logsift\nnew"));
+        assertEquals("---\nname: logsift\nnew", Files.readString(f));
+        Files.writeString(f, "---\nname: someone-elses\n");
+        assertNull(Skill.refreshInstalled(skills, "---\nname: logsift\nnewer"));
+        assertEquals("---\nname: someone-elses\n", Files.readString(f), "left alone");
     }
 
     @Test

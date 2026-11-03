@@ -145,6 +145,11 @@ public record AgentSettings(Masking.Options masking, List<Path> roots) {
 
     /** The text to paste for an agent: config for {@code launcher}. */
     public static String snippet(Agent a, Path launcher) {
+        return snippet(a, launcher, LogCatalog.EMPTY);
+    }
+
+    /** As {@link #snippet(Agent, Path)}; the skill names the services in {@code catalog}. */
+    public static String snippet(Agent a, Path launcher, LogCatalog catalog) {
         String cmd = JsonWriter.write(launcher.toString());
         return switch (a) {
             case VSCODE, VISUAL_STUDIO -> """
@@ -168,7 +173,7 @@ public record AgentSettings(Masking.Options masking, List<Path> roots) {
                       }
                     }""".formatted(cmd);
             case OTHER -> launcher.toString();
-            case SKILL -> Skill.text(LogTools.all(), launcher, Skill.windows());
+            case SKILL -> Skill.text(LogTools.all(), launcher, Skill.windows(), catalog);
         };
     }
 }

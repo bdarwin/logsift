@@ -991,7 +991,23 @@ final class LogLocationsDialog extends JDialog {
             }
         }
         dirty = false;
+        refreshSkill();
         return true;
+    }
+
+    /** An installed skill names the services: saved again as they are now. */
+    static void refreshSkill() {
+        Path launcher = logsift.agent.AgentSettings.launcher();
+        if (launcher == null) {
+            return; // a build: the installed skill's command isn't this one
+        }
+        try {
+            logsift.agent.Skill.refreshInstalled(logsift.agent.Skill.personalDir(), logsift.agent.Skill.text(
+                    logsift.agent.LogTools.all(), launcher, logsift.agent.Skill.windows(),
+                    LogCatalog.load(AppState.home(), null, AppState.logLocationProjects())));
+        } catch (java.io.IOException | RuntimeException e) {
+            // the skill keeps what it said; Install for Me saves it again
+        }
     }
 
     /** The service with its folders written to work on other computers too. */
