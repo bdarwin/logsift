@@ -34,8 +34,8 @@ dependencies {
     implementation("org.duckdb:duckdb_jdbc:2.0.0.0:$duckdbClassifier")
     // the big-table cache and the SQL guard: quackjvm, on the DuckDB above (its own would bring
     // every system's native library)
-    implementation("io.github.bdarwin:quackjvm-core:1.2.0") { exclude(group = "org.duckdb") }
-    implementation("io.github.bdarwin:quackjvm-agent:1.2.0") { exclude(group = "org.duckdb") }
+    implementation("io.github.bdarwin:quackjvm-core:1.3.0") { exclude(group = "org.duckdb") }
+    implementation("io.github.bdarwin:quackjvm-agent:1.3.0") { exclude(group = "org.duckdb") }
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

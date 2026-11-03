@@ -8695,6 +8695,24 @@ class VisualTest {
         }, 30_000, "the refusal");
         assertTrue(onEdt(cq::failureForTest).startsWith("Only queries can run here"), onEdt(cq::failureForTest));
         assertFalse(Files.exists(box.resolve("x.csv")));
+        // a mistake: DuckDB's whole message, with the columns there are and the line as written
+        onEdt(() -> {
+            cq.setQueryForTest("SELECT region,\n  count(*) AS orders\nFROM t\nWHERE regoin <> 'North'\nGROUP BY region");
+            cq.run();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !cq.runningForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the mistake");
+        String mistake = onEdt(cq::failureForTest);
+        assertTrue(mistake.startsWith("Binder Error") && mistake.contains("Candidate bindings")
+                && mistake.contains("\"region\"") && mistake.contains("LINE 4:"), mistake);
+        settle();
+        shot("117d-query-mistake");
         onEdt(() -> {
             frame.closeTab(frame.tabsForTest().indexOfComponent(ct));
             frame.closeTab(frame.tabsForTest().indexOfComponent(tab));

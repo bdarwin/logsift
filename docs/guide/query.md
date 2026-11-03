@@ -60,6 +60,8 @@ DuckDB's SQL has what you'd expect and more:
 
 See [DuckDB's SQL](https://duckdb.org/docs/stable/sql/introduction).
 
+A query runs until it's done or you press **Stop**. A mistake is shown in DuckDB's own words. For a column that isn't there (`regoin`), that includes the columns that are (*Candidate bindings: "region"…*). It also names the line of the query where the mistake is, numbered as you wrote it.
+
 ## The results
 
 At most 10,000 rows are shown. The bar says how many there were and how long the query took. Click a column's title to sort by it. **Double-click a row** that has a `line` column to see that line in the log. **Copy** copies the rows as tab-separated text, with the column names, for a spreadsheet.

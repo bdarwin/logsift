@@ -221,12 +221,53 @@ class SqlTest {
     }
 
     @Test
+    void readsAFolderWhoseNameHasABackslash() throws Exception {
+        // as a Windows path does (a folder in a folder there; one name elsewhere): DuckDB mustn't
+        // lose the backslash and so refuse the folder
+        Path odd = Files.createDirectories(dir.resolve("logs\\2026"));
+        Path f = Files.writeString(odd.resolve("in.csv"), "a\n1\n2\n");
+        try (Sql sql = Sql.open(new Sql.Options(List.of(odd), dir.resolve("tmp")))) {
+            assertEquals(2, sql.query("SELECT * FROM read_csv('" + f + "')", 10, null).rows().size());
+        }
+    }
+
+    @Test
     void atMostTheRowsAskedFor() throws Exception {
         try (Sql sql = open()) {
             Sql.Result r = sql.query("SELECT * FROM range(1000)", 50, null);
             assertEquals(50, r.rows().size());
             assertTrue(r.more());
+            Sql.Result exactly = sql.query("SELECT * FROM range(50)", 50, null);
+            assertEquals(50, exactly.rows().size());
+            assertFalse(exactly.more(), "all of them: none more");
+            Sql.Result pivot = sql.query("PIVOT (SELECT range % 7 AS k, range AS v FROM range(100)) ON k USING sum(v)", 1,
+                    null);
+            assertEquals(1, pivot.rows().size());
+            assertEquals(List.of("0", "1", "2", "3", "4", "5", "6"), pivot.columns());
         }
+    }
+
+    @Test
+    void mistakesAreToldWithDuckDBsWholeMessage() throws Exception {
+        Files.writeString(dir.resolve("orders.csv"), "order_id,region,amount\n1,North,12.5\n");
+        try (Sql sql = open()) {
+            sql.csv("t", dir.resolve("orders.csv"), ',', true, java.nio.charset.StandardCharsets.UTF_8);
+            String m = assertThrows(SQLException.class, () -> sql.query("SELECT region,\n  sum(amount)\nFROM t\n"
+                    + "WHERE regoin = 'North'\nGROUP BY 1", 10, null)).getMessage();
+            assertTrue(m.startsWith("Binder Error"), m);
+            assertTrue(m.contains("Candidate bindings") && m.contains("\"region\""), "the columns there are: " + m);
+            assertTrue(m.contains("LINE 4:"), "the line as written: " + m);
+            assertFalse(m.contains("quackjvm") || m.contains("LIMIT"), "nothing of the wrapping: " + m);
+        }
+    }
+
+    @Test
+    void queriesHaveNoTimeLimitButStop() {
+        io.quackjvm.agent.guard.QueryPolicy p = Sql.policy(100);
+        assertTrue(p.getTimeout().toHours() >= 1, "a long query runs until Stop: " + p.getTimeout());
+        assertEquals(0, p.getMaxBytes(), "no cap on the size of the rows");
+        assertEquals(100, p.getMaxRows());
+        assertEquals(io.quackjvm.agent.guard.QueryPolicy.Over.TRUNCATE, p.getWhenOver());
     }
 
     @Test
@@ -238,6 +279,10 @@ class SqlTest {
                     "SELECT count(*) FROM range(100000000000) a", 10, () -> System.currentTimeMillis() - t0 > 300));
             assertEquals("Stopped.", e.getMessage());
             assertTrue(System.currentTimeMillis() - t0 < 10_000);
+            // stopped before it starts: nothing runs; and the session goes on
+            assertEquals("Stopped.", assertThrows(SQLException.class,
+                    () -> sql.query("SELECT 1", 10, () -> true)).getMessage());
+            assertEquals(1, sql.query("SELECT 1", 10, null).rows().size());
         }
     }
 }

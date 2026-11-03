@@ -111,7 +111,16 @@ public final class Sql implements AutoCloseable {
         for (Path p : o.readable()) {
             h = h.allowedFolders(p.toString());
         }
-        return new Sql(DriverManager.getConnection("jdbc:duckdb:", h.properties()), temp);
+        // applied by SET, before anything runs: as properties at open, a folder's backslashes are
+        // lost and on Windows nothing can be read (quackjvm #12)
+        Connection c = DriverManager.getConnection("jdbc:duckdb:");
+        try {
+            io.quackjvm.agent.guard.Hardening.apply(c, h);
+        } catch (RuntimeException e) {
+            c.close();
+            throw new SQLException("SQL couldn't be locked down, so it isn't opened: " + e.getMessage(), e);
+        }
+        return new Sql(c, temp);
     }
 
     private static long physicalMemory() {
@@ -639,65 +648,73 @@ public final class Sql implements AutoCloseable {
      */
     static Result run(Connection conn, String sql, int maxRows, BooleanSupplier stop) throws SQLException {
         String q = check(conn, sql);
-        String wrapped = "SELECT * FROM (\n" + q + "\n) AS logsift_query LIMIT " + ((long) maxRows + 1);
-        long t0 = System.nanoTime();
-        try (Statement st = conn.createStatement()) {
-            Thread watcher = null;
-            if (stop != null) {
-                watcher = new Thread(() -> {
-                    while (!Thread.currentThread().isInterrupted()) {
-                        if (stop.getAsBoolean()) {
-                            try {
-                                st.cancel();
-                            } catch (SQLException e) {
-                                // finished meanwhile
-                            }
-                            return;
-                        }
-                        try {
-                            Thread.sleep(50);
-                        } catch (InterruptedException e) {
-                            return;
-                        }
-                    }
-                }, "logsift-sql-cancel");
-                watcher.setDaemon(true);
-                watcher.start();
-            }
-            try (ResultSet rs = st.executeQuery(wrapped)) {
-                ResultSetMetaData md = rs.getMetaData();
-                int n = md.getColumnCount();
-                List<String> cols = new ArrayList<>();
-                List<String> types = new ArrayList<>();
-                for (int i = 1; i <= n; i++) {
-                    cols.add(md.getColumnLabel(i));
-                    types.add(md.getColumnTypeName(i).toLowerCase(Locale.ROOT));
-                }
-                List<Object[]> rows = new ArrayList<>();
-                boolean more = false;
-                while (rs.next()) {
-                    if (rows.size() >= maxRows) {
-                        more = true;
-                        break;
-                    }
-                    Object[] r = new Object[n];
-                    for (int i = 0; i < n; i++) {
-                        r[i] = value(rs.getObject(i + 1));
-                    }
-                    rows.add(r);
-                }
-                return new Result(cols, types, rows, more, (System.nanoTime() - t0) / 1_000_000);
-            } finally {
-                if (watcher != null) {
-                    watcher.interrupt();
-                }
-            }
-        } catch (SQLException e) {
-            if (stop != null && stop.getAsBoolean()) {
-                throw new SQLException("Stopped.");
-            }
-            throw friendly(e);
+        io.quackjvm.agent.guard.CancelSignal signal = new io.quackjvm.agent.guard.CancelSignal();
+        if (stop != null && stop.getAsBoolean()) {
+            signal.cancel(); // stopped already: nothing runs
         }
+        Thread watcher = stop == null ? null : watch(stop, signal);
+        try {
+            io.quackjvm.agent.guard.GuardedResult r = io.quackjvm.agent.guard.GuardedQuery.on(conn, policy(maxRows))
+                    .run(q, signal);
+            List<String> types = new ArrayList<>();
+            for (String type : r.getColumnTypes()) {
+                types.add(type.toLowerCase(Locale.ROOT));
+            }
+            List<Object[]> rows = new ArrayList<>(r.getRows().size());
+            for (Object[] row : r.getRows()) {
+                for (int k = 0; k < row.length; k++) {
+                    row[k] = value(row[k]);
+                }
+                rows.add(row);
+            }
+            return new Result(r.getColumns(), types, rows, r.isTruncated(), r.getTook().toMillis());
+        } catch (io.quackjvm.agent.guard.QueryCancelled e) {
+            throw new SQLException("Stopped.", e);
+        } catch (io.quackjvm.agent.guard.QueryFailed e) {
+            // DuckDB's whole message, its lines numbered as written
+            throw new SQLException(e.getMessage(), e);
+        } catch (io.quackjvm.agent.guard.QueryRejected e) {
+            throw new SQLException("Only queries can run here (SELECT, WITH, FROM, PIVOT, SUMMARIZE, DESCRIBE): "
+                    + "Logsift only reads.", e);
+        } catch (RuntimeException e) {
+            throw new SQLException(e.getMessage() == null ? "The query failed." : e.getMessage(), e);
+        } finally {
+            if (watcher != null) {
+                watcher.interrupt();
+            }
+        }
+    }
+
+    /**
+     * At most {@code maxRows} rows, saying when there were more; no cap on their size, as before;
+     * and no time limit worth the name: Stop ends a query (an agent's has its own time).
+     */
+    static io.quackjvm.agent.guard.QueryPolicy policy(int maxRows) {
+        return io.quackjvm.agent.guard.QueryPolicy.readOnly()
+                .allowUnverified(io.quackjvm.agent.guard.QueryPolicy.PIVOT)
+                .maxRows(Math.max(1, maxRows)).maxBytes(0)
+                .whenOver(io.quackjvm.agent.guard.QueryPolicy.Over.TRUNCATE)
+                .timeout(java.time.Duration.ofDays(1));
+    }
+
+    /** Cancels the signal once {@code stop} says so, checked every 50 ms. */
+    private static Thread watch(BooleanSupplier stop, io.quackjvm.agent.guard.CancelSignal signal) {
+        Thread t = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                if (stop.getAsBoolean()) {
+                    signal.cancel();
+                    return;
+                }
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "logsift-sql-cancel");
+        t.setDaemon(true);
+        t.start();
+        return t;
     }
 
     private static final java.time.format.DateTimeFormatter SECONDS =
@@ -722,16 +739,6 @@ public final class Sql implements AutoCloseable {
             return String.valueOf(o);
         }
         return o;
-    }
-
-    /** DuckDB's message, without the parts about our wrapping. */
-    private static SQLException friendly(SQLException e) {
-        String m = e.getMessage() == null ? "The query failed." : e.getMessage();
-        if (m.contains("logsift_query") || m.contains("syntax error at or near \"COPY\"") || m.matches("(?s).*syntax error at or near \"(?:COPY|ATTACH|INSTALL|LOAD|SET|CREATE|INSERT|UPDATE|DELETE|DROP|EXPORT|IMPORT|PRAGMA|CALL)\".*")) {
-            return new SQLException("Only queries can run here (SELECT, WITH, FROM, PIVOT, SUMMARIZE, DESCRIBE): "
-                    + "Logsift only reads.", e);
-        }
-        return new SQLException(m.replace("\nLINE 2:", "\nLINE 1:"), e);
     }
 
     @Override
