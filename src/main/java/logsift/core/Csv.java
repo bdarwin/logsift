@@ -10,9 +10,12 @@ import java.util.List;
 public final class Csv {
     private Csv() {}
 
+    private static final boolean[] NONE = {};
+    private static final String[] NO_TEXT = {};
+
     /** How many fields a line has (a quote left open takes the rest of the line). */
     public static int fieldCount(String line, char delimiter) {
-        return split(line, delimiter, null).size();
+        return pick(line, delimiter, NONE, NO_TEXT); // counted, no field made into text
     }
 
     /** A field as CSV: quoted when it holds a comma, a quote, a line break or spaces at an end. */

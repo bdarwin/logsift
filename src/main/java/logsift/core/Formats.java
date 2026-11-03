@@ -51,8 +51,8 @@ public final class Formats {
             columns = find(chosen, mine, sample);
         } else if (forFile != null) {
             columns = forFile;
-        } else if (csvName && LogFormat.detectCsv(sample, true) != null) {
-            columns = LogFormat.detectCsv(sample, true);
+        } else if (csvName && (columns = LogFormat.detectCsv(sample, true)) != null) {
+            // a table: its header and rows say so
         } else {
             columns = LogFormat.detect(sample, mine);
             if (columns == null) {

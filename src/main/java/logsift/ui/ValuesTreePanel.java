@@ -236,21 +236,23 @@ final class ValuesTreePanel extends JPanel {
 
     /** Columns of this format that make a useful tree. */
     static List<String> treeColumns(LogFormat f) {
-        List<String> out = new ArrayList<>();
         if (f == null) {
-            return out;
+            return new ArrayList<>();
         }
+        // a set: a wide table has thousands of columns
+        java.util.Set<String> all = new java.util.HashSet<>(f.columns());
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
         for (String p : PREFERRED) {
-            if (f.columns().contains(p)) {
+            if (all.contains(p)) {
                 out.add(p);
             }
         }
         for (String c : f.columns()) {
-            if (!out.contains(c) && !NEVER.contains(c)) {
+            if (!NEVER.contains(c)) {
                 out.add(c);
             }
         }
-        return out;
+        return new ArrayList<>(out);
     }
 
     /** The log's layout (re)detected: columns to choose from, and counts. */
@@ -258,13 +260,12 @@ final class ValuesTreePanel extends JPanel {
         String keep = (String) column.getSelectedItem();
         format = f;
         updatingColumns = true;
-        column.removeAllItems();
-        for (String c : treeColumns(f)) {
-            column.addItem(c);
-        }
-        if (keep != null && treeColumns(f).contains(keep)) {
+        List<String> cols = treeColumns(f);
+        column.setModel(new javax.swing.DefaultComboBoxModel<>(cols.toArray(new String[0]))); // at once: thousands
+        java.util.Set<String> has = new java.util.HashSet<>(cols);
+        if (keep != null && has.contains(keep)) {
             column.setSelectedItem(keep);
-        } else if (hiddenColumn != null && treeColumns(f).contains(hiddenColumn)) {
+        } else if (hiddenColumn != null && has.contains(hiddenColumn)) {
             column.setSelectedItem(hiddenColumn);
         }
         updatingColumns = false;

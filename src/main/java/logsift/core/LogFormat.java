@@ -220,6 +220,9 @@ public final class LogFormat {
         int bestWidth = 0;
         int bestRowFields = 0;
         for (char d : new char[] {',', ';', '\t', '|'}) {
+            if (lines.get(0).indexOf(d) < 0 && lines.get(0).indexOf('"') < 0) {
+                continue; // a header of one column by this separator: not it (and a wide table's rows aren't read for it)
+            }
             // rows, not lines: a quoted value may go over a line break
             List<String> joined = CsvRows.join(lines, d);
             String head = joined.get(0);
@@ -288,6 +291,7 @@ public final class LogFormat {
      */
     static List<String> columnNames(List<String> header) {
         List<String> out = new ArrayList<>();
+        java.util.Set<String> taken = new java.util.HashSet<>(); // out's names: thousands, looked up each time
         java.util.Set<String> used = new java.util.HashSet<>();
         for (int i = 0; i < header.size(); i++) {
             String h = header.get(i).trim();
@@ -300,10 +304,11 @@ public final class LogFormat {
                 }
             }
             String unique = name;
-            for (int k = 2; out.contains(unique); k++) {
+            for (int k = 2; taken.contains(unique); k++) {
                 unique = name + " " + k;
             }
             out.add(unique);
+            taken.add(unique);
         }
         return out;
     }

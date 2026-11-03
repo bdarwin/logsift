@@ -201,6 +201,32 @@ public final class LogView extends JPanel {
 
     private List<Highlight> highlights = List.of();
     private List<HighlightRule> rules = HighlightRule.defaults();
+
+    /**
+     * The rule each line's text matched (-1: none), so that a repaint doesn't match the rules
+     * again: a wide table's row is tens of KB. Forgotten when the rules change.
+     */
+    private final java.util.Map<String, Integer> ruleHits = new java.util.HashMap<>();
+
+    /** The first rule that colors this line, or -1 ({@code rm}: matchers of the rules' patterns). */
+    private int ruleOf(String raw, Matcher[] rm) {
+        Integer known = ruleHits.get(raw);
+        if (known != null) {
+            return known;
+        }
+        int hit = -1;
+        for (int r = 0; r < rm.length; r++) {
+            if (rules.get(r).matches(raw, rm[r])) {
+                hit = r;
+                break;
+            }
+        }
+        if (ruleHits.size() >= 1024) {
+            ruleHits.clear();
+        }
+        ruleHits.put(raw, hit);
+        return hit;
+    }
     private double wheelRemainder;
     private int dragDirection;
     private final Timer dragTimer = new Timer(40, e -> dragScroll());
@@ -282,6 +308,7 @@ public final class LogView extends JPanel {
 
     public void setSource(RowSource source) {
         this.source = source;
+        ruleHits.clear();
         headerRows = -1;
         topRow = 0;
         topSeg = 0;
@@ -356,6 +383,7 @@ public final class LogView extends JPanel {
 
     public void setHighlightRules(List<HighlightRule> rules) {
         this.rules = List.copyOf(rules);
+        ruleHits.clear();
         canvas.repaint();
     }
 
@@ -383,6 +411,7 @@ public final class LogView extends JPanel {
      */
     void setColumns(ColumnLayout layout) {
         columns = layout;
+        ruleHits.clear();
         headerRows = -1;
         topSeg = 0;
         header.setVisible(columns != null);
@@ -596,6 +625,11 @@ public final class LogView extends JPanel {
 
     int hOffsetForTest() {
         return hOffset;
+    }
+
+    /** Scrolls sideways to {@code x} pixels, as the scrollbar does. For tests. */
+    void scrollSidewaysForTest(int x) {
+        hbar.setValue(x);
     }
 
     public void focusView() {
@@ -1929,15 +1963,13 @@ public final class LogView extends JPanel {
                 Color lf = fg;
                 Color lb = null;
                 boolean dim = source.dimmed(l.row);
-                for (int r = 0; r < rm.length && !dim; r++) {
-                    if (rules.get(r).matches(l.raw, rm[r])) {
-                        HighlightRule rule = rules.get(r);
-                        if (rule.foreground() != null) {
-                            lf = rule.foreground();
-                        }
-                        lb = rule.background();
-                        break;
+                int hit = dim ? -1 : ruleOf(l.raw, rm);
+                if (hit >= 0) {
+                    HighlightRule rule = rules.get(hit);
+                    if (rule.foreground() != null) {
+                        lf = rule.foreground();
                     }
+                    lb = rule.background();
                 }
                 if (dim) {
                     lf = Theme.dimmedForeground();
@@ -2243,12 +2275,19 @@ public final class LogView extends JPanel {
         private void paintColumnsRow(Graphics2D gt, Line l, int seg, int y, Color lineFg) {
             ColumnLayout cl = columns;
             int x0 = gutterWidth() - hOffset;
+            java.awt.Rectangle clip = gt.getClipBounds();
+            int left = clip == null ? Integer.MIN_VALUE : clip.x;
+            int right = clip == null ? Integer.MAX_VALUE : clip.x + clip.width;
             if (l.cells != null && seg == 0) {
                 int x = x0;
                 int[] visible = cl.visible();
-                for (int c = 0; c < visible.length - 1; c++) {
+                for (int c = 0; c < visible.length - 1 && x < right; c++) {
                     int col = visible[c];
                     int w = cl.width(c, charWidth);
+                    if (x + w <= left) { // off screen: thousands of a wide table's cells are
+                        x += w;
+                        continue;
+                    }
                     String v = l.cells[col] == null ? "" : l.cells[col].replace('\t', ' ');
                     Graphics2D cg = (Graphics2D) gt.create();
                     try {
@@ -2268,9 +2307,11 @@ public final class LogView extends JPanel {
                 int x = x0;
                 int[] visible = cl.visible();
                 gt.setColor(Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY));
-                for (int c = 0; c < visible.length - 1; c++) {
+                for (int c = 0; c < visible.length - 1 && x < right; c++) {
                     x += cl.width(c, charWidth);
-                    gt.drawLine(x - charWidth / 2, y, x - charWidth / 2, y + rowHeight);
+                    if (x >= left) {
+                        gt.drawLine(x - charWidth / 2, y, x - charWidth / 2, y + rowHeight);
+                    }
                 }
             }
             // the message (or the whole line) for this row
@@ -2300,9 +2341,16 @@ public final class LogView extends JPanel {
             if (l.cells != null && seg == 0) {
                 int x = gutterWidth() - hOffset;
                 int[] visible = cl.visible();
-                for (int c = 0; c < visible.length - 1; c++) {
+                java.awt.Rectangle clip = g.getClipBounds();
+                int right = clip == null ? Integer.MAX_VALUE : clip.x + clip.width;
+                int left = clip == null ? Integer.MIN_VALUE : clip.x;
+                for (int c = 0; c < visible.length - 1 && x < right; c++) {
                     int col = visible[c];
                     int w = cl.width(c, charWidth);
+                    if (x + w <= left) {
+                        x += w;
+                        continue;
+                    }
                     String v = l.cells[col] == null ? "" : l.cells[col].replace('\t', ' ');
                     // where the cell's text starts in the line (known from reading it, quotes and all)
                     int start = l.cellStarts != null && col < l.cellStarts.length && l.cellStarts[col] >= 0

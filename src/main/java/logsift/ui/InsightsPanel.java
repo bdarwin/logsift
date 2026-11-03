@@ -176,6 +176,7 @@ final class InsightsPanel extends JPanel {
             });
         }, "logsift-insights");
         t.setDaemon(true);
+        t.setPriority(Thread.MIN_PRIORITY); // by itself after a file opens: the window comes first
         t.start();
     }
 

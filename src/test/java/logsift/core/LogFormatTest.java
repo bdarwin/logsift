@@ -95,4 +95,39 @@ class LogFormatTest {
             assertTrue(r.values().get(0).count() >= r.values().get(r.values().size() - 1).count(), "sorted");
         }
     }
+
+    @Test
+    void thousandsOfColumnsNamedAtOnce() {
+        // a wide export: repeated and empty names get numbers, quickly however many there are
+        List<String> header = new ArrayList<>();
+        for (int i = 0; i < 8000; i++) {
+            header.add(i % 2 == 0 ? "value" : i % 3 == 0 ? "" : "m" + i);
+        }
+        long t0 = System.nanoTime();
+        List<String> names = LogFormat.columnNames(header);
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertEquals(8000, names.size());
+        assertEquals(8000, new java.util.HashSet<>(names).size(), "each name once");
+        assertEquals(List.of("value", "m1", "value 2", "column 4", "value 3", "m5"), names.subList(0, 6));
+        assertTrue(ms < 2000, "named in " + ms + " ms");
+    }
+
+    @Test
+    void aTableIsFoundByEachSeparator() {
+        // a separator the header hasn't is skipped without reading the rows for it
+        for (String sep : List.of(",", ";", "\t", "|")) {
+            List<String> sample = new ArrayList<>();
+            sample.add(String.join(sep, "id", "host", "ms"));
+            for (int i = 0; i < 20; i++) {
+                sample.add(String.join(sep, String.valueOf(i), "web-" + i % 3, String.valueOf(i * 7)));
+            }
+            LogFormat f = LogFormat.detectCsv(sample, false);
+            assertTrue(f != null && f.isCsv(), sep);
+            assertEquals(List.of("id", "host", "ms"), f.columns(), sep);
+        }
+        // a quoted header (with the separator inside quotes only on another line) is still read
+        List<String> quoted = new ArrayList<>(List.of("\"id\";\"note\"", "1;\"a; b\"", "2;c", "3;d", "4;e", "5;f"));
+        LogFormat q = LogFormat.detectCsv(quoted, true);
+        assertEquals(List.of("id", "note"), q.columns());
+    }
 }

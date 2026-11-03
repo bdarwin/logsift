@@ -7382,6 +7382,52 @@ class VisualTest {
         }, 60_000, "the table of 6,000 columns");
         LogTab tab = onEdt(frame::currentTab);
         assertEquals(6003, onEdt(() -> tab.logFormat().columns().size()));
+        // the grid draws only the cells on screen: quick to paint, and those scrolled to are drawn
+        LogView mv = onEdt(tab::mainView);
+        javax.swing.JComponent canvas = onEdt(mv::canvasForTest);
+        java.util.function.Supplier<BufferedImage> render = () -> {
+            BufferedImage im = new BufferedImage(canvas.getWidth(), canvas.getHeight(), BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = im.createGraphics();
+            canvas.paint(g);
+            g.dispose();
+            return im;
+        };
+        onEdt(render::get); // lines read, highlights known
+        long paintMs = onEdt(() -> {
+            long p0 = System.nanoTime();
+            for (int i = 0; i < 5; i++) {
+                render.get();
+            }
+            return (System.nanoTime() - p0) / 5_000_000;
+        });
+        System.out.println("    a paint of the grid of 6,000 columns: " + paintMs + " ms");
+        // 8 ms here; 115 ms when every cell of the 6,000 was drawn
+        assertTrue(paintMs < 80, "a paint took " + paintMs + " ms: are cells off screen drawn?");
+        int far = onEdt(() -> mv.xForCellForTest("metric_disk_0500"));
+        assertTrue(far > canvas.getWidth(), "off to the right at first: " + far);
+        onEdt(() -> {
+            mv.scrollSidewaysForTest(mv.hOffsetForTest() + far - 300);
+            return null;
+        });
+        settle();
+        int there = onEdt(() -> mv.xForCellForTest("metric_disk_0500"));
+        assertTrue(there > 0 && there < canvas.getWidth(), "on screen: " + there);
+        BufferedImage scrolled = onEdt(render::get);
+        int bg = Theme.background().getRGB() & 0xFFFFFF;
+        int inked = 0;
+        for (int y = 0; y < scrolled.getHeight(); y++) {
+            for (int x = there; x < Math.min(scrolled.getWidth(), there + 40); x++) {
+                if ((scrolled.getRGB(x, y) & 0xFFFFFF) != bg) {
+                    inked++;
+                }
+            }
+        }
+        assertTrue(inked > 200, "the cells scrolled to are drawn: " + inked + " pixels");
+        shot("61b-wide-6000-scrolled");
+        onEdt(() -> {
+            mv.scrollSidewaysForTest(0);
+            return null;
+        });
         PivotPanel pp = onEdt(tab::pivotPanel);
         onEdt(() -> {
             tab.showPivot();

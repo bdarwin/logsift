@@ -226,4 +226,18 @@ class CsvTest {
         assertEquals("Customer account balance 2999", names[2999]);
         assertFalse(f.isHeader("id,Customer"), "a short line that begins like the header is a row");
     }
+
+    @Test
+    void fieldsAreCountedAsSplitFindsThem() {
+        // counted without making each field into text (a wide table's rows have thousands)
+        for (char d : new char[] {',', ';', '\t', '|', ' '}) {
+            String s = String.valueOf(d);
+            for (String line : java.util.List.of("", "a", "a" + s, s, s + s, "a" + s + "b" + s + "c",
+                    "\"x" + s + "y\"" + s + "z", " \"q\"\"" + s + "\" " + s + "end", "\"open" + s + "never closed",
+                    "\"a\"tail" + s + "b", "  spaced " + s + "  \"  quoted  \"  " + s, "\"\"" + s + "\"\"\"\"")) {
+                org.junit.jupiter.api.Assertions.assertEquals(Csv.split(line, d, null).size(), Csv.fieldCount(line, d),
+                        "[" + line + "] by '" + d + "'");
+            }
+        }
+    }
 }
