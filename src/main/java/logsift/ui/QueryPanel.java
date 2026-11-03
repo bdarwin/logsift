@@ -57,6 +57,11 @@ final class QueryPanel extends JPanel {
         /** The columns a query can use, for the examples and the hint. */
         List<String> columns();
 
+        /** What a table's columns hold (by their names in {@link #columns}), as far as known. */
+        default java.util.Map<String, logsift.core.Pivot.Kind> kinds() {
+            return java.util.Map.of();
+        }
+
         /** Shows a line (1-based, as Logsift numbers them). */
         void goToLine(long line);
 
@@ -270,45 +275,10 @@ final class QueryPanel extends JPanel {
     /** {title, query} for the file. */
     List<String[]> examples() {
         List<String> cols = host.columns();
-        List<String[]> ex = new ArrayList<>();
-        if (host.isTable()) {
-            ex.add(new String[] {"The first rows", "SELECT * FROM t LIMIT 100"});
-            ex.add(new String[] {"Every column summarized (min, max, distinct, nulls…)", "SUMMARIZE t"});
-            String text = cols.stream().filter(c -> !c.equals("line")).findFirst().orElse(null);
-            if (text != null) {
-                ex.add(new String[] {"Rows per value of " + text,
-                        "SELECT " + Sql.ident(text) + ", count(*) AS rows\nFROM t\nGROUP BY ALL\nORDER BY rows DESC"});
-            }
-            return ex;
-        }
-        boolean level = cols.contains("level");
-        boolean message = cols.contains("message");
-        if (level) {
-            ex.add(new String[] {"Lines per level",
-                    "SELECT level, count(*) AS lines\nFROM log\nWHERE starts\nGROUP BY level\nORDER BY lines DESC"});
-            ex.add(new String[] {"Errors per minute",
-                    "SELECT date_trunc('minute', time) AS minute, count(*) AS errors\nFROM log\nWHERE level = 'ERROR'\n"
-                            + "GROUP BY minute\nORDER BY minute"});
-        }
-        if (level && message) {
-            ex.add(new String[] {"The most frequent errors (numbers blanked)",
-                    "SELECT regexp_replace(message, '[0-9]+', '#', 'g') AS kind, count(*) AS times, min(line) AS first\n"
-                            + "FROM log\nWHERE level = 'ERROR'\nGROUP BY kind\nORDER BY times DESC\nLIMIT 50"});
-        }
-        if (cols.contains("logger") && level) {
-            ex.add(new String[] {"Errors and warnings by logger",
-                    "PIVOT (SELECT logger, level FROM log WHERE level IN ('ERROR', 'WARN'))\nON level\nUSING count(*)\n"
-                            + "ORDER BY 2 DESC"});
-        }
-        ex.add(new String[] {"Durations in messages (… 345 ms): slowest first",
-                "SELECT line, time, CAST(regexp_extract(" + (message ? "message" : "text")
-                        + ", '([0-9]+) ?ms', 1) AS INTEGER) AS ms, " + (message ? "message" : "text") + "\nFROM log\n"
-                        + "WHERE " + (message ? "message" : "text") + " SIMILAR TO '.*[0-9]+ ?ms.*'\nORDER BY ms DESC\nLIMIT 100"});
-        ex.add(new String[] {"Lines with a text", "SELECT line, " + (cols.contains("time") ? "time, " : "") + "text\nFROM log\n"
-                + "WHERE text ILIKE '%timeout%'\nLIMIT 1000"});
-        ex.add(new String[] {"Lines per hour", "SELECT date_trunc('hour', time) AS hour, count(*) AS lines\nFROM log\n"
-                + "WHERE time IS NOT NULL\nGROUP BY hour\nORDER BY hour"});
-        return ex;
+        List<logsift.core.QueryExamples.Example> ex = host.isTable()
+                ? logsift.core.QueryExamples.forTable(cols, host.kinds())
+                : logsift.core.QueryExamples.forLog(cols);
+        return ex.stream().map(e -> new String[] {e.title(), e.sql()}).toList();
     }
 
     private JPopupMenu examplesMenu() {

@@ -183,4 +183,42 @@ class BigTableToolsTest {
         }
         assertTrue(logsift.core.PivotCache.size(caches) > 0, "kept in the app's cache");
     }
+
+    @Test
+    void examplesToStartFromRunAsGiven() throws Exception {
+        // a wide table: its examples, and each one runs through the query tool, cache on or off
+        StringBuilder b = new StringBuilder("time,host,ms");
+        for (int c = 0; c < 30; c++) {
+            b.append(",cpu_").append(c);
+        }
+        b.append('\n');
+        for (int r = 0; r < 300; r++) {
+            b.append(String.format("2026-10-28 10:%02d:%02d,web-%d,%d", r / 60, r % 60, r % 3, r * 7 % 500));
+            for (int c = 0; c < 30; c++) {
+                b.append(',').append((r * 13 + c) % 100);
+            }
+            b.append('\n');
+        }
+        Path f = Files.writeString(logs.resolve("cpu.csv"), b.toString());
+        for (String minBytes : List.of("1000000000", "1")) {
+            System.setProperty("logsift.pivotCacheMinBytes", minBytes);
+            try (Workspace w = workspace()) {
+                String ex = LogTools.QUERY_EXAMPLES.run(new Tool.Args(Map.of("log", f.toString())), w);
+                assertTrue(ex.contains("Average of each cpu_… column by host:\nSELECT host, avg(COLUMNS('^cpu_[0-9]+$'))"),
+                        ex);
+                int ran = 0;
+                for (String part : ex.split("\n\n")) {
+                    int colon = part.indexOf(":\n");
+                    if (colon < 0 || part.startsWith("Queries over")) {
+                        continue;
+                    }
+                    String sql = part.substring(colon + 2);
+                    String answer = query(w, f, sql, 50);
+                    assertTrue(answer.matches("(?s)\\d[\\d,]* rows? .*"), sql + " -> " + answer);
+                    ran++;
+                }
+                assertTrue(ran >= 10, "examples run: " + ran);
+            }
+        }
+    }
 }

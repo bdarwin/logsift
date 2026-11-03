@@ -41,7 +41,8 @@ public final class LogTools {
     public static List<Tool> all() {
         List<Tool> all = new ArrayList<>(List.of(LIST_LOGS, OPEN_LOG, LIST_OPEN, INSIGHTS, EXCEPTIONS, SEARCH,
                 READ_LINES, TOP_MESSAGES, METRICS, QUERY, SEARCH_FOLDER, ANALYZE_GC, ANALYZE_THREADS));
-        all.add(all.indexOf(QUERY) + 1, TableTools.PIVOT);
+        all.add(all.indexOf(QUERY) + 1, QUERY_EXAMPLES);
+        all.add(all.indexOf(QUERY_EXAMPLES) + 1, TableTools.PIVOT);
         all.addAll(TraceTools.all());
         all.addAll(CompareTools.all());
         all.addAll(CrashTools.all());
@@ -553,6 +554,41 @@ public final class LogTools {
                     throw new Tool.Failure(e.getMessage());
                 }
                 return w.finish(sqlText(r, limit, table ? "t" : "log", t.sqlColumns()), maxChars(a));
+            });
+
+    static final Tool QUERY_EXAMPLES = new Def("query_examples", "SQL to start from",
+            "Ready-made queries for the query tool, made for this log's or table's columns: counts per value, "
+                    + "averages by group, rows per hour, percentiles; for a wide table (many columns alike, such as "
+                    + "cpu_0001…cpu_1500) also all of them at once with COLUMNS('^cpu_[0-9]+$'), a total per row, the "
+                    + "highest values and the columns turned into rows. The same examples as Logsift's Query tab.",
+            new Tool.Schema().string("log", LOG_ARG, true).build(),
+            (a, w) -> {
+                LogAnalysis log = ready(a, w);
+                LogDocument doc = log.document();
+                var f = log.formats();
+                logsift.core.LogFormat cols = f == null ? null : f.columns();
+                List<logsift.core.QueryExamples.Example> ex;
+                String table;
+                if (cols != null && cols.isCsv()) {
+                    List<String> names = logsift.core.Sql.tableColumns(cols.titles());
+                    ex = logsift.core.QueryExamples.forTable(names, logsift.core.QueryExamples.kinds(names, cols,
+                            logsift.core.CsvRows.reader(doc, cols), doc.lineCount()));
+                    table = "t";
+                } else {
+                    List<String> names = new ArrayList<>(List.of("line", "starts", "time"));
+                    if (cols != null) {
+                        names.addAll(cols.columns());
+                    }
+                    names.add("text");
+                    ex = logsift.core.QueryExamples.forLog(names);
+                    table = "log";
+                }
+                StringBuilder b = new StringBuilder("Queries over " + table + " for " + log.path().getFileName()
+                        + " (run one with the query tool):\n");
+                for (logsift.core.QueryExamples.Example e : ex) {
+                    b.append("\n").append(e.title()).append(":\n").append(e.sql()).append('\n');
+                }
+                return b.toString().stripTrailing();
             });
 
     static String sqlText(logsift.core.Sql.Result r, int limit, String table, List<String> columns) {

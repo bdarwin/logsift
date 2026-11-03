@@ -8626,6 +8626,30 @@ class VisualTest {
                     "the results show");
             settle();
             shot("117c-query-from-the-cache");
+            // Examples for a wide table: its 196 m_ columns at once, by a pattern
+            List<String[]> examples = onEdt(q::examples);
+            List<String> titles = examples.stream().map(e -> e[0]).toList();
+            assertTrue(titles.contains("Average of each m_… column by host"), titles.toString());
+            assertTrue(titles.contains("The m_… columns as rows, highest average first"), titles.toString());
+            assertTrue(titles.contains("Average of each m_… column per minute"), titles.toString());
+            for (String title : List.of("Average of each m_… column by host", "Total of the m_… columns in each row",
+                    "The m_… columns as rows, highest average first", "Count, average and highest ms by host")) {
+                String sql = examples.stream().filter(e -> e[0].equals(title)).findFirst().orElseThrow()[1];
+                onEdt(() -> {
+                    q.setQueryForTest(sql);
+                    return null;
+                });
+                logsift.core.Sql.Result r = runQuery(q);
+                assertFalse(r.rows().isEmpty(), title);
+                if (title.startsWith("Average of each")) {
+                    assertEquals(5, r.rows().size(), "a row per host");
+                    assertEquals(197, r.columns().size(), "host and an average of each m_ column");
+                }
+                if (title.startsWith("The m_")) {
+                    settle();
+                    shot("117f-query-wide-example");
+                }
+            }
             // all 200 at once: more than are stored at a time, so the file is read in place
             int before = tab.queryCacheAnswersForTest();
             onEdt(() -> {

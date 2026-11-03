@@ -1914,6 +1914,22 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
 
             @Override
+            public java.util.Map<String, logsift.core.Pivot.Kind> kinds() {
+                logsift.core.LogFormat f = logFormat;
+                if (f == null || !f.isCsv() || doc.isIndexing()) {
+                    return java.util.Map.of();
+                }
+                if (queryKindsFor != f) {
+                    // from the first rows: enough to pick columns for the examples
+                    List<String> cols = columns();
+                    queryKinds = logsift.core.QueryExamples.kinds(cols.subList(1, cols.size()), f,
+                            logsift.core.CsvRows.reader(doc, f), doc.lineCount());
+                    queryKindsFor = f;
+                }
+                return queryKinds;
+            }
+
+            @Override
             public void goToLine(long line) {
                 showLine(line - 1);
                 mainView().focusView();
@@ -1927,6 +1943,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             }
         };
     }
+
+    /** What the table's columns hold, for the Query tab's examples, and the format it was told for. */
+    private java.util.Map<String, logsift.core.Pivot.Kind> queryKinds = java.util.Map.of();
+    private logsift.core.LogFormat queryKindsFor;
 
     /** SQL over this big table from the cache, with the columns it was made for (null: none yet). */
     private logsift.core.TableQuery tableQuery;

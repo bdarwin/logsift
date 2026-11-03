@@ -49,7 +49,20 @@ Type SQL in the box and press **Run** (Ctrl+Enter, ⌘Enter on a Mac). **Example
 - Errors and warnings by logger, as a pivot.
 - Durations in messages (*… 345 ms*), slowest first.
 - Lines with a text.
-- For a table: the first rows, every column summarized (`SUMMARIZE t`), and rows per value.
+- For a table, chosen by what its columns hold (numbers, times, text):
+  - the first rows, and every column summarized (`SUMMARIZE t`);
+  - rows per value;
+  - count, average and highest of a number by a text column such as `host`;
+  - the rows with the highest values, with the median and 95th and 99th percentiles;
+  - rows per hour.
+- For a wide table with many columns alike (`cpu_0001` … `cpu_1500`), all of them at once with a pattern, `COLUMNS('^cpu_[0-9]+$')`:
+  - the average of each by host, and per minute;
+  - their total in each row;
+  - the rows with the highest value;
+  - the columns turned into rows (`UNPIVOT`), highest average first;
+  - finding a column by name in `DESCRIBE t`.
+
+A column counts as numbers or times only when every value in its first rows is one, as DuckDB reading the file sees it. So each example runs as written, on a small table read in place and on a big one from the cache.
 
 DuckDB's SQL has what you'd expect and more:
 - `date_trunc('minute', time)`;
@@ -76,7 +89,7 @@ A query can read other files, for example to join this log with a CSV of orders:
 
 ## For coding agents
 
-Agents have the same with the **query** tool: they give a log (or a CSV file) and a query over `log` or `t`. For them, SQL reads no file at all. Logsift reads the log, after checking the [folders agents may read](agents.md#what-it-cant-do), and secrets in the answer are masked.
+Agents have the same with the **query** tool: they give a log (or a CSV file) and a query over `log` or `t`. The **query_examples** tool gives them the examples above for the file. For them, SQL reads no file at all. Logsift reads the log, after checking the [folders agents may read](agents.md#what-it-cant-do), and secrets in the answer are masked.
 
 A big table comes from the same cache as in the app, so what one has kept, the other uses. A table of more than 64 columns is too big for agents to load whole, so their queries there name the columns they need: `SELECT *` or a `PIVOT` is refused with a hint to name columns (`COLUMNS('cpu_.*')` for many alike) or use the **pivot** tool. A mistake, such as a column that isn't there, is told at once, with DuckDB's list of the columns that are.
 
