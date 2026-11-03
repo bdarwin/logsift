@@ -464,6 +464,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         side.setContinuousLayout(true);
         side.setResizeWeight(0);
         top.add(side, BorderLayout.CENTER);
+        treeDrawer = new TreeDrawer(() -> host.setValuesTree(true));
+        top.add(treeDrawer, BorderLayout.WEST);
+        treeDrawer.setVisible(false);
         updateTreeVisible();
         main.addPaintListener(timeline::repaint);
         split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, top, bottom);
@@ -3157,6 +3160,8 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     // ---------------------------------------------------------------- tree of loggers
 
     private final ValuesTreePanel treePanel;
+    /** The hidden tree, as a strip at the left edge that brings it back. */
+    private final TreeDrawer treeDrawer;
     private final JSplitPane side;
     private boolean treeWanted = AppState.prefs().getBoolean("valuesTree", true);
     private int sideDivider = -1;
@@ -3169,7 +3174,13 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     private void updateTreeVisible() {
-        boolean show = treeWanted && !ValuesTreePanel.treeColumns(logFormat).isEmpty();
+        boolean has = !ValuesTreePanel.treeColumns(logFormat).isEmpty();
+        boolean show = treeWanted && has;
+        treeDrawer.setColumn(treePanel.columnTitle());
+        if (treeDrawer.isVisible() != (has && !show)) {
+            treeDrawer.setVisible(has && !show);
+            revalidate();
+        }
         if (show == treePanel.isVisible() && side.getDividerSize() > 0 == show) {
             return;
         }
@@ -3185,6 +3196,10 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             treePanel.showAllValues(); // nothing stays hidden by a tree that isn't there
         }
         side.revalidate();
+    }
+
+    TreeDrawer treeDrawerForTest() {
+        return treeDrawer;
     }
 
     ValuesTreePanel valuesTree() {

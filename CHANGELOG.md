@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A hidden tree is easy to find again:** with the tree of loggers (or a table's values) hidden, nothing showed it was there. A narrow strip at the left edge now reads *Tree · host* (the column it shows); a click brings the tree back.
+
 - **Wide tables open and scroll faster:** a table of 6,000 columns shows as a grid about twice as soon (1.4 s instead of 2.6–3.5 s for 5,000 rows here), and each repaint while scrolling takes 8 ms instead of 115 ms. The grid drew every cell of every row on screen, thousands of them off to the side, and matched the line colors against each whole row on every repaint. It now draws only the cells in view and remembers a row's color. Working out that a file is a table also reads its rows once instead of eight times, and the column list for the tree is made in one go. The background insights wait for the window.
 
 - **Query reads files on Windows again:** since the last snapshot, a query on Windows couldn't read the table or any other file, even in the log's own folder ("file system operations are disabled"). The folders a query may read are now kept as written. A query's mistake is also shown in DuckDB's whole message, with the columns there are for one that isn't and the line where it is, numbered as written (a query over several lines pointed one line too far). Queries run on quackjvm 1.3's guard, which stops them with **Stop**.

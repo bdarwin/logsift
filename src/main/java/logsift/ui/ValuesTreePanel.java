@@ -505,6 +505,12 @@ final class ValuesTreePanel extends JPanel {
     // ---------------------------------------------------------------- for LogTab
 
     /** The column whose values are hidden, or null. */
+    /** The column the tree shows, as its title ("host"), or null. */
+    String columnTitle() {
+        String c = (String) column.getSelectedItem();
+        return c == null ? null : title(format, c);
+    }
+
     String hiddenColumn() {
         return hidden.isEmpty() ? null : hiddenColumn;
     }

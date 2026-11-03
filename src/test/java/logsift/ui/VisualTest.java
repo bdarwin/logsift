@@ -2442,6 +2442,24 @@ class VisualTest {
             return null;
         });
         assertTrue(!onEdt(tree::isVisible));
+        // hidden, the tree is a strip at the left edge that brings it back
+        TreeDrawer drawer = onEdt(tab::treeDrawerForTest);
+        assertTrue(onEdt(drawer::isShowing), "the strip shows where the tree was");
+        assertEquals("▲  Tree · Loggers", onEdt(drawer::label));
+        assertTrue(onEdt(() -> drawer.getWidth() < 40 && drawer.getHeight() > 200), "a narrow strip down the side");
+        settle();
+        shot("24c-tree-hidden-strip");
+        onEdt(() -> {
+            java.awt.event.MouseEvent click = new java.awt.event.MouseEvent(drawer, java.awt.event.MouseEvent.MOUSE_CLICKED,
+                    System.currentTimeMillis(), 0, 5, 50, 1, false, java.awt.event.MouseEvent.BUTTON1);
+            for (java.awt.event.MouseListener l : drawer.getMouseListeners()) {
+                l.mouseClicked(click);
+            }
+            return null;
+        });
+        assertTrue(onEdt(tree::isVisible), "a click on the strip shows the tree");
+        assertFalse(onEdt(drawer::isVisible), "and the strip goes");
+        assertTrue(AppState.prefs().getBoolean("valuesTree", false), "remembered, as the View menu does");
         onEdt(() -> {
             frame.setValuesTree(true);
             frame.setColumns(false);

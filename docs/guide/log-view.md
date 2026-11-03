@@ -135,6 +135,7 @@ Logs with a logger column (or class, component, thread, host…) can show a tree
 - Double-click a name (or right-click → **Show Only**) to see only that one; **Show all** brings everything back.
 - The list at the top picks the column. **Filter the tree** finds a name.
 - Hiding anything switches the log to Matching only, and adds a chip *Tree: N hidden*. What you hid is remembered for the file.
+- The ✕ at the top hides the tree. While it's hidden, a narrow strip at the left edge reads **Tree · Loggers** (or the column's name, such as *host*); click it to bring the tree back.
 
 ## Bookmarks
 
