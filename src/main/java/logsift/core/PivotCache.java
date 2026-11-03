@@ -77,28 +77,63 @@ public final class PivotCache implements AutoCloseable {
         return open(file, format, "", dir, limitBytes);
     }
 
+    /**
+     * Programs that can have one file's cache open at the same time (the app and an agent's
+     * logsift-mcp, say). DuckDB lets one program at a time write a file, so each beyond the first
+     * gets a copy of its own next to it.
+     */
+    static final int MAX_COPIES = 4;
+
     /** As {@link #open(Path, LogFormat, Path, long)}; {@code read} tells how the file is read (its encoding). */
     public static PivotCache open(Path file, LogFormat format, String read, Path dir, long limitBytes)
             throws IOException {
         Files.createDirectories(dir);
         String key = key(file, format, read);
-        Path db = dir.resolve(key + ".duckdb");
         trim(dir, limitBytes, key);
-        if (Files.exists(db)) {
-            Files.setLastModifiedTime(db, FileTime.fromMillis(System.currentTimeMillis())); // used now
+        io.quackjvm.core.DatabaseInUse inUse = null;
+        for (int copy = 1; copy <= MAX_COPIES; copy++) {
+            Path db = dir.resolve(fileName(key, copy));
+            if (Files.exists(db)) {
+                Files.setLastModifiedTime(db, FileTime.fromMillis(System.currentTimeMillis())); // used now
+            }
+            Quack q;
+            try {
+                q = open(db);
+            } catch (io.quackjvm.core.DatabaseInUse e) {
+                inUse = e; // another program has it open: never removed, the next copy is tried
+                continue;
+            }
+            PivotCache c = new PivotCache(q, file, format, read);
+            c.key = key;
+            c.load();
+            return c;
         }
-        Quack q;
+        throw new IOException("Other programs have every copy of this file's cache open", inUse);
+    }
+
+    /**
+     * The cache file at {@code db}, made again if it can't be opened (cut short, or written by a
+     * newer DuckDB). One another program has open is left as it is: {@link io.quackjvm.core.DatabaseInUse}.
+     */
+    private static Quack open(Path db) {
         try {
-            q = Quack.open(db.toString());
+            return Quack.open(db.toString());
+        } catch (io.quackjvm.core.DatabaseInUse e) {
+            throw e;
         } catch (RuntimeException e) {
-            // a cache that can't be opened (cut short, a newer DuckDB) is made again
-            deleteCache(dir, key);
-            q = Quack.open(db.toString());
+            try {
+                Files.deleteIfExists(db);
+                Files.deleteIfExists(Path.of(db + ".wal"));
+            } catch (IOException gone) {
+                throw e;
+            }
+            return Quack.open(db.toString());
         }
-        PivotCache c = new PivotCache(q, file, format, read);
-        c.key = key;
-        c.load();
-        return c;
+    }
+
+    /** The file of a cache: the first copy {@code <key>.duckdb}, then {@code <key>.duckdb.2} and so on. */
+    static String fileName(String key, int copy) {
+        return key + ".duckdb" + (copy == 1 ? "" : "." + copy);
     }
 
     /** The name of a file's cache: its path, size, time and columns. */
@@ -145,8 +180,7 @@ public final class PivotCache implements AutoCloseable {
             if (total <= limit) {
                 break;
             }
-            if (!e.key().equals(keep)) {
-                deleteCache(dir, e.key());
+            if (!e.key().equals(keep) && deleteCache(dir, e.key())) {
                 total -= e.bytes();
             }
         }
@@ -190,9 +224,24 @@ public final class PivotCache implements AutoCloseable {
         }
     }
 
-    private static void deleteCache(Path dir, String key) throws IOException {
-        Files.deleteIfExists(dir.resolve(key + ".duckdb"));
-        Files.deleteIfExists(dir.resolve(key + ".duckdb.wal"));
+    /**
+     * Removes a cache's files (every copy); one that can't be removed (open in another program on
+     * Windows) stays. Gives whether all went.
+     */
+    private static boolean deleteCache(Path dir, String key) throws IOException {
+        boolean all = true;
+        try (Stream<Path> s = Files.list(dir)) {
+            for (Path p : (Iterable<Path>) s::iterator) {
+                if (p.getFileName().toString().startsWith(key + ".duckdb")) {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (IOException e) {
+                        all = false;
+                    }
+                }
+            }
+        }
+        return all;
     }
 
     /** This cache's name, for the file as it is now: another than when opened if the file changed. */

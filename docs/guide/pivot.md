@@ -70,7 +70,7 @@ A table of millions of rows, or of thousands of columns, is read once for the fi
 - The answers are the same as reading the file: the same groups, blanks, numbers and time periods. Medians and percentiles are exact, where reading the file takes a fair sample past a million numbers.
 - When the file changes (it grew, or was replaced), **Refresh** reads it again into a new cache. With **Matching only** on, Pivot reads the file, as the log's filters decide which rows count.
 - [Column filters](filters.md#filters-on-a-column) use the same cache: a column filtered once is kept, and the next filters on it take milliseconds.
-- Tables from 200 MB on are cached. **Settings → General → Pivot cache** sets how much room caches may take (5 GB at first; 0: no cache) and shows how much they use; **Empty** removes them (those of open files stay). They're kept in `.logsift/cache/pivot` in your home folder, and the oldest used go first when there's no room.
+- Tables from 200 MB on are cached. **Settings → General → Pivot cache** sets how much room caches may take (5 GB at first; 0: no cache) and shows how much they use; **Empty** removes them (those of open files stay). They're kept in `.logsift/cache/pivot` in your home folder, and the oldest used go first when there's no room. When two programs pivot the same file at once (the app and an agent's `logsift-mcp`, say), the second one keeps a copy of its own next to the first, so neither waits for the other or loses its cache.
 
 ![A pivot of 300,000 rows from the cache, in 34 ms](../screenshots/pivot-from-the-cache.png)
 

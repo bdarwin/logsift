@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -243,5 +244,40 @@ class PivotCacheTest {
         PivotCache.clear(cacheDir, Set.of());
         assertEquals(0, PivotCache.size(cacheDir));
         o2.doc().close();
+    }
+
+    @Test
+    void aCacheAnotherProgramHasOpenIsLeftAloneAndACopyIsUsed() throws Exception {
+        Path f = table(dir.resolve("t.csv"), 500, 5);
+        Opened o = open(f);
+        Path cacheDir = dir.resolve("cache");
+        Pivot.Spec spec = new Pivot.Spec(List.of(new Pivot.Field(0)), List.of(), List.of(v(3, Pivot.Agg.SUM)), Map.of());
+        String key;
+        try (PivotCache cache = PivotCache.open(f, o.format(), cacheDir, PivotCache.DEFAULT_LIMIT)) {
+            key = cache.key();
+            assertTrue(cache.build(spec, o.fields(), o.lines(), o.doc().lineCount(), () -> false, null));
+        }
+        Path first = cacheDir.resolve(key + ".duckdb");
+        Process other = HoldsDatabase.start(first); // an agent's logsift-mcp, say
+        try {
+            assertThrows(io.quackjvm.core.DatabaseInUse.class, () -> io.quackjvm.core.Quack.open(first.toString()),
+                    "the other program has it");
+            try (PivotCache cache = PivotCache.open(f, o.format(), cacheDir, 1)) {
+                assertFalse(cache.has(spec), "a copy of its own, which has nothing yet");
+                assertTrue(cache.build(spec, o.fields(), o.lines(), o.doc().lineCount(), () -> false, null));
+                assertEquals(500, cache.compute(spec, o.fields(), ZONE, o.doc().lineCount()).rows());
+            }
+            assertTrue(Files.exists(first), "the other program's cache stays");
+            assertTrue(Files.exists(cacheDir.resolve(key + ".duckdb.2")));
+        } finally {
+            HoldsDatabase.stop(other);
+        }
+        // closed there: the first copy is used again, with what it had
+        try (PivotCache cache = PivotCache.open(f, o.format(), cacheDir, PivotCache.DEFAULT_LIMIT)) {
+            assertTrue(cache.has(spec));
+        }
+        PivotCache.clear(cacheDir, Set.of());
+        assertEquals(0, PivotCache.size(cacheDir), "every copy goes");
+        o.doc().close();
     }
 }

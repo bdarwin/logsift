@@ -17,7 +17,7 @@ val duckdbClassifier: String = run {
     val os = System.getProperty("os.name").lowercase()
     val arm = System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm") }
     when {
-        os.contains("mac") -> "macos_universal"
+        os.contains("mac") -> if (arm) "macos_arm64" else "macos_amd64"
         os.contains("win") -> if (arm) "windows_arm64" else "windows_amd64"
         else -> if (arm) "linux_arm64" else "linux_amd64"
     }
@@ -31,10 +31,11 @@ dependencies {
     implementation("com.github.mwiede:jsch:0.2.20")
     // DuckDB (MIT) for the Query tab: SQL over tables and logs. Only this system's native
     // library: each installer is built on its own system.
-    implementation("org.duckdb:duckdb_jdbc:1.5.6.0:$duckdbClassifier")
-    // the Pivot cache: DuckDB tables written and read through quackjvm; DuckDB itself stays the one above
-    implementation("io.github.bdarwin:quackjvm-core:1.1.0") { exclude(group = "org.duckdb") }
-    implementation("io.github.bdarwin:quackjvm-agent:1.1.0") { exclude(group = "org.duckdb") }
+    implementation("org.duckdb:duckdb_jdbc:2.0.0.0:$duckdbClassifier")
+    // the big-table cache and the SQL guard: quackjvm, on the DuckDB above (its own would bring
+    // every system's native library)
+    implementation("io.github.bdarwin:quackjvm-core:1.2.0") { exclude(group = "org.duckdb") }
+    implementation("io.github.bdarwin:quackjvm-agent:1.2.0") { exclude(group = "org.duckdb") }
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
