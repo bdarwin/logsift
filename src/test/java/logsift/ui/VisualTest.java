@@ -2807,6 +2807,13 @@ class VisualTest {
         // and every chat is kept, scrolls back a page at a time, and can be searched
         ScriptedAssistant engine = new ScriptedAssistant();
         logsift.chat.ChatService.useFactory((settings, home) -> engine);
+        // the assistant may read this test's folder (on Windows CI it's on another drive than the home folder)
+        Path agentHome = Path.of(System.getProperty("logsift.home"));
+        new logsift.agent.AgentSettings(logsift.agent.Masking.Options.DEFAULT, List.of(dir)).save(agentHome);
+        onEdt(() -> {
+            frame.resetChatWorkspaceForTest();
+            return null;
+        });
         // beside the log, as it was set to open (its own tab: the next test)
         logsift.chat.ChatService.get().saveOptions(logsift.chat.ChatInstructions.Options.DEFAULT.withInTab(false));
         logsift.chat.ChatStore store = logsift.chat.ChatService.get().store();
@@ -3187,6 +3194,12 @@ class VisualTest {
             none.close();
             frame.hideChat();
             frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+        // put back what other tests expect
+        logsift.agent.AgentSettings.DEFAULT.save(agentHome);
+        onEdt(() -> {
+            frame.resetChatWorkspaceForTest();
             return null;
         });
         assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");

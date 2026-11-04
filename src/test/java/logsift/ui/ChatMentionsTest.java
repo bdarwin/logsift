@@ -24,7 +24,7 @@ class ChatMentionsTest {
 
     @Test
     void theAssistantIsToldWhichFileEachNameIs() {
-        assertEquals("[Named] @app.log = log:2; @payments.log = /srv/pay/payments.log.",
+        assertEquals("[Named] @app.log = log:2; @payments.log = " + Path.of("/srv/pay/payments.log") + ".",
                 ChatMentions.line(List.of(OPEN, RECENT)));
         assertNull(ChatMentions.line(List.of()));
     }

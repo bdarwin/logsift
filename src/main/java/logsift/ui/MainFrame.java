@@ -3431,6 +3431,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return chatWorkspace();
     }
 
+    /** Forgets the assistant's workspace, so the next one reads Settings → Agents again. */
+    synchronized void resetChatWorkspaceForTest() {
+        if (chatWorkspace != null) {
+            chatWorkspace.close();
+            chatWorkspace = null;
+        }
+    }
+
     /** Shows "⚠ 2 errors" while this session has errors (not cleared); hidden when there are none. */
     private void updateErrorsButton() {
         int n = ErrorReporter.session().count();

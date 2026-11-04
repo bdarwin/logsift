@@ -20,18 +20,30 @@ class ChatLinksTest {
         assertNull(ChatMarkdown.LineLink.parse("https://example.com"));
     }
 
+    /** A path as this system writes it, whole (on Windows "/var/log" is on the current drive). */
+    private static Path abs(String p) {
+        return Path.of(p).toAbsolutePath().normalize();
+    }
+
     @Test
     void fileLinksAsModelsWriteThem() {
-        assertEquals(new ChatMarkdown.FileLink(Path.of("/var/log/app.log"), 0),
+        assertEquals(new ChatMarkdown.FileLink(abs("/var/log/app.log"), 0),
                 ChatMarkdown.FileLink.parse("/var/log/app.log"));
-        assertEquals(new ChatMarkdown.FileLink(Path.of("/var/log/app.log"), 1204),
+        assertEquals(new ChatMarkdown.FileLink(abs("/var/log/app.log"), 1204),
                 ChatMarkdown.FileLink.parse("/var/log/app.log:1204"));
-        assertEquals(new ChatMarkdown.FileLink(Path.of("/var/log/app.log"), 12),
+        assertEquals(new ChatMarkdown.FileLink(abs("/var/log/app.log"), 12),
                 ChatMarkdown.FileLink.parse("/var/log/app.log:12-30"));
-        assertEquals(new ChatMarkdown.FileLink(Path.of("/var/log/app.log"), 7),
-                ChatMarkdown.FileLink.parse("file:///var/log/app.log#L7"));
-        assertEquals(new ChatMarkdown.FileLink(Path.of("/tmp/my logs/a.log"), 0),
+        String uri = abs("/var/log/app.log").toUri().toString(); // file:///var/log/… or file:///C:/var/log/…
+        assertEquals(new ChatMarkdown.FileLink(abs("/var/log/app.log"), 7),
+                ChatMarkdown.FileLink.parse(uri + "#L7"));
+        assertEquals(new ChatMarkdown.FileLink(abs("/tmp/my logs/a.log"), 0),
                 ChatMarkdown.FileLink.parse("/tmp/my%20logs/a.log"), "as Markdown's renderer escapes it");
+        if (java.io.File.separatorChar == '\\') {
+            assertEquals(new ChatMarkdown.FileLink(Path.of("C:\\logs\\app.log"), 12),
+                    ChatMarkdown.FileLink.parse("C:\\logs\\app.log:12"), "a Windows path");
+            assertEquals(new ChatMarkdown.FileLink(Path.of("C:\\logs\\app.log"), 0),
+                    ChatMarkdown.FileLink.parse("C:%5Clogs%5Capp.log"), "as Markdown's renderer escapes it");
+        }
         assertEquals(new ChatMarkdown.FileLink(Path.of(System.getProperty("user.home"), "logs", "a.log"), 3),
                 ChatMarkdown.FileLink.parse("~/logs/a.log:3"));
         assertNull(ChatMarkdown.FileLink.parse("https://example.com/a.log"));
