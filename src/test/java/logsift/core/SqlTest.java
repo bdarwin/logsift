@@ -314,4 +314,44 @@ class SqlTest {
             assertThrows(SQLException.class, () -> sql.query("SELECT * FROM customers", 10, null), "gone");
         }
     }
+
+    @Test
+    void aLogIsKeptOnDiskBetweenRunsAndOnlyItsNewLinesAreRead() throws Exception {
+        Path f = dir.resolve("kept.log");
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < 2000; i++) {
+            b.append(String.format("2026-10-28 10:%02d:%02d,000 %s [main] c.a.App - step %d%n", i / 60 % 60, i % 60,
+                    i % 10 == 0 ? "ERROR" : "INFO ", i));
+        }
+        Files.writeString(f, b);
+        Path cache = dir.resolve("cache");
+        System.setProperty("logsift.logCacheMinBytes", "1");
+        try {
+            try (LogAnalysis la = LogAnalysis.open(f, List.of());
+                 Sql sql = Sql.open(new Sql.Options(List.of(), dir.resolve("k1"), cache, 1L << 30))) {
+                la.awaitReady(() -> false);
+                Sql.LogTable t = sql.log("log", la.document(), la.formats().columns(), la.formats().times(),
+                        la.formats().entries());
+                assertTrue(t.update(() -> false, null));
+                assertEquals(2000, t.loaded());
+            }
+            assertTrue(logsift.core.PivotCache.size(cache) > 0, "kept in the cache folder");
+            // the next run: there already, nothing read until the file grows
+            Files.writeString(f, "2026-10-28 11:00:00,000 ERROR [main] c.a.App - late\n",
+                    java.nio.file.StandardOpenOption.APPEND);
+            try (LogAnalysis la = LogAnalysis.open(f, List.of());
+                 Sql sql = Sql.open(new Sql.Options(List.of(), dir.resolve("k2"), cache, 1L << 30))) {
+                la.awaitReady(() -> false);
+                Sql.LogTable t = sql.log("log", la.document(), la.formats().columns(), la.formats().times(),
+                        la.formats().entries());
+                assertEquals(2000, t.loaded(), "the lines read last time");
+                assertTrue(t.update(() -> false, null));
+                assertEquals(2001, t.loaded(), "and the one written since");
+                Sql.Result r = sql.query("SELECT count(*), max(line) FROM log WHERE level = 'ERROR'", 10, null);
+                assertEquals(List.of(201L, 2001L), List.of(r.rows().get(0)[0], r.rows().get(0)[1]));
+            }
+        } finally {
+            System.clearProperty("logsift.logCacheMinBytes");
+        }
+    }
 }

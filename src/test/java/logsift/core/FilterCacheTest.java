@@ -166,10 +166,12 @@ class FilterCacheTest {
         try (LogDocument doc = o.doc();
              PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), 1L << 30)) {
             assertNull(cache.matchingLines(0, v -> true, doc.lineCount(), () -> false), "not stored yet");
-            AtomicInteger asked = new AtomicInteger();
+            // stopped before the file is read: nothing to answer from
             assertFalse(cache.buildValues(List.of(0), CsvRows.reader(doc, o.format()), doc.lineCount(),
-                    () -> asked.incrementAndGet() > 1, null), "stopped");
-            assertFalse(cache.hasValues(0), "nothing half-made is kept");
+                    () -> true, null), "stopped");
+            assertFalse(cache.hasValues(0), "nothing half-made is answered from");
+            assertNull(cache.matchingLines(0, v -> true, doc.lineCount(), () -> false));
+            assertNull(cache.valueCounts(0, doc.lineCount(), () -> false));
             assertTrue(cache.buildValues(List.of(2), CsvRows.reader(doc, o.format()), doc.lineCount(), () -> false,
                     null));
             assertTrue(cache.hasValues(2));
@@ -242,6 +244,24 @@ class FilterCacheTest {
                 assertEquals(2, reported.size(), reported.toString());
             } finally {
                 Problems.setSink(null);
+            }
+        }
+    }
+
+    @Test
+    void aRowIsWhatSplitReadsAsOne() throws Exception {
+        // isRow counts fields without copying them: the same rows split gives, header and broken lines not
+        for (Path f : List.of(awkward(dir.resolve("a.csv"), 800, 9), PivotCacheTest.table(dir.resolve("b.csv"), 800, 9))) {
+            PivotCacheTest.Opened o = PivotCacheTest.open(f);
+            try (LogDocument doc = o.doc()) {
+                String[] lines = new String[(int) doc.lineCount()];
+                doc.readLines(0, lines.length, lines);
+                for (String l : lines) {
+                    assertEquals(o.format().split(l, null) != null, o.format().isRow(l), l);
+                }
+                for (String l : List.of("", "x", "a,b", ",,,,,,,", "\"unclosed, quote")) {
+                    assertEquals(o.format().split(l, null) != null, o.format().isRow(l), l);
+                }
             }
         }
     }

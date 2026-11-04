@@ -571,16 +571,22 @@ public final class LogTools {
                 String table;
                 if (cols != null && cols.isCsv()) {
                     List<String> names = logsift.core.Sql.tableColumns(cols.titles());
-                    ex = logsift.core.QueryExamples.forTable(names, logsift.core.QueryExamples.kinds(names, cols,
-                            logsift.core.CsvRows.reader(doc, cols), doc.lineCount()));
+                    List<String> all = new ArrayList<>(List.of("line"));
+                    all.addAll(names);
+                    ex = logsift.core.QueryExamples.of("t", all, logsift.core.QueryExamples.kinds(names, cols,
+                            logsift.core.CsvRows.reader(doc, cols), doc.lineCount()), java.util.Map.of());
                     table = "t";
                 } else {
                     List<String> names = new ArrayList<>(List.of("line", "starts", "time"));
                     if (cols != null) {
-                        names.addAll(cols.columns());
+                        for (String c : cols.columns()) {
+                            if (!names.contains(c) && !c.equals("text")) {
+                                names.add(c); // as the log's table has them
+                            }
+                        }
                     }
                     names.add("text");
-                    ex = logsift.core.QueryExamples.forLog(names);
+                    ex = logsift.core.QueryExamples.of("log", names, null, java.util.Map.of());
                     table = "log";
                 }
                 StringBuilder b = new StringBuilder("Queries over " + table + " for " + log.path().getFileName()

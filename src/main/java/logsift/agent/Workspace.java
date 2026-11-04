@@ -565,18 +565,18 @@ public final class Workspace implements AutoCloseable {
         final logsift.core.TableQuery query;
         final logsift.core.LogDocument doc;
 
-        BigTable(logsift.core.PivotCache cache, logsift.core.LogDocument doc, logsift.core.LogFormat format,
-                 logsift.core.Pivot.Fields fields) throws java.sql.SQLException {
+        BigTable(logsift.core.PivotCache cache, logsift.core.TableQuery query, logsift.core.LogDocument doc,
+                 logsift.core.LogFormat format, logsift.core.Pivot.Fields fields) {
             this.cache = cache;
+            this.query = query;
             this.doc = doc;
             this.format = format;
             this.fields = fields;
-            this.query = new logsift.core.TableQuery(fields);
         }
 
-        /** The cache's name: another when the file changed. */
-        String key() throws IOException {
-            return cache.key();
+        /** The table as it is now: another when the file grew or was written again (answers kept by it). */
+        String key() {
+            return cache.key() + "|" + doc.generation() + "|" + doc.lineCount();
         }
 
         /** The table's columns as SQL names them. */
@@ -589,8 +589,7 @@ public final class Workspace implements AutoCloseable {
         /** A query's answer from the cache (storing the columns it reads first); null: ask the usual way. */
         public logsift.core.Sql.Result query(String sql, int maxRows, java.util.function.BooleanSupplier stop)
                 throws java.sql.SQLException {
-            return query.query(cache, sql, maxRows, logsift.core.CsvRows.reader(doc, format), doc.lineCount(), stop,
-                    null, null);
+            return query.query(sql, maxRows, logsift.core.CsvRows.reader(doc, format), doc.lineCount(), stop, null, null);
         }
 
         /** How many columns the table has. */
@@ -600,7 +599,7 @@ public final class Workspace implements AutoCloseable {
 
         /** Why the cache can't answer this query; null when it can. */
         public String whyNot(String sql) throws java.sql.SQLException {
-            return query.whyNot(cache, sql);
+            return query.whyNot(sql);
         }
 
         /**
@@ -612,6 +611,7 @@ public final class Workspace implements AutoCloseable {
             if (!logsift.core.PivotCache.canCache(spec)) {
                 return null;
             }
+            cache.feed(logsift.core.CsvRows.reader(doc, format), doc.lineCount());
             if (!cache.has(spec) && !cache.build(spec, fields, logsift.core.CsvRows.reader(doc, format), doc.lineCount(),
                     stop, null)) {
                 return null;
@@ -650,7 +650,7 @@ public final class Workspace implements AutoCloseable {
         String read = doc.charset().name();
         BigTable t = bigTables.get(handle);
         if (t != null && (t.format != f || !t.cache.isFor(log.path(), f, read))) {
-            t.close(); // the file changed
+            t.close(); // read another way
             bigTables.remove(handle);
             t = null;
         }
@@ -659,8 +659,12 @@ public final class Workspace implements AutoCloseable {
             try {
                 c = logsift.core.PivotCache.open(log.path(), f, read, logsift.core.CacheSettings.dir(),
                         logsift.core.CacheSettings.limit());
-                t = new BigTable(c, doc, f, logsift.core.Pivot.fields(f, doc.lineCount(),
-                        logsift.core.CsvRows.reader(doc, f), java.time.Year.now().getValue()));
+                c.feed(logsift.core.CsvRows.reader(doc, f), doc.lineCount());
+                logsift.core.Pivot.Fields fields = logsift.core.Pivot.fields(f, doc.lineCount(),
+                        logsift.core.CsvRows.reader(doc, f), java.time.Year.now().getValue());
+                logsift.core.TableQuery q = logsift.core.TableQuery.open(log.path(), f, read, fields,
+                        logsift.core.CacheSettings.dir(), logsift.core.CacheSettings.limit());
+                t = new BigTable(c, q, doc, f, fields);
             } catch (IOException | java.sql.SQLException | RuntimeException e) {
                 if (c != null) {
                     c.close();

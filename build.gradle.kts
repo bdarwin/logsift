@@ -9,6 +9,10 @@ group = "logsift"
 version = "1.3.0"
 
 repositories {
+    // quackjvm 1.6.0-SNAPSHOT (bdarwin/quackjvm, branch logsift-1.6), installed locally until it's released
+    mavenLocal {
+        content { includeGroup("io.github.bdarwin") }
+    }
     mavenCentral()
 }
 
@@ -34,8 +38,8 @@ dependencies {
     implementation("org.duckdb:duckdb_jdbc:2.0.0.0:$duckdbClassifier")
     // the big-table cache and the SQL guard: quackjvm, on the DuckDB above (its own would bring
     // every system's native library)
-    implementation("io.github.bdarwin:quackjvm-core:1.5.0") { exclude(group = "org.duckdb") }
-    implementation("io.github.bdarwin:quackjvm-agent:1.5.0") { exclude(group = "org.duckdb") }
+    implementation("io.github.bdarwin:quackjvm-core:1.6.0-SNAPSHOT") { exclude(group = "org.duckdb") }
+    implementation("io.github.bdarwin:quackjvm-agent:1.6.0-SNAPSHOT") { exclude(group = "org.duckdb") }
     // GitHub Copilot's SDK (MIT) for the assistant in the window. It runs the person's own Copilot
     // program; its native runtime isn't bundled.
     implementation("com.github:copilot-sdk-java:1.0.28")

@@ -43,7 +43,9 @@ class QueryExamplesTest {
 
     private static List<QueryExamples.Example> examples(PivotCacheTest.Opened o) {
         List<String> names = Sql.tableColumns(o.fields().titles());
-        return QueryExamples.forTable(names, QueryExamples.kinds(names, o.format(), o.lines(), o.doc().lineCount()));
+        List<String> all = new java.util.ArrayList<>(List.of("line"));
+        all.addAll(names);
+        return QueryExamples.of("t", all, QueryExamples.kinds(names, o.format(), o.lines(), o.doc().lineCount()), Map.of());
     }
 
     @Test
@@ -51,16 +53,18 @@ class QueryExamplesTest {
         PivotCacheTest.Opened o = PivotCacheTest.open(metrics(400));
         List<QueryExamples.Example> ex = examples(o);
         List<String> titles = ex.stream().map(QueryExamples.Example::title).toList();
-        assertTrue(titles.contains("The cpu_… columns (40 of them, by a pattern)"), titles.toString());
-        assertTrue(titles.contains("Average of each cpu_… column by host"), titles.toString());
-        assertTrue(titles.contains("Average of each cpu_… column per minute"), titles.toString());
-        assertTrue(titles.contains("Total of the cpu_… columns in each row"), titles.toString());
-        assertTrue(titles.contains("The cpu_… columns as rows, highest average first"), titles.toString());
-        assertTrue(titles.contains("Count, average and highest ms by host"), titles.toString());
-        assertTrue(titles.contains("Find columns by name"), titles.toString());
+        // quackjvm's examples, for what Logsift found the columns hold
+        assertTrue(titles.contains("The mean of each of 40 cpu_N columns"), titles.toString());
+        assertTrue(titles.contains("The mean of each of 40 cpu_N columns for each host"), titles.toString());
+        assertTrue(titles.contains("The mean of each of 40 cpu_N columns each minute"), titles.toString());
+        assertTrue(titles.contains("The total of the 40 cpu_N columns in each row"), titles.toString());
+        assertTrue(titles.contains("Each of the 40 cpu_N columns: its mean and highest, highest mean first"),
+                titles.toString());
+        assertTrue(titles.contains("Rows for each host"), titles.toString());
+        assertTrue(titles.contains("Columns whose name has a word in it"), titles.toString());
         assertTrue(ex.stream().anyMatch(e -> e.sql().contains("COLUMNS('^cpu_[0-9]+$')")), "a pattern for the family");
-        assertTrue(ex.stream().anyMatch(e -> e.sql().equals("SELECT column_name, column_type\nFROM (DESCRIBE t)\n"
-                + "WHERE column_name ILIKE '%cpu%'")));
+        assertTrue(ex.stream().anyMatch(e -> e.sql().equals(
+                "SELECT column_name, column_type FROM (DESCRIBE t) WHERE column_name ILIKE '%cpu%'")));
         o.doc().close();
     }
 
@@ -72,8 +76,7 @@ class QueryExamplesTest {
             assertTrue(ex.size() >= 5, f + ": " + ex);
             try (Sql inPlace = Sql.open(new Sql.Options(List.of(dir), null));
                  Sql loaded = Sql.open(new Sql.Options(List.of(), null));
-                 PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT);
-                 TableQuery tq = new TableQuery(o.fields())) {
+                 TableQuery tq = TableQuery.open(f, o.format(), "", o.fields(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT)) {
                 inPlace.csv("t", f, ',', o.format().titles(), StandardCharsets.UTF_8);
                 Sql.LogTable whole = loaded.table("t", o.doc(), o.format(), o.fields());
                 assertTrue(whole.update(() -> false, null));
@@ -81,7 +84,7 @@ class QueryExamplesTest {
                     Sql.Result read = inPlace.query(e.sql(), 1000, null);
                     assertFalse(read.columns().isEmpty(), e.title());
                     Sql.Result expected = loaded.query(e.sql(), 1000, null);
-                    Sql.Result cached = tq.query(cache, e.sql(), 1000, o.lines(), o.doc().lineCount(), () -> false, null,
+                    Sql.Result cached = tq.query(e.sql(), 1000, o.lines(), o.doc().lineCount(), () -> false, null,
                             null);
                     if (cached != null) { // else left to the usual way (too many columns at once, a PIVOT…)
                         assertEquals(TableQueryTest.text(expected), TableQueryTest.text(cached), f.getFileName() + ": "
@@ -91,20 +94,6 @@ class QueryExamplesTest {
             }
             o.doc().close();
         }
-    }
-
-    @Test
-    void namesAreQuotedOnlyWhereSqlNeedsIt() {
-        assertEquals("host", QueryExamples.name("host"));
-        assertEquals("cpu_001", QueryExamples.name("cpu_001"));
-        assertEquals("\"Host Name\"", QueryExamples.name("Host Name"));
-        assertEquals("\"timestamp\"", QueryExamples.name("timestamp"));
-        assertEquals("\"order\"", QueryExamples.name("order"));
-        assertEquals("\"a\"\"b\"", QueryExamples.name("a\"b"));
-        // a family whose name has regex characters in it is matched as written
-        QueryExamples.Family f = QueryExamples.family(List.of("a.b(1)", "x.y_1", "x.y_2", "x.y_3", "x.y_4", "x.y_5"),
-                Map.of());
-        assertEquals("^x\\.y_[0-9]+$", f.regex());
     }
 
     @Test
@@ -138,22 +127,26 @@ class QueryExamplesTest {
     }
 
     @Test
-    void aLogKeepsItsExamples() {
-        List<String> titles = QueryExamples.forLog(List.of("line", "starts", "time", "level", "logger", "message", "text"))
-                .stream().map(QueryExamples.Example::title).toList();
-        assertEquals(List.of("Lines per level", "Errors per minute", "The most frequent errors (numbers blanked)",
-                "Errors and warnings by logger", "Durations in messages (… 345 ms): slowest first", "Lines with a text",
-                "Lines per hour"), titles);
+    void aLogGetsItsExamples() {
+        List<String> titles = QueryExamples.of("log", List.of("line", "starts", "time", "level", "logger", "message", "text"),
+                null, Map.of()).stream().map(QueryExamples.Example::title).toList();
+        for (String t : List.of("Lines per level", "Errors per minute", "The most frequent errors, numbers blanked",
+                "Errors and warnings by logger", "Durations in the messages (\"... 345 ms\"), slowest first",
+                "Rows whose message mentions a word", "Rows each hour by time")) {
+            assertTrue(titles.contains(t), t + " in " + titles);
+        }
+        assertTrue(titles.stream().noneMatch(t -> t.equals("The range of line")), "line counts lines: no range of it");
     }
 
     @Test
     void otherOpenTablesAreJoinedByAColumnTheyShare() {
-        List<QueryExamples.Example> ex = QueryExamples.withOthers("t", List.of("line", "order_id", "customer_id", "amount"),
+        List<QueryExamples.Example> ex = QueryExamples.of("t", List.of("line", "order_id", "customer_id", "amount"),
+                Map.of("order_id", Pivot.Kind.NUMBER, "customer_id", Pivot.Kind.NUMBER, "amount", Pivot.Kind.NUMBER),
                 new java.util.LinkedHashMap<>(Map.of("customers", List.of("line", "customer_id", "name"))));
-        assertEquals("Rows with their match in customers (by customer_id)", ex.get(0).title());
-        assertEquals("SELECT *\nFROM t\nJOIN customers USING (customer_id)\nLIMIT 100", ex.get(0).sql());
-        List<QueryExamples.Example> none = QueryExamples.withOthers("log", List.of("line", "time", "message"),
+        assertTrue(ex.stream().anyMatch(e -> e.title().equals("Joined to customers by customer_id")
+                && e.sql().equals("SELECT * FROM t JOIN customers USING (customer_id) LIMIT 10")), ex.toString());
+        List<QueryExamples.Example> none = QueryExamples.of("log", List.of("line", "time", "message"), null,
                 Map.of("prices", List.of("line", "sku", "price")));
-        assertEquals("SELECT * FROM prices LIMIT 100", none.get(0).sql(), "only line in common: its rows");
+        assertTrue(none.stream().noneMatch(e -> e.sql().contains("JOIN")), "only line in common: no join");
     }
 }

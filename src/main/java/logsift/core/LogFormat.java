@@ -488,6 +488,33 @@ public final class LogFormat {
         return out;
     }
 
+    private static final boolean[] NO_FIELDS = new boolean[0];
+    private static final String[] NO_CELLS = new String[0];
+
+    /**
+     * Whether a line is one of the table's rows, as {@link #split} and {@link #splitSome} read it:
+     * not the header, nor a line with far too few fields. Counts the fields without copying them,
+     * so it's cheap enough to ask of every line first.
+     */
+    public boolean isRow(String line) {
+        if (line == null) {
+            return false;
+        }
+        if (delimiter == 0 || jsonKeys != null) {
+            return split(line, null) != null;
+        }
+        if (isHeader(line)) {
+            return false;
+        }
+        int n = columns.size();
+        int count = Csv.pick(line, delimiter, NO_FIELDS, NO_CELLS);
+        if (count == n) {
+            return true;
+        }
+        int usual = Math.min(n, rowFields);
+        return count >= 2 && count >= usual - usual / 2;
+    }
+
     /**
      * Like {@link #split}, but in a table only the columns marked in {@code want} are read (the
      * others are null). For Pivot, which needs a few columns of thousands.

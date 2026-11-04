@@ -8613,13 +8613,30 @@ class VisualTest {
             assertNotNull(used);
             assertTrue(onEdt(used::getText).matches("GB · [0-9,.]+ MB in use"), onEdt(used::getText));
             assertNotNull(findNamed(settings.getRootPane(), "pivotCacheGb"));
+            // the file grew and its cache followed it (no second cache); another table's cache, closed, is there too
+            Path otherCsv = Files.writeString(dir.resolve("other-cached.csv"), "host,ms\nweb-1,5\nweb-2,7\n");
+            long otherCache;
+            try (logsift.core.LogDocument od = logsift.core.LogDocument.open(otherCsv)) {
+                assertTrue(od.awaitIdle(10_000));
+                logsift.core.LogFormat of = logsift.core.LogFormat.detectCsv(List.of(od.line(0), od.line(1)), true);
+                logsift.core.ColumnProfile.Lines ol = logsift.core.CsvRows.reader(od, of);
+                logsift.core.Pivot.Fields ofields = logsift.core.Pivot.fields(of, od.lineCount(), ol, 2026);
+                long sizeBefore = logsift.core.PivotCache.size(cacheDir);
+                try (logsift.core.PivotCache oc = logsift.core.PivotCache.open(otherCsv, of, cacheDir, 1L << 40)) {
+                    assertTrue(oc.build(new logsift.core.Pivot.Spec(List.of(new logsift.core.Pivot.Field(0)), List.of(),
+                            List.of(), java.util.Map.of()), ofields, ol, od.lineCount(), () -> false, null));
+                }
+                otherCache = logsift.core.PivotCache.size(cacheDir) - sizeBefore;
+            }
+            assertTrue(otherCache > 0);
             long inUse = logsift.core.PivotCache.size(cacheDir);
             onEdt(() -> {
                 ((javax.swing.JButton) findNamed(settings.getRootPane(), "pivotCacheEmpty")).doClick();
                 return null;
             });
             long left = logsift.core.PivotCache.size(cacheDir);
-            assertTrue(left > 0 && left < inUse, "the open file's cache stays, the old one goes: " + inUse + " → " + left);
+            assertTrue(left > 0 && left <= inUse - otherCache, "the open file's cache stays, the other one goes: " + inUse
+                    + " → " + left);
             onEdt(() -> {
                 settings.dispose();
                 frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
@@ -9480,14 +9497,16 @@ class VisualTest {
         // (tables other tests left open are named too)
         java.util.regex.Pattern named = java.util.regex.Pattern.compile("Other open tables: <b>[^<]*\\bcustomers\\b");
         assertTrue(named.matcher(onEdt(q::hintForTest)).find(), onEdt(q::hintForTest));
-        String join = onEdt(q::examples).stream().filter(e -> e[0].equals("Rows with their match in customers (by customer_id)"))
+        String join = onEdt(q::examples).stream().filter(e -> e[0].equals("Joined to customers by customer_id"))
                 .findFirst().orElseThrow()[1];
-        assertEquals("SELECT *\nFROM t\nJOIN customers USING (customer_id)\nLIMIT 100", join);
+        assertEquals("SELECT * FROM t JOIN customers USING (customer_id) LIMIT 10", join);
         onEdt(() -> {
             q.setQueryForTest(join);
             return null;
         });
-        assertEquals(60, runQuery(q).rows().size(), "each order with its customer");
+        logsift.core.Sql.Result joined = runQuery(q);
+        assertEquals(10, joined.rows().size(), "the first orders, each with its customer");
+        assertTrue(joined.columns().contains("country"), "the customers' columns too: " + joined.columns());
         onEdt(() -> {
             javax.swing.JSplitPane sp = (javax.swing.JSplitPane) SwingUtilities.getAncestorOfClass(
                     javax.swing.JSplitPane.class, SwingUtilities.getAncestorOfClass(JTabbedPane.class, q));
@@ -9628,11 +9647,13 @@ class VisualTest {
             // Examples for a wide table: its 196 m_ columns at once, by a pattern
             List<String[]> examples = onEdt(q::examples);
             List<String> titles = examples.stream().map(e -> e[0]).toList();
-            assertTrue(titles.contains("Average of each m_… column by host"), titles.toString());
-            assertTrue(titles.contains("The m_… columns as rows, highest average first"), titles.toString());
-            assertTrue(titles.contains("Average of each m_… column per minute"), titles.toString());
-            for (String title : List.of("Average of each m_… column by host", "Total of the m_… columns in each row",
-                    "The m_… columns as rows, highest average first", "Count, average and highest ms by host")) {
+            assertTrue(titles.contains("The mean of each of 196 m_N columns for each host"), titles.toString());
+            assertTrue(titles.contains("Each of the 196 m_N columns: its mean and highest, highest mean first"),
+                    titles.toString());
+            assertTrue(titles.contains("The mean of each of 196 m_N columns each minute"), titles.toString());
+            for (String title : List.of("The mean of each of 196 m_N columns for each host",
+                    "The total of the 196 m_N columns in each row",
+                    "Each of the 196 m_N columns: its mean and highest, highest mean first", "Rows for each host")) {
                 String sql = examples.stream().filter(e -> e[0].equals(title)).findFirst().orElseThrow()[1];
                 onEdt(() -> {
                     q.setQueryForTest(sql);
@@ -9640,11 +9661,12 @@ class VisualTest {
                 });
                 logsift.core.Sql.Result r = runQuery(q);
                 assertFalse(r.rows().isEmpty(), title);
-                if (title.startsWith("Average of each")) {
+                if (title.startsWith("The mean of each")) {
                     assertEquals(5, r.rows().size(), "a row per host");
                     assertEquals(197, r.columns().size(), "host and an average of each m_ column");
                 }
-                if (title.startsWith("The m_")) {
+                if (title.startsWith("Each of the")) {
+                    assertEquals(20, r.rows().size(), "the 20 columns with the highest averages");
                     settle();
                     shot("117f-query-wide-example");
                 }
