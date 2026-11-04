@@ -541,6 +541,20 @@ public final class LogView extends JPanel {
         listeners.forEach(l -> l.selectionEdited(this));
     }
 
+    /** Selects whole rows {@code from} to {@code to} and shows them, the first near the middle. */
+    public void selectRows(int from, int to) {
+        int n = source.rowCount();
+        if (n == 0) {
+            return;
+        }
+        goToRow(from, true);
+        lead = Math.max(anchor, Math.min(n - 1, to));
+        lineMode = true;
+        cellsSelected = false;
+        canvas.repaint();
+        listeners.forEach(l -> l.selectionEdited(this));
+    }
+
     /**
      * Selects characters {@code start} to {@code end} of a row's text (a match) and scrolls
      * them into view: the row near the middle, and sideways to the match, which in a wide table

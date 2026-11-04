@@ -403,6 +403,13 @@ public final class Sql implements AutoCloseable {
         return name;
     }
 
+    /** Takes a table away, and the memory it held (its file was closed). */
+    public void drop(LogTable t) throws SQLException {
+        try (Statement s = conn.createStatement()) {
+            s.execute("DROP TABLE IF EXISTS " + ident(t.name));
+        }
+    }
+
     /** Takes a view away (a table no longer open). */
     public void dropView(String name) throws SQLException {
         try (Statement s = conn.createStatement()) {

@@ -151,7 +151,7 @@ public final class McpServer {
     }
 
     /** The instructions, naming the person's services when they described where their logs are. */
-    static String instructions(logsift.agent.LogCatalog catalog) {
+    public static String instructions(logsift.agent.LogCatalog catalog) {
         if (catalog == null || catalog.isEmpty()) {
             return INSTRUCTIONS + "\nNo log locations are described yet, so logs are opened by path. The person can "
                     + "describe their services in Logsift (File → Log Locations for Agents…).";
@@ -192,34 +192,12 @@ public final class McpServer {
         Tool.Args a = new Tool.Args(args);
         String key = String.valueOf(id);
         Future<?> f = calls.submit(() -> {
-            String text;
-            boolean failed = false;
-            String outcome;
-            try {
-                text = tool.run(a, workspace);
-                outcome = "ok";
-            } catch (Workspace.StillWorking e) {
-                text = e.getMessage();
-                outcome = "still working";
-            } catch (Tool.Failure | IOException e) {
-                text = e.getMessage();
-                failed = true;
-                outcome = "refused";
-            } catch (InterruptedException e) {
-                outcome = "cancelled";
-                text = null;
-            } catch (Exception | Error e) {
-                text = "Logsift failed: " + e;
-                failed = true;
-                outcome = "failed";
-            }
+            logsift.agent.ToolCall c = logsift.agent.ToolCall.run(tool, a, workspace);
             running.remove(key);
-            workspace.audit(tool.name(), a.brief(), text == null ? 0 : text.length(), outcome);
+            String text = c.text();
+            boolean failed = c.failed();
             if (text == null || Thread.currentThread().isInterrupted()) {
                 return; // cancelled: no answer is sent
-            }
-            if (failed) {
-                text = workspace.masking().mask(text, null);
             }
             Map<String, Object> content = new LinkedHashMap<>();
             content.put("type", "text");

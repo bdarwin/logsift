@@ -180,6 +180,59 @@ public final class Workspace implements AutoCloseable {
         }
     }
 
+    /**
+     * A log open in the window, for an assistant in the same window: tools read the window's own
+     * document, so there is nothing to read again and line numbers are the ones on screen. {@code
+     * shown} is what it goes by (its path, or for a remote log its name). Gives its handle; the
+     * same document again gives the same one.
+     */
+    public String adopt(Path shown, logsift.core.LogDocument doc) {
+        Path abs = shown.toAbsolutePath().normalize();
+        synchronized (this) {
+            for (Map.Entry<String, LogAnalysis> e : logs.entrySet()) {
+                if (e.getValue().document() == doc) {
+                    return e.getKey();
+                }
+            }
+            String h = "log:" + nextLog++;
+            logs.put(h, LogAnalysis.borrowed(doc, abs, options.formats()));
+            this.shown.put(h, abs);
+            return h;
+        }
+    }
+
+    /** Forgets a log the window closed (one it {@linkplain #adopt adopted}). */
+    public void forget(logsift.core.LogDocument doc) {
+        LogAnalysis gone = null;
+        BigTable big = null;
+        synchronized (this) {
+            for (var it = logs.entrySet().iterator(); it.hasNext();) {
+                var e = it.next();
+                if (e.getValue().document() == doc) {
+                    gone = e.getValue();
+                    shown.remove(e.getKey());
+                    big = bigTables.remove(e.getKey());
+                    logsift.core.Sql.LogTable t = sqlTables.remove(e.getKey());
+                    if (t != null && sql != null) {
+                        try {
+                            sql.drop(t);
+                        } catch (java.sql.SQLException ignored) {
+                            // gone with the session at the latest
+                        }
+                    }
+                    it.remove();
+                    break;
+                }
+            }
+        }
+        if (big != null) {
+            big.close();
+        }
+        if (gone != null) {
+            gone.close(); // leaves the document open: it's the window's
+        }
+    }
+
     /** Files Logsift wrote for this session (merged logs): removed when it ends. */
     private final List<Path> generated = new ArrayList<>();
 

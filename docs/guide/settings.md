@@ -66,7 +66,8 @@ In `~/.logsift` (your home folder):
 | `stdin/` | Piped output, kept a week |
 | `heap-index/` | Indexes of big heap dumps, removed when their tab closes |
 | `agent.properties` | Settings → Agents: what is masked, which folders agents may read |
-| `agent.log` | Each call coding agents made (never the answers) |
+| `agent.log` | Each call coding agents and the assistant made (never the answers) |
+| `chat/` | The [assistant](assistant.md)'s chats (`chats.duckdb`), its settings (model, the copilot program) and Copilot's sessions for them |
 | `logs.json` | Log Locations for Agents: your services, their log folders and what each file holds |
 | `crash.properties` | Settings → Crash Dumps: PDB folders, and whether Windows' names may be downloaded |
 | `symbols/` | PDBs of Windows' own files, when you let Logsift download them |

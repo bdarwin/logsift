@@ -1248,6 +1248,33 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     /**
+     * Selects file lines {@code from} to {@code to} (0-based) and shows them; if the filters hide
+     * the first, shows all lines first.
+     */
+    void showLines(long from, long to) {
+        if (matchingOnly && !filterResult.contains(from)) {
+            setMatchingOnly(false);
+        }
+        long a = matchingOnly ? filterResult.rowAtOrAfter(from) : from;
+        long b = matchingOnly ? Math.max(a, filterResult.rowAtOrAfter(to + 1) - 1) : to;
+        main.selectRows((int) Math.min(a, Integer.MAX_VALUE - 1), (int) Math.min(b, Integer.MAX_VALUE - 1));
+        host.tabStatusChanged(this);
+    }
+
+    /** The file lines chosen (0-based, first and last) when something is selected, or null. */
+    long[] chosenLines() {
+        if (!main.hasSelection()) {
+            return null;
+        }
+        int[] rows = main.selectedRows();
+        if (rows == null) {
+            return null;
+        }
+        LogView.RowSource src = main.source();
+        return new long[] {src.lineNumber(rows[0]), src.lineNumber(rows[1])};
+    }
+
+    /**
      * Shows a line now, or as soon as indexing (and, in "Matching only", the filters) have
      * reached it, for a file just opened.
      */

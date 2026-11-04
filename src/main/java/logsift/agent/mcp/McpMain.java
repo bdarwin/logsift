@@ -119,7 +119,7 @@ public final class McpMain {
      * The options from the command line and {@code agent.properties} in Logsift's folder (the
      * command line wins).
      */
-    static Workspace.Options options(String[] args, Path logsiftHome, Path cwd) {
+    public static Workspace.Options options(String[] args, Path logsiftHome, Path cwd) {
         AgentSettings settings = AgentSettings.load(logsiftHome);
         boolean secrets = settings.masking().secrets();
         boolean emails = settings.masking().emails();

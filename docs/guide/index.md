@@ -46,6 +46,7 @@ New to Logsift? Start with [Opening logs](opening-logs.md) and [The log view](lo
 | Page | What it covers |
 |---|---|
 | [Settings](settings.md) | Every setting and where Logsift keeps its files |
+| [Assistant](assistant.md) | Asking GitHub Copilot about the open logs in the window: clickable lines, models and credits, every chat kept and searchable |
 | [Coding agents](agents.md) | Letting GitHub Copilot and other agents ask Logsift about your logs; what is masked |
 | [Keyboard shortcuts](shortcuts.md) | All the keys, by area |
 | [Troubleshooting and FAQ](troubleshooting.md) | Messages you may see, and what to do |

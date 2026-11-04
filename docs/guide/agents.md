@@ -6,6 +6,8 @@ description: Letting GitHub Copilot and other coding agents ask Logsift about yo
 
 # Coding agents
 
+To ask Copilot about your logs inside Logsift's own window instead, see the [Assistant](assistant.md).
+
 A coding agent such as GitHub Copilot can ask Logsift about your logs. You ask in the agent's chat, for example *"why is orders.log full of timeouts?"*. The agent calls Logsift, and Logsift reads the file on your computer and answers with short summaries and line numbers, never whole files. The agent can then search and read the lines around what it found.
 
 It works with GitHub Copilot in VS Code, Visual Studio and JetBrains IDEs, with Copilot CLI, and with any other agent that supports MCP (the Model Context Protocol).

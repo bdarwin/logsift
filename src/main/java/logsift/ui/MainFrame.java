@@ -196,7 +196,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         center.add(tabs, "tabs");
 
         JPanel root = new JPanel(new BorderLayout());
-        root.add(center, BorderLayout.CENTER);
+        mainArea.add(center, BorderLayout.CENTER);
+        root.add(mainArea, BorderLayout.CENTER);
         root.add(buildStatusBar(), BorderLayout.SOUTH);
         setContentPane(root);
         setJMenuBar(buildMenus());
@@ -214,6 +215,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 PREFS.putInt("width", getWidth());
                 PREFS.putInt("height", getHeight());
                 saveSession();
+                closeChat();
                 for (LogTab t : allTabs()) {
                     t.close();
                 }
@@ -2977,7 +2979,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         errorsButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
         errorsButton.setToolTipText("Logsift hit unexpected errors in this session: see them, and report them");
         errorsButton.addActionListener(e -> showErrors());
-        right.add(errorsButton, BorderLayout.WEST);
+        JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 4, 0));
+        buttons.setOpaque(false);
+        buttons.add(errorsButton);
+        askButton.putClientProperty("JButton.buttonType", "borderless");
+        askButton.setFocusable(false);
+        askButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
+        askButton.setToolTipText("Ask GitHub Copilot about the open logs (" + (isMac() ? "⌘I" : "Ctrl+I") + ")");
+        askButton.addActionListener(e -> toggleChat());
+        buttons.add(askButton);
+        right.add(buttons, BorderLayout.WEST);
         ErrorReporter.session().addListener(() -> SwingUtilities.invokeLater(this::updateErrorsButton));
         updateErrorsButton();
         updateButton.putClientProperty("JButton.buttonType", "borderless");
@@ -2997,6 +3008,190 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     private final JButton errorsButton = new JButton();
+    private final JButton askButton = new JButton("Ask", Icons.of("sparkles"));
+
+    // ---------------------------------------------------------------- the assistant
+
+    /** The logs and the chat beside them, when it's open. */
+    private final JPanel mainArea = new JPanel(new BorderLayout());
+    private ChatPanel chatPanel;
+    private javax.swing.JSplitPane chatSplit;
+    private logsift.agent.Workspace chatWorkspace;
+    private static final java.util.prefs.Preferences CHAT_PREFS = PREFS.node("chat");
+
+    /** Shows the assistant beside the logs, or hides it. */
+    void toggleChat() {
+        if (chatPanel != null && chatPanel.isShowing()) {
+            hideChat();
+        } else {
+            showChat();
+        }
+    }
+
+    /** Shows the assistant (made the first time). */
+    ChatPanel showChat() {
+        if (chatPanel == null) {
+            chatPanel = new ChatPanel(chatHost(), logsift.chat.ChatService.get());
+        }
+        if (chatSplit == null) {
+            mainArea.remove(center);
+            chatSplit = new javax.swing.JSplitPane(javax.swing.JSplitPane.HORIZONTAL_SPLIT, center, chatPanel);
+            chatSplit.setResizeWeight(1);
+            chatSplit.setContinuousLayout(true);
+            chatSplit.setBorder(null);
+            mainArea.add(chatSplit, BorderLayout.CENTER);
+            int w = Math.max(300, Math.min(CHAT_PREFS.getInt("width", 440), Math.max(300, getWidth() - 400)));
+            mainArea.revalidate();
+            mainArea.validate();
+            chatSplit.setDividerLocation(Math.max(200, mainArea.getWidth() - w));
+            chatSplit.addPropertyChangeListener(javax.swing.JSplitPane.DIVIDER_LOCATION_PROPERTY, e -> {
+                if (chatSplit != null && chatPanel != null && chatPanel.getWidth() > 0) {
+                    CHAT_PREFS.putInt("width", chatPanel.getWidth());
+                }
+            });
+        }
+        chatPanel.focusInput();
+        return chatPanel;
+    }
+
+    void hideChat() {
+        if (chatSplit != null) {
+            mainArea.remove(chatSplit);
+            chatSplit.remove(center);
+            chatSplit = null;
+            mainArea.add(center, BorderLayout.CENTER);
+            mainArea.revalidate();
+            mainArea.repaint();
+            LogTab t = currentTab();
+            if (t != null) {
+                t.mainView().requestFocusInWindow();
+            }
+        }
+    }
+
+    private void closeChat() {
+        if (chatPanel != null) {
+            chatPanel.close();
+        }
+        if (chatWorkspace != null) {
+            chatWorkspace.close(); // leaves the window's logs open: they're the tabs'
+            chatWorkspace = null;
+        }
+    }
+
+    /** The assistant's workspace: the rules coding agents have (folders, masking, audit log). */
+    private synchronized logsift.agent.Workspace chatWorkspace() {
+        if (chatWorkspace == null) {
+            Path home = logsift.core.CacheSettings.home();
+            chatWorkspace = new logsift.agent.Workspace(logsift.agent.mcp.McpMain.options(new String[0], home,
+                    Path.of(System.getProperty("user.home"))));
+            chatWorkspace.setClient("Logsift assistant (GitHub Copilot)");
+            chatWorkspace.setCatalog(() -> logsift.agent.LogCatalog.load(home, Path.of(System.getProperty("user.home")),
+                    List.of()));
+        }
+        return chatWorkspace;
+    }
+
+    /** What the window tells and lets the assistant do. */
+    private ChatPanel.Host chatHost() {
+        return new ChatPanel.Host() {
+            @Override
+            public List<ChatPanel.OpenLog> openLogs() {
+                List<ChatPanel.OpenLog> out = new ArrayList<>();
+                LogTab shown = currentTab();
+                List<LogTab> all = allTabs();
+                if (shown != null) {
+                    all.remove(shown);
+                    all.add(0, shown);
+                }
+                for (LogTab t : all) {
+                    LogDocument d = t.document();
+                    Path p = t.path();
+                    if (d == null || p == null) {
+                        continue;
+                    }
+                    String h = chatWorkspace().adopt(p, d);
+                    String where = t.remoteLabel() != null ? t.remoteLabel() : p.toString();
+                    out.add(new ChatPanel.OpenLog(h, p.getFileName().toString(), where, d.lineCount(),
+                            t.mainView().isGrid()));
+                }
+                return out;
+            }
+
+            @Override
+            public long[] chosenLines() {
+                LogTab t = currentTab();
+                long[] l = t == null ? null : t.chosenLines();
+                return l == null ? null : new long[] {l[0] + 1, l[1] + 1};
+            }
+
+            @Override
+            public void showLines(String handle, long from, long to) {
+                LogTab t = tabOf(handle);
+                if (t == null) {
+                    status.setText("That log isn't open any more");
+                    return;
+                }
+                tabs.setSelectedComponent(t);
+                t.showLines(from - 1, to - 1);
+            }
+
+            @Override
+            public void find(String handle, String text) {
+                LogTab t = tabOf(handle);
+                if (t != null) {
+                    tabs.setSelectedComponent(t);
+                    t.findAll(SearchQuery.literal(text));
+                }
+            }
+
+            @Override
+            public void query(String handle, String sql) {
+                LogTab t = tabOf(handle);
+                if (t != null) {
+                    tabs.setSelectedComponent(t);
+                    t.showQuery();
+                    t.queryPanel().runQuery(sql);
+                }
+            }
+
+            @Override
+            public logsift.agent.Workspace workspace() {
+                return chatWorkspace();
+            }
+
+            @Override
+            public logsift.agent.LogCatalog catalog() {
+                return chatWorkspace().catalog();
+            }
+
+            @Override
+            public void closeChat() {
+                hideChat();
+            }
+        };
+    }
+
+    /** The tab whose log has this handle in the assistant's workspace. */
+    private LogTab tabOf(String handle) {
+        if (chatWorkspace == null) {
+            return null;
+        }
+        logsift.core.LogAnalysis a = chatWorkspace.logs().get(handle);
+        if (a == null) {
+            return null;
+        }
+        for (LogTab t : allTabs()) {
+            if (t.document() == a.document()) {
+                return t;
+            }
+        }
+        return null;
+    }
+
+    ChatPanel chatPanelForTest() {
+        return chatPanel;
+    }
 
     /** Shows "⚠ 2 errors" while this session has errors (not cleared); hidden when there are none. */
     private void updateErrorsButton() {
@@ -3114,6 +3309,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         // ---- View: what is shown and how
         JMenu view = menu("View");
+        view.add(check("Assistant", "sparkles", KeyStroke.getKeyStroke(KeyEvent.VK_I, MENU),
+                () -> chatPanel != null && chatPanel.isShowing(), e -> toggleChat()));
+        view.addSeparator();
         view.add(check("Follow (Tail)", "arrow-down-to-line", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU),
                 () -> currentTab() != null && currentTab().mainView().isFollow(),
                 e -> setFollow(currentTab() == null || !currentTab().mainView().isFollow())));
@@ -3386,6 +3584,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             hook.run();
         }
         if (c instanceof LogTab t) {
+            if (chatWorkspace != null && t.document() != null) {
+                chatWorkspace.forget(t.document());
+            }
             JvmBar bar = jvmBars.remove(t);
             if (bar != null) {
                 bar.close();

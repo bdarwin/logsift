@@ -2681,6 +2681,332 @@ class VisualTest {
         return counts;
     }
 
+    /** An assistant that answers by a script: Logsift's real tools on the log, then words with line links. */
+    private static final class ScriptedAssistant implements logsift.chat.ChatEngine {
+        final List<String> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        @Override
+        public String name() {
+            return "GitHub Copilot";
+        }
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public String user() {
+            return "tester";
+        }
+
+        @Override
+        public List<Model> models() {
+            return List.of(new Model("auto", "Auto", 0, 0, 0, List.of(), null, true),
+                    new Model("claude-haiku-5.5", "Claude Haiku 5.5", 10, 50, 1_000_000, List.of("low", "medium", "high"),
+                            "medium", true),
+                    new Model("claude-sonnet-5.5", "Claude Sonnet 5.5", 200, 1000, 1_000_000,
+                            List.of("low", "medium", "high"), "medium", true),
+                    new Model("grok-4.6", "Grok 4.6", 200, 600, 500_000, List.of(), null, false));
+        }
+
+        @Override
+        public Quota quota() {
+            return new Quota(12, 1500, false, 99.2, "2026-12-01T00:00:00Z");
+        }
+
+        @Override
+        public Conversation open(Setup setup, Listener l) {
+            return new Conversation() {
+                @Override
+                public String id() {
+                    return "scripted-1";
+                }
+
+                @Override
+                public void send(String text) {
+                    asked.add(text);
+                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("Shown: (log:\\d+) = (\\S+)").matcher(text);
+                    String h = m.find() ? m.group(1) : "log:1";
+                    String name = m.group(2);
+                    new Thread(() -> {
+                        try {
+                            l.on(new logsift.chat.ChatEvent.Usage("claude-haiku-5.5", 3500, 40, 0, 4.0e7, 900));
+                            l.on(new logsift.chat.ChatEvent.ToolStarted("c1", "read_lines",
+                                    "{\"log\": \"" + h + "\", \"from\": 3, \"count\": 2}"));
+                            var read = setup.tools().stream().filter(t -> t.name().equals("read_lines")).findFirst()
+                                    .orElseThrow();
+                            read.handler().call("c1", Map.of("log", h, "from", 3, "count", 2));
+                            l.on(new logsift.chat.ChatEvent.ToolFinished("c1", true));
+                            for (String part : List.of("**The database refused connections** from 10:42:01: ",
+                                    "[" + name + ":3-4](logsift:" + h + ":3-4).\n\n",
+                                    "| time | error |\n|---|---|\n| 10:42:01 | connection refused |\n",
+                                    "| 10:42:02 | connection refused |\n\n",
+                                    "It recovered at [10:43](logsift:" + h + ":5).")) {
+                                l.on(new logsift.chat.ChatEvent.Text("m2", part));
+                                Thread.sleep(30);
+                            }
+                            l.on(new logsift.chat.ChatEvent.Usage("claude-haiku-5.5", 3700, 60, 3500, 1.2e7, 800));
+                            l.on(new logsift.chat.ChatEvent.Idle(false));
+                        } catch (Exception e) {
+                            l.on(new logsift.chat.ChatEvent.Failed(e.toString()));
+                            l.on(new logsift.chat.ChatEvent.Idle(false));
+                        }
+                    }).start();
+                }
+
+                @Override
+                public void abort() {
+                    l.on(new logsift.chat.ChatEvent.Idle(true));
+                }
+
+                @Override
+                public void setModel(String model, String effort) {
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    @Test
+    @Order(66)
+    void chatsWithTheAssistantBesideTheLog() throws Exception {
+        // GitHub Copilot beside the log: it reads the lines with Logsift's tools, its answer links them,
+        // and every chat is kept, scrolls back a page at a time, and can be searched
+        ScriptedAssistant engine = new ScriptedAssistant();
+        logsift.chat.ChatService.useFactory((settings, home) -> engine);
+        logsift.chat.ChatStore store = logsift.chat.ChatService.get().store();
+        for (var c : store.chats(null, 10_000)) {
+            store.delete(c.id()); // the test's own home: last run's chats
+        }
+        Path f = dir.resolve("checkout.log");
+        Files.writeString(f, """
+                2026-11-04 10:41:00.000 INFO  [main] com.acme.App - started
+                2026-11-04 10:41:30.000 INFO  [http-1] com.acme.Checkout - order 17 paid
+                2026-11-04 10:42:01.000 ERROR [http-2] com.acme.Db - connection refused to db-1:5432
+                2026-11-04 10:42:02.000 ERROR [http-3] com.acme.Db - connection refused to db-1:5432
+                2026-11-04 10:43:00.000 INFO  [main] com.acme.Db - reconnected
+                """);
+        onEdt(() -> {
+            frame.openFile(f);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(f)
+                        && !frame.currentTab().document().isIndexing());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the log");
+        LogTab tab = onEdt(frame::currentTab);
+        onEdt(() -> {
+            tab.showLines(2, 3); // lines 3 and 4 chosen
+            return null;
+        });
+        ChatPanel chat = onEdt(frame::showChat);
+        waitFor(() -> {
+            try {
+                return onEdt(() -> chat.modelForTest().getItemCount() == 4);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "connected");
+        assertEquals("GitHub Copilot · tester", onEdt(chat::statusForTest));
+        assertEquals("auto", onEdt(() -> ((logsift.chat.ChatEngine.Model) chat.modelForTest().getSelectedItem()).id()),
+                "Copilot's own choice until one is chosen");
+        onEdt(() -> {
+            chat.modelForTest().setSelectedIndex(1);
+            chat.refreshContextForTest();
+            return null;
+        });
+        String chips = onEdt(() -> java.util.Arrays.stream(chat.chipsForTest().getComponents())
+                .flatMap(c -> java.util.Arrays.stream(((java.awt.Container) c).getComponents()))
+                .filter(c -> c instanceof javax.swing.JLabel).map(c -> ((javax.swing.JLabel) c).getText())
+                .collect(java.util.stream.Collectors.joining("|")));
+        assertEquals("checkout.log|lines 3–4", chips, "what goes with the question");
+        onEdt(() -> {
+            chat.inputForTest().setText("Why did checkout fail at 10:42?");
+            chat.sendForTest();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !chat.busyForTest() && chat.transcriptForTest().shownForTest() == 3);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the answer");
+        String asked = engine.asked.get(0);
+        assertTrue(asked.contains("Shown: log:") && asked.contains("checkout.log") && asked.contains("lines 3-4"), asked);
+        assertTrue(asked.endsWith("Why did checkout fail at 10:42?"), asked);
+        List<ChatEntryView> views = onEdt(() -> chat.transcriptForTest().viewsForTest());
+        assertEquals(logsift.chat.ChatMessage.Kind.TOOL, views.get(1).message().kind());
+        assertTrue(views.get(1).message().text().contains("connection refused to db-1:5432"),
+                "the tool read the window's own log: " + views.get(1).message().text());
+        ChatEntryView answer = views.get(2);
+        onEdt(() -> {
+            answer.renderForTest();
+            return null;
+        });
+        String words = onEdt(answer::bodyTextForTest);
+        assertTrue(words.contains("The database refused connections") && words.contains("checkout.log:3-4"), words);
+        assertTrue(words.contains("connection refused"), "the table: " + words);
+        assertTrue(onEdt(answer::htmlForTest).contains("href=\"logsift:log:"), "line links are links");
+        assertEquals("Claude Haiku 5.5 · 0.05 credits · 7.3k tokens", onEdt(answer::headerText)
+                .replaceAll(" · [0-9.]+ (ms|s)$", ""));
+        assertTrue(onEdt(chat::creditsForTest).startsWith("This chat 0.05 credits"), onEdt(chat::creditsForTest));
+        assertEquals("Why did checkout fail at 10:42?", onEdt(chat::titleForTest));
+        settle();
+        shot("130a-assistant");
+        // a line link shows those lines in the log
+        onEdt(() -> {
+            tab.showLines(0, 0);
+            chat.linkForTest("logsift:" + views.get(1).message().args().replaceAll(".*\"(log:\\d+)\".*", "$1") + ":5");
+            return null;
+        });
+        assertArrayEquals(new long[] {4, 4}, onEdt(tab::chosenLines), "line 5 shown and chosen");
+        onEdt(() -> {
+            chat.toolActionForTest(views.get(1).message(), ChatEntryView.SHOW_LINES);
+            return null;
+        });
+        assertArrayEquals(new long[] {2, 3}, onEdt(tab::chosenLines), "the lines the tool read");
+        String usage = onEdt(chat::usageForTest);
+        assertTrue(usage.contains("12 of 1,500 used") && usage.contains("This month") && usage.contains("Claude Haiku 5.5"),
+                usage);
+
+        // a long chat: it opens at its end and scrolls back a page at a time, both ways
+        var longChat = store.create("A long investigation", "claude-haiku-5.5", null);
+        for (int i = 1; i <= 500; i++) {
+            store.append(i % 2 == 1 ? logsift.chat.ChatMessage.user(longChat.id(), "question " + i)
+                    : logsift.chat.ChatMessage.assistant(longChat.id(), "claude-haiku-5.5").withText(
+                            "answer " + i + (i == 250 ? ": the pool ran out of connections" : "")));
+        }
+        onEdt(() -> {
+            chat.showHistoryForTest();
+            return null;
+        });
+        ChatHistory history = onEdt(chat::historyForTest);
+        assertEquals("A long investigation", onEdt(() -> history.rowForTest(0).chat().title()), "newest first");
+        onEdt(() -> {
+            history.openForTest(0);
+            return null;
+        });
+        settle();
+        ChatTranscript t = onEdt(chat::transcriptForTest);
+        assertEquals(500, onEdt(t::lastSeqForTest));
+        assertEquals(ChatTranscript.PAGE, onEdt(t::shownForTest), "one page, not 500");
+        for (int i = 0; i < 12; i++) {
+            onEdt(() -> {
+                t.scrollToTopForTest();
+                return null;
+            });
+            settle();
+        }
+        long first = onEdt(t::firstSeqForTest);
+        assertTrue(first < 500 - ChatTranscript.PAGE * 5, "scrolled back to " + first);
+        assertTrue(onEdt(t::shownForTest) <= ChatTranscript.KEEP, "the window keeps at most " + ChatTranscript.KEEP);
+        onEdt(() -> {
+            t.jumpToEnd();
+            return null;
+        });
+        settle();
+        assertEquals(500, onEdt(t::lastSeqForTest), "back at the newest");
+        // search goes to the very entry
+        onEdt(() -> {
+            chat.showHistoryForTest();
+            history.searchForTest().setText("pool ran out");
+            history.refresh();
+            return null;
+        });
+        assertEquals(1, onEdt(history::rowsForTest));
+        settle();
+        shot("130b-assistant-search");
+        onEdt(() -> {
+            history.openForTest(0);
+            return null;
+        });
+        settle();
+        assertTrue(onEdt(() -> t.viewsForTest().stream().anyMatch(v -> v.message().seq() == 250)), "around the hit: "
+                + onEdt(() -> t.chat() + " " + t.firstSeqForTest() + "-" + t.lastSeqForTest() + " " + history.rowForTest(0)));
+        assertTrue(onEdt(t::firstSeqForTest) < 250 && onEdt(t::lastSeqForTest) > 250);
+        assertTrue(onEdt(() -> t.inViewForTest(250)), "the hit is in view");
+        assertFalse(onEdt(() -> t.viewsForTest().stream().anyMatch(v -> v.headerText().contains("answering"))),
+                "stored answers aren't answering");
+        settle();
+        shot("130c-assistant-long-chat");
+
+        // without Copilot it says what to do
+        logsift.chat.ChatService.useFactory(new logsift.chat.ChatService.EngineFactory() {
+            @Override
+            public logsift.chat.ChatEngine make(logsift.chat.ChatSettings s, Path home) {
+                return null;
+            }
+        });
+        ChatPanel none = onEdt(() -> new ChatPanel(chatHostForTest(), logsift.chat.ChatService.get()));
+        waitFor(() -> {
+            try {
+                return onEdt(() -> none.statusForTest().equals("Not connected"));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "not connected");
+        onEdt(() -> {
+            none.close();
+            frame.hideChat();
+            frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
+            return null;
+        });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    /** A window with nothing open, for a chat panel on its own. */
+    private static ChatPanel.Host chatHostForTest() {
+        return new ChatPanel.Host() {
+            @Override
+            public List<ChatPanel.OpenLog> openLogs() {
+                return List.of();
+            }
+
+            @Override
+            public long[] chosenLines() {
+                return null;
+            }
+
+            @Override
+            public void showLines(String handle, long from, long to) {
+            }
+
+            @Override
+            public void find(String handle, String text) {
+            }
+
+            @Override
+            public void query(String handle, String sql) {
+            }
+
+            @Override
+            public logsift.agent.Workspace workspace() {
+                return null;
+            }
+
+            @Override
+            public logsift.agent.LogCatalog catalog() {
+                return logsift.agent.LogCatalog.EMPTY;
+            }
+
+            @Override
+            public void closeChat() {
+            }
+        };
+    }
+
     private void shot(String name) throws Exception {
         shotOf(frame.getRootPane(), name);
     }

@@ -585,6 +585,12 @@ final class QueryPanel extends JPanel {
 
     // ---------------------------------------------------------------- for tests
 
+    /** Puts a query in the box and runs it (from the assistant: "Open in Query"). */
+    void runQuery(String q) {
+        setQuery(q);
+        run();
+    }
+
     void setQueryForTest(String q) {
         setQuery(q);
     }

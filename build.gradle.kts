@@ -36,6 +36,12 @@ dependencies {
     // every system's native library)
     implementation("io.github.bdarwin:quackjvm-core:1.3.0") { exclude(group = "org.duckdb") }
     implementation("io.github.bdarwin:quackjvm-agent:1.3.0") { exclude(group = "org.duckdb") }
+    // GitHub Copilot's SDK (MIT) for the assistant in the window. It runs the person's own Copilot
+    // program; its native runtime isn't bundled.
+    implementation("com.github:copilot-sdk-java:1.0.28")
+    // Markdown (BSD-2) for the assistant's answers, with tables
+    implementation("org.commonmark:commonmark:0.24.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.24.0")
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

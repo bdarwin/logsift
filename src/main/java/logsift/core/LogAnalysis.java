@@ -220,6 +220,8 @@ public final class LogAnalysis implements AutoCloseable {
     private final LogDocument doc;
     private final Path path;
     private final List<CustomFormat> custom;
+    /** Whether closing this closes the document too (not one the window has open). */
+    private boolean ownsDocument = true;
     private FilterEngine errorLines;
     private FilterEngine warningLines;
     private TimeIndex timeIndex;
@@ -249,6 +251,16 @@ public final class LogAnalysis implements AutoCloseable {
             throw new IOException("UTF-16 logs can only be opened in the Logsift window for now: " + path);
         }
         return new LogAnalysis(LogDocument.open(path, LineIndex.DEFAULT_CHUNK_SIZE, cs), path, custom);
+    }
+
+    /**
+     * A log the window already has open, read through its document as it is (same lines, same
+     * index): nothing is read again. Closing this leaves the document open.
+     */
+    public static LogAnalysis borrowed(LogDocument doc, Path path, List<CustomFormat> custom) {
+        LogAnalysis a = new LogAnalysis(doc, path, custom);
+        a.ownsDocument = false;
+        return a;
     }
 
     public LogDocument document() {
@@ -381,6 +393,8 @@ public final class LogAnalysis implements AutoCloseable {
         if (warningLines != null) {
             warningLines.close();
         }
-        doc.close();
+        if (ownsDocument) {
+            doc.close();
+        }
     }
 }

@@ -66,6 +66,7 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Wrap long lines | Alt+Z (⌥Z on macOS) |
 | Tree of loggers | Ctrl+Shift+B |
 | Fold or open the bottom panel | Ctrl+J |
+| The assistant (ask Copilot about the open logs) | Ctrl+I |
 | Bigger / smaller font | Ctrl+= / Ctrl+- |
 
 ## Selecting and copying
@@ -78,6 +79,15 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Extend the selection | Shift+click, Shift+arrows, or drag in the line numbers |
 | A table: select a cell / a block of cells | Click / Shift+click or drag; arrows move, Shift+arrows grow it |
 | A table: copy the cells (tab-separated, for a spreadsheet) | Ctrl+C |
+
+## The assistant
+
+| Action | Keys |
+|---|---|
+| Open or close it | Ctrl+I |
+| Ask | Enter |
+| A new line in the question | Shift+Enter |
+| Stop the answer | Enter again, or the stop button |
 
 ## JVMs
 
