@@ -39,7 +39,11 @@ class CopilotEngineTest {
         ChatEngine e = ChatService.COPILOT.make(new ChatSettings(null, null, cli.toString()), dir.resolve("home"));
         CopilotEngine c = assertInstanceOf(CopilotEngine.class, e);
         assertNull(c.home());
+        // and works in a folder of Logsift's, made when a chat starts (with no home of its own,
+        // starting a chat failed on a null folder)
         assertFalse(Files.exists(dir.resolve("home")));
+        assertEquals(dir.resolve("home").resolve("chat").resolve("work"), c.work());
+        assertTrue(Files.isDirectory(c.work()));
     }
 
     @Test

@@ -39,6 +39,7 @@ public final class CopilotEngine implements ChatEngine {
 
     private final Path cli;
     private final Path home;
+    private final Path work;
     private CopilotClient client;
     private final ExecutorService tools = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "logsift-chat-tool");
@@ -50,15 +51,22 @@ public final class CopilotEngine implements ChatEngine {
      * @param cli  the {@code copilot} program
      * @param home Copilot's own folder, or null for the person's ({@code ~/.copilot}), where the
      *             program keeps its sign-in: a folder of its own would leave it signed out
+     * @param work the folder Copilot works in, in Logsift's: never one of the person's projects
      */
-    public CopilotEngine(Path cli, Path home) {
+    public CopilotEngine(Path cli, Path home, Path work) {
         this.cli = cli;
         this.home = home;
+        this.work = java.util.Objects.requireNonNull(work, "work");
     }
 
     /** Copilot's folder, or null for the person's own. */
     Path home() {
         return home;
+    }
+
+    /** The folder Copilot works in, made if it isn't there. */
+    Path work() throws java.io.IOException {
+        return java.nio.file.Files.createDirectories(work);
     }
 
     @Override
@@ -169,8 +177,7 @@ public final class CopilotEngine implements ChatEngine {
         // Logsift's own instructions instead of Copilot's coding-agent ones: shorter, and about logs
         SystemMessageConfig system = new SystemMessageConfig().setMode(com.github.copilot.SystemMessageMode.REPLACE)
                 .setContent(setup.instructions());
-        Path work = home.resolve("work");
-        java.nio.file.Files.createDirectories(work);
+        Path work = work();
         CopilotSession s;
         if (setup.resume() != null) {
             ResumeSessionConfig r = new ResumeSessionConfig().setModel(setup.model()).setTools(defs)

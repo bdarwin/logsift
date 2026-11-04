@@ -43,7 +43,7 @@ public final class ChatService {
     /** The real one: the person's own copilot program, in its own folder (~/.copilot), where its sign-in is. */
     public static final EngineFactory COPILOT = (settings, home) -> {
         Path cli = CopilotLocator.find(settings.copilot());
-        return cli == null ? null : new CopilotEngine(cli, null);
+        return cli == null ? null : new CopilotEngine(cli, null, home.resolve("chat").resolve("work"));
     };
 
     private static volatile EngineFactory factory = COPILOT;
