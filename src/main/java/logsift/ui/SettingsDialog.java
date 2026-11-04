@@ -520,12 +520,7 @@ final class SettingsDialog extends JDialog {
         JLabel cacheUsed = new JLabel();
         cacheUsed.setName("pivotCacheUsed");
         Runnable showUsed = () -> {
-            long bytes;
-            try {
-                bytes = logsift.core.PivotCache.size(PivotCaches.dir());
-            } catch (java.io.IOException e) {
-                bytes = 0;
-            }
+            long bytes = logsift.core.PivotCache.size(PivotCaches.dir());
             cacheUsed.setText(String.format(java.util.Locale.ROOT, "GB · %,.1f MB in use", bytes / 1048576.0));
         };
         showUsed.run();
@@ -539,11 +534,7 @@ final class SettingsDialog extends JDialog {
                     inUse.add(k);
                 }
             }
-            try {
-                logsift.core.PivotCache.clear(PivotCaches.dir(), inUse);
-            } catch (java.io.IOException ex) {
-                logsift.core.Problems.unexpected(ex);
-            }
+            logsift.core.PivotCache.clear(PivotCaches.dir(), inUse);
             showUsed.run();
         });
         JPanel cacheRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));

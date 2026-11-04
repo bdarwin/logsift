@@ -212,33 +212,42 @@ class PivotCacheTest {
     }
 
     @Test
-    void aChangedFileGetsANewCacheAndOldOnesGo() throws Exception {
+    void aFileWrittenAgainIsReadAgainAndOldCachesGoPastTheRoom() throws Exception {
         Path f = table(dir.resolve("t.csv"), 500, 3);
         Opened o = open(f);
         Path cacheDir = dir.resolve("cache");
-        String first;
         Pivot.Spec spec = new Pivot.Spec(List.of(new Pivot.Field(0)), List.of(), List.of(v(3, Pivot.Agg.SUM)), Map.of());
         try (PivotCache cache = PivotCache.open(f, o.format(), cacheDir, PivotCache.DEFAULT_LIMIT)) {
-            first = cache.key();
             assertTrue(cache.build(spec, o.fields(), o.lines(), o.doc().lineCount(), () -> false, null));
+            assertEquals(500, cache.compute(spec, o.fields(), ZONE, o.doc().lineCount()).rows());
         }
         o.doc().close();
-        // rewritten (another time too): a new cache, which has nothing yet
+        // another table's cache, closed: it goes when there's no room
+        Path g = table(dir.resolve("other.csv"), 300, 6);
+        Opened og = open(g);
+        Path otherCache;
+        try (PivotCache cache = PivotCache.open(g, og.format(), cacheDir, PivotCache.DEFAULT_LIMIT)) {
+            assertTrue(cache.build(spec, og.fields(), og.lines(), og.doc().lineCount(), () -> false, null));
+            otherCache = cache.cacheFile();
+        }
+        og.doc().close();
+        assertTrue(Files.exists(otherCache));
+        // written again from the start, other rows: read again, answered for what it holds now
         table(f, 600, 4);
         Files.setLastModifiedTime(f, FileTime.fromMillis(System.currentTimeMillis() + 5000));
         Opened o2 = open(f);
-        try (PivotCache cache = PivotCache.open(f, o2.format(), cacheDir, PivotCache.DEFAULT_LIMIT)) {
-            assertNotEquals(first, cache.key());
-            assertFalse(cache.has(spec));
+        try (PivotCache cache = PivotCache.open(f, o2.format(), cacheDir, 1)) {
+            cache.feed(o2.lines(), o2.doc().lineCount());
+            assertFalse(cache.has(spec), "not for the file as it is now");
             assertTrue(cache.build(spec, o2.fields(), o2.lines(), o2.doc().lineCount(), () -> false, null));
             Pivot.Result r = cache.compute(spec, o2.fields(), ZONE, o2.doc().lineCount());
+            Pivot.Result fromFile = Pivot.compute(o2.format(), o2.doc().lineCount(), o2.lines(), null, spec,
+                    o2.fields(), ZONE, () -> false, null);
+            assertSame(fromFile, r, "the file written again");
             assertEquals(600, r.rows());
-        }
-        assertTrue(Files.exists(cacheDir.resolve(first + ".duckdb")), "the old one stays while there is room");
-        // no room: the old one goes, the one in use stays
-        try (PivotCache cache = PivotCache.open(f, o2.format(), cacheDir, 1)) {
-            assertFalse(Files.exists(cacheDir.resolve(first + ".duckdb")));
-            assertTrue(cache.has(spec));
+            // no room: the other table's cache went, the one in use stayed
+            assertFalse(Files.exists(otherCache), "past the room, the longest unused goes");
+            assertTrue(Files.exists(cache.cacheFile()));
         }
         assertTrue(PivotCache.size(cacheDir) > 0);
         PivotCache.clear(cacheDir, Set.of());
@@ -252,23 +261,25 @@ class PivotCacheTest {
         Opened o = open(f);
         Path cacheDir = dir.resolve("cache");
         Pivot.Spec spec = new Pivot.Spec(List.of(new Pivot.Field(0)), List.of(), List.of(v(3, Pivot.Agg.SUM)), Map.of());
-        String key;
+        Path first;
         try (PivotCache cache = PivotCache.open(f, o.format(), cacheDir, PivotCache.DEFAULT_LIMIT)) {
-            key = cache.key();
             assertTrue(cache.build(spec, o.fields(), o.lines(), o.doc().lineCount(), () -> false, null));
+            first = cache.cacheFile();
         }
-        Path first = cacheDir.resolve(key + ".duckdb");
         Process other = HoldsDatabase.start(first); // an agent's logsift-mcp, say
         try {
             assertThrows(io.quackjvm.core.DatabaseInUse.class, () -> io.quackjvm.core.Quack.open(first.toString()),
                     "the other program has it");
+            Path copy;
             try (PivotCache cache = PivotCache.open(f, o.format(), cacheDir, 1)) {
                 assertFalse(cache.has(spec), "a copy of its own, which has nothing yet");
                 assertTrue(cache.build(spec, o.fields(), o.lines(), o.doc().lineCount(), () -> false, null));
                 assertEquals(500, cache.compute(spec, o.fields(), ZONE, o.doc().lineCount()).rows());
+                copy = cache.cacheFile();
             }
             assertTrue(Files.exists(first), "the other program's cache stays");
-            assertTrue(Files.exists(cacheDir.resolve(key + ".duckdb.2")));
+            assertNotEquals(first, copy);
+            assertTrue(Files.exists(copy));
         } finally {
             HoldsDatabase.stop(other);
         }

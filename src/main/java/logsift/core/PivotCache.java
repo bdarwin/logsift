@@ -1,23 +1,27 @@
 package logsift.core;
 
-import io.quackjvm.agent.udf.Udfs;
-import io.quackjvm.core.Quack;
+import io.quackjvm.agent.file.FileTable;
+import io.quackjvm.agent.file.FileTables;
+import io.quackjvm.agent.file.RowFunction;
+import io.quackjvm.agent.file.RowParser;
+import io.quackjvm.agent.file.RowSource;
+import io.quackjvm.agent.guard.CancelSignal;
+import io.quackjvm.agent.guard.GuardedResult;
+import io.quackjvm.agent.guard.Hardening;
+import io.quackjvm.agent.guard.QueryCancelled;
+import io.quackjvm.agent.guard.QueryPolicy;
+import io.quackjvm.agent.session.QuerySession;
+import io.quackjvm.agent.session.ResultWindow;
 import io.quackjvm.core.duckdb.ColumnDef;
-import io.quackjvm.core.duckdb.TableWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -26,277 +30,267 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
-import java.util.stream.Stream;
 
 /**
- * The columns of a big table that Pivot has used, kept in a DuckDB file so the next pivot doesn't
- * read the whole file again: 5 million rows are summed up in milliseconds instead of seconds, and
- * a table of 6,000 columns no longer has every row split.
+ * The columns of a big table that Pivot, column filters and value counts have used, kept on disk
+ * so the next pivot doesn't read the whole file again: 5 million rows are summed up in milliseconds
+ * instead of seconds, and a table of 6,000 columns no longer has every row split.
  *
- * <p>Logsift reads the file as Pivot does (the same splitting, blanks, numbers and times) and
- * stores each column it needs as a table of its own, in file order: {@code c<i>(t, n, e)} with the
- * text, its number and its time. "Values as One" over many columns keeps each row's count, sum,
- * min and max in a table {@code p_<key>}. DuckDB then groups and totals; the labels and answers are
- * what Pivot gives when it reads the file (median and percentiles exactly, where Pivot samples
- * past a million numbers).
+ * <p>A quackjvm {@link FileTable} over the file, a row per table row (by its first line), with lazy
+ * columns: of each of the file's columns, its text ({@code c<i>}: stripped, null when blank), its
+ * number ({@code n<i>}), its time ({@code e<i>}, ms) and its value as column filters read it
+ * ({@code v<i>}), each stored the first time it's needed; {@code pv} says whether Pivot counts the
+ * row (not blank, not the header, not a broken row). "Values as One" over many columns keeps each
+ * row's count, numbers, sum, min and max in columns the application computes ({@code p_<key>_…}).
+ * DuckDB then groups and totals; the labels and answers are what Pivot gives when it reads the file
+ * (median and percentiles exactly, where Pivot samples past a million numbers).
  *
- * <p>The cache is for one version of the file: its name holds the file's path, size and time, so
- * a changed file gets a new one. Old ones are removed, oldest first, past a size limit.
+ * <p>The cache follows the file: rows written since are added when it's used, and a file written
+ * again from the start is read again (the table sees its first bytes change). Caches past a size
+ * limit are removed, the longest unused first, never one in use.
  */
 public final class PivotCache implements AutoCloseable {
     /** Changes when the stored layout changes, so older caches aren't read. */
-    static final int VERSION = 1;
+    static final String VERSION = "logsift-pivot-2";
     /** Files smaller than this are pivoted from the file itself, quick enough. */
     public static final long MIN_BYTES = 200L << 20;
     /** The default room for caches. */
     public static final long DEFAULT_LIMIT = 5L << 30;
 
-    private final Quack db;
+    /** What SQL calls the table. */
+    static final String TABLE = "p";
+
     private final Path file;
     private final LogFormat format;
-    /** Tables built: name to rows. */
-    private final Map<String, Long> tables = new HashMap<>();
-    /** The column tables that have times ({@code e}). */
-    private final Set<String> timed = new HashSet<>();
-    private ZoneId udfZone;
-    /** The name it was opened by. */
-    private String key;
-
     private final String read;
+    private final FileTable table;
+    private final QuerySession session;
+    private final Feed feed;
+    /** The times of the columns, as Pivot reads them (from the fields last given). */
+    private volatile List<TimeFormat> times = List.of();
+    private ZoneId udfZone;
+    private boolean testRegistered;
+    /** Pools ("Values as One") declared on the table: name to their columns. */
+    private final Map<String, int[]> pools = new HashMap<>();
 
-    private PivotCache(Quack db, Path file, LogFormat format, String read) {
-        this.db = db;
+    private PivotCache(Path file, LogFormat format, String read, FileTable table, QuerySession session, Feed feed) {
+        this.feed = feed;
         this.file = file;
         this.format = format;
         this.read = read;
+        this.table = table;
+        this.session = session;
     }
 
     /**
-     * The cache of this version of the file, in {@code dir} (made if need be). Older caches past
-     * {@code limitBytes} are removed first, oldest used first.
+     * The cache of the file read this way, in {@code dir} (made if need be). Caches past
+     * {@code limitBytes} are removed first, the longest unused first.
      */
     public static PivotCache open(Path file, LogFormat format, Path dir, long limitBytes) throws IOException {
         return open(file, format, "", dir, limitBytes);
     }
 
-    /**
-     * Programs that can have one file's cache open at the same time (the app and an agent's
-     * logsift-mcp, say). DuckDB lets one program at a time write a file, so each beyond the first
-     * gets a copy of its own next to it.
-     */
-    static final int MAX_COPIES = 4;
-
     /** As {@link #open(Path, LogFormat, Path, long)}; {@code read} tells how the file is read (its encoding). */
     public static PivotCache open(Path file, LogFormat format, String read, Path dir, long limitBytes)
             throws IOException {
         Files.createDirectories(dir);
-        String key = key(file, format, read);
-        trim(dir, limitBytes, key);
-        io.quackjvm.core.DatabaseInUse inUse = null;
-        for (int copy = 1; copy <= MAX_COPIES; copy++) {
-            Path db = dir.resolve(fileName(key, copy));
-            if (Files.exists(db)) {
-                Files.setLastModifiedTime(db, FileTime.fromMillis(System.currentTimeMillis())); // used now
-            }
-            Quack q;
-            try {
-                q = open(db);
-            } catch (io.quackjvm.core.DatabaseInUse e) {
-                inUse = e; // another program has it open: never removed, the next copy is tried
-                continue;
-            }
-            PivotCache c = new PivotCache(q, file, format, read);
-            c.key = key;
-            c.load();
-            return c;
-        }
-        throw new IOException("Other programs have every copy of this file's cache open", inUse);
-    }
-
-    /**
-     * The cache file at {@code db}, made again if it can't be opened (cut short, or written by a
-     * newer DuckDB). One another program has open is left as it is: {@link io.quackjvm.core.DatabaseInUse}.
-     */
-    private static Quack open(Path db) {
+        Path abs = file.toAbsolutePath().normalize();
+        Feed feed = new Feed();
+        FileTable t;
         try {
-            return locked(db);
-        } catch (io.quackjvm.core.DatabaseInUse e) {
-            throw e;
+            t = FileTables.builder(abs, columns(format), feed, parser(format, feed)).name(TABLE).cacheDir(dir)
+                    .roomLimit(limitBytes).lazyColumns(true).maxNewColumnsPerQuery(Integer.MAX_VALUE)
+                    .version(VERSION + "|" + read + "|" + (int) format.delimiter() + "|"
+                            + String.join("\u0001", format.columns()))
+                    .open();
         } catch (RuntimeException e) {
-            try {
-                Files.deleteIfExists(db);
-                Files.deleteIfExists(Path.of(db + ".wal"));
-            } catch (IOException gone) {
-                throw e;
-            }
-            return locked(db);
+            throw new IOException("The Pivot cache couldn't be opened: " + e.getMessage(), e);
         }
-    }
-
-    /**
-     * The database, locked down: SQL run in it (queries over a big table) reaches no file, folder,
-     * extension or network, and its settings can't be changed.
-     */
-    private static Quack locked(Path db) {
-        return Quack.builder(db.toString()).settings(io.quackjvm.agent.guard.Hardening.options().properties()).open();
-    }
-
-    /** The file of a cache: the first copy {@code <key>.duckdb}, then {@code <key>.duckdb.2} and so on. */
-    static String fileName(String key, int copy) {
-        return key + ".duckdb" + (copy == 1 ? "" : "." + copy);
-    }
-
-    /** The name of a file's cache: its path, size, time and columns. */
-    static String key(Path file, LogFormat format, String read) throws IOException {
-        String id = file.toAbsolutePath().normalize() + "|" + read + "|" + Files.size(file) + "|"
-                + Files.getLastModifiedTime(file).toMillis() + "|" + (int) format.delimiter() + "|"
-                + String.join("\u0001", format.columns()) + "|" + VERSION;
+        QuerySession s;
         try {
-            byte[] h = MessageDigest.getInstance("SHA-256").digest(id.getBytes(StandardCharsets.UTF_8));
-            StringBuilder b = new StringBuilder();
-            for (int i = 0; i < 16; i++) {
-                b.append(String.format("%02x", h[i]));
+            s = QuerySession.open(Hardening.options(), QueryPolicy.readOnly().maxRows(Long.MAX_VALUE));
+            s.register(TABLE, t);
+        } catch (RuntimeException e) {
+            t.close();
+            throw new IOException("The Pivot cache couldn't be opened: " + e.getMessage(), e);
+        }
+        PivotCache c = new PivotCache(abs, format, read, t, s, feed);
+        feed.owner = c;
+        return c;
+    }
+
+    /** The file's rows as the caller reads them (rows whole by their first line; null for a line inside one). */
+    static final class Feed implements RowSource {
+        volatile ColumnProfile.Lines lines;
+        volatile long count = -1;
+        PivotCache owner;
+        private static final Object SAME = new Object();
+
+        @Override
+        public long rowCount() {
+            long n = count;
+            if (n < 0) {
+                throw new IllegalStateException("the file's rows weren't given yet");
             }
-            return b.toString();
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
+            return n;
+        }
+
+        @Override
+        public void read(long first, int n, String[] into) {
+            lines.read(first, n, into);
+        }
+
+        @Override
+        public Object identity() {
+            return SAME; // a file written again is told by its first bytes
         }
     }
 
-    /** Removes caches, oldest used first, until those left (but {@code keep}) fit in {@code limit}. */
-    static void trim(Path dir, long limit, String keep) throws IOException {
-        record Entry(String key, long bytes, long used) {}
-        Map<String, long[]> by = new HashMap<>();
-        try (Stream<Path> s = Files.list(dir)) {
-            for (Path p : (Iterable<Path>) s::iterator) {
-                String name = p.getFileName().toString();
-                int dot = name.indexOf('.');
-                if (dot != 32 || !name.substring(dot).startsWith(".duckdb")) {
-                    continue; // only our own files
+    /** The table's columns: the row's line, whether Pivot counts it, then text, number, time and value of each. */
+    private static List<ColumnDef> columns(LogFormat format) {
+        List<ColumnDef> out = new ArrayList<>(List.of(new ColumnDef("line", Long.class),
+                new ColumnDef("pv", Boolean.class)));
+        for (int c = 0; c < format.columns().size(); c++) {
+            out.add(new ColumnDef("c" + c, String.class));
+            out.add(new ColumnDef("n" + c, Double.class));
+            out.add(new ColumnDef("e" + c, Long.class));
+            out.add(new ColumnDef("v" + c, String.class));
+        }
+        return out;
+    }
+
+    /** Where column {@code c}'s text, number, time and value are among the table's columns. */
+    private static int text(int c) {
+        return 2 + 4 * c;
+    }
+
+    /** Whether a row is one Pivot counts: not blank, and a row of the table (not the header, not broken). */
+    static boolean pivotRow(LogFormat format, String raw) {
+        return raw != null && !raw.isBlank() && format.isRow(raw);
+    }
+
+    private static RowParser parser(LogFormat format, Feed feed) {
+        int nc = format.columns().size();
+        return new RowParser() {
+            @Override
+            public boolean isRow(String raw, long rowNo) {
+                return raw != null; // a line inside a row comes as null
+            }
+
+            @Override
+            public void parse(String raw, long rowNo, Object[] cells) {
+                BitSet all = new BitSet();
+                all.set(0, cells.length);
+                parse(raw, rowNo, cells, all);
+            }
+
+            @Override
+            public void parse(String raw, long rowNo, Object[] cells, BitSet wanted) {
+                cells[0] = rowNo;
+                boolean pivot = pivotRow(format, raw);
+                cells[1] = pivot;
+                boolean[] want = null;
+                boolean anyValue = false;
+                for (int c = 0; c < nc; c++) {
+                    int at = text(c);
+                    if (wanted.get(at) || wanted.get(at + 1) || wanted.get(at + 2)) {
+                        if (want == null) {
+                            want = new boolean[nc];
+                        }
+                        want[c] = true;
+                    }
+                    anyValue |= wanted.get(at + 3);
                 }
-                long[] e = by.computeIfAbsent(name.substring(0, dot), k -> new long[2]);
-                e[0] += Files.size(p);
-                e[1] = Math.max(e[1], Files.getLastModifiedTime(p).toMillis());
-            }
-        }
-        List<Entry> all = new ArrayList<>();
-        long total = 0;
-        for (Map.Entry<String, long[]> e : by.entrySet()) {
-            all.add(new Entry(e.getKey(), e.getValue()[0], e.getValue()[1]));
-            total += e.getValue()[0];
-        }
-        all.sort(java.util.Comparator.comparingLong(Entry::used));
-        for (Entry e : all) {
-            if (total <= limit) {
-                break;
-            }
-            if (!e.key().equals(keep) && deleteCache(dir, e.key())) {
-                total -= e.bytes();
-            }
-        }
-    }
-
-    /** How much room the caches in {@code dir} take. */
-    public static long size(Path dir) throws IOException {
-        if (!Files.isDirectory(dir)) {
-            return 0;
-        }
-        long total = 0;
-        try (Stream<Path> s = Files.list(dir)) {
-            for (Path p : (Iterable<Path>) s::iterator) {
-                if (p.getFileName().toString().contains(".duckdb")) {
-                    total += Files.size(p);
+                if (want != null && pivot) {
+                    String[] split = format.splitSome(raw, want);
+                    List<TimeFormat> times = feed.owner == null ? List.of() : feed.owner.times;
+                    if (split != null) {
+                        for (int c = 0; c < nc; c++) {
+                            if (!want[c]) {
+                                continue;
+                            }
+                            int at = text(c);
+                            String v = PivotCache.text(split, c);
+                            cells[at] = v;
+                            if (v != null && wanted.get(at + 1)) {
+                                double d = Pivot.number(v);
+                                cells[at + 1] = Double.isNaN(d) ? null : d;
+                            }
+                            if (v != null && wanted.get(at + 2) && c < times.size() && times.get(c) != null) {
+                                long ms = times.get(c).parse(v);
+                                cells[at + 2] = ms == TimeFormat.NONE ? null : ms;
+                            }
+                        }
+                    }
                 }
-            }
-        }
-        return total;
-    }
-
-    /** Removes every cache in {@code dir} but those in use ({@code keep}). */
-    public static void clear(Path dir, Set<String> keep) throws IOException {
-        if (!Files.isDirectory(dir)) {
-            return;
-        }
-        Set<String> keys = new HashSet<>();
-        try (Stream<Path> s = Files.list(dir)) {
-            for (Path p : (Iterable<Path>) s::iterator) {
-                String name = p.getFileName().toString();
-                int dot = name.indexOf('.');
-                if (dot == 32 && name.substring(dot).startsWith(".duckdb")) {
-                    keys.add(name.substring(0, dot));
-                }
-            }
-        }
-        for (String k : keys) {
-            if (!keep.contains(k)) {
-                deleteCache(dir, k);
-            }
-        }
-    }
-
-    /**
-     * Removes a cache's files (every copy); one that can't be removed (open in another program on
-     * Windows) stays. Gives whether all went.
-     */
-    private static boolean deleteCache(Path dir, String key) throws IOException {
-        boolean all = true;
-        try (Stream<Path> s = Files.list(dir)) {
-            for (Path p : (Iterable<Path>) s::iterator) {
-                if (p.getFileName().toString().startsWith(key + ".duckdb")) {
-                    try {
-                        Files.deleteIfExists(p);
-                    } catch (IOException e) {
-                        all = false;
+                if (anyValue) {
+                    for (int c = 0; c < nc; c++) {
+                        if (wanted.get(text(c) + 3)) {
+                            cells[text(c) + 3] = format.value(raw, format.columns().get(c));
+                        }
                     }
                 }
             }
-        }
-        return all;
+        };
     }
 
-    /** This cache's name, for the file as it is now: another than when opened if the file changed. */
-    public String key() throws IOException {
-        return key(file, format, read);
+    /** A cell as Pivot reads it: stripped, null when blank. */
+    private static String text(String[] cells, int c) {
+        String v = c < cells.length && cells[c] != null ? cells[c].strip() : "";
+        return v.isEmpty() ? null : v;
     }
 
-    /** Whether it is the cache of this file as it is now, read this way. */
+    /** The rows as the caller reads them now: rows written since are stored when the cache is next used. */
+    public void feed(ColumnProfile.Lines lines, long lineCount) {
+        feed.lines = lines;
+        feed.count = lineCount;
+    }
+
+    /** The source files of caches in use (to keep), as {@link #clear} takes them. */
+    public String key() {
+        return file.toString();
+    }
+
+    /** The cache file (for tests). */
+    Path cacheFile() {
+        return table.cacheFile();
+    }
+
+    /** Whether it is the cache of this file, read this way. */
     public boolean isFor(Path file, LogFormat format, String read) {
-        try {
-            return this.file.equals(file) && this.format.equals(format) && this.read.equals(read)
-                    && key.equals(key(file, format, read));
-        } catch (IOException e) {
-            return false;
-        }
+        return this.file.equals(file.toAbsolutePath().normalize()) && this.format.equals(format) && this.read.equals(read);
     }
 
-    private void load() {
-        db.execute("CREATE TABLE IF NOT EXISTS built (name VARCHAR PRIMARY KEY, rows BIGINT)");
-        db.query("SELECT name, rows FROM built").forEachRow(r -> tables.put(r.getString(1), r.getLong(2)));
-        // a build that didn't finish left a table that isn't listed: it goes
-        List<String> present = db.query("SELECT table_name FROM duckdb_tables() WHERE schema_name = 'main'")
-                .list(String.class);
-        for (String t : present) {
-            if (!t.equals("built") && !tables.containsKey(t)) {
-                db.execute("DROP TABLE IF EXISTS \"" + t + "\"");
-            }
+    /** How much room the caches in {@code dir} take. */
+    public static long size(Path dir) {
+        return Files.isDirectory(dir) ? FileTables.size(dir) : 0;
+    }
+
+    /** Removes every cache in {@code dir} but those of files in use ({@code keep}: their {@link #key}s) and those open. */
+    public static void clear(Path dir, Set<String> keep) {
+        if (Files.isDirectory(dir)) {
+            FileTables.clear(dir, keep);
         }
-        timed.addAll(db.query("SELECT table_name FROM duckdb_columns() WHERE schema_name = 'main' AND column_name = 'e'")
-                .list(String.class));
     }
 
     // ---------------------------------------------------------------- what a pivot needs
 
-    /** The tables a pivot reads, or null when its answer can't come from the cache. */
-    private record Needs(Set<Integer> columns, Map<String, List<Integer>> pools) {}
+    /** The columns a pivot reads, or null when its answer can't come from the cache. */
+    private record Needs(Set<String> columns, Map<String, List<Integer>> pools) {}
 
-    private static Needs needs(Spec spec) {
-        Set<Integer> cols = new TreeSet<>();
+    private static Needs needs(Pivot.Spec spec) {
+        Set<String> cols = new LinkedHashSet<>(List.of("pv"));
         Map<String, List<Integer>> pools = new LinkedHashMap<>();
         for (Integer f : spec.filters().keySet()) {
-            cols.add(f);
+            cols.add("c" + f);
+            cols.add("line");
         }
-        spec.rows().forEach(f -> cols.add(f.column()));
-        spec.cols().forEach(f -> cols.add(f.column()));
+        for (Pivot.Field f : spec.rows()) {
+            field(f, cols);
+        }
+        for (Pivot.Field f : spec.cols()) {
+            field(f, cols);
+        }
         for (Pivot.Value v : spec.cellValues()) {
             List<Integer> read = v.read();
             if (read.size() > 1) {
@@ -304,20 +298,28 @@ public final class PivotCache implements AutoCloseable {
                         || v.agg() == Pivot.Agg.P99) {
                     return null; // over many columns: the file is read
                 }
-                pools.put(poolName(read), read);
+                String p = poolName(read);
+                pools.put(p, read);
+                for (String part : POOL_PARTS) {
+                    cols.add(p + "_" + part);
+                }
             } else if (v.column() >= 0) {
-                cols.add(v.column());
+                cols.add("c" + v.column());
+                cols.add("n" + v.column());
             }
         }
         return new Needs(cols, pools);
     }
 
-    private record Spec(List<Pivot.Field> rows, List<Pivot.Field> cols, List<Pivot.Value> cellValues,
-                        Map<Integer, Set<String>> filters) {
-        static Spec of(Pivot.Spec s) {
-            return new Spec(s.rows(), s.cols(), s.cellValues(), s.filters());
+    private static void field(Pivot.Field f, Set<String> cols) {
+        cols.add("c" + f.column());
+        if (f.group() != Pivot.Group.NONE) {
+            cols.add("e" + f.column());
         }
     }
+
+    /** What a pool keeps of each row: cells, numbers among them, their sum, least and most. */
+    private static final List<String> POOL_PARTS = List.of("cnt", "nums", "s", "mn", "mx");
 
     static String poolName(List<Integer> columns) {
         List<Integer> sorted = new ArrayList<>(new TreeSet<>(columns));
@@ -337,287 +339,167 @@ public final class PivotCache implements AutoCloseable {
         }
     }
 
+    /**
+     * Declares a pool's columns (computed from the whole row, stored when first needed). One row's
+     * five numbers are worked out once, however many of them are stored at a time.
+     */
+    private synchronized void declare(String name, List<Integer> read) {
+        if (pools.containsKey(name)) {
+            return;
+        }
+        int[] cols = read.stream().mapToInt(Integer::intValue).toArray();
+        pools.put(name, cols);
+        ThreadLocal<Object[]> last = new ThreadLocal<>();
+        for (int part = 0; part < POOL_PARTS.size(); part++) {
+            int which = part;
+            RowFunction f = (raw, rowNo) -> {
+                Object[] memo = last.get();
+                if (memo == null || (long) memo[0] != rowNo) {
+                    memo = new Object[] {rowNo, pool(raw, cols)};
+                    last.set(memo);
+                }
+                Object[] row = (Object[]) memo[1];
+                return row == null ? null : row[which];
+            };
+            Class<?> type = part < 2 ? Integer.class : Double.class;
+            // with a version: kept from one start to the next, as long as this code works them out the same way
+            table.column(new ColumnDef(name + "_" + POOL_PARTS.get(part), type), f, VERSION);
+        }
+    }
+
+    /** A row's count, numbers, sum, min and max over the pool's columns; null for a row Pivot doesn't count. */
+    private Object[] pool(String raw, int[] cols) {
+        if (!pivotRow(format, raw)) {
+            return null;
+        }
+        boolean[] want = new boolean[format.columns().size()];
+        for (int c : cols) {
+            if (c >= 0 && c < want.length) {
+                want[c] = true;
+            }
+        }
+        String[] cells = format.splitSome(raw, want);
+        if (cells == null) {
+            return null;
+        }
+        int cnt = 0;
+        int nums = 0;
+        double s = 0;
+        double mn = Double.POSITIVE_INFINITY;
+        double mx = Double.NEGATIVE_INFINITY;
+        for (int c : cols) {
+            String v = c < 0 ? "" : text(cells, c);
+            if (v == null) {
+                continue;
+            }
+            cnt++;
+            double d = Pivot.number(v);
+            if (!Double.isNaN(d)) {
+                nums++;
+                s += d;
+                mn = Math.min(mn, d);
+                mx = Math.max(mx, d);
+            }
+        }
+        return new Object[] {cnt, nums, nums == 0 ? null : s, nums == 0 ? null : mn, nums == 0 ? null : mx};
+    }
+
+    /** Whether the rows are all stored: as many as the file has (when told), or some at least. */
+    private boolean rowsThere() {
+        long n = feed.count;
+        return n < 0 ? table.rowsLoaded() > 0 : table.rowsLoaded() >= n;
+    }
+
+    private boolean stored(Set<String> cols) {
+        return table.storedColumns().containsAll(cols);
+    }
+
+    /** Whether column {@code c}'s text is stored, for every row (for tests and agents' notes). */
+    public synchronized boolean hasColumn(int c) {
+        return rowsThere() && stored(Set.of("c" + c));
+    }
+
     /** Whether this pivot can be answered from the cache, as it is now. */
     public synchronized boolean has(Pivot.Spec spec) {
-        Needs n = needs(Spec.of(spec));
-        if (n == null || !tables.containsKey("lines")) {
+        Needs n = needs(spec);
+        if (n == null) {
             return false;
         }
-        for (int c : n.columns()) {
-            if (!tables.containsKey("c" + c)) {
-                return false;
-            }
-        }
-        for (String p : n.pools().keySet()) {
-            if (!tables.containsKey(p)) {
-                return false;
-            }
-        }
-        return true;
+        n.pools().forEach(this::declare); // after a restart: what was kept comes back as it was
+        return rowsThere() && stored(n.columns());
     }
 
     /** Whether this pivot can be answered from a cache at all (else the file is always read). */
     public static boolean canCache(Pivot.Spec spec) {
-        return needs(Spec.of(spec)) != null;
+        return needs(spec) != null;
     }
 
-    // ---------------------------------------------------------------- building
+    // ---------------------------------------------------------------- storing
+
+    private final java.util.concurrent.locks.ReentrantLock buildLock = new java.util.concurrent.locks.ReentrantLock();
 
     /**
-     * Reads the file once and stores the columns this pivot needs that aren't stored yet. Gives
-     * false when cancelled (nothing half-built is kept).
+     * Stores the columns this pivot needs that aren't stored yet, and the rows written since (one
+     * read of the file). Gives false when cancelled (nothing half-stored is answered from).
      */
     public boolean build(Pivot.Spec spec, Pivot.Fields fields, ColumnProfile.Lines lines, long lineCount,
                          BooleanSupplier cancelled, DoubleConsumer progress) {
-        // one build at a time: a pivot started while another (cancelled) one still stops
+        Needs n = needs(spec);
+        if (n == null) {
+            return false;
+        }
+        setTimes(fields);
+        feed(lines, lineCount);
+        n.pools().forEach(this::declare);
+        return ensure(n.columns(), cancelled, progress);
+    }
+
+    /** The columns stored, and the rows up to date: one read of the file at most. */
+    private boolean ensure(Set<String> cols, BooleanSupplier cancelled, DoubleConsumer progress) {
         buildLock.lock();
         try {
-            return buildNow(spec, fields, lines, lineCount, cancelled, progress);
+            CancelSignal signal = cancelled == null ? null : CancelSignal.from(cancelled);
+            if (table.rowsLoaded() == 0) {
+                // nothing read yet: the columns are taken into the first read (let go again if it's stopped)
+                List<String> added = new ArrayList<>(cols);
+                added.removeAll(table.storedColumns());
+                table.store(cols, signal, null);
+                try {
+                    table.update(signal, progress);
+                } catch (QueryCancelled e) {
+                    if (table.rowsLoaded() < feed.count) {
+                        table.unstore(added);
+                    }
+                    throw e;
+                }
+            } else {
+                table.update(signal, null);
+                table.store(cols, signal, progress);
+            }
+            return true;
+        } catch (QueryCancelled e) {
+            return rowsThere() && stored(cols); // stopped after all was stored: done all the same
+        } catch (RuntimeException e) {
+            if (cancelled != null && cancelled.getAsBoolean()) {
+                return false;
+            }
+            throw new IllegalStateException("The Pivot cache couldn't be written: " + e.getMessage(), e);
         } finally {
             buildLock.unlock();
         }
     }
 
-    private final java.util.concurrent.locks.ReentrantLock buildLock = new java.util.concurrent.locks.ReentrantLock();
-
-    private boolean buildNow(Pivot.Spec spec, Pivot.Fields fields, ColumnProfile.Lines lines, long lineCount,
-                             BooleanSupplier cancelled, DoubleConsumer progress) {
-        Needs n = needs(Spec.of(spec));
-        if (n == null) {
-            return false;
-        }
-        List<Integer> cols = new ArrayList<>();
-        synchronized (this) {
-            for (int c : n.columns()) {
-                if (!tables.containsKey("c" + c)) {
-                    cols.add(c);
-                }
-            }
-        }
-        Map<String, List<Integer>> pools = new LinkedHashMap<>();
-        for (Map.Entry<String, List<Integer>> e : n.pools().entrySet()) {
-            if (!tables.containsKey(e.getKey())) {
-                pools.put(e.getKey(), e.getValue());
-            }
-        }
-        boolean withLines = !tables.containsKey("lines");
-        if (cols.isEmpty() && pools.isEmpty() && !withLines) {
-            return true;
-        }
-        int nc = format.columns().size();
-        boolean[] want = new boolean[nc];
-        cols.forEach(c -> {
-            if (c < nc) {
-                want[c] = true;
-            }
-        });
-        pools.values().forEach(l -> l.forEach(c -> {
-            if (c >= 0 && c < nc) {
-                want[c] = true;
-            }
-        }));
-        boolean[] time = new boolean[cols.size()];
-        List<TableWriter> writers = new ArrayList<>();
-        List<String> names = new ArrayList<>();
-        if (withLines) {
-            names.add("lines");
-            writers.add(new TableWriter("lines", List.of(new ColumnDef("line", Long.class)), false, 16));
-        }
-        for (int i = 0; i < cols.size(); i++) {
-            int c = cols.get(i);
-            time[i] = fields != null && c < fields.times().size() && fields.times().get(c) != null;
-            List<ColumnDef> defs = new ArrayList<>(List.of(new ColumnDef("t", String.class),
-                    new ColumnDef("n", Double.class)));
-            if (time[i]) {
-                defs.add(new ColumnDef("e", Long.class));
-            }
-            names.add("c" + c);
-            writers.add(new TableWriter("c" + c, defs, false, 16));
-        }
-        int[][] poolCols = new int[pools.size()][];
-        int pi = 0;
-        for (Map.Entry<String, List<Integer>> e : pools.entrySet()) {
-            names.add(e.getKey());
-            writers.add(new TableWriter(e.getKey(), List.of(new ColumnDef("cnt", Integer.class),
-                    new ColumnDef("nums", Integer.class), new ColumnDef("s", Double.class),
-                    new ColumnDef("mn", Double.class), new ColumnDef("mx", Double.class)), false, 16));
-            poolCols[pi++] = e.getValue().stream().mapToInt(Integer::intValue).toArray();
-        }
-        int tablesOut = writers.size();
-        int[] colIdx = cols.stream().mapToInt(Integer::intValue).toArray();
-        List<TimeFormat> times = fields == null ? List.of() : fields.times();
-        try (Connection con = db.connection()) {
-            for (int i = 0; i < tablesOut; i++) {
-                try (Statement st = con.createStatement()) {
-                    st.execute("DROP TABLE IF EXISTS \"" + names.get(i) + "\"");
-                }
-                writers.get(i).createTable(con, false);
-            }
-            List<TableWriter.AppenderHandle> aps = new ArrayList<>();
-            long rows = 0;
-            boolean done = false;
-            try {
-                for (TableWriter w : writers) {
-                    aps.add(w.openAppender(con));
-                }
-                int chunk = Pivot.chunkLines(nc, cols.size() + poolCols.length);
-                int threads = Math.max(1, Math.min(Pivot.MAX_THREADS, Runtime.getRuntime().availableProcessors() - 1));
-                java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads,
-                        r -> {
-                            Thread t = new Thread(r, "logsift-pivot-cache");
-                            t.setDaemon(true);
-                            return t;
-                        });
-                java.util.ArrayDeque<java.util.concurrent.Future<List<Object[][]>>> pending = new java.util.ArrayDeque<>();
-                try {
-                    for (long first = 0; first < lineCount; first += chunk) {
-                        if (cancelled.getAsBoolean()) {
-                            return false;
-                        }
-                        long at = first;
-                        int k = (int) Math.min(chunk, lineCount - first);
-                        pending.add(pool.submit(() -> rowsOf(lines, at, k, want, colIdx, time, times, poolCols,
-                                withLines)));
-                        while (pending.size() >= threads * 2) {
-                            rows += append(pending.poll().get(), aps);
-                        }
-                        if (progress != null) {
-                            progress.accept((double) (first + k) / Math.max(1, lineCount));
-                        }
-                    }
-                    while (!pending.isEmpty()) {
-                        if (cancelled.getAsBoolean()) {
-                            return false;
-                        }
-                        rows += append(pending.poll().get(), aps);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                } catch (java.util.concurrent.ExecutionException e) {
-                    throw e.getCause() instanceof RuntimeException re ? re : new IllegalStateException(e.getCause());
-                } finally {
-                    pool.shutdownNow();
-                }
-                done = true;
-            } finally {
-                for (TableWriter.AppenderHandle a : aps) {
-                    try {
-                        a.close();
-                    } catch (RuntimeException e) {
-                        done = false;
-                    }
-                }
-                if (!done) {
-                    for (String t : names) {
-                        try (Statement st = con.createStatement()) {
-                            st.execute("DROP TABLE IF EXISTS \"" + t + "\"");
-                        }
-                    }
-                }
-            }
-            if (!withLines && tables.get("lines") != rows) {
-                throw new IllegalStateException("the cache has " + tables.get("lines") + " rows, this read " + rows);
-            }
-            try (var ps = con.prepareStatement("INSERT OR REPLACE INTO built VALUES (?, ?)")) {
-                for (String t : names) {
-                    ps.setString(1, t);
-                    ps.setLong(2, rows);
-                    ps.addBatch();
-                }
-                ps.executeBatch();
-            }
-            synchronized (this) {
-                for (String t : names) {
-                    tables.put(t, rows);
-                }
-                for (int i = 0; i < cols.size(); i++) {
-                    if (time[i]) {
-                        timed.add("c" + cols.get(i));
-                    }
-                }
-            }
-            return true;
-        } catch (SQLException e) {
-            throw new IllegalStateException("The Pivot cache couldn't be written: " + e.getMessage(), e);
+    /** The rows written since, stored (when the file's rows were given); quick when there are none. */
+    private void upToDate(BooleanSupplier stop) {
+        if (feed.count >= 0 && table.rowsLoaded() < feed.count) {
+            ensure(Set.of(), stop, null);
         }
     }
 
-    /** A block of lines as the rows of each table being built: {@code [table][row]} per line. */
-    private List<Object[][]> rowsOf(ColumnProfile.Lines lines, long first, int k, boolean[] want, int[] cols,
-                                    boolean[] time, List<TimeFormat> times, int[][] pools, boolean withLines) {
-        String[] buf = new String[k];
-        lines.read(first, k, buf);
-        List<Object[][]> out = new ArrayList<>(k);
-        int n = (withLines ? 1 : 0) + cols.length + pools.length;
-        for (int i = 0; i < k; i++) {
-            String t = buf[i];
-            if (t == null || t.isBlank()) {
-                continue; // as Pivot skips them
-            }
-            String[] cells = format.splitSome(t, want);
-            if (cells == null) {
-                continue;
-            }
-            Object[][] r = new Object[n][];
-            int j = 0;
-            if (withLines) {
-                r[j++] = new Object[] {first + i};
-            }
-            for (int x = 0; x < cols.length; x++) {
-                String v = text(cells, cols[x]);
-                Double num = null;
-                Long e = null;
-                if (v != null) {
-                    double d = Pivot.number(v);
-                    num = Double.isNaN(d) ? null : d;
-                    if (time[x]) {
-                        long ms = times.get(cols[x]).parse(v);
-                        e = ms == TimeFormat.NONE ? null : ms;
-                    }
-                }
-                r[j++] = time[x] ? new Object[] {v, num, e} : new Object[] {v, num};
-            }
-            for (int[] p : pools) {
-                int cnt = 0;
-                int nums = 0;
-                double s = 0;
-                double mn = Double.POSITIVE_INFINITY;
-                double mx = Double.NEGATIVE_INFINITY;
-                for (int c : p) {
-                    String v = c < 0 ? "" : text(cells, c);
-                    if (v == null) {
-                        continue;
-                    }
-                    cnt++;
-                    double d = Pivot.number(v);
-                    if (!Double.isNaN(d)) {
-                        nums++;
-                        s += d;
-                        mn = Math.min(mn, d);
-                        mx = Math.max(mx, d);
-                    }
-                }
-                r[j++] = new Object[] {cnt, nums, nums == 0 ? null : s, nums == 0 ? null : mn, nums == 0 ? null : mx};
-            }
-            out.add(r);
+    private synchronized void setTimes(Pivot.Fields fields) {
+        if (fields != null) {
+            times = java.util.Collections.unmodifiableList(new ArrayList<>(fields.times())); // null: not a time
         }
-        return out;
-    }
-
-    /** A cell as Pivot reads it: stripped, null when blank. */
-    private static String text(String[] cells, int c) {
-        String v = c < cells.length && cells[c] != null ? cells[c].strip() : "";
-        return v.isEmpty() ? null : v;
-    }
-
-    private static long append(List<Object[][]> rows, List<TableWriter.AppenderHandle> aps) {
-        for (Object[][] r : rows) {
-            for (int i = 0; i < r.length; i++) {
-                aps.get(i).appendRow(r[i]);
-            }
-        }
-        return rows.size();
     }
 
     // ---------------------------------------------------------------- column filters
@@ -627,165 +509,24 @@ public final class PivotCache implements AutoCloseable {
      * as {@link LogFormat#value} gives it (not stripped), by the row's first line.
      */
     public synchronized boolean hasValues(int c) {
-        return tables.containsKey("v" + c);
+        return rowsThere() && stored(Set.of("line", "v" + c));
     }
 
     /**
      * Reads the file once and stores the values of these columns as filters read them ({@code rows}
      * gives each row whole by its first line, null where a line continues the row above). Gives
-     * false when cancelled (nothing half-built is kept).
+     * false when cancelled.
      */
     public boolean buildValues(List<Integer> columns, ColumnProfile.Lines rows, long lineCount,
                                BooleanSupplier cancelled, DoubleConsumer progress) {
-        buildLock.lock();
-        try {
-            List<Integer> cols = new ArrayList<>();
-            for (int c : new TreeSet<>(columns)) {
-                if (c >= 0 && c < format.columns().size() && !hasValues(c)) {
-                    cols.add(c);
-                }
-            }
-            if (cols.isEmpty()) {
-                return true;
-            }
-            List<String> names = new ArrayList<>();
-            List<TableWriter> writers = new ArrayList<>();
-            for (int c : cols) {
-                names.add("v" + c);
-                writers.add(new TableWriter("v" + c, List.of(new ColumnDef("line", Long.class),
-                        new ColumnDef("v", String.class)), false, 16));
-            }
-            try (Connection con = db.connection()) {
-                for (int i = 0; i < names.size(); i++) {
-                    try (Statement st = con.createStatement()) {
-                        st.execute("DROP TABLE IF EXISTS \"" + names.get(i) + "\"");
-                    }
-                    writers.get(i).createTable(con, false);
-                }
-                List<TableWriter.AppenderHandle> aps = new ArrayList<>();
-                boolean done = false;
-                try {
-                    for (TableWriter w : writers) {
-                        aps.add(w.openAppender(con));
-                    }
-                    done = appendValues(cols, rows, lineCount, cancelled, progress, aps);
-                } finally {
-                    for (TableWriter.AppenderHandle a : aps) {
-                        try {
-                            a.close();
-                        } catch (RuntimeException e) {
-                            done = false;
-                        }
-                    }
-                    if (!done) {
-                        for (String t : names) {
-                            try (Statement st = con.createStatement()) {
-                                st.execute("DROP TABLE IF EXISTS \"" + t + "\"");
-                            }
-                        }
-                    }
-                }
-                if (!done) {
-                    return false;
-                }
-                try (var ps = con.prepareStatement("INSERT OR REPLACE INTO built VALUES (?, ?)")) {
-                    for (String t : names) {
-                        ps.setString(1, t);
-                        ps.setLong(2, lineCount);
-                        ps.addBatch();
-                    }
-                    ps.executeBatch();
-                }
-                synchronized (this) {
-                    for (String t : names) {
-                        tables.put(t, lineCount);
-                    }
-                }
-                return true;
-            } catch (SQLException e) {
-                throw new IllegalStateException("The cache couldn't be written: " + e.getMessage(), e);
-            }
-        } finally {
-            buildLock.unlock();
-        }
-    }
-
-    /** Lines read at a time for column values, each block on one of several threads. */
-    private static final int VALUE_BLOCK = 4096;
-
-    private boolean appendValues(List<Integer> cols, ColumnProfile.Lines rows, long lineCount,
-                                 BooleanSupplier cancelled, DoubleConsumer progress,
-                                 List<TableWriter.AppenderHandle> aps) {
-        List<String> names = new ArrayList<>();
-        for (int c : cols) {
-            names.add(format.columns().get(c));
-        }
-        int threads = Math.max(1, Math.min(Pivot.MAX_THREADS, Runtime.getRuntime().availableProcessors() - 1));
-        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads, r -> {
-            Thread t = new Thread(r, "logsift-filter-cache");
-            t.setDaemon(true);
-            return t;
-        });
-        java.util.ArrayDeque<java.util.concurrent.Future<List<Object[][]>>> pending = new java.util.ArrayDeque<>();
-        try {
-            for (long first = 0; first < lineCount; first += VALUE_BLOCK) {
-                if (cancelled.getAsBoolean()) {
-                    return false;
-                }
-                long at = first;
-                int k = (int) Math.min(VALUE_BLOCK, lineCount - first);
-                pending.add(pool.submit(() -> valuesOf(rows, at, k, names)));
-                while (pending.size() >= threads * 2) {
-                    appendValueRows(pending.poll().get(), aps);
-                }
-                if (progress != null) {
-                    progress.accept((double) (first + k) / Math.max(1, lineCount));
-                }
-            }
-            while (!pending.isEmpty()) {
-                if (cancelled.getAsBoolean()) {
-                    return false;
-                }
-                appendValueRows(pending.poll().get(), aps);
-            }
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        } catch (java.util.concurrent.ExecutionException e) {
-            throw e.getCause() instanceof RuntimeException re ? re : new IllegalStateException(e.getCause());
-        } finally {
-            pool.shutdownNow();
-        }
-    }
-
-    /** A block of rows as {@code [column][line, value]}: the rows a column filter would test. */
-    private List<Object[][]> valuesOf(ColumnProfile.Lines rows, long first, int k, List<String> names) {
-        String[] buf = new String[k];
-        rows.read(first, k, buf);
-        List<Object[][]> out = new ArrayList<>(names.size());
-        for (int c = 0; c < names.size(); c++) {
-            List<Object[]> col = new ArrayList<>();
-            for (int i = 0; i < k; i++) {
-                if (buf[i] == null) {
-                    continue; // continues the row above: a row is matched at its first line
-                }
-                String v = format.value(buf[i], names.get(c));
-                if (v != null) {
-                    col.add(new Object[] {first + i, v});
-                }
-            }
-            out.add(col.toArray(new Object[0][]));
-        }
-        return out;
-    }
-
-    private static void appendValueRows(List<Object[][]> block, List<TableWriter.AppenderHandle> aps) {
-        for (int c = 0; c < block.size(); c++) {
-            for (Object[] row : block.get(c)) {
-                aps.get(c).appendRow(row);
+        feed(rows, lineCount);
+        Set<String> cols = new LinkedHashSet<>(List.of("line"));
+        for (int c : new TreeSet<>(columns)) {
+            if (c >= 0 && c < format.columns().size()) {
+                cols.add("v" + c);
             }
         }
+        return ensure(cols, cancelled, progress);
     }
 
     /**
@@ -799,26 +540,28 @@ public final class PivotCache implements AutoCloseable {
             return null;
         }
         long t0 = System.nanoTime();
-        String where = " FROM v" + c + " WHERE line < " + upTo;
+        upToDate(stop);
+        String v = "v" + c;
+        CancelSignal signal = CancelSignal.from(stop);
         List<ColumnStats.Value> values = new ArrayList<>();
         long lines;
         long distinct;
-        try (Connection con = db.connection(); Statement st = con.createStatement()) {
-            try (ResultSet rs = st.executeQuery("SELECT count(*), count(DISTINCT v)" + where)) {
-                rs.next();
-                lines = rs.getLong(1);
-                distinct = rs.getLong(2);
-            }
+        try {
+            Object[] totals = session.run("SELECT count(" + v + "), count(DISTINCT " + v + ") FROM " + TABLE
+                    + " WHERE line < " + upTo, signal).getRows().get(0);
+            lines = ((Number) totals[0]).longValue();
+            distinct = ((Number) totals[1]).longValue();
             if (stop.getAsBoolean()) {
                 return null;
             }
-            try (ResultSet rs = st.executeQuery("SELECT v, count(*), min(line) AS first_line" + where
-                    + " GROUP BY v ORDER BY first_line LIMIT " + ColumnStats.MAX_VALUES)) {
-                while (rs.next()) {
-                    values.add(new ColumnStats.Value(rs.getString(1), rs.getLong(2), rs.getLong(3)));
-                }
+            for (Object[] r : session.run("SELECT " + v + ", count(*), min(line) AS first_line FROM " + TABLE
+                    + " WHERE line < " + upTo + " AND " + v + " IS NOT NULL GROUP BY 1 ORDER BY first_line LIMIT "
+                    + ColumnStats.MAX_VALUES, signal).getRows()) {
+                values.add(new ColumnStats.Value((String) r[0], ((Number) r[1]).longValue(), ((Number) r[2]).longValue()));
             }
-        } catch (SQLException e) {
+        } catch (QueryCancelled e) {
+            return null;
+        } catch (RuntimeException e) {
             if (stop.getAsBoolean()) {
                 return null;
             }
@@ -827,7 +570,7 @@ public final class PivotCache implements AutoCloseable {
         if (stop.getAsBoolean()) {
             return null;
         }
-        values.sort(java.util.Comparator.comparingLong((ColumnStats.Value v) -> -v.count())
+        values.sort(java.util.Comparator.comparingLong((ColumnStats.Value x) -> -x.count())
                 .thenComparing(ColumnStats.Value::value));
         return new ColumnStats.Result(format.columns().get(c), values, lines, (System.nanoTime() - t0) / 1_000_000,
                 distinct > values.size());
@@ -836,7 +579,9 @@ public final class PivotCache implements AutoCloseable {
     /** The tests of the filters being answered, by id, for the function SQL calls. */
     private final Map<Long, java.util.function.Predicate<String>> tests = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong nextTest = new java.util.concurrent.atomic.AtomicLong();
-    private boolean testRegistered;
+
+    /** Lines read back at a time. */
+    private static final int PAGE = 200_000;
 
     /**
      * The lines before {@code upTo} whose value in column {@code c} passes {@code test}, in order;
@@ -847,54 +592,39 @@ public final class PivotCache implements AutoCloseable {
         if (!hasValues(c)) {
             return null;
         }
+        upToDate(stop);
         synchronized (this) {
             if (!testRegistered) {
-                db.register(root -> Udfs.register(root, "logsift_keep", Boolean.class, Long.class, String.class,
-                        (id, v) -> {
-                            java.util.function.Predicate<String> t = tests.get(id);
-                            return t != null && v != null && t.test(v);
-                        }));
+                table.function("logsift_keep", Boolean.class, Long.class, String.class, (id, v) -> {
+                    java.util.function.Predicate<String> t = tests.get(id);
+                    return t != null && v != null && t.test(v);
+                });
                 testRegistered = true;
             }
         }
         long id = nextTest.incrementAndGet();
         tests.put(id, test);
-        String sql = "SELECT line FROM v" + c + " WHERE line < " + upTo + " AND v IN (SELECT v FROM (SELECT DISTINCT v "
-                + "FROM v" + c + ") WHERE logsift_keep(" + id + ", v)) ORDER BY line";
-        try (Connection con = db.connection(); Statement st = con.createStatement()) {
-            Thread watcher = new Thread(() -> {
-                while (!Thread.currentThread().isInterrupted()) {
-                    if (stop.getAsBoolean()) {
-                        try {
-                            st.cancel();
-                        } catch (SQLException e) {
-                            // finished meanwhile
-                        }
-                        return;
-                    }
-                    try {
-                        Thread.sleep(50);
-                    } catch (InterruptedException e) {
-                        return;
-                    }
+        String v = "v" + c;
+        // OFFSET 0: the test is asked once per value, not once per row
+        String sql = "SELECT line FROM " + TABLE + " WHERE line < " + upTo + " AND " + v + " IN (SELECT x FROM (SELECT"
+                + " DISTINCT " + v + " AS x FROM " + TABLE + " WHERE " + v + " IS NOT NULL OFFSET 0) WHERE logsift_keep("
+                + id + ", x)) ORDER BY line";
+        try (ResultWindow w = session.window(sql, CancelSignal.from(stop))) {
+            long n = w.rowCount();
+            long[] out = new long[(int) Math.min(n, Integer.MAX_VALUE - 8)];
+            int at = 0;
+            for (long first = 0; first < n && at < out.length; first += PAGE) {
+                if (stop.getAsBoolean()) {
+                    return null;
                 }
-            }, "logsift-filter-cache-cancel");
-            watcher.setDaemon(true);
-            watcher.start();
-            try (ResultSet rs = st.executeQuery(sql)) {
-                long[] out = new long[1024];
-                int n = 0;
-                while (rs.next()) {
-                    if (n == out.length) {
-                        out = java.util.Arrays.copyOf(out, n * 2);
-                    }
-                    out[n++] = rs.getLong(1);
+                for (Object[] r : w.rows(first, PAGE)) {
+                    out[at++] = ((Number) r[0]).longValue();
                 }
-                return stop.getAsBoolean() ? null : java.util.Arrays.copyOf(out, n);
-            } finally {
-                watcher.interrupt();
             }
-        } catch (SQLException e) {
+            return stop.getAsBoolean() ? null : out;
+        } catch (QueryCancelled e) {
+            return null;
+        } catch (RuntimeException e) {
             if (stop.getAsBoolean()) {
                 return null;
             }
@@ -904,82 +634,16 @@ public final class PivotCache implements AutoCloseable {
         }
     }
 
-    // ---------------------------------------------------------------- SQL
-
-    /** Whether column {@code c} is stored as Pivot reads it (and the rows' lines too). */
-    public synchronized boolean hasColumn(int c) {
-        return tables.containsKey("lines") && tables.containsKey("c" + c);
-    }
-
-    /** Whether the rows' lines are stored. */
-    public synchronized boolean hasLines() {
-        return tables.containsKey("lines");
-    }
-
-    /** One query at a time, on a connection of their own, which has the table {@code t}. */
-    private final Object queryLock = new Object();
-    private Connection queryConnection;
-    /** The table {@code t} as last made (made again when a query reads other columns). */
-    private String view;
-
-    /**
-     * Runs a query (read-only) over the table {@code t}: {@code line} (where the row starts,
-     * 1-based), then every column under its name in {@code names}, numbers, times and text as
-     * Pivot reads them, as {@link Sql#table} makes it. Only the columns {@code read} have their
-     * values, and they must be stored ({@link #hasColumn}); the others are there for the query to
-     * name (DESCRIBE, a {@code WHERE false}) and are empty.
-     */
-    public Sql.Result query(String sql, java.util.Collection<Integer> read, List<String> names, Pivot.Fields fields,
-                            int maxRows, BooleanSupplier stop) throws SQLException {
-        Set<Integer> with = new TreeSet<>(read);
-        StringBuilder ddl = new StringBuilder("CREATE OR REPLACE TEMP VIEW t AS SELECT lines.line + 1 AS line");
-        StringBuilder from = new StringBuilder(" FROM lines");
-        synchronized (this) {
-            if (!tables.containsKey("lines")) {
-                throw new IllegalStateException("the rows aren't stored");
-            }
-            for (int c = 0; c < names.size(); c++) {
-                String x = "x" + c;
-                String value;
-                if (!with.contains(c)) {
-                    value = "NULL::" + Sql.sqlType(fields.kind(c));
-                } else if (!tables.containsKey("c" + c)) {
-                    throw new IllegalStateException("column " + c + " isn't stored");
-                } else {
-                    value = switch (fields.kind(c)) {
-                        case NUMBER -> x + ".n";
-                        case TIME -> timed.contains("c" + c) ? "epoch_ms(" + x + ".e)" : "NULL::TIMESTAMP";
-                        case TEXT -> x + ".t";
-                    };
-                    from.append(" POSITIONAL JOIN c").append(c).append(" AS ").append(x);
-                }
-                ddl.append(", ").append(value).append(" AS ").append(Sql.ident(names.get(c)));
-            }
-        }
-        String make = ddl.append(from).toString();
-        synchronized (queryLock) {
-            if (queryConnection == null) {
-                queryConnection = db.connection();
-            }
-            if (!make.equals(view)) {
-                view = null;
-                try (Statement st = queryConnection.createStatement()) {
-                    st.execute(make);
-                }
-                view = make;
-            }
-            return Sql.run(queryConnection, sql, maxRows, stop);
-        }
-    }
-
     // ---------------------------------------------------------------- answering
 
     /**
      * The pivot, from the cache; null when it can't be answered from it (columns not stored yet,
-     * a filter of the log's own lines, or more groups than Pivot shows).
+     * or more groups than Pivot shows).
      */
     public Pivot.Result compute(Pivot.Spec spec, Pivot.Fields fields, ZoneId zone, long lineCount) {
         long t0 = System.nanoTime();
+        setTimes(fields);
+        upToDate(null);
         if (!has(spec)) {
             return null;
         }
@@ -987,49 +651,31 @@ public final class PivotCache implements AutoCloseable {
         List<Pivot.Value> values = spec.cellValues();
         int nr = spec.rows().size();
         int nm = spec.cols().size();
-        Set<Integer> used = new LinkedHashSet<>();
-        StringBuilder inner = new StringBuilder("SELECT ");
         List<String> sel = new ArrayList<>();
         for (int r = 0; r < nr; r++) {
             sel.add(label(spec.rows().get(r), fields) + " AS r" + r);
-            used.add(spec.rows().get(r).column());
         }
         for (int c = 0; c < nm; c++) {
             sel.add(label(spec.cols().get(c), fields) + " AS k" + c);
-            used.add(spec.cols().get(c).column());
         }
-        Set<String> poolsUsed = new LinkedHashSet<>();
         for (int v = 0; v < values.size(); v++) {
             Pivot.Value val = values.get(v);
             List<Integer> read = val.read();
             if (read.size() > 1) {
                 String p = poolName(read);
-                poolsUsed.add(p);
-                sel.add(p + ".cnt AS v" + v + "_cnt");
-                sel.add(p + ".nums AS v" + v + "_nums");
-                sel.add(p + ".s AS v" + v + "_s");
-                sel.add(p + ".mn AS v" + v + "_mn");
-                sel.add(p + ".mx AS v" + v + "_mx");
+                for (String part : POOL_PARTS) {
+                    sel.add(p + "_" + part + " AS v" + v + "_" + part);
+                }
             } else if (val.column() >= 0) {
-                used.add(val.column());
-                sel.add("x" + val.column() + ".t AS v" + v + "_t");
-                sel.add("x" + val.column() + ".n AS v" + v + "_n");
+                sel.add("c" + val.column() + " AS v" + v + "_t");
+                sel.add("n" + val.column() + " AS v" + v + "_n");
             }
         }
         if (sel.isEmpty()) {
             sel.add("1 AS one");
         }
-        inner.append(String.join(", ", sel)).append(" FROM lines");
-        for (int c : spec.filters().keySet()) {
-            used.add(c);
-        }
-        for (int c : used) {
-            inner.append(" POSITIONAL JOIN c").append(c).append(" AS x").append(c);
-        }
-        for (String p : poolsUsed) {
-            inner.append(" POSITIONAL JOIN ").append(p);
-        }
-        List<String> where = new ArrayList<>();
+        StringBuilder inner = new StringBuilder("SELECT ").append(String.join(", ", sel)).append(" FROM ").append(TABLE);
+        List<String> where = new ArrayList<>(List.of("pv"));
         for (Map.Entry<Integer, Set<String>> f : spec.filters().entrySet()) {
             if (f.getValue() == null) {
                 continue;
@@ -1038,7 +684,7 @@ public final class PivotCache implements AutoCloseable {
                 where.add("false");
                 continue;
             }
-            StringBuilder in = new StringBuilder("coalesce(x" + f.getKey() + ".t, '" + Pivot.BLANK + "') IN (");
+            StringBuilder in = new StringBuilder("coalesce(c" + f.getKey() + ", '" + Pivot.BLANK + "') IN (");
             boolean firstValue = true;
             for (String s : f.getValue()) {
                 in.append(firstValue ? "" : ", ").append(literal(s));
@@ -1046,9 +692,7 @@ public final class PivotCache implements AutoCloseable {
             }
             where.add(in.append(')').toString());
         }
-        if (!where.isEmpty()) {
-            inner.append(" WHERE ").append(String.join(" AND ", where));
-        }
+        inner.append(" WHERE ").append(String.join(" AND ", where));
         // every level of rows, by the column groups and in total
         List<String> agg = new ArrayList<>();
         agg.add("count(*) AS n");
@@ -1117,100 +761,105 @@ public final class PivotCache implements AutoCloseable {
         Pivot.Node root = new Pivot.Node("Grand Total", null, 0);
         Map<List<String>, Integer> colIndex = new HashMap<>();
         List<List<String>> colKeys = new ArrayList<>();
-        int[] groups = {0};
+        int groups = 0;
         int nv = values.size();
-        try (Connection con = db.connection(); Statement st = con.createStatement();
-             ResultSet rs = st.executeQuery(sql)) {
-            while (rs.next()) {
-                int at = 1;
-                List<String> path = new ArrayList<>();
-                for (int r = 0; r < nr; r++) {
-                    String label = rs.getString(at++);
-                    boolean grouped = rs.getInt(at++) == 0;
-                    if (grouped) {
-                        path.add(label);
-                    }
-                }
-                List<String> key = new ArrayList<>();
-                for (int c = 0; c < nm; c++) {
-                    key.add(rs.getString(at++));
-                }
-                boolean byCol = nm > 0 && rs.getInt(at++) == 0;
-                long n = rs.getLong(at++);
-                Pivot.Node node = root;
-                for (String l : path) {
-                    if (node.kids == null) {
-                        node.kids = new LinkedHashMap<>();
-                    }
-                    Pivot.Node k = node.kids.get(l);
-                    if (k == null) {
-                        if (++groups[0] > Pivot.MAX_ROW_GROUPS) {
-                            return null; // more than Pivot shows: it puts the rest in "(other)" itself
-                        }
-                        k = new Pivot.Node(l, node, node.depth + 1);
-                        node.kids.put(l, k);
-                    }
-                    node = k;
-                }
-                Pivot.Acc[] accs = new Pivot.Acc[nv];
-                for (int v = 0; v < nv; v++) {
-                    Pivot.Acc a = new Pivot.Acc();
-                    a.count = rs.getLong(at++);
-                    a.numbers = rs.getLong(at++);
-                    double s = rs.getDouble(at++);
-                    a.sum = rs.wasNull() ? 0 : s;
-                    double mn = rs.getDouble(at++);
-                    a.min = rs.wasNull() ? Double.POSITIVE_INFINITY : mn;
-                    double mx = rs.getDouble(at++);
-                    a.max = rs.wasNull() ? Double.NEGATIVE_INFINITY : mx;
-                    long d = rs.getLong(at++);
-                    if (!rs.wasNull()) {
-                        a.fixedDistinct = d;
-                    }
-                    double q = rs.getDouble(at++);
-                    if (!rs.wasNull()) {
-                        switch (values.get(v).agg()) {
-                            case MEDIAN -> a.fixedMedian = q;
-                            case P95 -> a.fixedP95 = q;
-                            case P99 -> a.fixedP99 = q;
-                            default -> { }
-                        }
-                    }
-                    accs[v] = a;
-                }
-                if (node.cells == null) {
-                    node.cells = new Pivot.Acc[4][];
-                }
-                int cell;
-                if (byCol) {
-                    Integer g = colIndex.get(key);
-                    if (g == null) {
-                        if (colKeys.size() >= Pivot.MAX_COL_GROUPS) {
-                            return null;
-                        }
-                        g = colKeys.size();
-                        colIndex.put(key, g);
-                        colKeys.add(key);
-                    }
-                    cell = g + 1;
-                } else {
-                    cell = 0; // the row's total
-                    node.rows = n;
-                }
-                if (cell >= node.cells.length) {
-                    node.cells = java.util.Arrays.copyOf(node.cells, cell + 4);
-                }
-                node.cells[cell] = accs;
-            }
-        } catch (SQLException e) {
+        List<Object[]> rows;
+        try {
+            rows = session.run(sql).getRows();
+        } catch (RuntimeException e) {
             throw new IllegalStateException("The Pivot cache couldn't be read: " + e.getMessage(), e);
+        }
+        for (Object[] rs : rows) {
+            int at = 0;
+            List<String> path = new ArrayList<>();
+            for (int r = 0; r < nr; r++) {
+                String label = (String) rs[at++];
+                boolean grouped = num(rs[at++]) == 0;
+                if (grouped) {
+                    path.add(label);
+                }
+            }
+            List<String> key = new ArrayList<>();
+            for (int c = 0; c < nm; c++) {
+                key.add((String) rs[at++]);
+            }
+            boolean byCol = nm > 0 && num(rs[at++]) == 0;
+            long n = num(rs[at++]);
+            Pivot.Node node = root;
+            for (String l : path) {
+                if (node.kids == null) {
+                    node.kids = new LinkedHashMap<>();
+                }
+                Pivot.Node k = node.kids.get(l);
+                if (k == null) {
+                    if (++groups > Pivot.MAX_ROW_GROUPS) {
+                        return null; // more than Pivot shows: it puts the rest in "(other)" itself
+                    }
+                    k = new Pivot.Node(l, node, node.depth + 1);
+                    node.kids.put(l, k);
+                }
+                node = k;
+            }
+            Pivot.Acc[] accs = new Pivot.Acc[nv];
+            for (int v = 0; v < nv; v++) {
+                Pivot.Acc a = new Pivot.Acc();
+                a.count = num(rs[at++]);
+                a.numbers = num(rs[at++]);
+                Object s = rs[at++];
+                a.sum = s == null ? 0 : ((Number) s).doubleValue();
+                Object mn = rs[at++];
+                a.min = mn == null ? Double.POSITIVE_INFINITY : ((Number) mn).doubleValue();
+                Object mx = rs[at++];
+                a.max = mx == null ? Double.NEGATIVE_INFINITY : ((Number) mx).doubleValue();
+                Object d = rs[at++];
+                if (d != null) {
+                    a.fixedDistinct = ((Number) d).longValue();
+                }
+                Object q = rs[at++];
+                if (q != null) {
+                    switch (values.get(v).agg()) {
+                        case MEDIAN -> a.fixedMedian = ((Number) q).doubleValue();
+                        case P95 -> a.fixedP95 = ((Number) q).doubleValue();
+                        case P99 -> a.fixedP99 = ((Number) q).doubleValue();
+                        default -> { }
+                    }
+                }
+                accs[v] = a;
+            }
+            if (node.cells == null) {
+                node.cells = new Pivot.Acc[4][];
+            }
+            int cell;
+            if (byCol) {
+                Integer g = colIndex.get(key);
+                if (g == null) {
+                    if (colKeys.size() >= Pivot.MAX_COL_GROUPS) {
+                        return null;
+                    }
+                    g = colKeys.size();
+                    colIndex.put(key, g);
+                    colKeys.add(key);
+                }
+                cell = g + 1;
+            } else {
+                cell = 0; // the row's total
+                node.rows = n;
+            }
+            if (cell >= node.cells.length) {
+                node.cells = java.util.Arrays.copyOf(node.cells, cell + 4);
+            }
+            node.cells[cell] = accs;
         }
         Map<Integer, List<String>> filterValues = new HashMap<>();
         for (int c : spec.filters().keySet()) {
             // the first ones in the file, as Pivot lists them
-            filterValues.put(c, new ArrayList<>(db.query("SELECT v FROM (SELECT coalesce(t, '" + Pivot.BLANK
-                    + "') AS v, min(rowid) AS first_row FROM c" + c + " GROUP BY 1) ORDER BY first_row LIMIT "
-                    + Pivot.MAX_FILTER_VALUES).list(String.class)));
+            List<String> l = new ArrayList<>();
+            for (Object[] r : session.run("SELECT v FROM (SELECT coalesce(c" + c + ", '" + Pivot.BLANK
+                    + "') AS v, min(line) AS first_row FROM " + TABLE + " WHERE pv GROUP BY 1) ORDER BY first_row LIMIT "
+                    + Pivot.MAX_FILTER_VALUES).getRows()) {
+                l.add((String) r[0]);
+            }
+            filterValues.put(c, l);
         }
         Pivot.Result res = Pivot.finish(spec, format.titles(), root, colKeys, root.rows, lineCount, false, false,
                 filterValues, t0);
@@ -1218,16 +867,21 @@ public final class PivotCache implements AutoCloseable {
         return res;
     }
 
+    private static long num(Object o) {
+        return o == null ? 0 : ((Number) o).longValue();
+    }
+
     /** A field's label, as Pivot makes it: the text, "(blank)", or its time group. */
     private static String label(Pivot.Field f, Pivot.Fields fields) {
-        String x = "x" + f.column();
+        String x = "c" + f.column();
         boolean time = f.group() != Pivot.Group.NONE && fields != null && f.column() < fields.times().size()
                 && fields.times().get(f.column()) != null;
         if (!time) {
-            return "coalesce(" + x + ".t, '" + Pivot.BLANK + "')";
+            return "coalesce(" + x + ", '" + Pivot.BLANK + "')";
         }
-        return "CASE WHEN " + x + ".t IS NULL THEN '" + Pivot.BLANK + "' WHEN " + x + ".e IS NULL THEN " + x
-                + ".t ELSE logsift_time(" + x + ".e, " + f.group().ordinal() + ") END";
+        String e = "e" + f.column();
+        return "CASE WHEN " + x + " IS NULL THEN '" + Pivot.BLANK + "' WHEN " + e + " IS NULL THEN " + x
+                + " ELSE logsift_time(" + e + ", " + f.group().ordinal() + ") END";
     }
 
     /** Time groups are labelled by Pivot's own code, called from SQL. */
@@ -1235,8 +889,8 @@ public final class PivotCache implements AutoCloseable {
         if (zone.equals(udfZone)) {
             return;
         }
-        db.register(root -> Udfs.register(root, "logsift_time", String.class, Long.class, Integer.class,
-                (ms, g) -> Pivot.timeLabel(ms, Pivot.Group.values()[g], zone)));
+        table.function("logsift_time", String.class, Long.class, Integer.class,
+                (ms, g) -> Pivot.timeLabel(ms, Pivot.Group.values()[g], zone));
         udfZone = zone;
     }
 
@@ -1246,16 +900,10 @@ public final class PivotCache implements AutoCloseable {
 
     @Override
     public void close() {
-        synchronized (queryLock) {
-            if (queryConnection != null) {
-                try {
-                    queryConnection.close();
-                } catch (SQLException e) {
-                    // closing anyway
-                }
-                queryConnection = null;
-            }
+        try {
+            session.close();
+        } finally {
+            table.close();
         }
-        db.close();
     }
 }

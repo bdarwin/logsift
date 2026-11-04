@@ -249,9 +249,21 @@ final class QueryPanel extends JPanel {
         if (!typed && editor.getText().isBlank() && Boolean.TRUE.equals(Sql.availableIfKnown())) {
             List<String[]> ex = examples();
             if (!ex.isEmpty()) {
-                setQuery(ex.get(0)[1]);
+                setQuery(starter(ex));
             }
         }
+    }
+
+    /** The example to start from: a log's lines per level, a table's first rows, else the first one. */
+    static String starter(List<String[]> ex) {
+        for (String want : List.of("Lines per level", "The first rows")) {
+            for (String[] e : ex) {
+                if (e[0].startsWith(want)) {
+                    return e[1];
+                }
+            }
+        }
+        return ex.get(0)[1];
     }
 
     private void setQuery(String q) {
@@ -289,15 +301,12 @@ final class QueryPanel extends JPanel {
     /** {title, query} for the file. */
     List<String[]> examples() {
         List<String> cols = host.columns();
-        List<logsift.core.QueryExamples.Example> ex = host.isTable()
-                ? logsift.core.QueryExamples.forTable(cols, host.kinds())
-                : logsift.core.QueryExamples.forLog(cols);
         java.util.Map<String, List<String>> others = new java.util.LinkedHashMap<>();
         for (Other o : host.others()) {
             others.put(o.name(), o.columns());
         }
-        ex = new ArrayList<>(ex);
-        ex.addAll(logsift.core.QueryExamples.withOthers(host.isTable() ? "t" : "log", cols, others));
+        List<logsift.core.QueryExamples.Example> ex = logsift.core.QueryExamples.of(host.isTable() ? "t" : "log", cols,
+                host.isTable() ? host.kinds() : null, others);
         return ex.stream().map(e -> new String[] {e.title(), e.sql()}).toList();
     }
 
@@ -341,7 +350,9 @@ final class QueryPanel extends JPanel {
                     sql = null;
                 }
                 if (sql == null) {
-                    sql = Sql.open(new Sql.Options(folders, null));
+                    // logs kept on disk between runs, beside the big tables' caches, within the same room
+                    sql = Sql.open(PivotCaches.enabled() ? new Sql.Options(folders, null, PivotCaches.dir(),
+                            PivotCaches.limit()) : new Sql.Options(folders, null));
                     sqlFolders = folders;
                     registered.clear();
                 }

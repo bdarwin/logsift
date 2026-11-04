@@ -86,18 +86,17 @@ class TableQueryTest {
         Path f = PivotCacheTest.table(dir.resolve("t.csv"), 5000, 11);
         PivotCacheTest.Opened o = PivotCacheTest.open(f);
         try (Sql sql = Sql.open(new Sql.Options(List.of(), null));
-             PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT);
-             TableQuery tq = new TableQuery(o.fields())) {
+             TableQuery tq = TableQuery.open(f, o.format(), "", o.fields(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT)) {
             Sql.LogTable whole = sql.table("t", o.doc(), o.format(), o.fields());
             assertTrue(whole.update(() -> false, null));
             for (String q : QUERIES) {
                 Sql.Result expected = sql.query(q, 1000, null);
-                Sql.Result cached = tq.query(cache, q, 1000, o.lines(), o.doc().lineCount(), () -> false, null, null);
+                Sql.Result cached = tq.query(q, 1000, o.lines(), o.doc().lineCount(), () -> false, null, null);
                 assertNotNull(cached, q);
                 assertEquals(text(expected), text(cached), q);
             }
             // a few rows of many: "more" as well
-            Sql.Result some = tq.query(cache, "SELECT line FROM t", 10, o.lines(), o.doc().lineCount(), () -> false, null, null);
+            Sql.Result some = tq.query("SELECT line FROM t", 10, o.lines(), o.doc().lineCount(), () -> false, null, null);
             assertEquals(10, some.rows().size());
             assertTrue(some.more());
         }
@@ -109,32 +108,31 @@ class TableQueryTest {
         Path f = PivotCacheTest.table(dir.resolve("t.csv"), 2000, 12);
         PivotCacheTest.Opened o = PivotCacheTest.open(f);
         Counting rows = new Counting(o.lines());
-        try (PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT);
-             TableQuery tq = new TableQuery(o.fields())) {
-            Sql.Result r = tq.query(cache, "SELECT host, sum(ms) FROM t GROUP BY host", 100, rows, o.doc().lineCount(),
+        try (TableQuery tq = TableQuery.open(f, o.format(), "", o.fields(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT)) {
+            Sql.Result r = tq.query("SELECT host, sum(ms) FROM t GROUP BY host", 100, rows, o.doc().lineCount(),
                     () -> false, null, null);
             assertNotNull(r);
             assertTrue(rows.read.get() > 0, "the file is read once");
-            assertTrue(cache.hasColumn(0));
-            assertTrue(cache.hasColumn(3));
+            assertTrue(tq.hasColumn(0));
+            assertTrue(tq.hasColumn(3));
             for (int c : List.of(1, 2, 4, 5, 6)) {
-                assertFalse(cache.hasColumn(c), "column " + c + " isn't read");
+                assertFalse(tq.hasColumn(c), "column " + c + " isn't read");
             }
             // the same columns again, or fewer, or none: the file isn't read
             rows.read.set(0);
             List<String> again = List.of("SELECT host, avg(ms), max(ms) FROM t WHERE ms > 3 GROUP BY 1",
                     "SELECT count(*) FROM t", "DESCRIBE t", "SELECT ms FROM t ORDER BY ms DESC LIMIT 3");
             for (String q : again) {
-                assertNotNull(tq.query(cache, q, 100, rows, o.doc().lineCount(), () -> false, null, null), q);
+                assertNotNull(tq.query(q, 100, rows, o.doc().lineCount(), () -> false, null, null), q);
             }
             assertEquals(0, rows.read.get());
             // one more column: read once more, for that one only
             List<String> said = new ArrayList<>();
-            tq.query(cache, "SELECT status, count(*) FROM t GROUP BY 1", 100, rows, o.doc().lineCount(), () -> false, null,
+            tq.query("SELECT status, count(*) FROM t GROUP BY 1", 100, rows, o.doc().lineCount(), () -> false, null,
                     said::add);
             assertTrue(rows.read.get() > 0);
-            assertTrue(cache.hasColumn(1));
-            assertFalse(cache.hasColumn(2));
+            assertTrue(tq.hasColumn(1));
+            assertFalse(tq.hasColumn(2));
             assertTrue(said.get(0).startsWith("Preparing this column"), said.toString());
         }
         o.doc().close();
@@ -145,11 +143,10 @@ class TableQueryTest {
         Path f = PivotCacheTest.table(dir.resolve("t.csv"), 500, 13);
         PivotCacheTest.Opened o = PivotCacheTest.open(f);
         Counting rows = new Counting(o.lines());
-        try (PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT);
-             TableQuery tq = new TableQuery(o.fields())) {
+        try (TableQuery tq = TableQuery.open(f, o.format(), "", o.fields(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT)) {
             for (String q : List.of("PIVOT t ON status USING sum(ms)", "SELECT * FROM read_csv('" + f + "')",
                     "SELECT hots FROM t")) {
-                assertNull(tq.query(cache, q, 100, rows, o.doc().lineCount(), () -> false, null, null), q);
+                assertNull(tq.query(q, 100, rows, o.doc().lineCount(), () -> false, null, null), q);
             }
             assertEquals(0, rows.read.get(), "nothing read for them");
             // a mistake is told from the empty table, with DuckDB's hint
@@ -159,14 +156,14 @@ class TableQueryTest {
             // what isn't a query is refused before anything is read
             for (String q : List.of("DELETE FROM t", "SELECT 1; DROP TABLE t", "COPY t TO 'x.csv'")) {
                 assertThrows(SQLException.class,
-                        () -> tq.query(cache, q, 100, rows, o.doc().lineCount(), () -> false, null, null), q);
+                        () -> tq.query(q, 100, rows, o.doc().lineCount(), () -> false, null, null), q);
             }
             assertEquals(0, rows.read.get());
             // stopped while storing: nothing kept
-            SQLException stopped = assertThrows(SQLException.class, () -> tq.query(cache, "SELECT sum(bytes) FROM t", 100,
+            SQLException stopped = assertThrows(SQLException.class, () -> tq.query("SELECT sum(bytes) FROM t", 100,
                     rows, o.doc().lineCount(), () -> true, null, null));
             assertEquals("Stopped.", stopped.getMessage());
-            assertFalse(cache.hasColumn(4));
+            assertFalse(tq.hasColumn(4));
         }
         o.doc().close();
     }
@@ -187,14 +184,13 @@ class TableQueryTest {
         }
         Path f = Files.writeString(dir.resolve("wide.csv"), b.toString());
         PivotCacheTest.Opened o = PivotCacheTest.open(f);
-        try (PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT);
-             TableQuery tq = new TableQuery(o.fields())) {
-            assertNull(tq.query(cache, "SELECT * FROM t LIMIT 3", 100, o.lines(), o.doc().lineCount(), () -> false, null,
+        try (TableQuery tq = TableQuery.open(f, o.format(), "", o.fields(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT)) {
+            assertNull(tq.query("SELECT * FROM t LIMIT 3", 100, o.lines(), o.doc().lineCount(), () -> false, null,
                     null), "every column at once");
-            assertNotNull(tq.query(cache, "SELECT m1, m69 FROM t LIMIT 3", 100, o.lines(), o.doc().lineCount(),
+            assertNotNull(tq.query("SELECT m1, m69 FROM t LIMIT 3", 100, o.lines(), o.doc().lineCount(),
                     () -> false, null, null));
-            assertTrue(cache.hasColumn(1) && cache.hasColumn(69));
-            assertFalse(cache.hasColumn(2));
+            assertTrue(tq.hasColumn(1) && tq.hasColumn(69));
+            assertFalse(tq.hasColumn(2));
         }
         o.doc().close();
     }
@@ -203,14 +199,12 @@ class TableQueryTest {
     void sqlInTheCacheReachesNoFile() throws Exception {
         Path f = PivotCacheTest.table(dir.resolve("t.csv"), 200, 14);
         PivotCacheTest.Opened o = PivotCacheTest.open(f);
-        try (PivotCache cache = PivotCache.open(f, o.format(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT);
-             TableQuery tq = new TableQuery(o.fields())) {
-            assertNotNull(tq.query(cache, "SELECT count(*) FROM t", 10, o.lines(), o.doc().lineCount(), () -> false, null,
+        try (TableQuery tq = TableQuery.open(f, o.format(), "", o.fields(), dir.resolve("cache"), PivotCache.DEFAULT_LIMIT)) {
+            assertNotNull(tq.query("SELECT count(*) FROM t", 10, o.lines(), o.doc().lineCount(), () -> false, null,
                     null));
-            List<String> names = Sql.tableColumns(o.fields().titles());
             for (String q : List.of("SELECT count(*) FROM read_csv('" + f + "')",
                     "SELECT * FROM read_text('" + f + "')", "SELECT * FROM glob('" + dir + "/*')")) {
-                assertThrows(SQLException.class, () -> cache.query(q, Set.of(), names, o.fields(), 10, null), q);
+                assertThrows(SQLException.class, () -> tq.onCacheForTest(q), q);
             }
         }
         o.doc().close();

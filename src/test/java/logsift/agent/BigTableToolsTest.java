@@ -204,8 +204,8 @@ class BigTableToolsTest {
             System.setProperty("logsift.pivotCacheMinBytes", minBytes);
             try (Workspace w = workspace()) {
                 String ex = LogTools.QUERY_EXAMPLES.run(new Tool.Args(Map.of("log", f.toString())), w);
-                assertTrue(ex.contains("Average of each cpu_… column by host:\nSELECT host, avg(COLUMNS('^cpu_[0-9]+$'))"),
-                        ex);
+                assertTrue(ex.contains("The mean of each of 30 cpu_N columns for each host:\nSELECT host, avg(COLUMNS("
+                        + "'^cpu_[0-9]+$'))"), ex);
                 int ran = 0;
                 for (String part : ex.split("\n\n")) {
                     int colon = part.indexOf(":\n");

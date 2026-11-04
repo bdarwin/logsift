@@ -22,7 +22,7 @@ The **Query** tab (below the log) asks a log or a table anything you can write i
   | `level`, `thread`, `logger`, `message`… | The log format's columns, whatever its format: your own formats too |
   | `text` | The whole line |
 
-  The first query on a big log gets it ready: Logsift reads it into a table, on several processor cores, about 5 seconds for 300 MB. It does this once. When the log grows, only the new lines are added. A log that was replaced (rotated, truncated) is read again.
+  The first query on a big log gets it ready: Logsift reads it into a table, on several processor cores, about 5 seconds for 300 MB. It does this once, and keeps the table on disk with the big tables' caches, so the next time Logsift starts the log is ready at once. When the log grows, only the new lines are added. A log that was replaced (rotated, truncated) is read again. Logs under 32 MB are quick enough to read again, so they aren't kept.
 - **A table (CSV, TSV) is the table `t`.** It has `line` and then its columns, named as in its header. DuckDB reads the file itself, so even big files answer at once; the biggest ones are kept in a cache (see [Big tables](#big-tables)).
 
 Use `"double quotes"` for a column name with spaces or capitals: `SELECT "Order Id" FROM t`.
@@ -62,21 +62,23 @@ Type SQL in the box and press **Run** (Ctrl+Enter, ⌘Enter on a Mac). **Example
 
 - Lines per level, errors per minute, lines per hour.
 - The most frequent errors, with numbers blanked so they group.
-- Errors and warnings by logger, as a pivot.
+- Errors and warnings by logger.
 - Durations in messages (*… 345 ms*), slowest first.
-- Lines with a text.
+- Lines whose message mentions a word.
 - For a table, chosen by what its columns hold (numbers, times, text):
-  - the first rows, and every column summarized (`SUMMARIZE t`);
-  - rows per value;
-  - count, average and highest of a number by a text column such as `host`;
-  - the rows with the highest values, with the median and 95th and 99th percentiles;
-  - rows per hour.
+  - how many rows, the first rows, and every column summarized (`SUMMARIZE t`);
+  - the range, median and 95th and 99th percentiles of a number, and the rows with its highest values;
+  - count, average and highest of that number by a column with few values, such as `host`;
+  - rows per hour, with the number's average.
 - For a wide table with many columns alike (`cpu_0001` … `cpu_1500`), all of them at once with a pattern, `COLUMNS('^cpu_[0-9]+$')`:
-  - the average of each by host, and per minute;
+  - the average of each, by host and per minute;
   - their total in each row;
   - the rows with the highest value;
-  - the columns turned into rows (`UNPIVOT`), highest average first;
+  - each column's average and highest, highest average first (`UNPIVOT`);
   - finding a column by name in `DESCRIBE t`.
+- With other tables open: a join on a column they share (`JOIN customers USING (customer_id)`), never on the line numbers.
+
+The examples come from quackjvm, the library Logsift's SQL runs on; Logsift tells it the columns and what they hold.
 
 A column counts as numbers or times only when every value in its first rows is one, as DuckDB reading the file sees it. So each example runs as written, on a small table read in place and on a big one from the cache.
 

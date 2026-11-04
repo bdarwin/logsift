@@ -1,30 +1,37 @@
 package logsift.core;
 
+import io.quackjvm.agent.file.FileTable;
+import io.quackjvm.agent.file.FileTables;
+import io.quackjvm.agent.file.RowParser;
+import io.quackjvm.agent.file.RowSource;
+import io.quackjvm.agent.guard.CancelSignal;
+import io.quackjvm.agent.guard.QueryCancelled;
+import io.quackjvm.agent.session.QuerySession;
+import io.quackjvm.core.duckdb.ColumnDef;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
 
 /**
- * SQL over tables and logs, with DuckDB. A CSV or TSV file is a view read in place; a log is
- * loaded once into a table (by Logsift's own reading: its line numbers, times and columns) and
- * kept up to date as it grows. Everything is read-only: DuckDB's parser (through quackjvm's
- * guard) lets only a single query through, and it runs as {@code SELECT * FROM (query) LIMIT n},
- * so nothing else (COPY, ATTACH, INSTALL, SET, a WITH that deletes…) can run;
- * files can be read only in the folders given, and nothing on the network.
+ * SQL over tables and logs, with DuckDB, in a quackjvm {@link QuerySession}: every table by its
+ * name, joined at will. A CSV or TSV file is a view read in place; a log is a quackjvm
+ * {@link FileTable} (Logsift's own reading: its line numbers, times and columns), kept up to date
+ * as it grows, and kept on disk between runs when a cache folder is given. Everything is
+ * read-only: DuckDB's parser (through quackjvm's guard) lets only a single query through, and it
+ * runs as {@code SELECT * FROM (query) LIMIT n}, so nothing else (COPY, ATTACH, INSTALL, SET, a
+ * WITH that deletes…) can run; files can be read only in the folders given, and nothing on the
+ * network.
  */
 public final class Sql implements AutoCloseable {
 
@@ -80,22 +87,42 @@ public final class Sql implements AutoCloseable {
     }
 
     /**
-     * @param readable folders whose files queries may read (the log's, the user's home)
-     * @param temp     where DuckDB may spill to disk when a query needs more memory
+     * @param readable   folders whose files queries may read (the log's, the user's home)
+     * @param temp       where DuckDB may spill to disk when a query needs more memory
+     * @param cache      where logs are kept between runs, or null to keep them in memory only
+     * @param cacheLimit how much room the caches in that folder may take
      */
-    public record Options(List<Path> readable, Path temp) {}
+    public record Options(List<Path> readable, Path temp, Path cache, long cacheLimit) {
+        public Options(List<Path> readable, Path temp) {
+            this(readable, temp, null, 0);
+        }
+    }
 
     /** A query's answer: column names and types, rows (at most the limit), and whether there were more. */
     public record Result(List<String> columns, List<String> types, List<Object[]> rows, boolean more, long millis) {}
 
-    private final Connection conn;
+    private final QuerySession session;
     private final Path temp;
+    private final Path cache;
+    private final long cacheLimit;
+    private final List<LogTable> tables = new ArrayList<>();
 
-    private Sql(Connection conn, Path temp) {
-        this.conn = conn;
+    private Sql(QuerySession session, Path temp, Path cache, long cacheLimit) {
+        this.session = session;
         this.temp = temp;
+        this.cache = cache;
+        this.cacheLimit = cacheLimit;
     }
 
+    /** What a query must be: one that only reads (PIVOT too, which DuckDB's parser can't vouch for). */
+    static final io.quackjvm.agent.guard.QueryPolicy CHECK = io.quackjvm.agent.guard.QueryPolicy.readOnly()
+            .allowUnverified(io.quackjvm.agent.guard.QueryPolicy.PIVOT);
+
+    /**
+     * SQL in a session of its own, hardened from the moment it opens: files only in the folders
+     * given (not the spill folder, which DuckDB uses anyway), no network, no extensions, no settings
+     * changed.
+     */
     public static Sql open(Options o) throws SQLException, IOException {
         if (!available()) {
             throw new SQLException(unavailableReason());
@@ -103,23 +130,17 @@ public final class Sql implements AutoCloseable {
         Path temp = o.temp() == null ? Files.createTempDirectory("logsift-sql-") : Files.createDirectories(o.temp());
         long max = physicalMemory();
         long limit = Math.max(256L << 20, Math.min(4L << 30, max > 0 ? max * 3 / 10 : 1L << 30));
-        // locked down from the start (quackjvm's hardening): files only in the folders given (not the
-        // spill folder, which DuckDB uses anyway), no network, no extensions, no settings changed
         io.quackjvm.agent.guard.Hardening.Options h = io.quackjvm.agent.guard.Hardening.options()
                 .tempFolder(temp.toString()).memoryLimit((limit >> 20) + "MB")
                 .threads(Math.max(1, Math.min(16, Runtime.getRuntime().availableProcessors() - 1)));
         for (Path p : o.readable()) {
             h = h.allowedFolders(p.toString());
         }
-        // locked as it opens: no moment without the rules (Windows folders keep their backslashes
-        // since quackjvm 1.4, #12)
-        java.util.Properties props;
         try {
-            props = h.properties();
+            return new Sql(QuerySession.open(h, CHECK), temp, o.cache(), o.cacheLimit());
         } catch (RuntimeException e) {
             throw new SQLException("SQL couldn't be locked down, so it isn't opened: " + e.getMessage(), e);
         }
-        return new Sql(DriverManager.getConnection("jdbc:duckdb:", props), temp);
     }
 
     private static long physicalMemory() {
@@ -156,8 +177,8 @@ public final class Sql implements AutoCloseable {
      * A CSV file as a view; {@code columns} are its header's names as Logsift found them (null
      * for no header; empty to leave them to DuckDB), used when DuckDB cannot read the header.
      */
-    public void csv(String name, Path file, char delimiter, List<String> columns, java.nio.charset.Charset charset)
-            throws SQLException {
+    public synchronized void csv(String name, Path file, char delimiter, List<String> columns,
+                                 java.nio.charset.Charset charset) throws SQLException {
         boolean header = columns != null;
         String enc = charset == null ? "utf-8" : switch (charset.name().toUpperCase(Locale.ROOT)) {
             case "ISO-8859-1", "WINDOWS-1252", "US-ASCII" -> charset.name().equalsIgnoreCase("US-ASCII") ? "utf-8" : "latin-1";
@@ -167,14 +188,14 @@ public final class Sql implements AutoCloseable {
         String src = "read_csv('" + quote(file.toAbsolutePath().toString()) + "', delim='" + quote(String.valueOf(delimiter))
                 + "', header=" + header + ", encoding='" + enc + "', sample_size=20480, strict_mode=false";
         // not strict: real files mix line ends (\n and \r\n), which the strict reader refuses
-        String view = "CREATE OR REPLACE VIEW " + ident(name) + " AS SELECT row_number() OVER () + " + (header ? 1 : 0)
-                + " AS line, * FROM ";
-        try (Statement s = conn.createStatement()) {
-            s.execute(view + src + ")");
-            if (!readsHeader(s.executeQuery("SELECT * FROM " + ident(name) + " LIMIT 0"), columns)) {
+        String view = "SELECT row_number() OVER () + " + (header ? 1 : 0) + " AS line, * FROM ";
+        try {
+            session.register(name, view + src + ")");
+            io.quackjvm.agent.guard.GuardedResult r = session.run("SELECT * FROM " + ident(name) + " LIMIT 0");
+            if (!readsHeader(r.getColumns(), columns)) {
                 throw new SQLException("the header was read as values");
             }
-        } catch (SQLException e) {
+        } catch (SQLException | RuntimeException e) {
             // rows shorter or longer than the header (a column no row fills, a separator more at
             // each row's end): padded with nulls. Only then, as that reads on one thread
             String names = "";
@@ -192,66 +213,44 @@ public final class Sql implements AutoCloseable {
                 }
                 names = sb.append(']').toString();
             }
-            try (Statement s = conn.createStatement()) {
-                s.execute(view + (names.isEmpty() ? src : src.replace(", header=true", names)) + ", null_padding=true)");
+            try {
+                session.register(name, view + (names.isEmpty() ? src : src.replace(", header=true", names))
+                        + ", null_padding=true)");
+            } catch (RuntimeException again) {
+                throw failure(again);
             }
         }
     }
 
     /** Whether DuckDB found the header's names (it takes a header of another width for values). */
-    private static boolean readsHeader(ResultSet rs, List<String> columns) throws SQLException {
-        try (rs) {
-            if (columns == null || columns.isEmpty()) {
-                return true;
-            }
-            ResultSetMetaData md = rs.getMetaData();
-            java.util.Set<String> found = new java.util.HashSet<>();
-            for (int i = 2; i <= md.getColumnCount(); i++) {
-                found.add(md.getColumnLabel(i).strip().toLowerCase(Locale.ROOT));
-            }
-            return md.getColumnCount() - 1 == columns.size()
-                    && columns.stream().allMatch(c -> found.contains(c.strip().toLowerCase(Locale.ROOT))
-                            || c.matches("column \\d+"));
+    private static boolean readsHeader(List<String> found, List<String> columns) {
+        if (columns == null || columns.isEmpty()) {
+            return true;
         }
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (int i = 1; i < found.size(); i++) {
+            names.add(found.get(i).strip().toLowerCase(Locale.ROOT));
+        }
+        return found.size() - 1 == columns.size()
+                && columns.stream().allMatch(c -> names.contains(c.strip().toLowerCase(Locale.ROOT))
+                        || c.matches("column \\d+"));
     }
 
-    /** A log loaded into a table; {@link #update} adds what was written since. */
+    /** A log or table loaded by Logsift's own reading, by its name in the session; {@link #update} adds what was written since. */
     public final class LogTable {
         final String name;
-        final LogDocument doc;
         final LogFormat format;
-        final TimeFormat times;
-        final EntryFormat entries;
         final List<String> columns;
         /** A table's (CSV's) column kinds; null for a log. */
         final Pivot.Fields fields;
-        long loaded;
-        int generation;
+        final FileTable table;
 
-        LogTable(String name, LogDocument doc, LogFormat format, TimeFormat times, EntryFormat entries) {
-            this(name, doc, format, times, entries, null);
-        }
-
-        LogTable(String name, LogDocument doc, LogFormat format, TimeFormat times, EntryFormat entries,
-                 Pivot.Fields fields) {
+        LogTable(String name, LogFormat format, List<String> columns, Pivot.Fields fields, FileTable table) {
             this.name = name;
-            this.doc = doc;
             this.format = format;
-            this.times = times;
-            this.entries = entries;
+            this.columns = columns;
             this.fields = fields;
-            List<String> cols = new ArrayList<>();
-            if (fields != null) {
-                cols.addAll(fields.titles());
-            } else if (format != null) {
-                for (String c : format.columns()) {
-                    if (!c.equals("time") && !c.equals("line") && !c.equals("text") && !c.equals("starts")) {
-                        cols.add(c);
-                    }
-                }
-            }
-            this.columns = cols;
-            this.generation = doc.generation();
+            this.table = table;
         }
 
         public String name() {
@@ -276,69 +275,134 @@ public final class Sql implements AutoCloseable {
             return out;
         }
 
+        /** The file's lines read into it so far. */
         public long loaded() {
-            return loaded;
+            return table.rowsLoaded();
         }
 
         /**
          * Brings the table up to date: the lines written since, or all of them again if the file
-         * was replaced. Returns false if stopped.
+         * was replaced. Returns false if stopped (what was read by then is kept, and the next update
+         * goes on from there).
          */
-        public synchronized boolean update(BooleanSupplier stop, DoubleConsumer progress) throws SQLException {
-            if (doc.generation() != generation) {
-                try (Statement s = conn.createStatement()) {
-                    s.execute("DELETE FROM " + ident(name));
-                }
-                loaded = 0;
-                generation = doc.generation();
-            }
-            long total = doc.lineCount();
-            if (total <= loaded) {
+        public boolean update(BooleanSupplier stop, DoubleConsumer progress) throws SQLException {
+            try {
+                table.update(stop == null ? null : CancelSignal.from(stop), progress);
                 return true;
+            } catch (QueryCancelled e) {
+                return false;
+            } catch (RuntimeException e) {
+                throw failure(e);
             }
-            boolean done = load(this, loaded, total, stop, progress);
-            if (done) {
-                loaded = total;
-            }
-            return done;
         }
     }
+
+    /** A document's lines, for a table over them: whole lines, and its generation, which changes when the file is replaced. */
+    private record Lines(LogDocument doc, ColumnProfile.Lines lines) implements RowSource {
+        @Override
+        public long rowCount() {
+            return doc.lineCount();
+        }
+
+        @Override
+        public void read(long first, int n, String[] into) {
+            lines.read(first, n, into);
+        }
+
+        @Override
+        public Object identity() {
+            return doc.generation();
+        }
+    }
+
+    /** Changes when a log's stored layout changes, so older caches aren't read. */
+    static final String LOG_VERSION = "logsift-log-1";
 
     /**
      * A log as a table {@code name}: {@code line} (1-based, as Logsift shows it), {@code starts}
      * (the line starts an entry: continuation lines of a stack trace don't), {@code time} (as
      * Logsift reads it), the format's columns ({@code level}, {@code thread}, {@code logger},
-     * {@code message}…), and {@code text}, the whole line.
+     * {@code message}…), and {@code text}, the whole line. Every line is a row, a blank one too.
      */
-    public LogTable log(String name, LogDocument doc, LogFormat format, TimeFormat times, EntryFormat entries)
+    public synchronized LogTable log(String name, LogDocument doc, LogFormat format, TimeFormat times, EntryFormat entries)
             throws SQLException {
-        LogTable t = new LogTable(name, doc, format, times, entries);
-        StringBuilder ddl = new StringBuilder("CREATE OR REPLACE TABLE " + ident(name)
-                + " (line BIGINT, starts BOOLEAN, time TIMESTAMP");
-        for (String c : t.columns) {
-            ddl.append(", ").append(ident(c)).append(" VARCHAR");
+        List<String> cols = new ArrayList<>();
+        if (format != null) {
+            for (String c : format.columns()) {
+                if (!c.equals("time") && !c.equals("line") && !c.equals("text") && !c.equals("starts")) {
+                    cols.add(c);
+                }
+            }
         }
-        ddl.append(", text VARCHAR)");
-        try (Statement s = conn.createStatement()) {
-            s.execute(ddl.toString());
+        List<ColumnDef> defs = new ArrayList<>(List.of(new ColumnDef("line", Long.class),
+                new ColumnDef("starts", Boolean.class), new ColumnDef("time", LocalDateTime.class)));
+        for (String c : cols) {
+            defs.add(new ColumnDef(c, String.class));
         }
-        return t;
+        defs.add(new ColumnDef("text", String.class));
+        int[] index = new int[cols.size()];
+        for (int i = 0; i < index.length; i++) {
+            index[i] = format.columns().indexOf(cols.get(i));
+        }
+        RowParser parser = (raw, rowNo, cells) -> {
+            String text = raw == null ? "" : raw;
+            String[] split = format == null ? null : format.split(text, null);
+            long ms = times == null ? TimeFormat.NONE : times.parse(text);
+            cells[0] = rowNo + 1;
+            cells[1] = entries == null || entries.startsEntry(text);
+            cells[2] = ms == TimeFormat.NONE ? null : LocalDateTime.ofEpochSecond(Math.floorDiv(ms, 1000),
+                    Math.floorMod(ms, 1000) * 1_000_000, ZoneOffset.UTC);
+            for (int i = 0; i < index.length; i++) {
+                int c = index[i];
+                cells[3 + i] = split == null || c < 0 || c >= split.length ? null : split[c];
+            }
+            cells[cells.length - 1] = text;
+        };
+        String version = LOG_VERSION + "|" + (format == null ? "" : format.name() + "|" + format.regex() + "|"
+                + format.columns() + "|" + (int) format.delimiter()) + "|" + (times == null ? "" : times.name()) + "|"
+                + (entries == null ? "" : entries.name());
+        FileTable.Builder b = FileTables.builder(doc.path().toAbsolutePath().normalize(), defs,
+                new Lines(doc, doc::readLines), parser).name(name).version(version);
+        if (cache != null) {
+            b.cacheDir(cache).roomLimit(cacheLimit).inMemoryBelow(Long.getLong("logsift.logCacheMinBytes",
+                    LOG_IN_MEMORY_BELOW));
+        }
+        return register(new LogTable(name, format, cols, null, open(b)));
     }
+
+    /** A log smaller than this is kept in memory, not in the cache folder: quick enough to read again. */
+    static final long LOG_IN_MEMORY_BELOW = 32L << 20;
 
     /**
      * A table (CSV, TSV) loaded by Logsift's own reading, for when DuckDB may not read files
      * itself (agents): {@code line}, then the columns by their titles, numbers as numbers and
-     * times as times (as Pivot reads them).
+     * times as times (as Pivot reads them). The header and the lines inside a value that spans
+     * lines aren't rows.
      */
-    public LogTable table(String name, LogDocument doc, LogFormat format, Pivot.Fields fields) throws SQLException {
-        LogTable t = new LogTable(name, doc, format, null, null, fields);
-        List<String> names = tableColumns(fields.titles());
-        for (int c = 0; c < names.size(); c++) {
-            t.columns.set(c, names.get(c));
+    public synchronized LogTable table(String name, LogDocument doc, LogFormat format, Pivot.Fields fields)
+            throws SQLException {
+        FileTable.Builder b = FileTables.builder(doc.path().toAbsolutePath().normalize(), TableQuery.columns(fields),
+                new Lines(doc, CsvRows.reader(doc, format)), TableQuery.parser(format, fields)).name(name)
+                .version(TableQuery.VERSION + "|" + fields.kinds() + "|" + String.join("\u0001", format.columns()));
+        return register(new LogTable(name, format, tableColumns(fields.titles()), fields, open(b)));
+    }
+
+    private static FileTable open(FileTable.Builder b) throws SQLException {
+        try {
+            return b.open();
+        } catch (RuntimeException e) {
+            throw new SQLException("The table couldn't be made: " + e.getMessage(), e);
         }
-        try (Statement s = conn.createStatement()) {
-            s.execute(tableDdl(name, fields));
+    }
+
+    private LogTable register(LogTable t) throws SQLException {
+        try {
+            session.register(t.name, t.table);
+        } catch (RuntimeException e) {
+            t.table.close();
+            throw failure(e);
         }
+        tables.add(t);
         return t;
     }
 
@@ -403,16 +467,23 @@ public final class Sql implements AutoCloseable {
     }
 
     /** Takes a table away, and the memory it held (its file was closed). */
-    public void drop(LogTable t) throws SQLException {
-        try (Statement s = conn.createStatement()) {
-            s.execute("DROP TABLE IF EXISTS " + ident(t.name));
+    public synchronized void drop(LogTable t) throws SQLException {
+        try {
+            session.unregister(t.name);
+        } catch (RuntimeException e) {
+            throw failure(e);
+        } finally {
+            t.table.close();
+            tables.remove(t);
         }
     }
 
     /** Takes a view away (a table no longer open). */
-    public void dropView(String name) throws SQLException {
-        try (Statement s = conn.createStatement()) {
-            s.execute("DROP VIEW IF EXISTS " + ident(name));
+    public synchronized void dropView(String name) throws SQLException {
+        try {
+            session.unregister(name);
+        } catch (RuntimeException e) {
+            throw failure(e);
         }
     }
 
@@ -425,152 +496,17 @@ public final class Sql implements AutoCloseable {
         return query(sql, maxRows, stop);
     }
 
-    public void alias(String view, LogTable t) throws SQLException {
-        try (Statement s = conn.createStatement()) {
-            s.execute("CREATE OR REPLACE VIEW " + ident(view) + " AS SELECT * FROM " + ident(t.name));
+    /** Another name for a table ({@code t}, {@code log}): a query says that whichever file it is about. */
+    public synchronized void alias(String view, LogTable t) throws SQLException {
+        if (view.equalsIgnoreCase(t.name)) {
+            return;
+        }
+        try {
+            session.alias(view, t.name);
+        } catch (RuntimeException e) {
+            throw failure(e);
         }
     }
-
-    /** Lines read and appended at a time, each block by one of several threads. */
-    static final int BLOCK = 8192;
-
-    private boolean load(LogTable t, long from, long to, BooleanSupplier stop, DoubleConsumer progress)
-            throws SQLException {
-        int threads = (to - from) < 4L * BLOCK ? 1 : Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() - 1));
-        AtomicLong next = new AtomicLong(from);
-        AtomicLong done = new AtomicLong();
-        List<Thread> workers = new ArrayList<>();
-        SQLException[] failed = {null};
-        RuntimeException[] bug = {null};
-        org.duckdb.DuckDBConnection base = conn.unwrap(org.duckdb.DuckDBConnection.class);
-        // a table's rows whole (a quoted value may go over lines); a log's lines
-        ColumnProfile.Lines lines = t.fields != null ? CsvRows.reader(t.doc, t.format) : t.doc::readLines;
-        int[] index = new int[t.columns.size()];
-        for (int i = 0; i < index.length; i++) {
-            index[i] = t.fields != null ? i : t.format.columns().indexOf(t.columns.get(i));
-        }
-        for (int w = 0; w < threads; w++) {
-            Connection own = base.duplicate();
-            Thread th = new Thread(() -> {
-                String[] buf = new String[BLOCK];
-                try (own; org.duckdb.DuckDBAppender ap = own.unwrap(org.duckdb.DuckDBConnection.class)
-                        .createAppender(org.duckdb.DuckDBConnection.DEFAULT_SCHEMA, t.name)) {
-                    long first;
-                    while ((first = next.getAndAdd(BLOCK)) < to) {
-                        if (stop.getAsBoolean()) {
-                            return;
-                        }
-                        int k = (int) Math.min(BLOCK, to - first);
-                        lines.read(first, k, buf);
-                        for (int i = 0; i < k; i++) {
-                            String text = buf[i] == null ? "" : buf[i];
-                            String[] cells = t.format == null ? null : t.format.split(text, null);
-                            if (t.fields != null) {
-                                if (cells != null) {
-                                    tableRow(ap, t, first + i + 1, cells);
-                                }
-                                continue; // the header, or a piece of a value over several lines
-                            }
-                            long ms = t.times == null ? TimeFormat.NONE : t.times.parse(text);
-                            ap.beginRow();
-                            ap.append(first + i + 1);
-                            ap.append(t.entries == null || t.entries.startsEntry(text));
-                            if (ms == TimeFormat.NONE) {
-                                ap.appendNull();
-                            } else {
-                                ap.append(LocalDateTime.ofEpochSecond(Math.floorDiv(ms, 1000),
-                                        Math.floorMod(ms, 1000) * 1_000_000, ZoneOffset.UTC));
-                            }
-                            for (int c : index) {
-                                String v = cells == null || c < 0 || c >= cells.length ? null : cells[c];
-                                if (v == null) {
-                                    ap.appendNull();
-                                } else {
-                                    ap.append(v);
-                                }
-                            }
-                            ap.append(text);
-                            ap.endRow();
-                        }
-                        long d = done.addAndGet(k);
-                        if (progress != null) {
-                            progress.accept((double) d / Math.max(1, to - from));
-                        }
-                    }
-                } catch (SQLException e) {
-                    synchronized (failed) {
-                        failed[0] = e;
-                    }
-                } catch (RuntimeException e) {
-                    synchronized (failed) {
-                        bug[0] = e;
-                    }
-                }
-            }, "logsift-sql-load");
-            th.setDaemon(true);
-            workers.add(th);
-            th.start();
-        }
-        for (Thread th : workers) {
-            try {
-                th.join();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        }
-        if (bug[0] != null) {
-            throw bug[0];
-        }
-        if (failed[0] != null) {
-            throw failed[0];
-        }
-        if (stop.getAsBoolean()) {
-            try (Statement s = conn.createStatement()) {
-                s.execute("DELETE FROM " + ident(t.name) + " WHERE line > " + from); // a half load is no load
-            }
-            return false;
-        }
-        return true;
-    }
-
-    private static void tableRow(org.duckdb.DuckDBAppender ap, LogTable t, long line, String[] cells) throws SQLException {
-        ap.beginRow();
-        ap.append(line);
-        for (int c = 0; c < t.columns.size(); c++) {
-            String v = c < cells.length && cells[c] != null ? cells[c].strip() : "";
-            switch (t.fields.kind(c)) {
-                case NUMBER -> {
-                    double d = v.isEmpty() ? Double.NaN : Pivot.number(v);
-                    if (Double.isNaN(d)) {
-                        ap.appendNull();
-                    } else {
-                        ap.append(d);
-                    }
-                }
-                case TIME -> {
-                    TimeFormat tf = c < t.fields.times().size() ? t.fields.times().get(c) : null;
-                    long ms = tf == null || v.isEmpty() ? TimeFormat.NONE : tf.parse(v);
-                    if (ms == TimeFormat.NONE) {
-                        ap.appendNull();
-                    } else {
-                        ap.append(LocalDateTime.ofEpochSecond(Math.floorDiv(ms, 1000), Math.floorMod(ms, 1000) * 1_000_000,
-                                ZoneOffset.UTC));
-                    }
-                }
-                case TEXT -> {
-                    if (v.isEmpty()) {
-                        ap.appendNull();
-                    } else {
-                        ap.append(v);
-                    }
-                }
-            }
-        }
-        ap.endRow();
-    }
-
-    // ---------------------------------------------------------------- queries
 
     /**
      * The query as one statement, or an exception saying why not: only one, and the wrapping
@@ -683,8 +619,34 @@ public final class Sql implements AutoCloseable {
         return query(sql, maxRows, stop);
     }
 
-    public synchronized Result query(String sql, int maxRows, BooleanSupplier stop) throws SQLException {
-        return run(conn, sql, maxRows, stop);
+    public Result query(String sql, int maxRows, BooleanSupplier stop) throws SQLException {
+        String q = single(sql);
+        String why;
+        try {
+            why = session.whyRejected(q);
+        } catch (RuntimeException e) {
+            throw new SQLException("The query couldn't be checked: " + e.getMessage(), e);
+        }
+        if (why != null) {
+            throw new SQLException(why.startsWith("Only one statement") ? "One query at a time, please."
+                    : "Only queries can run here (SELECT, WITH, FROM, PIVOT, SUMMARIZE, DESCRIBE): Logsift only reads.");
+        }
+        // Stop, polled while it runs; already pressed, nothing runs
+        CancelSignal signal = stop == null ? new CancelSignal() : CancelSignal.from(stop);
+        try {
+            return result(session.run(q, signal, policy(maxRows)));
+        } catch (RuntimeException e) {
+            throw failure(e);
+        }
+    }
+
+    /** The table's description as quackjvm's catalog gives it (for the examples). */
+    public io.quackjvm.agent.catalog.TableInfo describe(String name) throws SQLException {
+        try {
+            return session.describe(name);
+        } catch (RuntimeException e) {
+            throw failure(e);
+        }
     }
 
     /**
@@ -697,31 +659,42 @@ public final class Sql implements AutoCloseable {
         io.quackjvm.agent.guard.CancelSignal signal = stop == null ? new io.quackjvm.agent.guard.CancelSignal()
                 : io.quackjvm.agent.guard.CancelSignal.from(stop);
         try {
-            io.quackjvm.agent.guard.GuardedResult r = io.quackjvm.agent.guard.GuardedQuery.on(conn, policy(maxRows))
-                    .run(q, signal);
-            List<String> types = new ArrayList<>();
-            for (String type : r.getColumnTypes()) {
-                types.add(type.toLowerCase(Locale.ROOT));
-            }
-            List<Object[]> rows = new ArrayList<>(r.getRows().size());
-            for (Object[] row : r.getRows()) {
-                for (int k = 0; k < row.length; k++) {
-                    row[k] = value(row[k]);
-                }
-                rows.add(row);
-            }
-            return new Result(r.getColumns(), types, rows, r.isTruncated(), r.getTook().toMillis());
-        } catch (io.quackjvm.agent.guard.QueryCancelled e) {
-            throw new SQLException("Stopped.", e);
-        } catch (io.quackjvm.agent.guard.QueryFailed e) {
-            // DuckDB's whole message, its lines numbered as written
-            throw new SQLException(e.getMessage(), e);
-        } catch (io.quackjvm.agent.guard.QueryRejected e) {
-            throw new SQLException("Only queries can run here (SELECT, WITH, FROM, PIVOT, SUMMARIZE, DESCRIBE): "
-                    + "Logsift only reads.", e);
+            return result(io.quackjvm.agent.guard.GuardedQuery.on(conn, policy(maxRows)).run(q, signal));
         } catch (RuntimeException e) {
-            throw new SQLException(e.getMessage() == null ? "The query failed." : e.getMessage(), e);
+            throw failure(e);
         }
+    }
+
+    /** A guarded query's answer as the Query tab and agents show it: types in lower case, values as people read them. */
+    static Result result(io.quackjvm.agent.guard.GuardedResult r) {
+        List<String> types = new ArrayList<>();
+        for (String type : r.getColumnTypes()) {
+            types.add(type.toLowerCase(Locale.ROOT));
+        }
+        List<Object[]> rows = new ArrayList<>(r.getRows().size());
+        for (Object[] row : r.getRows()) {
+            for (int k = 0; k < row.length; k++) {
+                row[k] = value(row[k]);
+            }
+            rows.add(row);
+        }
+        return new Result(r.getColumns(), types, rows, r.isTruncated(), r.getTook().toMillis());
+    }
+
+    /** Why a guarded query failed, in the words the Query tab shows ("Stopped." when it was stopped). */
+    static SQLException failure(RuntimeException e) {
+        if (e instanceof io.quackjvm.agent.guard.QueryCancelled) {
+            return new SQLException("Stopped.", e);
+        }
+        if (e instanceof io.quackjvm.agent.guard.QueryFailed) {
+            // DuckDB's whole message, its lines numbered as written
+            return new SQLException(e.getMessage(), e);
+        }
+        if (e instanceof io.quackjvm.agent.guard.QueryRejected) {
+            return new SQLException("Only queries can run here (SELECT, WITH, FROM, PIVOT, SUMMARIZE, DESCRIBE): "
+                    + "Logsift only reads.", e);
+        }
+        return new SQLException(e.getMessage() == null ? "The query failed." : e.getMessage(), e);
     }
 
     /**
@@ -761,12 +734,16 @@ public final class Sql implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         try {
-            conn.close();
-        } catch (SQLException e) {
+            session.close();
+        } catch (RuntimeException e) {
             // closing anyway
         }
+        for (LogTable t : tables) {
+            t.table.close();
+        }
+        tables.clear();
         try (var walk = Files.walk(temp)) {
             walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
                 try {

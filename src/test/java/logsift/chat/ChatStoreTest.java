@@ -183,4 +183,40 @@ class ChatStoreTest {
             assertEquals(0, s.search("hello", 5).size());
         }
     }
+
+    @Test
+    void aFileWrittenBeforeTheJournalsOpensAsItIs() throws Exception {
+        // the tables as Logsift made them before quackjvm's journals, with a chat in them
+        Path f = dir.resolve("old").resolve("chats.duckdb");
+        java.nio.file.Files.createDirectories(f.getParent());
+        try (io.quackjvm.core.Quack q = io.quackjvm.core.Quack.open(f.toString())) {
+            q.execute("CREATE TABLE meta (k VARCHAR PRIMARY KEY, v VARCHAR)");
+            q.execute("""
+                    CREATE TABLE chat (id VARCHAR PRIMARY KEY, title VARCHAR, created BIGINT, updated BIGINT,
+                        model VARCHAR, session VARCHAR, context VARCHAR)""");
+            q.execute("""
+                    CREATE TABLE message (chat VARCHAR, seq BIGINT, time BIGINT, kind VARCHAR, text VARCHAR,
+                        model VARCHAR, tool VARCHAR, args VARCHAR, ok BOOLEAN, tokens_in BIGINT, tokens_out BIGINT,
+                        nano_aiu DOUBLE, millis BIGINT, PRIMARY KEY (chat, seq))""");
+            q.execute("INSERT INTO meta VALUES ('version', '1')");
+            q.execute("INSERT INTO chat VALUES ('c1', 'Why did it fail?', 1, 2, 'claude-haiku-5.5', NULL, NULL)");
+            q.execute("INSERT INTO message VALUES ('c1', 1, 1, 'USER', 'why?', NULL, NULL, NULL, NULL, 0, 0, 0, 0)");
+            q.execute("INSERT INTO message VALUES ('c1', 2, 2, 'ASSISTANT', 'because', 'claude-haiku-5.5', NULL, NULL, NULL,"
+                    + " 10, 5, 4.0e7, 900)");
+        }
+        try (ChatStore s = ChatStore.open(f.getParent())) {
+            ChatInfo c = s.chat("c1");
+            assertEquals("Why did it fail?", c.title());
+            assertEquals(2, c.messages());
+            assertEquals(List.of("why?", "because"), s.last("c1", 10).stream().map(ChatMessage::text).toList());
+            ChatMessage next = s.append(ChatMessage.user("c1", "and now?"));
+            assertEquals(3, next.seq(), "numbered on from the old entries");
+            s.delete("c1");
+            assertNull(s.chat("c1"));
+            assertEquals(0, s.count("c1"), "its entries went with it");
+        }
+        try (ChatStore s = ChatStore.open(f.getParent())) {
+            assertEquals(0, s.chatCount(), "and stay gone");
+        }
+    }
 }
