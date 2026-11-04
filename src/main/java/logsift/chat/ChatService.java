@@ -40,10 +40,10 @@ public final class ChatService {
         }
     }
 
-    /** The real one: the person's own copilot program, its sessions in Logsift's folder. */
+    /** The real one: the person's own copilot program, in its own folder (~/.copilot), where its sign-in is. */
     public static final EngineFactory COPILOT = (settings, home) -> {
         Path cli = CopilotLocator.find(settings.copilot());
-        return cli == null ? null : new CopilotEngine(cli, home.resolve("chat").resolve("copilot"));
+        return cli == null ? null : new CopilotEngine(cli, null);
     };
 
     private static volatile EngineFactory factory = COPILOT;

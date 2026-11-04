@@ -44,6 +44,6 @@ Chats are kept on your computer, in a DuckDB file in Logsift's folder (`~/.logsi
 
 ## What it can and can't do
 
-The assistant has **only Logsift's tools**: it reads logs, tables, dumps and profiles, within the [folders agents may read](agents.md#what-it-cant-do), and Logsift masks secrets in what it sees, as set in **Settings → Agents**. It can't run commands, change files or browse the web. Each tool call is written to the agents' audit log (`~/.logsift/agent.log`). Copilot's own sessions for these chats are kept apart from yours, in `~/.logsift/chat/copilot`.
+The assistant has **only Logsift's tools**: it reads logs, tables, dumps and profiles, within the [folders agents may read](agents.md#what-it-cant-do), and Logsift masks secrets in what it sees, as set in **Settings → Agents**. It can't run commands, change files or browse the web. Each tool call is written to the agents' audit log (`~/.logsift/agent.log`). Copilot runs as you, from its own folder (`~/.copilot`) where your sign-in is, so its sessions for these chats are kept there too, beside your terminal ones.
 
 *GitHub Copilot is a trademark of GitHub, Inc. Logsift is not affiliated with or endorsed by GitHub.*

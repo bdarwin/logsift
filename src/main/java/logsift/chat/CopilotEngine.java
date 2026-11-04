@@ -48,11 +48,17 @@ public final class CopilotEngine implements ChatEngine {
 
     /**
      * @param cli  the {@code copilot} program
-     * @param home where its sessions are kept (in Logsift's folder)
+     * @param home Copilot's own folder, or null for the person's ({@code ~/.copilot}), where the
+     *             program keeps its sign-in: a folder of its own would leave it signed out
      */
     public CopilotEngine(Path cli, Path home) {
         this.cli = cli;
         this.home = home;
+    }
+
+    /** Copilot's folder, or null for the person's own. */
+    Path home() {
+        return home;
     }
 
     @Override
@@ -67,9 +73,11 @@ public final class CopilotEngine implements ChatEngine {
         }
         CopilotClientOptions o = new CopilotClientOptions()
                 .setCliPath(cli.toString())
-                .setCopilotHome(home.toString())
                 .setUseLoggedInUser(true)
                 .setEnvironment(CopilotLocator.environment(cli));
+        if (home != null) {
+            o.setCopilotHome(home.toString());
+        }
         CopilotClient c = new CopilotClient(o);
         try {
             c.start().get(START_SECONDS, TimeUnit.SECONDS);

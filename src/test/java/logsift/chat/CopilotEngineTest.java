@@ -10,9 +10,12 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.copilot.generated.SessionEvent;
 import com.github.copilot.rpc.ModelInfo;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * What Copilot's events and models mean in the window. Events are read from JSON as Copilot
@@ -26,6 +29,17 @@ class CopilotEngineTest {
         SessionEvent e = JSON.readValue("{\"type\":\"" + type + "\",\"id\":\"" + UUID.randomUUID()
                 + "\",\"timestamp\":\"2026-11-04T10:00:00Z\",\"data\":" + data + "}", SessionEvent.class);
         return CopilotEngine.event(e);
+    }
+
+    @Test
+    void itUsesThePersonsOwnCopilotFolderWhereTheirSignInIs(@TempDir Path dir) throws Exception {
+        // signed in with copilot's /login, the sign-in is in ~/.copilot: a folder of Logsift's
+        // own left the window saying 'not signed in'
+        Path cli = Files.createFile(dir.resolve("copilot"));
+        ChatEngine e = ChatService.COPILOT.make(new ChatSettings(null, null, cli.toString()), dir.resolve("home"));
+        CopilotEngine c = assertInstanceOf(CopilotEngine.class, e);
+        assertNull(c.home());
+        assertFalse(Files.exists(dir.resolve("home")));
     }
 
     @Test
