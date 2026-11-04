@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Graphics2D;
@@ -2684,6 +2685,8 @@ class VisualTest {
     /** An assistant that answers by a script: Logsift's real tools on the log, then words with line links. */
     private static final class ScriptedAssistant implements logsift.chat.ChatEngine {
         final List<String> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
+        /** What each conversation was told before its first question. */
+        final List<String> told = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         @Override
         public String name() {
@@ -2716,6 +2719,7 @@ class VisualTest {
 
         @Override
         public Conversation open(Setup setup, Listener l) {
+            told.add(setup.instructions());
             return new Conversation() {
                 @Override
                 public String id() {
@@ -2726,8 +2730,9 @@ class VisualTest {
                 public void send(String text) {
                     asked.add(text);
                     java.util.regex.Matcher m = java.util.regex.Pattern.compile("Shown: (log:\\d+) = (\\S+)").matcher(text);
-                    String h = m.find() ? m.group(1) : "log:1";
-                    String name = m.group(2);
+                    boolean shown = m.find();
+                    String h = shown ? m.group(1) : "log:1";
+                    String name = shown ? m.group(2) : "app.log";
                     new Thread(() -> {
                         try {
                             l.on(new logsift.chat.ChatEvent.Usage("claude-haiku-5.5", 3500, 40, 0, 4.0e7, 900));
@@ -2781,6 +2786,8 @@ class VisualTest {
         // and every chat is kept, scrolls back a page at a time, and can be searched
         ScriptedAssistant engine = new ScriptedAssistant();
         logsift.chat.ChatService.useFactory((settings, home) -> engine);
+        // beside the log, as it was set to open (its own tab: the next test)
+        logsift.chat.ChatService.get().saveOptions(logsift.chat.ChatInstructions.Options.DEFAULT.withInTab(false));
         logsift.chat.ChatStore store = logsift.chat.ChatService.get().store();
         for (var c : store.chats(null, 10_000)) {
             store.delete(c.id()); // the test's own home: last run's chats
@@ -2969,6 +2976,10 @@ class VisualTest {
             }
         });
         ChatPanel none = onEdt(() -> new ChatPanel(chatHostForTest(), logsift.chat.ChatService.get()));
+        onEdt(() -> {
+            none.connect(); // never on screen, so it's asked to
+            return null;
+        });
         waitFor(() -> {
             try {
                 return onEdt(() -> none.statusForTest().equals("Not connected"));
@@ -2982,6 +2993,190 @@ class VisualTest {
             frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
             return null;
         });
+        assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
+    }
+
+    @Test
+    @Order(66)
+    void opensTheAssistantInATabWithExamplesAndItsSettings() throws Exception {
+        // as Logsift starts: the assistant's tab in front, with questions to start with (for the services
+        // described) and what can be set up; Settings → Assistant shows what it's told, part by part
+        ScriptedAssistant engine = new ScriptedAssistant();
+        logsift.chat.ChatService.useFactory((settings, home) -> engine);
+        logsift.chat.ChatService svc = logsift.chat.ChatService.get();
+        svc.saveOptions(logsift.chat.ChatInstructions.Options.DEFAULT);
+        Path userList = logsift.agent.LogCatalog.userFile(AppState.home());
+        String hadList = Files.exists(userList) ? Files.readString(userList) : null;
+        Path logs = Files.createDirectories(dir.resolve("login-logs"));
+        Path app = logs.resolve("app.log");
+        Files.writeString(app, """
+                2026-11-04 08:10:00.000 INFO  [main] com.acme.Login - started
+                2026-11-04 08:12:00.000 ERROR [http-1] com.acme.Login - token service timed out
+                2026-11-04 08:12:01.000 ERROR [http-2] com.acme.Login - token service timed out
+                2026-11-04 08:20:00.000 INFO  [http-3] com.acme.Login - signed in user 42
+                """);
+        MainFrame[] second = new MainFrame[1];
+        try {
+            List<logsift.agent.LogCatalog.Service> services = new ArrayList<>(hadList == null ? List.of()
+                    : logsift.agent.LogCatalog.read(userList));
+            services.removeIf(sv -> sv.name().equals("login"));
+            services.add(0, new logsift.agent.LogCatalog.Service("login", "Signs people in", List.of(logs.toString()),
+                    List.of(new logsift.agent.LogCatalog.FileKind("app.log*", "Requests and errors")), "UTC",
+                    "Restarts at 03:00 every night"));
+            logsift.agent.LogCatalog.save(userList, services);
+            MainFrame w = onEdt(() -> {
+                MainFrame m = new MainFrame();
+                m.setSize(1200, 780);
+                m.setLocation(60, 60);
+                m.setVisible(true);
+                m.openAssistantAtStart();
+                return m;
+            });
+            second[0] = w;
+            settle();
+            assertTrue(onEdt(() -> w.tabsForTest().getSelectedComponent() instanceof ChatPanel), "in front");
+            assertEquals("Assistant", onEdt(() -> w.tabsForTest().getTitleAt(0)));
+            assertTrue(onEdt(() -> java.util.stream.IntStream.range(0, w.tabsForTest().getTabCount())
+                    .anyMatch(i -> w.tabsForTest().getComponentAt(i) instanceof StartPage)), "the start page beside it");
+            ChatPanel chat = onEdt(w::chatPanelForTest);
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> chat.modelForTest().getItemCount() == 4 && !chat.examplesForTest().isEmpty());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "connected, with examples");
+            List<String> examples = onEdt(chat::examplesForTest);
+            assertTrue(examples.contains("What went wrong in login this morning?"), examples.toString());
+            assertEquals(List.of("locations", "settings", "model"), onEdt(chat::settingsForTest));
+            settle();
+            shotOf(w.getRootPane(), "131a-assistant-tab-welcome");
+
+            // an example asked: it was told where login's logs are and the plans, and the question says when it is
+            onEdt(() -> {
+                chat.askExampleForTest("What went wrong in login this morning?");
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> !chat.busyForTest() && chat.transcriptForTest().shownForTest() >= 3);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "the answer");
+            String told = engine.told.get(0);
+            assertTrue(told.contains("**login**: Signs people in") && told.contains(logs.toString())
+                    && told.contains("Times in its logs are UTC"), told);
+            assertTrue(told.contains("### Investigate a problem") && told.contains("## Times"), told);
+            String asked = engine.asked.get(0);
+            assertTrue(asked.startsWith("[Now] ") && asked.contains(java.time.ZoneId.systemDefault().getId()), asked);
+            assertTrue(asked.endsWith("What went wrong in login this morning?"), asked);
+
+            // a log opened: the start page goes, the assistant's tab stays and asks about the log shown before it
+            onEdt(() -> {
+                w.openFile(app);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> w.currentTab() != null && w.currentTab().path().equals(app)
+                            && !w.currentTab().document().isIndexing());
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the log");
+            LogTab tab = onEdt(w::currentTab);
+            assertFalse(onEdt(() -> java.util.stream.IntStream.range(0, w.tabsForTest().getTabCount())
+                    .anyMatch(i -> w.tabsForTest().getComponentAt(i) instanceof StartPage)), "the start page went");
+            onEdt(() -> {
+                tab.showLines(1, 2);
+                w.toggleChat(); // ⌘I: to the assistant's tab
+                chat.refreshContextForTest();
+                return null;
+            });
+            assertSame(chat, onEdt(() -> w.tabsForTest().getSelectedComponent()));
+            String context = onEdt(chat::context);
+            assertTrue(context.contains("Shown: log:") && context.contains("= app.log") && context.contains("lines 2-3"),
+                    context);
+            onEdt(() -> {
+                w.toggleChat(); // and back to the log
+                return null;
+            });
+            assertSame(tab, onEdt(() -> w.tabsForTest().getSelectedComponent()));
+            // a line link in the tab shows the log
+            onEdt(() -> {
+                w.showChat();
+                chat.linkForTest("logsift:" + context.replaceAll("(?s).*Shown: (log:\\d+).*", "$1") + ":4");
+                return null;
+            });
+            assertSame(tab, onEdt(() -> w.tabsForTest().getSelectedComponent()));
+            assertArrayEquals(new long[] {3, 3}, onEdt(tab::chosenLines));
+
+            // moved beside the logs, and back to its tab
+            onEdt(() -> {
+                w.showChat();
+                w.moveChat();
+                return null;
+            });
+            assertTrue(onEdt(() -> w.tabsForTest().indexOfComponent(chat) < 0 && chat.isShowing()), "beside the logs");
+            assertFalse(svc.options().inTab(), "remembered");
+            onEdt(() -> {
+                w.moveChat();
+                return null;
+            });
+            assertTrue(onEdt(() -> w.tabsForTest().indexOfComponent(chat) >= 0), "a tab again");
+
+            // Settings → Assistant: what it's told, part by part
+            SettingsDialog before = SettingsDialog.lastForTest();
+            javax.swing.SwingUtilities.invokeLater(() -> w.showSettings(SettingsDialog.ASSISTANT));
+            waitFor(() -> SettingsDialog.lastForTest() != before && SettingsDialog.lastForTest() != null
+                    && SettingsDialog.lastForTest().isShowing(), 10_000, "Settings");
+            SettingsDialog sd = SettingsDialog.lastForTest();
+            AssistantPanel ap = sd.assistant();
+            assertTrue(onEdt(() -> ap.inTabForTest().isSelected() && ap.atStartForTest().isSelected()));
+            assertTrue(onEdt(() -> ap.partForTest("locations").isSelected() && ap.partForTest("plans").isSelected()
+                    && ap.partForTest("now").isSelected()));
+            assertFalse(onEdt(() -> ap.partForTest("logsift").isEnabled()), "Logsift's own is always told");
+            assertTrue(onEdt(ap::totalForTest).matches("All that's on: ≈ [0-9.]+k? tokens.*"), onEdt(ap::totalForTest));
+            onEdt(() -> {
+                ap.partForTest("plans").doClick();
+                ap.ownForTest().setText("“login” is the auth service. Answer in short bullets.");
+                return null;
+            });
+            assertFalse(svc.options().plans());
+            assertEquals("“login” is the auth service. Answer in short bullets.", svc.options().own());
+            String now = logsift.chat.ChatInstructions.text(svc.options(), w.assistantCatalog());
+            assertFalse(now.contains("### Investigate a problem"), "left out");
+            assertTrue(now.endsWith("Answer in short bullets."), "the person's own words last");
+            settle();
+            shotOf(sd.getRootPane(), "131b-settings-assistant");
+            onEdt(() -> {
+                ap.besideForTest().doClick(); // the open chat moves at once
+                return null;
+            });
+            assertTrue(onEdt(() -> w.tabsForTest().indexOfComponent(chat) < 0 && chat.isShowing()), "moved");
+            onEdt(() -> {
+                sd.dispose();
+                return null;
+            });
+        } finally {
+            if (hadList == null) {
+                Files.deleteIfExists(userList);
+            } else {
+                Files.writeString(userList, hadList);
+            }
+            svc.saveOptions(logsift.chat.ChatInstructions.Options.DEFAULT);
+            onEdt(() -> {
+                if (second[0] != null) {
+                    ChatPanel c = second[0].chatPanelForTest();
+                    if (c != null) {
+                        c.close();
+                    }
+                    second[0].dispose();
+                }
+                return null;
+            });
+        }
         assertFalse(onEdt(() -> frame.errorsButtonForTest().isVisible()), "no errors in the app");
     }
 

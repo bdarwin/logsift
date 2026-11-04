@@ -84,7 +84,7 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 
 | Action | Keys |
 |---|---|
-| Open or close it | Ctrl+I |
+| Go to it, and back to the log (in its tab); show or hide it (at the side) | Ctrl+I |
 | Ask | Enter |
 | A new line in the question | Shift+Enter |
 | Stop the answer | Enter again, or the stop button |

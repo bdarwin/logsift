@@ -34,12 +34,14 @@ final class SettingsDialog extends JDialog {
     static final String AGENTS = "Agents";
     static final String METRICS = "Metrics";
     static final String CRASH = "Crash Dumps";
+    static final String ASSISTANT = "Assistant";
 
     private static final Preferences PREFS = AppState.prefs();
     private final MainFrame frame;
     private final LogFormatsPanel formats;
     private final JTabbedPane tabs = new JTabbedPane();
     private final AgentsPanel agents;
+    private final AssistantPanel assistant;
     private static SettingsDialog lastForTest;
 
     /**
@@ -57,6 +59,9 @@ final class SettingsDialog extends JDialog {
         agents = new AgentsPanel(logsift.agent.AgentSettings.launcher(), this::openAgentActivity,
                 () -> new LogLocationsDialog(this, null).setVisible(true));
         tabs.addTab(AGENTS, agents);
+        assistant = new AssistantPanel(logsift.chat.ChatService.get(), frame::assistantCatalog,
+                () -> new LogLocationsDialog(this, null).setVisible(true), frame::assistantPlaced);
+        tabs.addTab(ASSISTANT, assistant);
         tabs.addTab(CRASH, crashDumps());
         JButton close = new JButton("Close");
         close.addActionListener(e -> dispose());
@@ -89,6 +94,10 @@ final class SettingsDialog extends JDialog {
 
     AgentsPanel agents() {
         return agents;
+    }
+
+    AssistantPanel assistant() {
+        return assistant;
     }
 
     /** Opens the log of what agents asked (closing Settings). */

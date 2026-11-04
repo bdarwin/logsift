@@ -70,6 +70,23 @@ final class ChatPanel extends JPanel {
         logsift.agent.LogCatalog catalog();
 
         void closeChat();
+
+        /** Whether the chat is a tab of its own (else beside the logs). */
+        default boolean inTab() {
+            return false;
+        }
+
+        /** Moves the chat to a tab of its own, or back beside the logs. */
+        default void moveChat() {
+        }
+
+        /** Opens Settings → Assistant. */
+        default void openSettings() {
+        }
+
+        /** Opens Log Locations for Agents. */
+        default void openLocations() {
+        }
     }
 
     /**
@@ -99,7 +116,7 @@ final class ChatPanel extends JPanel {
     private final CardLayout cards = new CardLayout();
     private final JPanel center = new JPanel(cards);
     private final JPanel message = new JPanel(new BorderLayout());
-    private final JPanel suggestions = new JPanel();
+    private final JPanel suggestions = AssistantPanel.column();
     private final ChatHistory history;
     private final Timer contextTimer;
 
@@ -190,6 +207,22 @@ final class ChatPanel extends JPanel {
         }
         contextTimer = new Timer(700, e -> refreshContext());
         contextTimer.start();
+        // Copilot starts the first time the chat is seen: a tab in the background costs nothing
+        addHierarchyListener(e -> {
+            if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
+                connect();
+            }
+        });
+    }
+
+    private boolean connecting;
+
+    /** Starts Copilot, once (the first time the chat is shown). */
+    void connect() {
+        if (connecting) {
+            return;
+        }
+        connecting = true;
         service.state().thenAccept(s -> SwingUtilities.invokeLater(() -> connected(s)));
     }
 
@@ -215,7 +248,16 @@ final class ChatPanel extends JPanel {
         buttons.setOpaque(false);
         buttons.add(toolButton("history", "Chats: every chat, and search them", e -> showHistory()));
         buttons.add(toolButton("square-pen", "New chat", e -> newChat()));
+        move.putClientProperty("JButton.buttonType", "toolBarButton");
+        move.setFocusable(false);
+        move.addActionListener(e -> {
+            host.moveChat();
+            placed();
+        });
+        buttons.add(move);
+        buttons.add(toolButton("settings", "Settings → Assistant: where it opens, and what it's told", e -> host.openSettings()));
         buttons.add(toolButton("x", "Close (" + (MainFrame.isMac() ? "⌘I" : "Ctrl+I") + ")", e -> host.closeChat()));
+        placed();
         JPanel top = new JPanel(new BorderLayout());
         top.setOpaque(false);
         top.add(title, BorderLayout.CENTER);
@@ -239,6 +281,15 @@ final class ChatPanel extends JPanel {
         line.add(credits, BorderLayout.EAST);
         h.add(line, BorderLayout.SOUTH);
         return h;
+    }
+
+    private final JButton move = new JButton();
+
+    /** The move button says where the chat goes. */
+    void placed() {
+        boolean tab = host.inTab();
+        move.setIcon(Icons.of(tab ? "panel-right" : "app-window"));
+        move.setToolTipText(tab ? "Move beside the logs" : "Move to a tab of its own");
     }
 
     private static JButton toolButton(String icon, String tip, java.awt.event.ActionListener a) {
@@ -332,7 +383,7 @@ final class ChatPanel extends JPanel {
         return sp;
     }
 
-    /** Questions to start with, for what's open. */
+    /** The welcome: questions to start with, for what's open and the services described, and what to set up. */
     private void refreshSuggestions() {
         suggestions.removeAll();
         JLabel hello = new JLabel("<html><b>Ask about your logs</b><br>Copilot reads them with Logsift's tools, "
@@ -340,11 +391,16 @@ final class ChatPanel extends JPanel {
         hello.setAlignmentX(LEFT_ALIGNMENT);
         suggestions.add(hello);
         suggestions.add(Box.createVerticalStrut(12));
-        for (String q : suggested(host.openLogs(), host.chosenLines() != null, !host.catalog().isEmpty())) {
+        logsift.agent.LogCatalog catalog = host.catalog();
+        List<String> services = catalog == null ? List.of()
+                : catalog.entries().stream().map(e -> e.service().name()).filter(n -> !n.isEmpty()).toList();
+        for (String q : suggested(host.openLogs(), host.chosenLines() != null, services)) {
             JButton b = new JButton(q);
+            b.setName("example");
             b.setAlignmentX(LEFT_ALIGNMENT);
             b.setHorizontalAlignment(JButton.LEFT);
             b.putClientProperty("JButton.buttonType", "roundRect");
+            b.setToolTipText("Ask this");
             b.addActionListener(e -> {
                 input.setText(q);
                 sendOrStop();
@@ -352,11 +408,93 @@ final class ChatPanel extends JPanel {
             suggestions.add(b);
             suggestions.add(Box.createVerticalStrut(6));
         }
+        suggestions.add(Box.createVerticalStrut(14));
+        JLabel setUp = new JLabel("<html><b>Set it up</b></html>");
+        setUp.setAlignmentX(LEFT_ALIGNMENT);
+        suggestions.add(setUp);
+        suggestions.add(Box.createVerticalStrut(6));
+        for (Setting st : settingsShown(services, service.options(), (ChatEngine.Model) model.getSelectedItem())) {
+            suggestions.add(setting(st));
+            suggestions.add(Box.createVerticalStrut(6));
+        }
         suggestions.revalidate();
         suggestions.repaint();
     }
 
-    static List<String> suggested(List<OpenLog> logs, boolean chosen, boolean catalog) {
+    /**
+     * Something the person can set, as the welcome shows it.
+     *
+     * @param title  what it is
+     * @param now    how it is now
+     * @param button the button's words
+     * @param action what the button opens: locations, settings, model, program
+     */
+    record Setting(String title, String now, String button, String action) {}
+
+    static List<Setting> settingsShown(List<String> services, logsift.chat.ChatInstructions.Options o,
+                                       ChatEngine.Model m) {
+        List<Setting> l = new ArrayList<>();
+        l.add(new Setting("Where your logs are", services.isEmpty()
+                ? "Not described yet: describe your services' log folders, and ask “what went wrong in orders this "
+                + "morning?” without a path."
+                : "It knows " + services.size() + (services.size() == 1 ? " service: " : " services: ")
+                + String.join(", ", services.subList(0, Math.min(6, services.size())))
+                + (services.size() > 6 ? ", …" : "") + ".", "Log Locations…", "locations"));
+        List<String> told = new ArrayList<>();
+        if (o.locations()) {
+            told.add("where your logs are");
+        }
+        if (o.plans()) {
+            told.add("step-by-step plans");
+        }
+        if (o.now()) {
+            told.add("the time now");
+        }
+        if (!o.own().isEmpty()) {
+            told.add("your own instructions");
+        }
+        l.add(new Setting("What it's told", "Logsift's instructions" + (told.isEmpty() ? "" : ", " + String.join(", ", told))
+                + ". Add your own: names you use, what's normal.", "Assistant Settings…", "settings"));
+        l.add(new Setting("The model", (m == null ? "Chosen below" : m.name() + ", below")
+                + ": each shows its price in AI credits per million tokens. Each answer shows what it cost.",
+                "Choose…", "model"));
+        return l;
+    }
+
+    private JComponent setting(Setting st) {
+        JPanel row = AssistantPanel.row();
+        row.setName("setting:" + st.action());
+        row.setOpaque(false);
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        JPanel words = new JPanel(new BorderLayout(0, 2));
+        words.setOpaque(false);
+        JLabel l = new JLabel(st.title());
+        l.setFont(l.getFont().deriveFont(Font.BOLD));
+        words.add(l, BorderLayout.NORTH);
+        words.add(AssistantPanel.wrapped(st.now(), true), BorderLayout.CENTER);
+        row.add(words, BorderLayout.CENTER);
+        JButton b = new JButton(st.button());
+        b.addActionListener(e -> {
+            switch (st.action()) {
+                case "locations" -> host.openLocations();
+                case "settings" -> host.openSettings();
+                case "model" -> {
+                    model.requestFocusInWindow();
+                    model.showPopup();
+                }
+                default -> {
+                }
+            }
+            refreshSuggestions();
+        });
+        JPanel east = new JPanel(new BorderLayout());
+        east.setOpaque(false);
+        east.add(b, BorderLayout.NORTH);
+        row.add(east, BorderLayout.EAST);
+        return row;
+    }
+
+    static List<String> suggested(List<OpenLog> logs, boolean chosen, List<String> services) {
         List<String> l = new ArrayList<>();
         OpenLog shown = logs.isEmpty() ? null : logs.get(0);
         if (shown != null && shown.table()) {
@@ -374,9 +512,20 @@ final class ChatPanel extends JPanel {
                 l.add("Compare " + shown.name() + " with " + logs.get(1).name());
             }
         }
-        if (catalog) {
-            l.add("Which of my services had errors in the last hour?");
+        if (!services.isEmpty()) {
+            String a = services.get(0);
+            l.add("What went wrong in " + a + " this morning?");
+            if (shown == null) {
+                l.add("Errors in " + a + " in the last hour, minute by minute");
+                l.add("Was " + a + " slow today? The slowest requests and why");
+            }
+            if (services.size() > 1) {
+                l.add("Which of my services had errors in the last hour?");
+            } else {
+                l.add("Check the health of " + a);
+            }
         } else if (shown == null) {
+            l.add("What can you do with my logs?");
             l.add("Where are the logs on this computer?");
         }
         return l;
@@ -576,7 +725,7 @@ final class ChatPanel extends JPanel {
         }
         if (session == null) {
             session = new ChatSession(store, state.engine(), chat, ChatTools.of(logsift.agent.LogTools.all(),
-                    host.workspace()), ChatTools.instructions(host.catalog()), m.id(), (String) effort.getSelectedItem(),
+                    host.workspace()), logsift.chat.ChatInstructions.text(service.options(), host.catalog()), m.id(), (String) effort.getSelectedItem(),
                     view());
         }
         showCard("chat");
@@ -628,6 +777,12 @@ final class ChatPanel extends JPanel {
      * and the lines chosen. Not shown in the chat.
      */
     String context() {
+        String now = service.options().now() ? logsift.chat.ChatInstructions.now(java.time.ZonedDateTime.now()) : null;
+        String window = window();
+        return now == null ? window : window == null ? now : now + "\n" + window;
+    }
+
+    private String window() {
         List<OpenLog> logs = host.openLogs();
         if (logs.isEmpty()) {
             return null;
@@ -986,6 +1141,38 @@ final class ChatPanel extends JPanel {
 
     ChatInfo chatForTest() {
         return chat;
+    }
+
+    /** The questions the welcome offers. */
+    List<String> examplesForTest() {
+        List<String> l = new ArrayList<>();
+        for (Component c : suggestions.getComponents()) {
+            if (c instanceof JButton b && "example".equals(b.getName())) {
+                l.add(b.getText());
+            }
+        }
+        return l;
+    }
+
+    /** What the welcome offers to set up. */
+    List<String> settingsForTest() {
+        List<String> l = new ArrayList<>();
+        for (Component c : suggestions.getComponents()) {
+            if (c.getName() != null && c.getName().startsWith("setting:")) {
+                l.add(c.getName().substring("setting:".length()));
+            }
+        }
+        return l;
+    }
+
+    void askExampleForTest(String q) {
+        for (Component c : suggestions.getComponents()) {
+            if (c instanceof JButton b && q.equals(b.getText())) {
+                b.doClick();
+                return;
+            }
+        }
+        throw new IllegalArgumentException("no example " + q);
     }
 
     void refreshContextForTest() {

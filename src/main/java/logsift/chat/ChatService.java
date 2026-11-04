@@ -107,6 +107,25 @@ public final class ChatService {
         return storeProblem;
     }
 
+    private ChatInstructions.Options options;
+
+    /** Where the chat opens and what it's told (Settings → Assistant). */
+    public synchronized ChatInstructions.Options options() {
+        if (options == null) {
+            options = ChatInstructions.Options.load(home);
+        }
+        return options;
+    }
+
+    public synchronized void saveOptions(ChatInstructions.Options o) {
+        options = o;
+        try {
+            o.save(home);
+        } catch (java.io.IOException e) {
+            // kept for this run
+        }
+    }
+
     public synchronized ChatSettings settings() {
         return settings;
     }

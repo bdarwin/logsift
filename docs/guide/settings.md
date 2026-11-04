@@ -6,7 +6,7 @@ description: Every Logsift setting with its default, log formats, source folders
 
 # Settings
 
-**Edit → Settings…** (Ctrl+,), or **Logsift → Settings** on macOS (⌘,). Changes apply at once. Four tabs: **General**, **Log Formats**, **Source Code**, **Agents**.
+**Edit → Settings…** (Ctrl+,), or **Logsift → Settings** on macOS (⌘,). Changes apply at once. Seven tabs: **General**, **Log Formats**, **Source Code**, **Metrics**, **Agents**, **Assistant**, **Crash Dumps**.
 
 ## General
 
@@ -67,7 +67,7 @@ In `~/.logsift` (your home folder):
 | `heap-index/` | Indexes of big heap dumps, removed when their tab closes |
 | `agent.properties` | Settings → Agents: what is masked, which folders agents may read |
 | `agent.log` | Each call coding agents and the assistant made (never the answers) |
-| `chat/` | The [assistant](assistant.md)'s chats (`chats.duckdb`), and its settings (model, the copilot program). Copilot keeps its own sessions in `~/.copilot` |
+| `chat/` | The [assistant](assistant.md)'s chats (`chats.duckdb`), its settings (model, the copilot program: `settings.properties`; where it opens and what it's told: `assistant.properties`), and your own instructions for it (`instructions.md`). Copilot keeps its own sessions in `~/.copilot` |
 | `logs.json` | Log Locations for Agents: your services, their log folders and what each file holds |
 | `crash.properties` | Settings → Crash Dumps: PDB folders, and whether Windows' names may be downloaded |
 | `symbols/` | PDBs of Windows' own files, when you let Logsift download them |
@@ -92,3 +92,7 @@ Which numbers in messages the [Metrics tab](metrics.md#which-numbers-count) char
 ## Agents
 
 How to let a coding agent such as GitHub Copilot ask Logsift about your logs, what is masked in its answers, and which folders it may read. See [Coding agents](agents.md).
+
+## Assistant
+
+Where the [assistant](assistant.md) opens (in a tab of its own, or at the side of the window), whether it opens when Logsift starts, and what it's told before the first question: Logsift's instructions, where your logs are, the step-by-step plans, the date and time, and your own instructions. Each part shows about how many tokens it costs with each question, and its words. See [What it's told](assistant.md#what-its-told).

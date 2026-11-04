@@ -169,7 +169,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tabs.addContainerListener(new java.awt.event.ContainerAdapter() {
             @Override
             public void componentAdded(java.awt.event.ContainerEvent e) {
-                if (!(e.getChild() instanceof StartPage)) {
+                if (!(e.getChild() instanceof StartPage) && !(e.getChild() instanceof ChatPanel)) {
                     SwingUtilities.invokeLater(() -> {
                         for (int i = tabs.getTabCount() - 1; i >= 0; i--) {
                             if (tabs.getComponentAt(i) instanceof StartPage) {
@@ -182,6 +182,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
         tabs.addChangeListener(e -> {
             LogTab t = currentTab();
+            if (t != null) {
+                lastLogTab = t; // the assistant's tab tells about the log shown before it
+            }
             if (t != null && t.getClientProperty("alerts") != null) {
                 t.putClientProperty("alerts", null); // seen: clear the badge
                 int i = tabs.indexOfComponent(t);
@@ -3025,20 +3028,80 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private logsift.agent.Workspace chatWorkspace;
     private static final java.util.prefs.Preferences CHAT_PREFS = PREFS.node("chat");
 
-    /** Shows the assistant beside the logs, or hides it. */
+    /** The log tab shown last: the one the assistant's tab asks about. */
+    private LogTab lastLogTab;
+
+    /** The log shown, or (with the assistant's tab in front) the one shown before it. */
+    LogTab shownLogTab() {
+        LogTab t = currentTab();
+        if (t != null) {
+            return t;
+        }
+        return lastLogTab != null && tabs.indexOfComponent(lastLogTab) >= 0 ? lastLogTab : null;
+    }
+
+    private boolean chatInTab() {
+        return logsift.chat.ChatService.get().options().inTab();
+    }
+
+    /** Whether the assistant is in view: its tab in front, or beside the logs. */
+    boolean chatShown() {
+        return chatPanel != null && chatPanel.isShowing();
+    }
+
+    /** ⌘I: shows the assistant; again, back to the log (its tab) or hides it (beside the logs). */
     void toggleChat() {
-        if (chatPanel != null && chatPanel.isShowing()) {
-            hideChat();
+        if (chatShown()) {
+            if (tabs.indexOfComponent(chatPanel) >= 0) {
+                LogTab back = shownLogTab();
+                if (back != null) {
+                    tabs.setSelectedComponent(back);
+                    back.mainView().requestFocusInWindow();
+                } else {
+                    hideChat();
+                }
+            } else {
+                hideChat();
+            }
         } else {
             showChat();
         }
     }
 
-    /** Shows the assistant (made the first time). */
+    /** Shows the assistant where it opens (made the first time). */
     ChatPanel showChat() {
+        return showChat(true);
+    }
+
+    private ChatPanel showChat(boolean select) {
         if (chatPanel == null) {
             chatPanel = new ChatPanel(chatHost(), logsift.chat.ChatService.get());
         }
+        if (chatInTab()) {
+            removeChatSplit();
+            if (tabs.indexOfComponent(chatPanel) < 0) {
+                tabs.insertTab("Assistant", Icons.of("sparkles"), chatPanel,
+                        "GitHub Copilot, with Logsift's tools (" + (isMac() ? "⌘I" : "Ctrl+I") + ")", 0);
+                updateEmptyState();
+            }
+            if (select) {
+                tabs.setSelectedComponent(chatPanel);
+            }
+        } else {
+            if (tabs.indexOfComponent(chatPanel) >= 0) {
+                tabs.remove(chatPanel);
+                updateEmptyState();
+            }
+            showChatBeside();
+        }
+        chatPanel.placed();
+        if (select) {
+            chatPanel.focusInput();
+        }
+        return chatPanel;
+    }
+
+    private void showChatBeside() {
         if (chatSplit == null) {
             mainArea.remove(center);
             chatSplit = new javax.swing.JSplitPane(javax.swing.JSplitPane.HORIZONTAL_SPLIT, center, chatPanel);
@@ -3056,23 +3119,74 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 }
             });
         }
-        chatPanel.focusInput();
-        return chatPanel;
     }
 
+    /** Hides the assistant (its tab closes; the chat is kept for next time). */
     void hideChat() {
-        if (chatSplit != null) {
-            mainArea.remove(chatSplit);
-            chatSplit.remove(center);
-            chatSplit = null;
-            mainArea.add(center, BorderLayout.CENTER);
-            mainArea.revalidate();
-            mainArea.repaint();
+        if (chatPanel != null && tabs.indexOfComponent(chatPanel) >= 0) {
+            tabs.remove(chatPanel);
+            updateEmptyState();
+        }
+        if (removeChatSplit()) {
             LogTab t = currentTab();
             if (t != null) {
                 t.mainView().requestFocusInWindow();
             }
         }
+    }
+
+    private boolean removeChatSplit() {
+        if (chatSplit == null) {
+            return false;
+        }
+        mainArea.remove(chatSplit);
+        chatSplit.remove(center);
+        chatSplit = null;
+        mainArea.add(center, BorderLayout.CENTER);
+        mainArea.revalidate();
+        mainArea.repaint();
+        return true;
+    }
+
+    /** Moves the assistant between its own tab and the side of the window, and remembers where. */
+    void moveChat() {
+        var service = logsift.chat.ChatService.get();
+        service.saveOptions(service.options().withInTab(!service.options().inTab()));
+        assistantPlaced();
+    }
+
+    /** Settings changed where the assistant opens: if it's open, it goes there. */
+    void assistantPlaced() {
+        if (chatPanel != null && (tabs.indexOfComponent(chatPanel) >= 0 || chatSplit != null)) {
+            showChat();
+        }
+    }
+
+    /**
+     * When Logsift starts: the assistant opens if Settings → Assistant says so. As a tab, it's in
+     * front only when nothing else was reopened, with the start page beside it.
+     */
+    void openAssistantAtStart() {
+        if (!logsift.chat.ChatService.get().options().atStart()) {
+            return;
+        }
+        boolean nothing = tabs.getTabCount() == 0 && restore.isDone();
+        if (chatInTab()) {
+            showChat(nothing);
+            if (nothing) {
+                openStartTab();
+                tabs.setSelectedComponent(chatPanel);
+                chatPanel.focusInput();
+            }
+        } else {
+            showChat(false);
+        }
+    }
+
+    /** What the assistant knows of where logs are: the person's list and the projects'. */
+    logsift.agent.LogCatalog assistantCatalog() {
+        return logsift.agent.LogCatalog.load(logsift.core.CacheSettings.home(), Path.of(System.getProperty("user.home")),
+                AppState.logLocationProjects());
     }
 
     private void closeChat() {
@@ -3092,8 +3206,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             chatWorkspace = new logsift.agent.Workspace(logsift.agent.mcp.McpMain.options(new String[0], home,
                     Path.of(System.getProperty("user.home"))));
             chatWorkspace.setClient("Logsift assistant (GitHub Copilot)");
-            chatWorkspace.setCatalog(() -> logsift.agent.LogCatalog.load(home, Path.of(System.getProperty("user.home")),
-                    List.of()));
+            chatWorkspace.setCatalog(this::assistantCatalog);
         }
         return chatWorkspace;
     }
@@ -3104,7 +3217,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             @Override
             public List<ChatPanel.OpenLog> openLogs() {
                 List<ChatPanel.OpenLog> out = new ArrayList<>();
-                LogTab shown = currentTab();
+                LogTab shown = shownLogTab();
                 List<LogTab> all = allTabs();
                 if (shown != null) {
                     all.remove(shown);
@@ -3126,7 +3239,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
             @Override
             public long[] chosenLines() {
-                LogTab t = currentTab();
+                LogTab t = shownLogTab();
                 long[] l = t == null ? null : t.chosenLines();
                 return l == null ? null : new long[] {l[0] + 1, l[1] + 1};
             }
@@ -3174,6 +3287,27 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             @Override
             public void closeChat() {
                 hideChat();
+            }
+
+            @Override
+            public boolean inTab() {
+                return chatInTab();
+            }
+
+            @Override
+            public void moveChat() {
+                MainFrame.this.moveChat();
+            }
+
+            @Override
+            public void openSettings() {
+                showSettings(SettingsDialog.ASSISTANT);
+            }
+
+            @Override
+            public void openLocations() {
+                LogTab t = shownLogTab();
+                openLogLocations(t == null ? null : t.path());
             }
         };
     }
@@ -3316,7 +3450,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         // ---- View: what is shown and how
         JMenu view = menu("View");
         view.add(check("Assistant", "sparkles", KeyStroke.getKeyStroke(KeyEvent.VK_I, MENU),
-                () -> chatPanel != null && chatPanel.isShowing(), e -> toggleChat()));
+                this::chatShown, e -> toggleChat()));
         view.addSeparator();
         view.add(check("Follow (Tail)", "arrow-down-to-line", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU),
                 () -> currentTab() != null && currentTab().mainView().isFollow(),

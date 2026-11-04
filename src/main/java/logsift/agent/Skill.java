@@ -81,9 +81,17 @@ public final class Skill {
     /**
      * Where the person's logs are, as they described them in Logsift: each service, its folders,
      * time zone and notes. What the files hold now (sizes, newest) is list_logs' to tell.
+     *
+     * @param cmd how a terminal runs Logsift, or null for an agent that calls the tools themselves
+     *            (the window's assistant)
      */
-    static String locations(LogCatalog c, String cmd) {
+    public static String locations(LogCatalog c, String cmd) {
         StringBuilder b = new StringBuilder("## Where the logs are\n\n");
+        if (c.isEmpty() && cmd == null) {
+            return b.append("No log locations are described yet, so a log is found by its path or among the open "
+                    + "ones. The person can describe their services in Logsift (File → Log Locations for Agents…); "
+                    + "until then, ask them where a service's logs are.\n").toString();
+        }
         if (c.isEmpty()) {
             b.append("""
                     No log locations are described yet, so a log is found by its path. The person can describe \
@@ -94,9 +102,9 @@ public final class Skill {
                     """);
             return b.toString();
         }
-        b.append("The person described these services in Logsift. `").append(cmd).append(" run list_logs` tells "
-                + "which files each has now, their sizes, what each holds and when it last changed (`service=NAME` "
-                + "for all of one service's files).\n\n");
+        b.append("The person described these services in Logsift. `").append(cmd == null ? "list_logs" : cmd + " run list_logs")
+                .append("` tells which files each has now, their sizes, what each holds and when it last changed "
+                        + "(`service=NAME` for all of one service's files).\n\n");
         for (LogCatalog.Entry e : c.entries()) {
             LogCatalog.Service sv = e.service();
             b.append("- **").append(sv.name()).append("**");
@@ -127,8 +135,9 @@ public final class Skill {
         String kind = first.service().files().isEmpty() ? "app"
                 : first.service().files().get(0).pattern().replaceAll("[*?].*$", "").replaceAll("[._-]+$", "");
         b.append("\nOpen a service's newest log by name: `log=").append(svc).append('/').append(kind.isEmpty() ? "app" : kind)
-                .append("`. Search all of a service's folders at once: `").append(cmd).append(" run search_folder folder=")
-                .append(svc).append(" query=\"timed out\"`.\n\n");
+                .append("`. Search all of a service's folders at once: `")
+                .append(cmd == null ? "search_folder` with `folder=" : cmd + " run search_folder folder=")
+                .append(svc).append(cmd == null ? "`.\n\n" : " query=\"timed out\"`.\n\n");
         return b.toString();
     }
 

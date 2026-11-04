@@ -126,6 +126,9 @@ public final class LogsiftApp {
                 f.openFiles(List.copyOf(pending));
                 pending.clear();
             }
+            if (pendingTools.isEmpty() && capture == null) {
+                f.openAssistantAtStart(); // unless Settings → Assistant says not to
+            }
             for (Object[] t : pendingTools) {
                 @SuppressWarnings("unchecked")
                 List<String> cmd = (List<String>) t[0];
