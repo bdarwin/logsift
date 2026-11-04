@@ -32,7 +32,8 @@ final class ChatMarkdown {
 
     static boolean allowed(String href) {
         String h = href.strip().toLowerCase(java.util.Locale.ROOT);
-        return h.startsWith("logsift:") || h.startsWith("https://") || h.startsWith("http://");
+        return h.startsWith("logsift:") || h.startsWith("https://") || h.startsWith("http://")
+                || LineLink.parse(href) != null || FileLink.parse(href) != null;
     }
 
     /** The body of an answer as HTML (no page around it). */
@@ -86,7 +87,7 @@ final class ChatMarkdown {
                 return null;
             }
             java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("(?i)logsift:(log:\\d+):(\\d+)(?:-(\\d+))?").matcher(href.strip());
+                    .compile("(?i)(?:logsift:)?(log:\\d+):(\\d+)(?:-(\\d+))?").matcher(href.strip());
             if (!m.matches()) {
                 return null;
             }
@@ -97,6 +98,57 @@ final class ChatMarkdown {
             } catch (NumberFormatException e) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * A link to a file on this computer, as models write them: {@code /var/log/app.log},
+     * {@code file:///var/log/app.log}, {@code ~/logs/app.log} or {@code C:\logs\app.log}, with or
+     * without a line at the end ({@code :1204}, {@code #L1204}). Opened in Logsift, never run.
+     *
+     * @param line the line (1-based), 0 for none
+     */
+    record FileLink(java.nio.file.Path path, long line) {
+        private static final java.util.regex.Pattern LINE = java.util.regex.Pattern.compile("(?:[:#]L?(\\d+))(?:-\\d+)?$");
+
+        static FileLink parse(String href) {
+            if (href == null || href.isBlank()) {
+                return null;
+            }
+            String h = href.strip();
+            if (!h.regionMatches(true, 0, "file:", 0, 5)) {
+                try {
+                    // as the page has it: Markdown's renderer escapes spaces, backslashes…
+                    h = java.net.URLDecoder.decode(h.replace("+", "%2B"), java.nio.charset.StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    return null;
+                }
+            }
+            long line = 0;
+            java.util.regex.Matcher m = LINE.matcher(h);
+            if (m.find() && !h.matches("(?i)[a-z]:\\d+")) {
+                try {
+                    line = Long.parseLong(m.group(1));
+                    h = h.substring(0, m.start());
+                } catch (NumberFormatException e) {
+                    line = 0;
+                }
+            }
+            java.nio.file.Path p;
+            try {
+                if (h.regionMatches(true, 0, "file:", 0, 5)) {
+                    p = java.nio.file.Path.of(java.net.URI.create(h.replace(" ", "%20").replace("\\", "/")));
+                } else if (h.startsWith("~/")) {
+                    p = java.nio.file.Path.of(System.getProperty("user.home"), h.substring(2));
+                } else if (h.startsWith("/") || h.matches("(?i)^[a-z]:[\\\\/].*") || h.startsWith("\\\\")) {
+                    p = java.nio.file.Path.of(h);
+                } else {
+                    return null;
+                }
+            } catch (RuntimeException e) {
+                return null;
+            }
+            return new FileLink(p.toAbsolutePath().normalize(), Math.max(0, line));
         }
     }
 }

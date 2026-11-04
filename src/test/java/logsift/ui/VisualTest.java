@@ -2903,6 +2903,52 @@ class VisualTest {
             chat.inputForTest().setText("");
             return null;
         });
+        // clicking the tool's summary (its words, not only the row's edge) shows what Logsift answered
+        ChatEntryView toolView = views.get(1);
+        onEdt(() -> {
+            toolView.clickSummaryForTest();
+            return null;
+        });
+        assertTrue(onEdt(toolView::expandedForTest), "the summary opens it");
+        assertTrue(onEdt(toolView::detailsForTest).contains("connection refused to db-1:5432"), onEdt(toolView::detailsForTest));
+        onEdt(() -> {
+            toolView.clickSummaryForTest();
+            return null;
+        });
+        assertFalse(onEdt(toolView::expandedForTest), "and closes it again");
+        // a link to a file that isn't open: opened in a tab, at the line
+        Path other = dir.resolve("payments.log");
+        Files.writeString(other, "one\ntwo\nthree\nfour\n");
+        onEdt(() -> {
+            chat.linkForTest(other.toString() + ":3");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(other)
+                        && frame.currentTab().chosenLines() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "payments.log at its line");
+        assertArrayEquals(new long[] {2, 2}, onEdt(() -> frame.currentTab().chosenLines()));
+        // a line link to a log the assistant opened itself (not in a tab): opened in one too
+        Path own = dir.resolve("inventory.log");
+        Files.writeString(own, "a\nb\nc\nd\ne\n");
+        String ownHandle = frame.chatWorkspaceForTest().open(own);
+        onEdt(() -> {
+            chat.linkForTest("logsift:" + ownHandle + ":3-4");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(own)
+                        && frame.currentTab().chosenLines() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "inventory.log at its line");
+        assertArrayEquals(new long[] {2, 3}, onEdt(() -> frame.currentTab().chosenLines()), "lines 3–4");
         String usage = onEdt(chat::usageForTest);
         assertTrue(usage.contains("12 of 1,500 used") && usage.contains("This month") && usage.contains("Claude Haiku 5.5"),
                 usage);

@@ -3247,12 +3247,31 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             @Override
             public void showLines(String handle, long from, long to) {
                 LogTab t = tabOf(handle);
-                if (t == null) {
+                if (t != null) {
+                    tabs.setSelectedComponent(t);
+                    t.showLines(from - 1, to - 1);
+                    return;
+                }
+                // a log the assistant opened itself: opened in a tab too, at the line
+                Path p = chatWorkspace == null ? null : chatWorkspace.shownPath(handle);
+                if (p == null || !Files.isRegularFile(p)) {
                     status.setText("That log isn't open any more");
                     return;
                 }
-                tabs.setSelectedComponent(t);
-                t.showLines(from - 1, to - 1);
+                MainFrame.this.openFile(p, null, opened -> {
+                    tabs.setSelectedComponent(opened);
+                    opened.showLinesWhenAvailable(from - 1, to - 1);
+                });
+            }
+
+            @Override
+            public void openFile(Path file, long line) {
+                MainFrame.this.openFile(file, null, t -> {
+                    tabs.setSelectedComponent(t);
+                    if (line > 0) {
+                        t.showLinesWhenAvailable(line - 1, line - 1);
+                    }
+                });
             }
 
             @Override
@@ -3331,6 +3350,10 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     ChatPanel chatPanelForTest() {
         return chatPanel;
+    }
+
+    logsift.agent.Workspace chatWorkspaceForTest() {
+        return chatWorkspace();
     }
 
     /** Shows "⚠ 2 errors" while this session has errors (not cleared); hidden when there are none. */

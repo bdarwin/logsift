@@ -87,6 +87,10 @@ final class ChatPanel extends JPanel {
         /** Opens Log Locations for Agents. */
         default void openLocations() {
         }
+
+        /** Opens a file in a tab of its own, at a line (1-based; 0: where it opens). */
+        default void openFile(java.nio.file.Path file, long line) {
+        }
     }
 
     /**
@@ -1036,6 +1040,15 @@ final class ChatPanel extends JPanel {
         ChatMarkdown.LineLink l = ChatMarkdown.LineLink.parse(href);
         if (l != null) {
             host.showLines(l.handle(), l.from(), l.to());
+            return;
+        }
+        ChatMarkdown.FileLink f = ChatMarkdown.FileLink.parse(href);
+        if (f != null) {
+            if (java.nio.file.Files.isRegularFile(f.path())) {
+                host.openFile(f.path(), f.line());
+            } else {
+                status.setText("Couldn't find " + f.path());
+            }
             return;
         }
         if (href != null && ChatMarkdown.allowed(href) && !href.startsWith("logsift:")) {

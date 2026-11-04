@@ -149,6 +149,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private boolean matchingOnly;
     private long pendingLine = -1; // line to show once indexing (and filters) reach it
     private boolean pendingExact;  // true: show exactly that line (may leave "Matching only")
+    private long pendingTo = -1;   // with pendingExact: choose the lines up to this one too
     private volatile logsift.core.EntryFormat entryFormat; // detected; null = none
     private volatile logsift.core.TimeFormat timeFormat;   // detected; null = none
     private volatile logsift.core.TimeIndex timeIndex;
@@ -1284,6 +1285,15 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     void showLineWhenAvailable(long line) {
         pendingLine = line;
         pendingExact = true;
+        pendingTo = -1;
+        tryPendingLine();
+    }
+
+    /** Chooses file lines {@code from} to {@code to} (0-based) as soon as indexing has reached them. */
+    void showLinesWhenAvailable(long from, long to) {
+        pendingLine = from;
+        pendingExact = true;
+        pendingTo = Math.max(from, to);
         tryPendingLine();
     }
 
@@ -1308,7 +1318,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
         if (indexed && filtered) {
             pendingLine = -1;
-            if (pendingExact) {
+            if (pendingExact && pendingTo >= 0) {
+                long to = Math.min(pendingTo, Math.max(line, doc.lineCount() - 1));
+                pendingTo = -1;
+                showLines(line, to);
+            } else if (pendingExact) {
                 showLine(line);
             } else {
                 goNear(line); // keep the place: this line, or the next one shown
@@ -2745,6 +2759,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             if (keep >= 0) {
                 pendingLine = keep;
                 pendingExact = false;
+                pendingTo = -1;
             }
         }
         filterResult = r;

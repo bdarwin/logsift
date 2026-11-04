@@ -229,22 +229,39 @@ final class ChatEntryView extends JPanel {
         what.setIcon(Icons.of("wrench", Theme.dimmedForeground(), 12));
         what.setForeground(Theme.dimmedForeground());
         what.setFont(what.getFont().deriveFont(what.getFont().getSize2D() - 1f));
-        what.setToolTipText("Show what Logsift answered");
         row.add(what, BorderLayout.CENTER);
         JLabel status = new JLabel(toolStatus());
         status.setFont(what.getFont());
         status.setForeground(Boolean.FALSE.equals(m.ok()) ? Theme.errorMark() : Theme.dimmedForeground());
+        status.setHorizontalTextPosition(JLabel.LEADING);
+        status.setIconTextGap(4);
         row.add(status, BorderLayout.EAST);
+        toolArrow = status;
+        arrow();
         row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        row.addMouseListener(new MouseAdapter() {
+        MouseAdapter click = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 expanded = !expanded;
                 buildTool2();
             }
-        });
+        };
+        // on the labels too: a label with a tooltip takes the clicks itself, and the row never got them
+        for (javax.swing.JComponent c : new javax.swing.JComponent[] {row, what, status}) {
+            c.addMouseListener(click);
+            c.setToolTipText(TOOL_TIP);
+        }
         add(row, BorderLayout.NORTH);
         buildTool2();
+    }
+
+    static final String TOOL_TIP = "Show what Logsift answered";
+    private JLabel toolArrow;
+
+    private void arrow() {
+        if (toolArrow != null) {
+            toolArrow.setIcon(Icons.of(expanded ? "chevron-up" : "chevron-down", Theme.dimmedForeground(), 12));
+        }
     }
 
     /** The details below the row, when open. */
@@ -253,10 +270,13 @@ final class ChatEntryView extends JPanel {
             remove(toolDetails);
             toolDetails = null;
         }
-        if (expanded && m.text() != null && !m.text().isEmpty()) {
+        arrow();
+        if (expanded) {
             toolDetails = new JPanel(new BorderLayout(0, 4));
             toolDetails.setOpaque(false);
-            javax.swing.JTextArea t = new javax.swing.JTextArea(firstLines(m.text(), 60));
+            String said = m.text() == null || m.text().isEmpty()
+                    ? (m.ok() == null ? "Still working…" : "Logsift's answer wasn't kept.") : firstLines(m.text(), 60);
+            javax.swing.JTextArea t = new javax.swing.JTextArea(said);
             t.setEditable(false);
             t.setLineWrap(true);
             t.setWrapStyleWord(false);
@@ -447,5 +467,21 @@ final class ChatEntryView extends JPanel {
     void toggleForTest() {
         expanded = !expanded;
         buildTool2();
+    }
+
+    /** Clicks the tool's summary, as the person does. */
+    void clickSummaryForTest() {
+        JPanel row = (JPanel) ((BorderLayout) getLayout()).getLayoutComponent(BorderLayout.NORTH);
+        java.awt.Component what = ((BorderLayout) row.getLayout()).getLayoutComponent(BorderLayout.CENTER);
+        for (java.awt.event.MouseListener l : what.getMouseListeners()) {
+            l.mouseClicked(new MouseEvent(what, MouseEvent.MOUSE_CLICKED, System.currentTimeMillis(), 0, 4, 4, 1, false));
+        }
+    }
+
+    String detailsForTest() {
+        if (toolDetails == null) {
+            return null;
+        }
+        return ((javax.swing.JTextArea) ((BorderLayout) toolDetails.getLayout()).getLayoutComponent(BorderLayout.CENTER)).getText();
     }
 }

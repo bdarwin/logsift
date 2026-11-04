@@ -34,8 +34,8 @@ With nothing asked yet, it offers questions to start with, for what's open and f
 
 ## The answer
 
-- **Lines are links.** The assistant cites each line it relies on, like *checkout.log:1201-1209*; a click selects those lines in the log (showing all lines if filters hide them).
-- **Each tool it calls is shown** (*read lines 3–4 in log:1 ✓ 9 ms*). A click shows what Logsift answered, with **Show these lines**, **Find in the log** (for a search) or **Open in Query** (for SQL, run in the Query tab), and **Copy**.
+- **Lines are links.** The assistant cites each line it relies on, like *checkout.log:1201-1209*; a click selects those lines in the log (showing all lines if filters hide them). A log it opened by itself opens in a tab of its own at those lines, and a file it names by its path (*/var/log/app.log:120*) opens in Logsift too.
+- **Each tool it calls is shown** (*read lines 3–4 in log:1 ✓ 9 ms*). A click anywhere on the row (the arrow at its end says which way) shows what Logsift answered, with **Show these lines**, **Find in the log** (for a search) or **Open in Query** (for SQL, run in the Query tab), and **Copy**.
 - **What it cost** is above each answer: the model, the AI credits Copilot reported for it, the tokens, and how long it took.
 
 ## Models and credits
