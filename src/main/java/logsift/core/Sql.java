@@ -111,16 +111,15 @@ public final class Sql implements AutoCloseable {
         for (Path p : o.readable()) {
             h = h.allowedFolders(p.toString());
         }
-        // applied by SET, before anything runs: as properties at open, a folder's backslashes are
-        // lost and on Windows nothing can be read (quackjvm #12)
-        Connection c = DriverManager.getConnection("jdbc:duckdb:");
+        // locked as it opens: no moment without the rules (Windows folders keep their backslashes
+        // since quackjvm 1.4, #12)
+        java.util.Properties props;
         try {
-            io.quackjvm.agent.guard.Hardening.apply(c, h);
+            props = h.properties();
         } catch (RuntimeException e) {
-            c.close();
             throw new SQLException("SQL couldn't be locked down, so it isn't opened: " + e.getMessage(), e);
         }
-        return new Sql(c, temp);
+        return new Sql(DriverManager.getConnection("jdbc:duckdb:", props), temp);
     }
 
     private static long physicalMemory() {
@@ -694,11 +693,9 @@ public final class Sql implements AutoCloseable {
      */
     static Result run(Connection conn, String sql, int maxRows, BooleanSupplier stop) throws SQLException {
         String q = check(conn, sql);
-        io.quackjvm.agent.guard.CancelSignal signal = new io.quackjvm.agent.guard.CancelSignal();
-        if (stop != null && stop.getAsBoolean()) {
-            signal.cancel(); // stopped already: nothing runs
-        }
-        Thread watcher = stop == null ? null : watch(stop, signal);
+        // Stop, polled while it runs; already pressed, nothing runs
+        io.quackjvm.agent.guard.CancelSignal signal = stop == null ? new io.quackjvm.agent.guard.CancelSignal()
+                : io.quackjvm.agent.guard.CancelSignal.from(stop);
         try {
             io.quackjvm.agent.guard.GuardedResult r = io.quackjvm.agent.guard.GuardedQuery.on(conn, policy(maxRows))
                     .run(q, signal);
@@ -724,10 +721,6 @@ public final class Sql implements AutoCloseable {
                     + "Logsift only reads.", e);
         } catch (RuntimeException e) {
             throw new SQLException(e.getMessage() == null ? "The query failed." : e.getMessage(), e);
-        } finally {
-            if (watcher != null) {
-                watcher.interrupt();
-            }
         }
     }
 
@@ -741,26 +734,6 @@ public final class Sql implements AutoCloseable {
                 .maxRows(Math.max(1, maxRows)).maxBytes(0)
                 .whenOver(io.quackjvm.agent.guard.QueryPolicy.Over.TRUNCATE)
                 .timeout(java.time.Duration.ofDays(1));
-    }
-
-    /** Cancels the signal once {@code stop} says so, checked every 50 ms. */
-    private static Thread watch(BooleanSupplier stop, io.quackjvm.agent.guard.CancelSignal signal) {
-        Thread t = new Thread(() -> {
-            while (!Thread.currentThread().isInterrupted()) {
-                if (stop.getAsBoolean()) {
-                    signal.cancel();
-                    return;
-                }
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException e) {
-                    return;
-                }
-            }
-        }, "logsift-sql-cancel");
-        t.setDaemon(true);
-        t.start();
-        return t;
     }
 
     private static final java.time.format.DateTimeFormatter SECONDS =

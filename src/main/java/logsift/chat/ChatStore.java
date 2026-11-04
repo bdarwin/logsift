@@ -1,19 +1,21 @@
 package logsift.chat;
 
 import io.quackjvm.core.Quack;
-import io.quackjvm.core.sql.SqlRow;
+import io.quackjvm.core.page.Page;
+import io.quackjvm.core.page.PageKey;
+import io.quackjvm.core.page.Pages;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Every chat with the assistant, in a DuckDB file of Logsift's own ({@code chats.duckdb} in its
- * folder): the chats, and each one's entries in order. Read a page at a time, by key, so a chat
- * of thousands of entries scrolls back as fast as a short one, and searched across all of them.
+ * folder): the chats, and each one's entries in order. Read a page at a time by quackjvm's
+ * {@link Pages} (each page found from the row next to it), so a chat of thousands of entries
+ * scrolls back as fast as a short one; and searched across all of them.
  *
  * <p>Safe from several threads: an answer streams in on one while the window reads pages.</p>
  */
@@ -110,11 +112,24 @@ public final class ChatStore implements AutoCloseable {
      * {@code n} after it.
      */
     public synchronized List<ChatInfo> chats(ChatInfo after, int n) {
-        if (after == null) {
-            return chats("SELECT " + CHAT_COLUMNS + " FROM chat c ORDER BY c.updated DESC, c.id DESC LIMIT ?", n);
+        // in order of (updated, id): the newest are the last page, and going on is going back
+        Pages pages = Pages.of(db, "SELECT " + CHAT_COLUMNS + " FROM chat c").orderBy("updated", "id").size(n);
+        Page p = after == null ? pages.last() : pages.before(PageKey.of(after.updated(), after.id()));
+        List<ChatInfo> out = new ArrayList<>(p.size());
+        for (int i = p.size() - 1; i >= 0; i--) {
+            out.add(new ChatInfo((String) p.get(i, "id"), (String) p.get(i, "title"), num(p.get(i, "created")),
+                    num(p.get(i, "updated")), (String) p.get(i, "model"), (String) p.get(i, "session"),
+                    (String) p.get(i, "context"), num(p.get(i, "n")), dbl(p.get(i, "cost"))));
         }
-        return chats("SELECT " + CHAT_COLUMNS + " FROM chat c WHERE (c.updated, c.id) < (?, ?) "
-                + "ORDER BY c.updated DESC, c.id DESC LIMIT ?", after.updated(), after.id(), n);
+        return out;
+    }
+
+    private static long num(Object o) {
+        return o == null ? 0 : ((Number) o).longValue();
+    }
+
+    private static double dbl(Object o) {
+        return o == null ? 0 : ((Number) o).doubleValue();
     }
 
     /** How many chats there are. */
@@ -161,43 +176,42 @@ public final class ChatStore implements AutoCloseable {
         return db.query("SELECT count(*) FROM message WHERE chat = ?", chat).scalar(Long.class);
     }
 
+    /** A chat's entries, in order, a page of {@code n} at a time. */
+    private Pages entries(String chat, int n) {
+        return Pages.of(db, "SELECT * FROM message WHERE chat = ?", chat).orderBy("seq").size(Math.max(1, n));
+    }
+
     /** The last {@code n} entries of a chat, in order. */
     public synchronized List<ChatMessage> last(String chat, int n) {
-        return before(chat, Long.MAX_VALUE, n);
+        return messages(entries(chat, n).last());
     }
 
     /** The {@code n} entries before {@code seq} (not counting it), in order. */
     public synchronized List<ChatMessage> before(String chat, long seq, int n) {
-        List<ChatMessage> l = messages("SELECT * FROM message WHERE chat = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
-                chat, seq, n);
-        Collections.reverse(l);
-        return l;
+        return messages(entries(chat, n).before(PageKey.of(seq)));
     }
 
     /** The {@code n} entries after {@code seq} (not counting it), in order. */
     public synchronized List<ChatMessage> after(String chat, long seq, int n) {
-        return messages("SELECT * FROM message WHERE chat = ? AND seq > ? ORDER BY seq LIMIT ?", chat, seq, n);
+        return messages(entries(chat, n).after(PageKey.of(seq)));
     }
 
     /** {@code seq} and up to {@code n} entries each side of it, in order: where a search hit is. */
     public synchronized List<ChatMessage> around(String chat, long seq, int n) {
-        List<ChatMessage> l = new ArrayList<>(before(chat, seq, n));
-        l.addAll(messages("SELECT * FROM message WHERE chat = ? AND seq >= ? ORDER BY seq LIMIT ?", chat, seq, n + 1));
-        return l;
+        return messages(entries(chat, n).around(PageKey.of(seq), n));
     }
 
-    private List<ChatMessage> messages(String sql, Object... params) {
-        List<ChatMessage> out = new ArrayList<>();
-        db.query(sql, params).forEachRow(r -> out.add(message(r)));
+    private static List<ChatMessage> messages(Page p) {
+        List<ChatMessage> out = new ArrayList<>(p.size());
+        for (int i = 0; i < p.size(); i++) {
+            Object ok = p.get(i, "ok");
+            out.add(new ChatMessage((String) p.get(i, "chat"), num(p.get(i, "seq")), num(p.get(i, "time")),
+                    ChatMessage.Kind.valueOf((String) p.get(i, "kind")), (String) p.get(i, "text"),
+                    (String) p.get(i, "model"), (String) p.get(i, "tool"), (String) p.get(i, "args"),
+                    ok == null ? null : (Boolean) ok, num(p.get(i, "tokens_in")), num(p.get(i, "tokens_out")),
+                    dbl(p.get(i, "nano_aiu")), num(p.get(i, "millis"))));
+        }
         return out;
-    }
-
-    private static ChatMessage message(SqlRow r) {
-        Object ok = r.get("ok");
-        return new ChatMessage(r.getString("chat"), r.getLong("seq"), r.getLong("time"),
-                ChatMessage.Kind.valueOf(r.getString("kind")), r.getString("text"), r.getString("model"),
-                r.getString("tool"), r.getString("args"), ok == null ? null : (Boolean) ok, r.getLong("tokens_in"),
-                r.getLong("tokens_out"), r.getDouble("nano_aiu"), r.getLong("millis"));
     }
 
     // ---------------------------------------------------------------- search and usage
@@ -273,6 +287,11 @@ public final class ChatStore implements AutoCloseable {
                 .forEachRow(r -> out.add(new Usage(r.getString("model"), r.getLong("n"), r.getLong("i"), r.getLong("o"),
                         r.getDouble("c"))));
         return out;
+    }
+
+    /** For tests: when a chat last changed. */
+    synchronized void updatedForTest(String id, long ms) {
+        db.execute("UPDATE chat SET updated = ? WHERE id = ?", ms, id);
     }
 
     @Override

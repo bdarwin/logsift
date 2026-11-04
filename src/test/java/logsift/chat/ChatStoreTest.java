@@ -98,6 +98,27 @@ class ChatStoreTest {
     }
 
     @Test
+    void chatsChangedInTheSameMillisecondAreEachListedOnce() {
+        // pages are found from the last chat shown: its time and id together, so ties don't repeat or hide
+        try (ChatStore s = ChatStore.inMemory()) {
+            for (int i = 0; i < 23; i++) {
+                String id = s.create("chat " + i, "m", null).id();
+                s.updatedForTest(id, 1_000L * (i / 5)); // five at a time share a time
+            }
+            List<String> titles = new ArrayList<>();
+            List<ChatInfo> page = s.chats(null, 4);
+            while (!page.isEmpty()) {
+                page.forEach(c -> titles.add(c.title()));
+                page = s.chats(page.get(page.size() - 1), 4);
+            }
+            assertEquals(23, titles.size(), titles.toString());
+            assertEquals(23, new HashSet<>(titles).size(), "none twice: " + titles);
+            assertTrue(titles.subList(0, 3).stream().allMatch(t -> Integer.parseInt(t.substring(5)) >= 20),
+                    "the newest first: " + titles);
+        }
+    }
+
+    @Test
     void searchFindsWordsInAnyChatAndTakesWildcardsLiterally() {
         try (ChatStore s = ChatStore.inMemory()) {
             String a = s.create("Checkout timeouts", "m", null).id();
