@@ -30,8 +30,10 @@ class QueryExamplesTest {
         }
         b.append('\n');
         String[] st = {"ok", "ok", "slow", "error"};
+        // hosts with different numbers of rows: "Rows for each host" sorts by them, and a tie has no order
+        int[] host = {0, 0, 0, 0, 1, 1, 1, 2, 2, 3};
         for (int r = 0; r < rows; r++) {
-            b.append(String.format("2026-10-28 10:%02d:%02d", r / 60 % 60, r % 60)).append(",web-").append(r % 4).append(',')
+            b.append(String.format("2026-10-28 10:%02d:%02d", r / 60 % 60, r % 60)).append(",web-").append(host[r % host.length]).append(',')
                     .append(st[rnd.nextInt(st.length)]).append(',').append(rnd.nextInt(900));
             for (int i = 0; i < 50; i++) {
                 b.append(',').append(rnd.nextInt(10_000) / 100.0);

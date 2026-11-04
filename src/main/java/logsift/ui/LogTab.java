@@ -160,7 +160,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     private final TimelineBar timeline;
     private long[] timeRange;                       // selected {from, to} times, or null
     private boolean timelineWanted = true;
-    private int detectedGeneration = -1;
+    private volatile int detectedGeneration = -1;
     private long indexMillis = -1;
     private String error;
 
@@ -3072,6 +3072,18 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     /** The lines of a request in this log (null if cancelled). */
     List<logsift.core.RequestTrace.Step> requestSteps(String value, boolean withThreads,
                                                       java.util.function.BooleanSupplier stop) {
+        // a log just opened: all its lines, read with its format and times, else some steps are missed
+        while (doc.isIndexing() || detectedGeneration != doc.generation()) {
+            if (stop.getAsBoolean()) {
+                return null;
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
         SearchQuery q = new SearchQuery(logsift.core.RequestIds.regex(value), true, true, false);
         SearchSession s = new SearchSession(doc, q).start();
         try {
