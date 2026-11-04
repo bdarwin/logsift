@@ -83,6 +83,9 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         /** Opens Search in Folder for this text. */
         default void searchInFolder(String text) {}
 
+        /** Opens the assistant with a question about this log's selected lines (not yet asked). */
+        default void askAssistant(LogTab tab, String question) {}
+
         /** Opens the heap dump the JVM wrote when it ran out of memory (the log says where, near this line). */
         default void openHeapDumpOf(LogTab tab, long line) {}
 
@@ -2898,6 +2901,21 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         menu.addSeparator();
         if (view == main) {
             long cur = currentLine();
+            if (cur >= 0) {
+                long[] chosen = chosenLines();
+                boolean many = chosen != null && chosen[1] > chosen[0];
+                JMenuItem ask = new JMenuItem(many ? "Ask the Assistant About These Lines" : "Ask the Assistant About This Line",
+                        Icons.of("sparkles"));
+                ask.setToolTipText("GitHub Copilot explains them, with the rest of the log at hand");
+                ask.addActionListener(e -> {
+                    if (chosenLines() == null) {
+                        showLines(cur, cur); // the line goes with the question
+                    }
+                    host.askAssistant(this, many ? "Explain these lines: what happened, and why?"
+                            : "Explain this line: what happened, and why?");
+                });
+                menu.add(ask);
+            }
             JMenuItem bm = new JMenuItem(cur >= 0 && bookmarks.contains(cur) ? "Remove Bookmark"
                     : "Bookmark This Line");
             bm.addActionListener(e -> toggleBookmark());

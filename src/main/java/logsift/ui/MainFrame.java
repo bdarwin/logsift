@@ -2376,6 +2376,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     @Override
+    public void askAssistant(LogTab tab, String question) {
+        tabs.setSelectedComponent(tab);
+        showChat().prefill(question);
+    }
+
+    @Override
     public void searchInFolder(String text) {
         openFolderSearch(null, text.isEmpty() ? null : text);
     }

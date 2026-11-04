@@ -158,6 +158,13 @@ public final class ChatService {
         if (e == null) {
             return new State(null, null, List.of(), null, f.missing());
         }
+        // Copilot's program goes when Logsift does
+        ChatEngine started = e;
+        try {
+            Runtime.getRuntime().addShutdownHook(new Thread(started::close, "logsift-chat-stop"));
+        } catch (IllegalStateException alreadyStopping) {
+            // quitting now
+        }
         try {
             e.start();
             String user = e.user();

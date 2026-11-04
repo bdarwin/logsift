@@ -582,11 +582,19 @@ final class ChatPanel extends JPanel {
         showCard("chat");
         input.setText("");
         dropLines = false;
-        try {
-            session.ask(q, context);
-        } catch (Exception e) {
-            // shown in the chat as an error
-        }
+        busy = true; // until the session says otherwise
+        updateSend();
+        ChatSession s = session;
+        // starting Copilot's session and sending wait on it: not on the window's thread
+        Thread t = new Thread(() -> {
+            try {
+                s.ask(q, context);
+            } catch (Exception e) {
+                // shown in the chat as an error, and the turn is over
+            }
+        }, "logsift-chat-ask");
+        t.setDaemon(true);
+        t.start();
     }
 
     private ChatSession.View view() {
@@ -744,12 +752,17 @@ final class ChatPanel extends JPanel {
         }
         String e = (String) effort.getSelectedItem();
         service.saveSettings(service.settings().withModel(m.id(), e));
-        if (session != null) {
-            try {
-                session.setModel(m.id(), e);
-            } catch (Exception ex) {
-                status.setText("Couldn't change the model: " + ex.getMessage());
-            }
+        ChatSession s = session;
+        if (s != null) {
+            Thread t = new Thread(() -> {
+                try {
+                    s.setModel(m.id(), e);
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> status.setText("Couldn't change the model: " + ex.getMessage()));
+                }
+            }, "logsift-chat-model");
+            t.setDaemon(true);
+            t.start();
         }
     }
 

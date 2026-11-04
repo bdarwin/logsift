@@ -299,6 +299,11 @@ class ProfilerTest {
         }
     }
 
+    /** A folder on disk for the JVM's own files (the build folder; the system's temp may be in memory). */
+    static Path onDisk() throws java.io.IOException {
+        return Files.createDirectories(Path.of("build", "tmp", "jvm-test-dumps").toAbsolutePath());
+    }
+
     private void profileWithFlightRecorder(LocalJvms.Session session, Profiler.Target target) throws Exception {
         assertTrue(target.engines().contains(Profiler.Engine.JFR));
         // a JVM that just started may spend a short recording elsewhere: try a few times
@@ -361,7 +366,10 @@ class ProfilerTest {
 
         // a heap dump: an .hprof file
         Path hprof = dir.resolve("heap.hprof");
+        // the JVM writes it in a folder on disk: /tmp may be in memory (Ubuntu 26), and then it's refused
+        target.setDumpFolder(onDisk().toString());
         target.heapDump(hprof, null, () -> false);
+        target.setDumpFolder(null);
         byte[] head = new byte[12];
         try (var in = Files.newInputStream(hprof)) {
             assertEquals(12, in.read(head));

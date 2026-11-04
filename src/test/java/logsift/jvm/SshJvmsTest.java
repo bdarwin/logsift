@@ -193,10 +193,14 @@ class SshJvmsTest {
         assertTrue(HeapHistogram.parse(t.diagnostic("GC.class_histogram"), 0).rows().size() > 100);
         Path hprof = dir.resolve("remote.hprof");
         double[] progress = {0};
+        // a folder on disk on the server: /tmp may be in memory (Ubuntu 26), and then it's refused
+        Path serverDisk = ProfilerTest.onDisk();
+        t.setDumpFolder(serverDisk.toString());
         String note = t.heapDump(hprof, f -> progress[0] = f, () -> false);
+        t.setDumpFolder(null);
         assertTrue(Files.size(hprof) > 1_000_000);
         assertEquals(1.0, progress[0], 0.001);
-        assertTrue(note != null && note.contains("stays at /tmp/logsift-"), "the dump stays on the server: " + note);
+        assertTrue(note != null && note.contains("stays at " + serverDisk + "/logsift-"), "the dump stays on the server: " + note);
         cleanUpLeft(List.of(note));
         // no room, or a folder in memory: refused before anything is written
         Path full = Files.createDirectories(dir.resolve("full"));
@@ -226,7 +230,7 @@ class SshJvmsTest {
 
     /** The "server" of these tests is this computer: the test removes what Logsift left there (Logsift doesn't). */
     private static void cleanUpLeft(List<String> notes) throws java.io.IOException {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(/tmp/logsift-[0-9a-f]+\\.(?:hprof|jfr))").matcher(
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(/\\S*?/logsift-[0-9a-f]+\\.(?:hprof|jfr))").matcher(
                 String.join(" ", notes));
         while (m.find()) {
             Files.deleteIfExists(Path.of(m.group(1)));

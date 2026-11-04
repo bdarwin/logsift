@@ -19,6 +19,7 @@ description: Ask GitHub Copilot about your logs beside them, in Logsift's window
 
 - **Enter** asks; **Shift+Enter** starts a new line. While it answers, the button stops it.
 - What you're looking at goes with the question: the log shown, the other logs open, and the lines you selected. The chips above the box say what; **×** leaves one out of the next question.
+- **Right-click a line** (or selected lines) and choose **Ask the Assistant About This Line**: the question waits in the box, with the lines chosen, for you to change or send.
 - With nothing asked yet, the chat offers questions that fit what's open: what went wrong, errors by hour, root causes, the selected lines, a table's columns.
 
 ## The answer

@@ -2877,6 +2877,25 @@ class VisualTest {
             return null;
         });
         assertArrayEquals(new long[] {2, 3}, onEdt(tab::chosenLines), "the lines the tool read");
+        // right-click a line: the question waits in the box, with the line chosen
+        javax.swing.JPopupMenu menu = onEdt(() -> {
+            tab.showLines(2, 2);
+            return tab.mainView().menuForTest(200, tab.mainView().yForRowForTest(2));
+        });
+        javax.swing.JMenuItem askItem = onEdt(() -> java.util.Arrays.stream(menu.getComponents())
+                .filter(c -> c instanceof javax.swing.JMenuItem i && i.getText().startsWith("Ask the Assistant"))
+                .map(c -> (javax.swing.JMenuItem) c).findFirst().orElseThrow());
+        assertEquals("Ask the Assistant About This Line", onEdt(askItem::getText));
+        onEdt(() -> {
+            askItem.doClick();
+            return null;
+        });
+        assertEquals("Explain this line: what happened, and why?", onEdt(() -> chat.inputForTest().getText()));
+        assertArrayEquals(new long[] {2, 2}, onEdt(tab::chosenLines));
+        onEdt(() -> {
+            chat.inputForTest().setText("");
+            return null;
+        });
         String usage = onEdt(chat::usageForTest);
         assertTrue(usage.contains("12 of 1,500 used") && usage.contains("This month") && usage.contains("Claude Haiku 5.5"),
                 usage);
