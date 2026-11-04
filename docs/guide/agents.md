@@ -124,8 +124,9 @@ Open **File → Log Locations for Agents…** (it starts from the log you are lo
 2. **What it is**: one line, such as *Order service: takes orders from the shop and charges cards*.
 3. **Its logs**: Logsift finds the files in the folder (and its subfolders, three deep), puts each log together with its rotated copies (`app.log`, `app.log.1`, `app.2026-10-27.log.gz` are one log), and guesses what each holds (*Java GC log*, *CSV: order_id, placed_at, amount*, *Log (logback format)*, *Java crash report*). The guesses are gray. Click one to say it better, for example *Application log: one line per order, errors with stack traces*, or **Use the Guesses** to keep them.
 4. **Times in**: the time zone of the times in its logs, if it isn't this computer's.
-5. **Notes**: anything an agent should know, such as *payment timeouts before 06:00 are the nightly maintenance*.
-6. **An agent sees** shows exactly what `list_logs` will answer.
+5. **Its JVMs**: where the service's JVM runs, so the assistant can take a thread dump or a heap histogram after you say yes. **Add** a row: what it runs (`orders.jar`, `com.acme.App`), how it's reached (**This computer**, **SSH** with `user@host` or `host:port`, or a **JMX port** like `prod-7:9010` or `monitor@prod-7:9010`). Never a password: the list may be shared, and Logsift asks for one when it's needed.
+6. **Notes**: anything an agent should know, such as *payment timeouts before 06:00 are the nightly maintenance*.
+7. **An agent sees** shows exactly what `list_logs` will answer.
 
 Agents read only the folders allowed under **Folders agents may read** (your home folder unless you chose others). If a service's folder is outside them, a bar says so, and **Let Agents Read Them** adds it.
 
@@ -175,7 +176,7 @@ The file is plain JSON, if you prefer to write it by hand:
 | Tool | What it does |
 |---|---|
 | **list_logs** | Your services and where their logs are (see [Where your logs are](#where-your-logs-are)): each kind of log with what it holds, rotated copies counted together, sizes and when they last changed |
-| **open_log** | Opens a log (also a `.gz` file, or a file inside a zip), by its path or by a name from `list_logs` (`orders/app` opens the newest `app.log`), and gives back a short name for it (`log:1`), its format, size, line count and time range |
+| **open_log** | Opens a log (also a `.gz` file, a file inside a zip, or a web address, downloaded once to Logsift's temporary folder), by its path or by a name from `list_logs` (`orders/app` opens the newest `app.log`), and gives back a short name for it (`log:1`), its format, size, line count and time range |
 | **list_open** | The logs open so far |
 | **insights** | What happened in the log, most important first (error bursts, new errors, restarts, known problems) |
 | **exceptions** | Exceptions grouped by root cause, with counts and where they first and last appear |
@@ -192,12 +193,15 @@ The file is plain JSON, if you prefer to write it by hand:
 | **follow_request** | One request, trace or order id through a log, several logs or a service's folders: its lines in time order, the threads, the errors, the longest wait |
 | **merge_logs** | Several logs merged by time into one (a temporary copy, never next to your files), to search and query together |
 | **analyze_profile** | A profile (a `.jfr` recording or collapsed stacks): the hottest methods, your own code's share, the hottest stacks |
-| **compare_files** | Two files: CSV/TSV as tables matched by a key (added, removed and changed rows, old → new), anything else line by line (times, numbers or IDs masked if asked) |
+| **compare_files** | Two files (paths, open logs or web addresses): CSV/TSV as tables matched by a key (added, removed and changed rows, old → new), anything else line by line (times, numbers or IDs masked if asked) |
 | **compare_folders** | Two folders or zips, file by file: the same, different, only on one side |
 | **compare_logs** | A bad run against a good one, by kinds of message: new, gone, much more or less often |
 | **analyze_crash** | Explains a crash file: a Windows dump (`.dmp`, `.mdmp`) or a Java `hs_err_pid` file. What happened, the code to blame, the crashed thread's stack, what other threads and libraries may have caused it, and what to try |
 | **crash_threads** | The threads of a crash file with their stacks, threads with the same stack together; filter by name, state or function |
 | **crash_modules** | The DLLs or shared libraries loaded in the crashed process, with versions and paths |
+| **list_jvms** | The JVMs to look into: where you said each service's JVM runs (**Its JVMs**), and those running on this computer, each with a handle (`jvm:1`) |
+| **thread_dump** | A thread dump of a running JVM, **after you say yes**: its threads by state, deadlocks, who blocks whom, the biggest groups doing the same. The whole dump becomes a log to read |
+| **heap_histogram** | A running JVM's objects counted by class, **after you say yes**, without a full GC: what takes the memory. Refused on a heap over 8 GB. Never a heap dump |
 
 Line numbers in answers start at 1, like in the log view. Times are the log's own times.
 
@@ -222,7 +226,7 @@ They come with `logsift-mcp`, so there's nothing else to install. Agents without
 ## What it can't do
 
 - Change, move or delete any file.
-- Run commands, connect to servers, or touch a running JVM.
+- Run commands, or connect to servers by itself. A thread dump or a heap histogram happens only after you say yes: in the assistant, on its question above the box; for an agent whose app can ask you (MCP elicitation), in that app. Otherwise it's refused. Over SSH it signs in with your key and a server you already trust; the assistant asks for anything missing. Never a heap dump, never a profiler.
 - Read outside your home folder, or outside the folders listed under **Folders agents may read**. The current folder also counts when it is outside your home folder.
 - Read files that hold keys or passwords, even through a link:
   - `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`;

@@ -43,9 +43,10 @@ public final class LogCatalog {
      * @param files       what its files hold
      * @param timeZone    the zone of the times in its logs ("UTC", "Europe/Berlin"), or ""
      * @param notes       anything an agent should know, or ""
+     * @param jvms        where its JVMs run, for a thread dump or a heap histogram
      */
     public record Service(String name, String description, List<String> folders, List<FileKind> files, String timeZone,
-                          String notes) {
+                          String notes, List<JvmPlace> jvms) {
         public Service {
             name = name == null ? "" : name.strip();
             description = description == null ? "" : description.strip();
@@ -53,6 +54,16 @@ public final class LogCatalog {
             files = List.copyOf(files);
             timeZone = timeZone == null ? "" : timeZone.strip();
             notes = notes == null ? "" : notes.strip();
+            jvms = jvms == null ? List.of() : List.copyOf(jvms);
+        }
+
+        public Service(String name, String description, List<String> folders, List<FileKind> files, String timeZone,
+                       String notes) {
+            this(name, description, folders, files, timeZone, notes, List.of());
+        }
+
+        public Service withJvms(List<JvmPlace> j) {
+            return new Service(name, description, folders, files, timeZone, notes, j);
         }
 
         /** The description of a file, from the first pattern that matches its name; null if none. */
@@ -63,6 +74,71 @@ public final class LogCatalog {
                 }
             }
             return null;
+        }
+    }
+
+    /**
+     * Where a service's JVM runs: on this computer (neither {@code ssh} nor {@code jmx}), on a server
+     * reached over SSH ({@code deploy@prod-7}, {@code prod-7:2222}), or at a JMX port
+     * ({@code prod-7:9010}, {@code monitor@prod-7:9010}). Never a password: the file is shared, and
+     * Logsift asks for one when it's needed.
+     *
+     * @param program what it runs, as {@code jps} names it: {@code orders.jar}, {@code com.acme.App}
+     */
+    public record JvmPlace(String program, String ssh, String jmx) {
+        public JvmPlace {
+            program = program == null ? "" : program.strip();
+            ssh = ssh == null ? "" : ssh.strip();
+            jmx = jmx == null ? "" : jmx.strip();
+        }
+
+        public logsift.jvm.JvmLink.Kind kindOf() {
+            return !jmx.isEmpty() ? logsift.jvm.JvmLink.Kind.JMX
+                    : !ssh.isEmpty() ? logsift.jvm.JvmLink.Kind.SSH : logsift.jvm.JvmLink.Kind.LOCAL;
+        }
+
+        private String address() {
+            return !jmx.isEmpty() ? jmx : ssh;
+        }
+
+        /** The user in {@code user@host:port}, or "". */
+        public String user() {
+            String a = address();
+            int at = a.lastIndexOf('@');
+            return at > 0 ? a.substring(0, at) : "";
+        }
+
+        /** The host in {@code user@host:port}, or "" on this computer. */
+        public String host() {
+            String a = address();
+            a = a.substring(a.lastIndexOf('@') + 1);
+            int colon = a.lastIndexOf(':');
+            return colon > 0 && a.indexOf(':') == colon ? a.substring(0, colon) : a;
+        }
+
+        /** The port in {@code host:port}, or 0 (SSH's usual). */
+        public int port() {
+            String a = address();
+            a = a.substring(a.lastIndexOf('@') + 1);
+            int colon = a.lastIndexOf(':');
+            if (colon > 0 && a.indexOf(':') == colon) {
+                try {
+                    return Integer.parseInt(a.substring(colon + 1));
+                } catch (NumberFormatException e) {
+                    return 0;
+                }
+            }
+            return 0;
+        }
+
+        /** "orders.jar on deploy@prod-7 (SSH)", "orders.jar on prod-7:9010 (JMX)", "orders.jar on this computer" */
+        public String label() {
+            String p = program.isEmpty() ? "the JVM" : program;
+            return switch (kindOf()) {
+                case LOCAL -> p + " on this computer";
+                case SSH -> p + " on " + ssh + " (SSH)";
+                case JMX -> p + " on " + jmx + " (JMX)";
+            };
         }
     }
 
@@ -229,8 +305,19 @@ public final class LogCatalog {
                     }
                 }
             }
+            List<JvmPlace> jvms = new ArrayList<>();
+            if (s.get("jvms") instanceof List<?> jl) {
+                for (Object j : jl) {
+                    if (j instanceof Map<?, ?> jm) {
+                        JvmPlace p = new JvmPlace(str(jm.get("program")), str(jm.get("ssh")), str(jm.get("jmx")));
+                        if (!p.program().isEmpty() || !p.ssh().isEmpty() || !p.jmx().isEmpty()) {
+                            jvms.add(p);
+                        }
+                    }
+                }
+            }
             out.add(new Service(name, str(s.get("description")), folders, files, str(s.get("timeZone")),
-                    str(s.get("notes"))));
+                    str(s.get("notes")), jvms));
         }
         return out;
     }
@@ -259,6 +346,21 @@ public final class LogCatalog {
             }
             b.append(s.files().isEmpty() ? "],\n" : "\n      ],\n");
             b.append("      \"timeZone\": ").append(q(s.timeZone())).append(",\n");
+            if (!s.jvms().isEmpty()) {
+                b.append("      \"jvms\": [");
+                for (int j = 0; j < s.jvms().size(); j++) {
+                    JvmPlace p = s.jvms().get(j);
+                    b.append(j == 0 ? "\n" : ",\n").append("        { \"program\": ").append(q(p.program()));
+                    if (!p.ssh().isEmpty()) {
+                        b.append(", \"ssh\": ").append(q(p.ssh()));
+                    }
+                    if (!p.jmx().isEmpty()) {
+                        b.append(", \"jmx\": ").append(q(p.jmx()));
+                    }
+                    b.append(" }");
+                }
+                b.append("\n      ],\n");
+            }
             b.append("      \"notes\": ").append(q(s.notes())).append("\n    }");
         }
         b.append(services.isEmpty() ? "]\n}\n" : "\n  ]\n}\n");

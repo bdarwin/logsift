@@ -53,13 +53,27 @@ public final class Workspace implements AutoCloseable {
      * assistant asks in its chat. Throws {@link Tool.Failure} with the answer for the model when
      * they say no.
      */
-    @FunctionalInterface
     public interface Gate {
         /**
          * @param what  in a few words: "open app.log", "search the folder logs"
          * @param where the file or folder
          */
         void allow(String what, Path where) throws Tool.Failure, InterruptedException;
+
+        /**
+         * Something that touches a running program (a thread dump, a heap histogram): always asked.
+         *
+         * @param key    what "for this chat" allows again without asking
+         * @param detail what it does to the program, for the person
+         */
+        /** A web address to download (asked as a file is: the person didn't open it). */
+        default void allowUrl(String what, String url) throws Tool.Failure, InterruptedException {
+        }
+
+        default void approve(String what, String key, String detail) throws Tool.Failure, InterruptedException {
+            throw new Tool.Failure("This needs the person's OK, and they can't be asked here: " + what
+                    + ". Ask them to use Logsift's assistant, or Logsift's window.");
+        }
     }
 
     private volatile Gate gate;
@@ -71,6 +85,33 @@ public final class Workspace implements AutoCloseable {
     /** Asks before reading what the person didn't open or name (null: never asks, as for MCP agents). */
     public void setGate(Gate g) {
         gate = g;
+    }
+
+    /** Asks the person's OK for something that touches a running program; a no is a {@link Tool.Failure}. */
+    public void approve(String what, String key, String detail) throws Tool.Failure, InterruptedException {
+        Gate g = gate;
+        if (g == null) {
+            throw new Tool.Failure("This needs the person's OK, and they can't be asked here: " + what
+                    + ". Ask them to use Logsift's assistant, or Logsift's window.");
+        }
+        g.approve(what, key, detail);
+    }
+
+    private JvmReach jvms;
+
+    /** The JVMs agents may look into (the window gives one that can ask for passwords). */
+    public synchronized JvmReach jvms() {
+        if (jvms == null) {
+            jvms = new JvmReach(this);
+        }
+        return jvms;
+    }
+
+    public synchronized void setJvms(JvmReach r) {
+        if (jvms != null && jvms != r) {
+            jvms.close();
+        }
+        jvms = r;
     }
 
     /** A file or folder the person named or opened: read without asking. */
@@ -95,6 +136,9 @@ public final class Workspace implements AutoCloseable {
      * @param what what the tool would do, for the question: "open", "search the folder", "compare"
      */
     public Path check(Path p, String what) throws java.io.IOException, Tool.Failure, InterruptedException {
+        if (fetched.containsValue(p.toAbsolutePath().normalize())) {
+            return p.toAbsolutePath().normalize(); // downloaded for this session, in Logsift's own folder
+        }
         Path real = options.scope().check(p);
         Gate g = gate;
         if (g != null && !isKnown(p) && !isKnown(real)) {
@@ -103,6 +147,36 @@ public final class Workspace implements AutoCloseable {
             g.allow(what + " " + name, abs);
         }
         return real;
+    }
+
+    /** Web addresses downloaded for this session, and where. */
+    private final Map<String, Path> fetched = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * A web address an agent gave ({@code https://…/app.log}): downloaded once into Logsift's
+     * temporary folder, then read like a file. The window asks first, as for a file not opened.
+     */
+    Path fetch(String url) throws Exception {
+        Path got = fetched.get(url);
+        if (got != null) {
+            return got;
+        }
+        java.net.URI u = logsift.core.UrlFetch.parse(url);
+        Gate g = gate;
+        if (g != null) {
+            g.allowUrl("download " + u.getHost() + (u.getPath() == null ? "" : u.getPath()), url);
+        }
+        Path dir = Files.createTempDirectory("logsift-url-");
+        dir.toFile().deleteOnExit();
+        Path f = await("fetch:" + url, "downloading " + u.getHost(), () -> logsift.core.UrlFetch.download(u,
+                logsift.core.UrlFetch.Auth.NONE, dir, null, () -> Thread.currentThread().isInterrupted()));
+        if (f == null) {
+            throw new InterruptedException();
+        }
+        f.toFile().deleteOnExit();
+        Path abs = f.toAbsolutePath().normalize();
+        fetched.put(url, abs);
+        return abs;
     }
 
     private boolean isKnown(Path p) {
@@ -166,8 +240,11 @@ public final class Workspace implements AutoCloseable {
      * A path from what an agent gave: a path, or a name from the log locations ("orders/app":
      * the newest file of that log). A name that is neither stays a path (and fails as one).
      */
-    public Path pathOf(String pathOrName) {
+    public Path pathOf(String pathOrName) throws Exception {
         String s = expandHome(pathOrName.strip());
+        if (s.regionMatches(true, 0, "http://", 0, 7) || s.regionMatches(true, 0, "https://", 0, 8)) {
+            return fetch(s);
+        }
         try {
             Path p = Path.of(s);
             if (p.isAbsolute() || Files.exists(p)) {
@@ -603,6 +680,14 @@ public final class Workspace implements AutoCloseable {
 
     @Override
     public void close() {
+        JvmReach j;
+        synchronized (this) {
+            j = jvms;
+            jvms = null;
+        }
+        if (j != null) {
+            j.close(); // the connections to JVMs this session opened
+        }
         synchronized (this) {
             if (sql != null) {
                 sql.close();

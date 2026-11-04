@@ -385,14 +385,9 @@ final class ChatTranscript extends JPanel implements Scrollable {
     static final class Stack implements LayoutManager {
         static final int GAP = 10;
         static final int PAD = 12;
-        /** The widest the words go: lines longer than this are hard to read (a chat in a wide tab). */
-        static final int READ = 760;
-
-        /** The column's width and where it starts, in a panel {@code w} wide inside {@code in}. */
+        /** The entries' width and where they start, in a panel {@code w} wide inside {@code in}: all of it. */
         static int[] column(int w, Insets in) {
-            int inner = w - in.left - in.right - 2 * PAD;
-            int col = Math.min(inner, READ);
-            return new int[] {col, in.left + PAD + Math.max(0, (inner - col) / 2)};
+            return new int[] {w - in.left - in.right - 2 * PAD, in.left + PAD};
         }
 
         @Override

@@ -485,29 +485,6 @@ final class ChatPanel extends JPanel {
         return b;
     }
 
-    /**
-     * Keeps a panel's contents in a column no wider than the transcript's ({@link ChatTranscript.Stack#READ}),
-     * in the middle: in a wide tab, lines stay short enough to read.
-     */
-    static void readable(JComponent c, int top, int side, int bottom, javax.swing.border.Border line) {
-        Runnable fit = () -> {
-            int pad = Math.max(side, (c.getWidth() - ChatTranscript.Stack.READ) / 2);
-            javax.swing.border.Border b = BorderFactory.createEmptyBorder(top, pad, bottom, pad);
-            javax.swing.border.Border now = line == null ? b : BorderFactory.createCompoundBorder(line, b);
-            java.awt.Insets was = c.getInsets();
-            c.setBorder(now);
-            if (!was.equals(c.getInsets())) {
-                c.revalidate();
-            }
-        };
-        c.addComponentListener(new java.awt.event.ComponentAdapter() {
-            @Override
-            public void componentResized(java.awt.event.ComponentEvent e) {
-                fit.run();
-            }
-        });
-        fit.run();
-    }
 
     private JComponent composer() {
         JPanel c = new JPanel(new BorderLayout(0, 4));
@@ -715,7 +692,7 @@ final class ChatPanel extends JPanel {
 
     private JComponent suggestionsCard() {
         suggestions.setLayout(new BoxLayout(suggestions, BoxLayout.Y_AXIS));
-        readable(suggestions, 24, 16, 16, null);
+        suggestions.setBorder(BorderFactory.createEmptyBorder(24, 16, 16, 16));
         suggestions.setOpaque(false);
         JScrollPane sp = new JScrollPane(suggestions);
         sp.setBorder(null);

@@ -126,6 +126,10 @@ public final class Skill {
             if (!sv.notes().isEmpty()) {
                 b.append("  - Notes: ").append(sv.notes().replace('\n', ' ')).append('\n');
             }
+            if (!sv.jvms().isEmpty()) {
+                b.append("  - JVMs (thread_dump, heap_histogram): ").append(String.join(", ",
+                        sv.jvms().stream().map(LogCatalog.JvmPlace::label).toList())).append('\n');
+            }
             if (e.project()) {
                 b.append("  - From the project's list, `").append(e.file()).append("`\n");
             }

@@ -24,6 +24,7 @@ import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import logsift.agent.JsonWriter;
+import logsift.agent.LogCatalog;
 import logsift.agent.LogTools;
 import logsift.agent.Masking;
 import logsift.agent.Scope;
@@ -207,13 +208,55 @@ class McpServerTest {
         assertNull(out.poll(200, TimeUnit.MILLISECONDS), "no answer to a notification");
     }
 
+    /** Sends a tools/call without waiting (the agent may be asked something first). */
+    private int callLater(String tool, Map<String, Object> args) {
+        int id = nextId++;
+        server.handle(JsonWriter.write(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
+                "params", Map.of("name", tool, "arguments", args))));
+        return id;
+    }
+
+    private void jvmService() {
+        LogCatalog.Service orders = new LogCatalog.Service("orders", "", List.of(logs.toString()), List.of(), "", "",
+                List.of(new LogCatalog.JvmPlace("logsift.jvm.FixtureApp", "", "")));
+        LogCatalog c = LogCatalog.of(List.of(new LogCatalog.Entry(orders, logs.resolve("logs.json"), false)));
+        workspace.setCatalog(() -> c);
+    }
+
+    @Test
+    void aThreadDumpIsAskedThroughAnAgentThatCanAsk() throws Exception {
+        request("initialize", Map.of("protocolVersion", "2025-06-18", "capabilities", Map.of("elicitation", Map.of())));
+        jvmService();
+        int id = callLater("thread_dump", Map.of("jvm", "orders"));
+        Map<String, Object> ask = out.poll(60, TimeUnit.SECONDS);
+        assertNotNull(ask);
+        assertEquals("elicitation/create", ask.get("method"));
+        assertTrue(String.valueOf(map(ask.get("params")).get("message"))
+                .contains("take a thread dump of logsift.jvm.FixtureApp on this computer"), ask.toString());
+        server.handle(JsonWriter.write(Map.of("jsonrpc", "2.0", "id", ask.get("id"), "result", Map.of("action", "decline"))));
+        Map<String, Object> r = out.poll(60, TimeUnit.SECONDS);
+        assertNotNull(r);
+        assertEquals(String.valueOf(id), String.valueOf(r.get("id")));
+        Map<String, Object> result = map(r.get("result"));
+        assertEquals(true, result.get("isError"));
+        assertTrue(String.valueOf(result.get("content")).contains("The person said no"), result.toString());
+    }
+
+    @Test
+    void aThreadDumpIsRefusedWhenNobodyCanBeAsked() throws Exception {
+        request("initialize", Map.of("protocolVersion", "2025-06-18", "capabilities", Map.of()));
+        jvmService();
+        Map<String, Object> r = request("tools/call", Map.of("name", "thread_dump", "arguments", Map.of("jvm", "orders")));
+        assertTrue(String.valueOf(map(r.get("result")).get("content")).contains("can't be asked here"), r.toString());
+    }
+
     @Test
     void listsReadOnlyTools() throws Exception {
         List<Object> tools = list(map(request("tools/list", Map.of()).get("result")).get("tools"));
         assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines",
                 "top_messages", "metrics", "query", "query_examples", "pivot", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
                 "merge_logs", "analyze_profile", "compare_files", "compare_folders", "compare_logs", "analyze_crash",
-                "crash_threads", "crash_modules"),
+                "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
             Map<String, Object> d = map(t);

@@ -86,9 +86,32 @@ final class ChatGate extends JPanel {
 
     /** The gate for the workspace's tools: files and folders. */
     Workspace.Gate files() {
-        return (what, where) -> ask(what, where.toString(), "file:" + key(where),
-                "Copilot wants to " + what + ", which you didn't open or name.", shortPath(where),
-                "Work with the logs that are open or that the person named; say what else you would need and why.");
+        return new Workspace.Gate() {
+            @Override
+            public void allow(String what, Path where) throws Tool.Failure, InterruptedException {
+                if (asking.getAsBoolean()) {
+                    ask(what, where.toString(), "file:" + key(where),
+                            "Copilot wants to " + what + ", which you didn't open or name.", shortPath(where),
+                            "Work with the logs that are open or that the person named; say what else you would need and why.");
+                }
+            }
+
+            @Override
+            public void allowUrl(String what, String url) throws Tool.Failure, InterruptedException {
+                if (asking.getAsBoolean()) {
+                    String host = java.net.URI.create(url).getHost();
+                    ask(what, url, "url:" + host, "Copilot wants to " + what + ", which you didn't open or name.", url,
+                            "Work with the logs that are open or that the person named.");
+                }
+            }
+
+            @Override
+            public void approve(String what, String key, String detail) throws Tool.Failure, InterruptedException {
+                // a running program: always asked, whatever the setting for files
+                ask(what, what, key, "Copilot wants to " + what + ".", detail,
+                        "Don't ask again for it in this answer; say what it would have shown, or work from the logs.");
+            }
+        };
     }
 
     /** A long path as its start and its last parts: "/Users/…/build/visual/elsewhere/billing.log". */
@@ -122,9 +145,6 @@ final class ChatGate extends JPanel {
      */
     void ask(String what, String where, String key, String question, String shown, String instead)
             throws Tool.Failure, InterruptedException {
-        if (!asking.getAsBoolean()) {
-            return;
-        }
         String id = chatId.get();
         Set<String> ok = id == null ? Set.of() : allowed.getOrDefault(id, Set.of());
         for (String k : ok) {

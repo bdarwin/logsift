@@ -3207,8 +3207,83 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                     Path.of(System.getProperty("user.home"))));
             chatWorkspace.setClient("Logsift assistant (GitHub Copilot)");
             chatWorkspace.setCatalog(this::assistantCatalog);
+            chatWorkspace.setJvms(windowJvms(chatWorkspace));
         }
         return chatWorkspace;
+    }
+
+    /**
+     * The JVMs the assistant may look into, reached as the window reaches them: a server seen for the
+     * first time is trusted only when the person says so, and a sign-in or password missing is asked.
+     */
+    private logsift.agent.JvmReach windowJvms(logsift.agent.Workspace w) {
+        return new logsift.agent.JvmReach(w) {
+            @Override
+            protected logsift.core.RemoteMirror.Target sshSignIn(Place p) {
+                logsift.core.RemoteMirror.Target withKey = super.sshSignIn(p);
+                if (withKey != null) {
+                    return withKey;
+                }
+                logsift.core.RemoteMirror.Target[] t = new logsift.core.RemoteMirror.Target[1];
+                try {
+                    SwingUtilities.invokeAndWait(() -> t[0] = askSshSignIn(p.host(), p.port() > 0 ? p.port() : 22,
+                            p.user(), "The assistant needs to sign in to " + p.host() + " to look into " + p.program() + "."));
+                } catch (Exception e) {
+                    return null;
+                }
+                return t[0];
+            }
+
+            @Override
+            protected boolean trustHost(String message) {
+                return MainFrame.this.trustHost(message);
+            }
+
+            @Override
+            protected String jmxPassword(Place p) {
+                String[] pw = new String[1];
+                try {
+                    SwingUtilities.invokeAndWait(() -> {
+                        javax.swing.JPasswordField f = new javax.swing.JPasswordField(18);
+                        Object[] msg = {"<html>The JMX port of <b>" + p.host() + ":" + p.port() + "</b> asks for "
+                                + p.user() + "'s password:</html>", f};
+                        if (JOptionPane.showConfirmDialog(MainFrame.this, msg, "JMX Password", JOptionPane.OK_CANCEL_OPTION,
+                                JOptionPane.QUESTION_MESSAGE) == JOptionPane.OK_OPTION) {
+                            pw[0] = new String(f.getPassword());
+                        }
+                    });
+                } catch (Exception e) {
+                    return null;
+                }
+                return pw[0];
+            }
+
+            @Override
+            protected Path knownHosts() {
+                return knownHostsFile();
+            }
+        };
+    }
+
+    /** Asks how to sign in to a server over SSH (a password, or a key); null if cancelled. */
+    private logsift.core.RemoteMirror.Target askSshSignIn(String host, int port, String user, String why) {
+        javax.swing.JTextField u = new javax.swing.JTextField(user.isEmpty() ? PREFS.get("remote.user",
+                System.getProperty("user.name")) : user, 14);
+        javax.swing.JPasswordField pw = new javax.swing.JPasswordField(16);
+        javax.swing.JTextField key = new javax.swing.JTextField(PREFS.get("remote.key", ""), 22);
+        key.putClientProperty("JTextField.placeholderText", "or a private key's path");
+        javax.swing.JPasswordField phrase = new javax.swing.JPasswordField(12);
+        phrase.putClientProperty("JTextField.placeholderText", "its passphrase, if any");
+        Object[] msg = {"<html>" + why + "<br>Sign in to <b>" + host + ":" + port + "</b>:</html>", "User", u,
+                "Password", pw, "Key", key, phrase};
+        if (JOptionPane.showConfirmDialog(this, msg, "Sign In over SSH", JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.QUESTION_MESSAGE) != JOptionPane.OK_OPTION) {
+            return null;
+        }
+        boolean useKey = !key.getText().isBlank();
+        return new logsift.core.RemoteMirror.Target(host, port, u.getText().strip(), "",
+                useKey ? null : new String(pw.getPassword()), useKey ? Path.of(key.getText().strip()) : null,
+                useKey ? new String(phrase.getPassword()) : null);
     }
 
     /** What the window tells and lets the assistant do. */

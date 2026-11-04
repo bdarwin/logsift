@@ -46,6 +46,7 @@ public final class LogTools {
         all.addAll(TraceTools.all());
         all.addAll(CompareTools.all());
         all.addAll(CrashTools.all());
+        all.addAll(JvmTools.all());
         return List.copyOf(all);
     }
 
@@ -117,7 +118,7 @@ public final class LogTools {
                     + "format, time range. Gives a handle (log:1) for the other tools. Start here, then call "
                     + "insights for what happened in it. Without a path, call list_logs: it names the person's "
                     + "services and their logs, and a name from it (\"orders/app\") opens the newest file of that log.",
-            new Tool.Schema().string("path", "The log file's path, or a name from list_logs (\"orders/app\").", true)
+            new Tool.Schema().string("path", "The log file's path, a name from list_logs (\"orders/app\"), or a web address.", true)
                     .build(),
             (a, w) -> {
                 String h = w.open(w.pathOf(a.string("path")));
@@ -215,6 +216,10 @@ public final class LogTools {
             if (!s.timeZone().isEmpty()) {
                 b.append("  Times in its logs: ").append(s.timeZone()).append('\n');
             }
+            if (!s.jvms().isEmpty()) {
+                b.append("  JVMs (thread_dump, heap_histogram): ").append(String.join(", ",
+                        s.jvms().stream().map(LogCatalog.JvmPlace::label).toList())).append('\n');
+            }
             if (!s.notes().isEmpty()) {
                 b.append("  Notes: ").append(s.notes().replace("\n", " ")).append('\n');
             }
@@ -231,7 +236,7 @@ public final class LogTools {
             }
             LogCatalog.Entry readable = new LogCatalog.Entry(new LogCatalog.Service(s.name(), s.description(),
                     e.folders().stream().filter(f -> scope.allows(f)).map(Path::toString).toList(),
-                    s.files(), s.timeZone(), s.notes()), e.file(), false);
+                    s.files(), s.timeZone(), s.notes(), s.jvms()), e.file(), false);
             groups.addAll(LogCatalog.scan(readable));
             int max = detail ? 200 : 15;
             int guessed = 0;

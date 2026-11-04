@@ -19,7 +19,7 @@ Logsift opens the assistant when it starts, in a tab of its own. **View → Assi
 
 In a tab of its own, beside the logs' tabs, or at the side of the window next to the log shown: the button beside the gear in the chat's header moves it, and Logsift remembers where. In its tab, it asks about the log you looked at last, so **Ask the Assistant About This Line** and the chips work as they do beside it, and a line link takes you to the log.
 
-In its tab there's room for more: your **chats** at the left, as in other chat apps (*Today*, *Yesterday*, *Previous 7 days*…, the one open marked, with **New Chat** and a search at the top), and its **skills** at the right. The conversation, the welcome and the box stay in a column in the middle, so lines stay short enough to read however wide the window is. Each folds to a narrow strip with the button at its top (and opens again from the strip, or the clock and book buttons in the header). The question box takes the whole width; drag the handle on its top edge to make it taller or shorter, and Logsift keeps that height.
+In its tab there's room for more: your **chats** at the left, as in other chat apps (*Today*, *Yesterday*, *Previous 7 days*…, the one open marked, with **New Chat** and a search at the top), and its **skills** at the right. The conversation takes the room between them. Each folds to a narrow strip with the button at its top (and opens again from the strip, or the clock and book buttons in the header). The question box takes the whole width; drag the handle on its top edge to make it taller or shorter, and Logsift keeps that height.
 
 ![The assistant's tab: chats at the left, the conversation in the middle, skills at the right](../screenshots/assistant-tab.png)
 
@@ -46,6 +46,10 @@ The **Skills** panel says what the assistant can do, by what it's for: find and 
 The logs you have open, and files you name with `@`, it reads freely. To open another file, or search a folder, it first asks above the box, naming the file: **Allow**, **Allow for This Chat** (that file's folder too, for the rest of the chat) or **Deny**. Your answer is written in the chat; after a no it works with what's open, or says what it would need and why. Reading what you didn't ask about is where answers get expensive, so this is on by default; turn it off in **Settings → Assistant → What it reads**.
 
 ![The assistant asks before it opens a file you didn't open or name](../screenshots/assistant-asks.png)
+
+A **thread dump** or a **heap histogram** of a running JVM is always asked for, whatever that setting, with what it does to the program (*the JVM pauses for a moment while its threads are listed*). Tell Logsift where each service's JVM runs in [Log Locations](agents.md#where-your-logs-are) (**Its JVMs**: this computer, SSH or a JMX port), and ask *why is orders slow right now?*: the assistant takes a dump, shows the busy and blocked threads, and keeps the whole dump as a log to read. Over SSH it uses your key and a server you already trust; for a password, a new server's key or a JMX password, Logsift asks you. Never a heap dump.
+
+![The assistant asks before it takes a thread dump](../screenshots/assistant-asks-thread-dump.png)
 
 Each tool's answer is also kept to 8,000 characters (about 2,000 tokens; coding agents get up to 24,000). When there is more, the assistant is told how much was cut and asks for a narrower range.
 

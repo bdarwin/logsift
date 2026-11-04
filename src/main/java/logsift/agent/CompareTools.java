@@ -97,7 +97,7 @@ public final class CompareTools {
                     + "(the key given, else the one Logsift suggests, else row order), with rows added, removed and "
                     + "changed (old → new per column) and line numbers. Other files are compared line by line "
                     + "(times, numbers or IDs can be masked so two runs line up). left is the older file.",
-            new Tool.Schema().string("left", "The older file: a path, a log handle (log:1) or a name from list_logs.", true)
+            new Tool.Schema().string("left", "The older file: a path, a log handle (log:1), a name from list_logs or a web address.", true)
                     .string("right", "The newer file.", true)
                     .string("keys", "Tables: the key column(s), comma-separated, like order_id (default: suggested).",
                             false)

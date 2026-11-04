@@ -69,6 +69,8 @@ final class LogLocationsDialog extends JDialog {
         final Map<String, String> kinds = new LinkedHashMap<>();
         String timeZone;
         String notes;
+        /** Where its JVMs run. */
+        final List<LogCatalog.JvmPlace> jvms = new ArrayList<>();
         Path file;
         boolean project;
 
@@ -81,6 +83,7 @@ final class LogLocationsDialog extends JDialog {
             }
             timeZone = s.timeZone();
             notes = s.notes();
+            jvms.addAll(s.jvms());
             this.file = file;
             this.project = project;
         }
@@ -92,7 +95,7 @@ final class LogLocationsDialog extends JDialog {
                     files.add(new LogCatalog.FileKind(p, d.strip()));
                 }
             });
-            return new LogCatalog.Service(name, description, folders, files, timeZone, notes);
+            return new LogCatalog.Service(name, description, folders, files, timeZone, notes, jvms);
         }
 
         LogCatalog.Entry entry() {
@@ -469,6 +472,7 @@ final class LogLocationsDialog extends JDialog {
         tzHint.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
         tz.add(tzHint);
         row(f, l, v, "Times in", tz);
+        row(f, l, v, "Its JVMs", jvmsRow());
         notes.setLineWrap(true);
         notes.setWrapStyleWord(true);
         notes.putClientProperty("JTextArea.placeholderText",
@@ -556,6 +560,120 @@ final class LogLocationsDialog extends JDialog {
         }
     }
 
+    // ---------------------------------------------------------------- its JVMs
+
+    static final String[] HOW = {"This computer", "SSH", "JMX port"};
+
+    /** Where the service's JVMs run: a row each, what it runs, how it's reached, and the address. */
+    private final javax.swing.table.AbstractTableModel jvmModel = new javax.swing.table.AbstractTableModel() {
+        private final String[] cols = {"Program", "Reached by", "Address"};
+
+        @Override
+        public int getRowCount() {
+            return current == null ? 0 : current.jvms.size();
+        }
+
+        @Override
+        public int getColumnCount() {
+            return 3;
+        }
+
+        @Override
+        public String getColumnName(int c) {
+            return cols[c];
+        }
+
+        @Override
+        public boolean isCellEditable(int r, int c) {
+            return c < 2 || !current.jvms.get(r).kindOf().equals(logsift.jvm.JvmLink.Kind.LOCAL);
+        }
+
+        @Override
+        public Object getValueAt(int r, int c) {
+            LogCatalog.JvmPlace p = current.jvms.get(r);
+            return switch (c) {
+                case 0 -> p.program();
+                case 1 -> HOW[p.kindOf().ordinal()];
+                default -> p.jmx().isEmpty() ? p.ssh() : p.jmx();
+            };
+        }
+
+        @Override
+        public void setValueAt(Object v, int r, int c) {
+            LogCatalog.JvmPlace p = current.jvms.get(r);
+            String s = v == null ? "" : v.toString().strip();
+            String address = p.jmx().isEmpty() ? p.ssh() : p.jmx();
+            LogCatalog.JvmPlace now = switch (c) {
+                case 0 -> new LogCatalog.JvmPlace(s, p.ssh(), p.jmx());
+                case 1 -> s.equals(HOW[1]) ? new LogCatalog.JvmPlace(p.program(), address.isEmpty() ? "host" : address, "")
+                        : s.equals(HOW[2]) ? new LogCatalog.JvmPlace(p.program(), "", address.isEmpty() ? "host:9010" : address)
+                        : new LogCatalog.JvmPlace(p.program(), "", "");
+                default -> p.kindOf() == logsift.jvm.JvmLink.Kind.JMX ? new LogCatalog.JvmPlace(p.program(), "", s)
+                        : new LogCatalog.JvmPlace(p.program(), s, "");
+            };
+            current.jvms.set(r, now);
+            fireTableRowsUpdated(r, r);
+            changed(false);
+        }
+    };
+    private final JTable jvmTable = new JTable(jvmModel);
+
+    private JComponent jvmsRow() {
+        jvmTable.setName("jvms");
+        jvmTable.setRowHeight(Math.max(jvmTable.getRowHeight(), 24));
+        jvmTable.setShowGrid(false);
+        jvmTable.getTableHeader().setReorderingAllowed(false);
+        jvmTable.putClientProperty("terminateEditOnFocusLost", true);
+        jvmTable.getColumnModel().getColumn(1).setCellEditor(new javax.swing.DefaultCellEditor(new JComboBox<>(HOW)));
+        jvmTable.getColumnModel().getColumn(0).setPreferredWidth(160);
+        jvmTable.getColumnModel().getColumn(1).setPreferredWidth(110);
+        jvmTable.getColumnModel().getColumn(2).setPreferredWidth(220);
+        jvmTable.setToolTipText("<html>Where it runs, so the assistant can take a thread dump or a heap histogram"
+                + " (after you say yes).<br>SSH: <tt>user@host</tt> or <tt>host:port</tt>. JMX: <tt>host:9010</tt> or"
+                + " <tt>user@host:9010</tt>.<br>Never a password: this list may be shared; Logsift asks when it needs one.</html>");
+        JScrollPane sp = new JScrollPane(jvmTable);
+        sp.setPreferredSize(new Dimension(420, 82));
+        sp.setMinimumSize(new Dimension(200, 82));
+        JButton add = new JButton("Add", Icons.of("plus"));
+        add.setName("addJvm");
+        add.addActionListener(e -> {
+            if (current != null) {
+                String guess = current.name.isEmpty() ? "app.jar" : current.name + ".jar";
+                current.jvms.add(new LogCatalog.JvmPlace(guess, "", ""));
+                jvmModel.fireTableDataChanged();
+                changed(false);
+            }
+        });
+        JButton remove = new JButton("Remove");
+        remove.addActionListener(e -> {
+            int r = jvmTable.getSelectedRow();
+            if (current != null && r >= 0) {
+                if (jvmTable.isEditing()) {
+                    jvmTable.getCellEditor().cancelCellEditing();
+                }
+                current.jvms.remove(r);
+                jvmModel.fireTableDataChanged();
+                changed(false);
+            }
+        });
+        JPanel b = new JPanel();
+        b.setLayout(new BoxLayout(b, BoxLayout.Y_AXIS));
+        b.add(add);
+        b.add(Box.createVerticalStrut(4));
+        b.add(remove);
+        JPanel row = new JPanel(new BorderLayout(8, 4));
+        row.add(sp, BorderLayout.CENTER);
+        row.add(b, BorderLayout.EAST);
+        JLabel hint = new JLabel("where it runs, for a thread dump or a heap histogram (never a password)");
+        hint.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        row.add(hint, BorderLayout.SOUTH);
+        return row;
+    }
+
+    JTable jvmTableForTest() {
+        return jvmTable;
+    }
+
     private static void row(JPanel f, GridBagConstraints l, GridBagConstraints v, String label, JComponent c) {
         JLabel t = new JLabel(label);
         t.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
@@ -609,6 +727,7 @@ final class LogLocationsDialog extends JDialog {
         description.setText(it.description);
         notes.setText(it.notes);
         timeZone.setSelectedItem(it.timeZone == null ? "" : it.timeZone);
+        jvmModel.fireTableDataChanged();
         fillSavedIn(it);
         loading = false;
         refreshFolders();
@@ -1018,7 +1137,7 @@ final class LogLocationsDialog extends JDialog {
         for (String f : s.folders()) {
             fs.add(LogCatalog.portable(f, root));
         }
-        return new LogCatalog.Service(s.name(), s.description(), fs, s.files(), s.timeZone(), s.notes());
+        return new LogCatalog.Service(s.name(), s.description(), fs, s.files(), s.timeZone(), s.notes(), s.jvms());
     }
 
     // ---------------------------------------------------------------- sharing

@@ -91,7 +91,14 @@ public final class McpServer {
         Object id = msg.get("id");
         Object m = msg.get("method");
         if (!(m instanceof String method)) {
-            return; // a response to us: we send no requests
+            // an answer to a question we asked (elicitation)
+            java.util.concurrent.CompletableFuture<Map<String, Object>> f = asked.remove(String.valueOf(id));
+            if (f != null) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = msg.get("result") instanceof Map<?, ?> r ? (Map<String, Object>) r : Map.of();
+                f.complete(result);
+            }
+            return;
         }
         @SuppressWarnings("unchecked")
         Map<String, Object> params = msg.get("params") instanceof Map<?, ?> p ? (Map<String, Object>) p : Map.of();
@@ -130,7 +137,62 @@ public final class McpServer {
 
     private enum Fail { FAIL }
 
+    /** Questions asked of the person through the agent (elicitation), by request id. */
+    private final Map<String, java.util.concurrent.CompletableFuture<Map<String, Object>>> asked = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicInteger askIds = new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * Asks the person through their agent (MCP elicitation): true if they accept. Waits at most five
+     * minutes; no answer is a no.
+     */
+    boolean ask(String message) throws InterruptedException {
+        String id = "logsift-" + askIds.incrementAndGet();
+        java.util.concurrent.CompletableFuture<Map<String, Object>> f = new java.util.concurrent.CompletableFuture<>();
+        asked.put(id, f);
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", Map.of());
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("message", message);
+        params.put("requestedSchema", schema);
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("jsonrpc", "2.0");
+        r.put("id", id);
+        r.put("method", "elicitation/create");
+        r.put("params", params);
+        send(r);
+        try {
+            Map<String, Object> answer = f.get(5, java.util.concurrent.TimeUnit.MINUTES);
+            return "accept".equals(answer.get("action"));
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+            return false;
+        } finally {
+            asked.remove(id);
+        }
+    }
+
+    /** For an agent that can ask its person (elicitation): files as before, a JVM action asked each time. */
+    private Workspace.Gate elicitingGate() {
+        return new Workspace.Gate() {
+            @Override
+            public void allow(String what, java.nio.file.Path where) {
+                // files: as for every agent, within the folders it may read
+            }
+
+            @Override
+            public void approve(String what, String key, String detail) throws logsift.agent.Tool.Failure,
+                    InterruptedException {
+                if (!ask("Logsift: an agent wants to " + what + ". " + detail + " Allow it?")) {
+                    throw new logsift.agent.Tool.Failure("The person said no to: " + what + ".");
+                }
+            }
+        };
+    }
+
     private Map<String, Object> initialize(Map<String, Object> params) {
+        if (params.get("capabilities") instanceof Map<?, ?> caps && caps.get("elicitation") != null) {
+            workspace.setGate(elicitingGate());
+        }
         Object asked = params.get("protocolVersion");
         String v = asked != null && VERSIONS.contains(asked.toString()) ? asked.toString() : VERSIONS.get(0);
         if (params.get("clientInfo") instanceof Map<?, ?> ci) {

@@ -3066,6 +3066,35 @@ class VisualTest {
         assertEquals("Why is @payments.log ", onEdt(() -> chat.inputForTest().getText()));
         String withNamed = onEdt(chat::context);
         assertTrue(withNamed.contains("[Named] @payments.log = log:"), withNamed);
+        // a thread dump is always asked for, with what it does to the program; for this chat, once
+        logsift.agent.Workspace.Gate jvmGate = onEdt(() -> gate.files());
+        java.util.concurrent.CompletableFuture<String> dumpAsked = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                jvmGate.approve("take a thread dump of orders.jar on prod-7 (SSH)", "jvm:dump:jvm:1",
+                        "The JVM pauses for a moment while its threads are listed. Nothing is changed.");
+                return "yes";
+            } catch (Exception e) {
+                return e.getMessage();
+            }
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(gate::isAsking);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "asked for the thread dump");
+        assertTrue(onEdt(gate::textForTest).contains("take a thread dump of orders.jar on prod-7 (SSH)")
+                && onEdt(gate::textForTest).contains("pauses for a moment"), onEdt(gate::textForTest));
+        settle();
+        shot("130e-assistant-asks-thread-dump");
+        onEdt(() -> {
+            gate.answerForTest(ChatGate.Answer.CHAT);
+            return null;
+        });
+        assertEquals("yes", dumpAsked.get(20, java.util.concurrent.TimeUnit.SECONDS));
+        jvmGate.approve("take a thread dump of orders.jar on prod-7 (SSH)", "jvm:dump:jvm:1", "again");
+        assertFalse(onEdt(gate::isAsking), "allowed for this chat: not asked again");
         onEdt(() -> {
             chat.inputForTest().setText("");
             return null;
@@ -3262,7 +3291,9 @@ class VisualTest {
                     onEdt(() -> chat.sidebarForTest().rowForTest(0).chat().title()));
             int widest = onEdt(() -> chat.transcriptForTest().viewsForTest().stream().mapToInt(java.awt.Component::getWidth)
                     .max().orElse(0));
-            assertTrue(widest > 300 && widest <= ChatTranscript.Stack.READ, "a column to read, not the tab's width: " + widest);
+            int room = onEdt(() -> chat.transcriptForTest().getWidth());
+            assertTrue(widest >= room - 2 * ChatTranscript.Stack.PAD - 2, "the whole width between the chats and the skills: "
+                    + widest + " of " + room);
             settle();
             shotOf(w.getRootPane(), "131c-assistant-tab-chat");
             // the question box is as tall as dragged (and stays so); the chats and skills fold to strips
@@ -9221,10 +9252,24 @@ class VisualTest {
             d.setNotesForTest("Payment gateway timeouts before 06:00 are the nightly maintenance.");
             return null;
         });
+        // where its JVMs run: shared with the services, never a password
+        onEdt(() -> {
+            javax.swing.JTable jt = d.jvmTableForTest();
+            ((javax.swing.JButton) findNamed(d.getRootPane(), "addJvm")).doClick();
+            ((javax.swing.JButton) findNamed(d.getRootPane(), "addJvm")).doClick();
+            jt.getModel().setValueAt("SSH", 0, 1);
+            jt.getModel().setValueAt("deploy@prod-7", 0, 2);
+            jt.getModel().setValueAt("JMX port", 1, 1);
+            jt.getModel().setValueAt("prod-7:9010", 1, 2);
+            return null;
+        });
+        assertEquals("orders.jar", onEdt(() -> d.jvmTableForTest().getValueAt(0, 0)), "named after the service");
         String preview = onEdt(d::previewForTest);
         assertTrue(preview.contains("orders — Order service: takes orders from the shop and charges cards"), preview);
         assertTrue(preview.contains("orders/app: app.log — Application log: one line per order"), preview);
         assertTrue(preview.contains("Times in its logs: UTC"), preview);
+        assertTrue(preview.contains("JVMs (thread_dump, heap_histogram): orders.jar on deploy@prod-7 (SSH), "
+                + "orders.jar on prod-7:9010 (JMX)"), preview);
         settle();
         shotOf(d.getRootPane(), "114-log-locations");
         onEdt(() -> {
@@ -9238,6 +9283,7 @@ class VisualTest {
             assertTrue(saved.contains("\"~/"), "a folder in the home folder is saved as ~/…, for other computers: " + saved);
             assertFalse(saved.contains(userHome), saved);
         }
+        assertTrue(saved.contains("\"ssh\": \"deploy@prod-7\"") && saved.contains("\"jmx\": \"prod-7:9010\""), saved);
         logsift.agent.LogCatalog c = logsift.agent.LogCatalog.load(home, null, List.of());
         assertEquals(1, c.entries().size());
         assertEquals("Application log: one line per order, errors with stack traces",
