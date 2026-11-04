@@ -129,7 +129,7 @@ public final class TraceTools {
                         folders.add(Workspace.path(arg));
                     }
                     for (Path f : folders) {
-                        Path folder = w.options().scope().check(f);
+                        Path folder = w.check(f, "follow the request in the folder");
                         if (!Files.isDirectory(folder)) {
                             throw new Tool.Failure("Not a folder: " + folder + ". Give log for a file.");
                         }
@@ -387,7 +387,7 @@ public final class TraceTools {
                     .integer("limit", "Most methods per list (default 15).", false)
                     .integer("max_chars", "Longest answer (default 24000).", false).build(),
             (a, w) -> {
-                Path file = w.options().scope().check(Workspace.path(a.string("path")));
+                Path file = w.check(Workspace.path(a.string("path")), "read the profile");
                 if (Files.isDirectory(file)) {
                     throw new Tool.Failure("That is a folder: " + file + ". Give a .jfr or collapsed-stack file.");
                 }

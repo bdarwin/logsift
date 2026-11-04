@@ -35,12 +35,19 @@ public final class ChatInstructions {
      * @param plans     it's given the step-by-step plans
      * @param now       each question goes with the date and time now
      * @param own       the person's own instructions, or ""
+     * @param askFiles  it asks before it opens a file or folder the person didn't open or name
+     *                  (reading what wasn't asked about is where answers get expensive)
      */
-    public record Options(boolean inTab, boolean atStart, boolean locations, boolean plans, boolean now, String own) {
-        public static final Options DEFAULT = new Options(true, true, true, true, true, "");
+    public record Options(boolean inTab, boolean atStart, boolean locations, boolean plans, boolean now, String own,
+                          boolean askFiles) {
+        public static final Options DEFAULT = new Options(true, true, true, true, true, "", true);
 
         public Options {
             own = own == null ? "" : own.strip();
+        }
+
+        public Options(boolean inTab, boolean atStart, boolean locations, boolean plans, boolean now, String own) {
+            this(inTab, atStart, locations, plans, now, own, true);
         }
 
         static Path file(Path home) {
@@ -71,7 +78,7 @@ public final class ChatInstructions {
                 own = "";
             }
             return new Options(!"side".equals(p.getProperty("where")), on(p, "atStart"), on(p, "locations"),
-                    on(p, "plans"), on(p, "now"), own);
+                    on(p, "plans"), on(p, "now"), own, on(p, "askFiles"));
         }
 
         private static boolean on(Properties p, String key) {
@@ -85,6 +92,7 @@ public final class ChatInstructions {
             p.setProperty("locations", String.valueOf(locations));
             p.setProperty("plans", String.valueOf(plans));
             p.setProperty("now", String.valueOf(now));
+            p.setProperty("askFiles", String.valueOf(askFiles));
             Path f = file(home);
             Files.createDirectories(f.getParent());
             try (Writer w = Files.newBufferedWriter(f, StandardCharsets.UTF_8)) {
@@ -99,27 +107,31 @@ public final class ChatInstructions {
         }
 
         public Options withInTab(boolean v) {
-            return new Options(v, atStart, locations, plans, now, own);
+            return new Options(v, atStart, locations, plans, now, own, askFiles);
         }
 
         public Options withAtStart(boolean v) {
-            return new Options(inTab, v, locations, plans, now, own);
+            return new Options(inTab, v, locations, plans, now, own, askFiles);
         }
 
         public Options withLocations(boolean v) {
-            return new Options(inTab, atStart, v, plans, now, own);
+            return new Options(inTab, atStart, v, plans, now, own, askFiles);
         }
 
         public Options withPlans(boolean v) {
-            return new Options(inTab, atStart, locations, v, now, own);
+            return new Options(inTab, atStart, locations, v, now, own, askFiles);
         }
 
         public Options withNow(boolean v) {
-            return new Options(inTab, atStart, locations, plans, v, own);
+            return new Options(inTab, atStart, locations, plans, v, own, askFiles);
+        }
+
+        public Options withAskFiles(boolean v) {
+            return new Options(inTab, atStart, locations, plans, now, own, v);
         }
 
         public Options withOwn(String v) {
-            return new Options(inTab, atStart, locations, plans, now, v);
+            return new Options(inTab, atStart, locations, plans, now, v, askFiles);
         }
     }
 

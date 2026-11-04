@@ -46,4 +46,14 @@ class ChatLinksTest {
         assertFalse(html.contains("javascript"), html);
         assertNotNull(ChatMarkdown.FileLink.parse("/var/log/app.log:12"));
     }
+
+    @Test
+    void numbersInTablesLineUpAtTheRight() {
+        String html = ChatMarkdown.body("| host | errors | p95 |\n|---|---|---|\n| web-1 | 1,204 | 850 ms |\n");
+        assertTrue(html.contains("<td align=\"right\">1,204</td>"), html);
+        assertTrue(html.contains("<td align=\"right\">850 ms</td>"), html);
+        assertTrue(html.contains("<td>web-1</td>"), html);
+        assertFalse(ChatMarkdown.numeric("web-1"));
+        assertTrue(ChatMarkdown.numeric("12%"));
+    }
 }

@@ -48,6 +48,78 @@ public final class Workspace implements AutoCloseable {
     public static final int HARD_MAX_CHARS = 80_000;
     public static final int DEFAULT_MAX_CHARS = 24_000;
 
+    /**
+     * Asks the person before a tool reads a file or folder they didn't open or name: the window's
+     * assistant asks in its chat. Throws {@link Tool.Failure} with the answer for the model when
+     * they say no.
+     */
+    @FunctionalInterface
+    public interface Gate {
+        /**
+         * @param what  in a few words: "open app.log", "search the folder logs"
+         * @param where the file or folder
+         */
+        void allow(String what, Path where) throws Tool.Failure, InterruptedException;
+    }
+
+    private volatile Gate gate;
+    /** Files and folders the person opened or named: read without asking. */
+    private final java.util.Set<Path> known = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** The longest answer, whatever a tool is asked for (the window's assistant: shorter, to spend less). */
+    private volatile int answerCap = HARD_MAX_CHARS;
+
+    /** Asks before reading what the person didn't open or name (null: never asks, as for MCP agents). */
+    public void setGate(Gate g) {
+        gate = g;
+    }
+
+    /** A file or folder the person named or opened: read without asking. */
+    public void know(Path p) {
+        if (p != null) {
+            known.add(p.toAbsolutePath().normalize());
+        }
+    }
+
+    public void setAnswerCap(int chars) {
+        answerCap = Math.max(500, Math.min(chars, HARD_MAX_CHARS));
+    }
+
+    public int answerCap() {
+        return answerCap;
+    }
+
+    /**
+     * Checks that a tool may read {@code p}: inside the folders agents may read and, when the person
+     * is asked first, opened or named by them (or allowed). Gives the real path.
+     *
+     * @param what what the tool would do, for the question: "open", "search the folder", "compare"
+     */
+    public Path check(Path p, String what) throws java.io.IOException, Tool.Failure, InterruptedException {
+        Path real = options.scope().check(p);
+        Gate g = gate;
+        if (g != null && !isKnown(p) && !isKnown(real)) {
+            Path abs = p.toAbsolutePath().normalize();
+            String name = abs.getFileName() == null ? abs.toString() : abs.getFileName().toString();
+            g.allow(what + " " + name, abs);
+        }
+        return real;
+    }
+
+    private boolean isKnown(Path p) {
+        Path abs = p.toAbsolutePath().normalize();
+        synchronized (this) {
+            if (shown.containsValue(abs)) {
+                return true;
+            }
+        }
+        for (Path k : known) {
+            if (abs.startsWith(k)) {
+                return true; // the file, or one in a folder named or allowed
+            }
+        }
+        return false;
+    }
+
     private final Options options;
     private final Masking masking;
     private final Map<String, LogAnalysis> logs = new LinkedHashMap<>();
@@ -152,11 +224,11 @@ public final class Workspace implements AutoCloseable {
         logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
         Path read;
         if (in != null && !Files.isRegularFile(abs)) {
-            Path zip = options.scope().check(in.zip());
+            Path zip = check(in.zip(), "open");
             read = await("unpack:" + abs, "unpacking " + in.entry() + " from " + zip.getFileName(),
                     () -> unpack(zip, in.entry()));
         } else {
-            Path real = options.scope().check(abs);
+            Path real = check(abs, "open");
             if (Files.isDirectory(real)) {
                 throw new IOException("That is a folder: " + real + ". Use search_folder to search it.");
             }
@@ -347,7 +419,7 @@ public final class Workspace implements AutoCloseable {
     public String finish(String text, int maxChars) {
         AtomicLong masked = new AtomicLong();
         String s = masking.mask(text, masked);
-        int max = Math.max(500, Math.min(maxChars, HARD_MAX_CHARS));
+        int max = Math.max(500, Math.min(maxChars, answerCap));
         StringBuilder out = new StringBuilder();
         if (s.length() > max) {
             int cut = s.lastIndexOf('\n', max);

@@ -111,7 +111,7 @@ final class ChatEntryView extends JPanel {
             case ASSISTANT -> {
                 setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 2));
                 header.setText(headerText());
-                header.setIcon(Icons.of("sparkles", Theme.dimmedForeground(), 12));
+                header.setIcon(Icons.of("sparkles", ChatColors.accent(), 12));
                 add(header, BorderLayout.NORTH);
                 add(body, BorderLayout.CENTER);
                 renderNow();
@@ -226,13 +226,15 @@ final class ChatEntryView extends JPanel {
         JPanel row = new JPanel(new BorderLayout(6, 0));
         row.setOpaque(false);
         JLabel what = new JLabel(toolSummary());
-        what.setIcon(Icons.of("wrench", Theme.dimmedForeground(), 12));
+        ChatColors.Look look = ChatColors.tool(m.tool());
+        what.setIcon(Icons.of(look.icon(), look.color(), 13));
         what.setForeground(Theme.dimmedForeground());
         what.setFont(what.getFont().deriveFont(what.getFont().getSize2D() - 1f));
         row.add(what, BorderLayout.CENTER);
         JLabel status = new JLabel(toolStatus());
         status.setFont(what.getFont());
-        status.setForeground(Boolean.FALSE.equals(m.ok()) ? Theme.errorMark() : Theme.dimmedForeground());
+        status.setForeground(Boolean.FALSE.equals(m.ok()) ? Theme.errorMark()
+                : Boolean.TRUE.equals(m.ok()) ? ChatColors.ok() : Theme.dimmedForeground());
         status.setHorizontalTextPosition(JLabel.LEADING);
         status.setIconTextGap(4);
         row.add(status, BorderLayout.EAST);
@@ -436,6 +438,10 @@ final class ChatEntryView extends JPanel {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setColor(fill);
             g.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+            if (m.kind() == ChatMessage.Kind.TOOL && !marked) {
+                g.setColor(ChatColors.tool(m.tool()).color()); // the tool's color down its edge
+                g.fillRoundRect(0, 3, 3, getHeight() - 6, 3, 3);
+            }
             g.dispose();
         }
         super.paintComponent(g0);

@@ -11,6 +11,7 @@ import java.awt.Font;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -122,6 +123,24 @@ final class ChatPanel extends JPanel {
     private final JPanel message = new JPanel(new BorderLayout());
     private final JPanel suggestions = AssistantPanel.column();
     private final ChatHistory history;
+    /** Every chat at the left, as chat apps have it (in a tab of its own: there's room). */
+    private final ChatHistory sidebar;
+    private final JPanel sidebarBox = new JPanel(new BorderLayout());
+    /** The longest answer a tool gives the assistant: shorter than for coding agents, to spend less. */
+    static final int ANSWER_CAP = 8_000;
+    /** Asks before it reads what the person didn't open or name. */
+    private final ChatGate gate;
+    /** Files named with @. */
+    private ChatMentions mentions;
+    /** The chat asked in, for the tools' threads. */
+    private volatile String chatNow;
+    /** What it can do, at the right (in a tab of its own). */
+    private final ChatSkills skills;
+    /** The chats and the skills, folded: a strip with a button to open them again. */
+    private final JPanel chatsStrip = new JPanel();
+    private final JPanel skillsStrip = new JPanel();
+    private final JButton skillsButton = toolButton("book-open", "Show or hide the skills: what the assistant can do", null);
+    private static final java.util.prefs.Preferences PREFS = AppState.prefs().node("chat");
     private final Timer contextTimer;
 
     private ChatService.State state;
@@ -156,6 +175,13 @@ final class ChatPanel extends JPanel {
             }
         });
         transcript.onEndChanged(atEnd -> newer.setVisible(!atEnd));
+        gate = new ChatGate(() -> chatNow, () -> service.options().askFiles(), words -> {
+            String id = chatNow;
+            if (id != null) {
+                ChatMessage n = store.append(ChatMessage.note(id, words));
+                SwingUtilities.invokeLater(() -> transcript.changed(n, true));
+            }
+        });
         history = new ChatHistory(store, new ChatHistory.Host() {
             @Override
             public void open(String chatId, long seq) {
@@ -174,8 +200,65 @@ final class ChatPanel extends JPanel {
                 showCard("chat");
             }
         });
+        sidebar = new ChatHistory(store, new ChatHistory.Host() {
+            @Override
+            public void open(String chatId, long seq) {
+                openChat(chatId, seq);
+            }
 
-        add(header(), BorderLayout.NORTH);
+            @Override
+            public void deleted(String chatId) {
+                if (chat != null && chat.id().equals(chatId)) {
+                    newChat();
+                }
+            }
+
+            @Override
+            public void back() {
+            }
+
+            @Override
+            public void newChat() {
+                ChatPanel.this.newChat();
+            }
+
+            @Override
+            public void collapse() {
+                PREFS.putBoolean("sidebar", false);
+                showSidebar();
+            }
+        }, true);
+        sidebarBox.add(sidebar, BorderLayout.CENTER);
+        sidebarBox.setPreferredSize(new Dimension(250, 100));
+        sidebarBox.setMinimumSize(new Dimension(180, 100));
+        sidebarBox.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY)));
+
+        JPanel main = new JPanel(new BorderLayout());
+        main.setOpaque(false);
+        skills = new ChatSkills(logsift.agent.LogTools.all(), this::prefill, () -> {
+            PREFS.putBoolean("skills", false);
+            showSidebar();
+        });
+        JPanel right = new JPanel(new BorderLayout());
+        right.setOpaque(false);
+        right.add(skills, BorderLayout.CENTER);
+        right.add(skillsStrip, BorderLayout.EAST);
+        add(right, BorderLayout.EAST);
+        JPanel left = new JPanel(new BorderLayout());
+        left.setOpaque(false);
+        left.add(sidebarBox, BorderLayout.CENTER);
+        left.add(chatsStrip, BorderLayout.WEST);
+        add(left, BorderLayout.WEST);
+        strip(chatsStrip, true, "panel-left-open", "history", "Show the chats", () -> {
+            PREFS.putBoolean("sidebar", true);
+            showSidebar();
+        });
+        strip(skillsStrip, false, "panel-right-open", "book-open", "Show the skills", () -> {
+            PREFS.putBoolean("skills", true);
+            showSidebar();
+        });
+        add(main, BorderLayout.CENTER);
+        main.add(header(), BorderLayout.NORTH);
         JPanel chatCard = new JPanel(new BorderLayout());
         chatCard.setOpaque(false);
         javax.swing.JLayeredPane layered = new javax.swing.JLayeredPane() {
@@ -201,8 +284,9 @@ final class ChatPanel extends JPanel {
         center.add(suggestionsCard(), "empty");
         center.add(message, "message");
         center.add(history, "history");
-        add(center, BorderLayout.CENTER);
-        add(composer(), BorderLayout.SOUTH);
+        main.add(center, BorderLayout.CENTER);
+        main.add(composer(), BorderLayout.SOUTH);
+        showSidebar();
 
         String problem = service.storeProblem();
         showMessage("Connecting to GitHub Copilot…", null);
@@ -238,7 +322,7 @@ final class ChatPanel extends JPanel {
                 BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY)),
                 BorderFactory.createEmptyBorder(6, 10, 6, 6)));
         title.setFont(title.getFont().deriveFont(Font.BOLD));
-        title.setIcon(Icons.of("sparkles"));
+        title.setIcon(Icons.of("sparkles", ChatColors.accent(), 16));
         title.setToolTipText("Double-click to rename this chat");
         title.addMouseListener(new MouseAdapter() {
             @Override
@@ -250,7 +334,13 @@ final class ChatPanel extends JPanel {
         });
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         buttons.setOpaque(false);
-        buttons.add(toolButton("history", "Chats: every chat, and search them", e -> showHistory()));
+        buttons.add(historyButton);
+        historyButton.addActionListener(e -> showHistory());
+        buttons.add(skillsButton);
+        skillsButton.addActionListener(e -> {
+            PREFS.putBoolean("skills", !skills.isVisible());
+            showSidebar();
+        });
         buttons.add(toolButton("square-pen", "New chat", e -> newChat()));
         move.putClientProperty("JButton.buttonType", "toolBarButton");
         move.setFocusable(false);
@@ -288,12 +378,100 @@ final class ChatPanel extends JPanel {
     }
 
     private final JButton move = new JButton();
+    private final JButton historyButton = toolButton("history", "Chats: every chat, and search them", null);
 
-    /** The move button says where the chat goes. */
+    /** The move button says where the chat goes; the chats are at the left in a tab of its own. */
     void placed() {
         boolean tab = host.inTab();
         move.setIcon(Icons.of(tab ? "panel-right" : "app-window"));
         move.setToolTipText(tab ? "Move beside the logs" : "Move to a tab of its own");
+        historyButton.setToolTipText(tab ? "Show or hide the chats at the left" : "Chats: every chat, and search them");
+        showSidebar();
+    }
+
+    /** The sidebar: in a tab of its own, unless the person hid it. */
+    private void showSidebar() {
+        if (sidebar == null || skills == null) {
+            return; // still being built
+        }
+        boolean show = host.inTab() && PREFS.getBoolean("sidebar", true);
+        if (show && !sidebarBox.isVisible() || show && sidebar.rowsForTest() == 0) {
+            sidebar.refresh();
+            sidebar.setCurrent(chat == null ? null : chat.id());
+        }
+        sidebarBox.setVisible(show);
+        chatsStrip.setVisible(host.inTab() && !show);
+        skills.setVisible(host.inTab() && PREFS.getBoolean("skills", true));
+        skillsStrip.setVisible(host.inTab() && !skills.isVisible());
+        skillsButton.setVisible(host.inTab());
+        revalidate();
+        repaint();
+    }
+
+    /** A folded panel: a narrow strip with a button that opens it, and its own icon (also opens it). */
+    private static void strip(JPanel p, boolean left, String openIcon, String icon, String tip, Runnable open) {
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBackground(ChatHistory.sidebarBackground());
+        Color line = Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY);
+        p.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, left ? 0 : 1, 0, left ? 1 : 0, line),
+                BorderFactory.createEmptyBorder(6, 3, 6, 3)));
+        for (String i : new String[] {openIcon, icon}) {
+            JButton b = toolButton(i, tip, e -> open.run());
+            if (i.equals(icon)) {
+                b.setIcon(Icons.of(icon, ChatColors.accent(), 16));
+            }
+            b.setName(i.equals(openIcon) ? "expand" : "icon");
+            b.setAlignmentX(CENTER_ALIGNMENT);
+            p.add(b);
+            p.add(Box.createVerticalStrut(4));
+        }
+        p.setVisible(false);
+    }
+
+    boolean chatsStripShownForTest() {
+        return chatsStrip.isVisible();
+    }
+
+    JPanel skillsStripForTest() {
+        return skillsStrip;
+    }
+
+    boolean skillsStripShownForTest() {
+        return skillsStrip.isVisible();
+    }
+
+    void expandChatsForTest() {
+        ((JButton) chatsStrip.getComponent(0)).doClick();
+    }
+
+    void collapseSkillsForTest() {
+        PREFS.putBoolean("skills", false);
+        showSidebar();
+    }
+
+    /** The chats changed (one asked in, renamed, deleted): the sidebar says so. */
+    private void chatsChanged() {
+        if (sidebarBox.isVisible()) {
+            sidebar.refresh();
+            sidebar.setCurrent(chat == null ? null : chat.id());
+        }
+    }
+
+    boolean skillsShownForTest() {
+        return skills.isVisible();
+    }
+
+    ChatSkills skillsForTest() {
+        return skills;
+    }
+
+    boolean sidebarShownForTest() {
+        return sidebarBox.isVisible();
+    }
+
+    ChatHistory sidebarForTest() {
+        return sidebar;
     }
 
     private static JButton toolButton(String icon, String tip, java.awt.event.ActionListener a) {
@@ -301,17 +479,56 @@ final class ChatPanel extends JPanel {
         b.putClientProperty("JButton.buttonType", "toolBarButton");
         b.setToolTipText(tip);
         b.setFocusable(false);
-        b.addActionListener(a);
+        if (a != null) {
+            b.addActionListener(a);
+        }
         return b;
+    }
+
+    /**
+     * Keeps a panel's contents in a column no wider than the transcript's ({@link ChatTranscript.Stack#READ}),
+     * in the middle: in a wide tab, lines stay short enough to read.
+     */
+    static void readable(JComponent c, int top, int side, int bottom, javax.swing.border.Border line) {
+        Runnable fit = () -> {
+            int pad = Math.max(side, (c.getWidth() - ChatTranscript.Stack.READ) / 2);
+            javax.swing.border.Border b = BorderFactory.createEmptyBorder(top, pad, bottom, pad);
+            javax.swing.border.Border now = line == null ? b : BorderFactory.createCompoundBorder(line, b);
+            java.awt.Insets was = c.getInsets();
+            c.setBorder(now);
+            if (!was.equals(c.getInsets())) {
+                c.revalidate();
+            }
+        };
+        c.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                fit.run();
+            }
+        });
+        fit.run();
     }
 
     private JComponent composer() {
         JPanel c = new JPanel(new BorderLayout(0, 4));
+        // the full width: the box is where everything starts (the answers keep to a column)
         c.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.uiColor("Separator.foreground", Color.LIGHT_GRAY)),
-                BorderFactory.createEmptyBorder(6, 8, 8, 8)));
+                BorderFactory.createEmptyBorder(2, 12, 10, 12)));
         chips.setOpaque(false);
-        c.add(chips, BorderLayout.NORTH);
+        JPanel above = new JPanel();
+        above.setLayout(new BoxLayout(above, BoxLayout.Y_AXIS));
+        above.setOpaque(false);
+        gate.setAlignmentX(LEFT_ALIGNMENT);
+        chips.setAlignmentX(LEFT_ALIGNMENT);
+        above.add(gate);
+        above.add(chips);
+        c.add(above, BorderLayout.NORTH);
+        mentions = new ChatMentions(input, this::nameable);
+        bindMentionKey(KeyEvent.VK_DOWN, () -> mentions.move(1));
+        bindMentionKey(KeyEvent.VK_UP, () -> mentions.move(-1));
+        bindMentionKey(KeyEvent.VK_TAB, () -> mentions.pick());
+        bindMentionKey(KeyEvent.VK_ESCAPE, () -> mentions.close());
         input.setLineWrap(true);
         input.setWrapStyleWord(true);
         input.putClientProperty("JTextField.placeholderText", "Ask about the open logs…");
@@ -320,6 +537,10 @@ final class ChatPanel extends JPanel {
         input.getActionMap().put("send", new AbstractAction() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (mentions != null && mentions.isOpen()) {
+                    mentions.pick(); // Enter picks the file named
+                    return;
+                }
                 sendOrStop();
             }
         });
@@ -329,10 +550,14 @@ final class ChatPanel extends JPanel {
             public Dimension getPreferredSize() {
                 Dimension d = super.getPreferredSize();
                 int line = input.getFontMetrics(input.getFont()).getHeight();
-                int rows = Math.max(3, Math.min(10, input.getLineCount()));
-                return new Dimension(d.width, rows * line + 10);
+                // as tall as the person made it (5 lines at first), and taller for a long question
+                int chosen = PREFS.getInt("boxHeight", 5 * line + 14);
+                int grown = Math.min(14, input.getLineCount()) * line + 14;
+                return new Dimension(d.width, Math.max(3 * line + 14, Math.max(chosen, grown)));
             }
         };
+        input.setMargin(new java.awt.Insets(6, 8, 6, 8));
+        above.add(grip(sp), 0); // the handle, above the question and the chips
         input.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             private void grow() {
                 SwingUtilities.invokeLater(() -> {
@@ -378,9 +603,119 @@ final class ChatPanel extends JPanel {
         return c;
     }
 
+    /** The handle on the box's top edge: dragged, the box is taller or shorter (and stays so). */
+    private JComponent grip(JScrollPane box) {
+        JComponent g = new JComponent() {
+            @Override
+            protected void paintComponent(java.awt.Graphics g0) {
+                java.awt.Graphics2D g2 = (java.awt.Graphics2D) g0.create();
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(Theme.dimmedForeground());
+                int w = 36;
+                g2.fillRoundRect((getWidth() - w) / 2, getHeight() / 2 - 1, w, 3, 3, 3);
+                g2.dispose();
+            }
+        };
+        g.setName("boxGrip");
+        g.setPreferredSize(new Dimension(10, 8));
+        g.setCursor(Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR));
+        g.setToolTipText("Drag to make the box taller or shorter");
+        MouseAdapter drag = new MouseAdapter() {
+            private int fromY;
+            private int fromH;
+
+            @Override
+            public void mousePressed(MouseEvent e) {
+                fromY = e.getYOnScreen();
+                fromH = box.getHeight();
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                resizeBox(fromH + fromY - e.getYOnScreen());
+            }
+        };
+        g.addMouseListener(drag);
+        g.addMouseMotionListener(drag);
+        boxView = box;
+        g.setAlignmentX(LEFT_ALIGNMENT);
+        g.setMaximumSize(new Dimension(Integer.MAX_VALUE, 8));
+        return g;
+    }
+
+    private JScrollPane boxView;
+
+    /** Makes the question box {@code h} pixels tall (within reason) and remembers it. */
+    void resizeBox(int h) {
+        int line = input.getFontMetrics(input.getFont()).getHeight();
+        int most = Math.max(6 * line, getHeight() / 2);
+        PREFS.putInt("boxHeight", Math.max(3 * line + 14, Math.min(most, h)));
+        if (boxView != null) {
+            boxView.revalidate();
+        }
+        revalidate();
+        repaint();
+    }
+
+    int boxHeightForTest() {
+        return boxView == null ? 0 : boxView.getHeight();
+    }
+
+    /** While the @ list is open, a key moves in it instead of in the box. */
+    private void bindMentionKey(int key, Runnable r) {
+        KeyStroke ks = KeyStroke.getKeyStroke(key, 0);
+        Object was = input.getInputMap().get(ks);
+        javax.swing.Action before = was == null ? null : input.getActionMap().get(was);
+        String name = "mention-" + key;
+        input.getInputMap().put(ks, name);
+        input.getActionMap().put(name, new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (mentions.isOpen()) {
+                    r.run();
+                } else if (before != null) {
+                    before.actionPerformed(e);
+                } else if (key == KeyEvent.VK_TAB) {
+                    input.transferFocus();
+                }
+            }
+        });
+    }
+
+    /** The files a question can name: the logs open in the window, then the files opened lately. */
+    List<ChatMentions.File> nameable() {
+        List<ChatMentions.File> out = new ArrayList<>();
+        java.util.Set<Path> seen = new java.util.HashSet<>();
+        for (OpenLog l : host.openLogs()) {
+            Path p = localPath(l.where());
+            if (p != null) {
+                seen.add(p);
+            }
+            out.add(new ChatMentions.File(l.name(), p, l.handle(),
+                    p != null && p.getParent() != null ? p.getParent().toString() : l.where()));
+        }
+        for (Path r : AppState.recentFiles()) {
+            Path abs = r.toAbsolutePath().normalize();
+            if (seen.add(abs) && abs.getFileName() != null) {
+                out.add(new ChatMentions.File(abs.getFileName().toString(), abs, null,
+                        abs.getParent() == null ? "" : abs.getParent().toString()));
+            }
+        }
+        return out;
+    }
+
+    private static Path localPath(String where) {
+        try {
+            Path p = Path.of(where);
+            return p.isAbsolute() ? p.toAbsolutePath().normalize() : null;
+        } catch (RuntimeException e) {
+            return null; // a server's address
+        }
+    }
+
     private JComponent suggestionsCard() {
         suggestions.setLayout(new BoxLayout(suggestions, BoxLayout.Y_AXIS));
-        suggestions.setBorder(BorderFactory.createEmptyBorder(24, 16, 16, 16));
+        readable(suggestions, 24, 16, 16, null);
         suggestions.setOpaque(false);
         JScrollPane sp = new JScrollPane(suggestions);
         sp.setBorder(null);
@@ -390,16 +725,19 @@ final class ChatPanel extends JPanel {
     /** The welcome: questions to start with, for what's open and the services described, and what to set up. */
     private void refreshSuggestions() {
         suggestions.removeAll();
-        JLabel hello = new JLabel("<html><b>Ask about your logs</b><br>Copilot reads them with Logsift's tools, "
-                + "and every line it cites is a click away.</html>");
+        JLabel hello = new JLabel("<html><span style='font-size:120%'><b>Ask about your logs</b></span><br>Copilot reads "
+                + "them with Logsift's tools, and every line it cites is a click away.</html>");
+        hello.setIcon(Icons.of("sparkles", ChatColors.accent(), 24));
+        hello.setIconTextGap(10);
         hello.setAlignmentX(LEFT_ALIGNMENT);
         suggestions.add(hello);
         suggestions.add(Box.createVerticalStrut(12));
         logsift.agent.LogCatalog catalog = host.catalog();
         List<String> services = catalog == null ? List.of()
                 : catalog.entries().stream().map(e -> e.service().name()).filter(n -> !n.isEmpty()).toList();
+        int turn = 0;
         for (String q : suggested(host.openLogs(), host.chosenLines() != null, services)) {
-            JButton b = new JButton(q);
+            JButton b = new JButton(q, Icons.of("message-square", ChatColors.turn(turn++), 14));
             b.setName("example");
             b.setAlignmentX(LEFT_ALIGNMENT);
             b.setHorizontalAlignment(JButton.LEFT);
@@ -414,6 +752,7 @@ final class ChatPanel extends JPanel {
         }
         suggestions.add(Box.createVerticalStrut(14));
         JLabel setUp = new JLabel("<html><b>Set it up</b></html>");
+        setUp.setForeground(ChatColors.accent());
         setUp.setAlignmentX(LEFT_ALIGNMENT);
         suggestions.add(setUp);
         suggestions.add(Box.createVerticalStrut(6));
@@ -639,7 +978,10 @@ final class ChatPanel extends JPanel {
             return;
         }
         closeSession();
+        gate.cancel();
         chat = null;
+        chatNow = null;
+        sidebar.setCurrent(null);
         title.setText("New chat");
         transcript.show(null);
         showCard(state != null && state.ready() ? "empty" : "message");
@@ -656,7 +998,10 @@ final class ChatPanel extends JPanel {
             return;
         }
         closeSession();
+        gate.cancel();
         chat = c;
+        chatNow = c.id();
+        sidebar.setCurrent(c.id());
         title.setText(c.title());
         showCard("chat");
         validate();
@@ -679,6 +1024,11 @@ final class ChatPanel extends JPanel {
     }
 
     private void showHistory() {
+        if (host.inTab()) {
+            PREFS.putBoolean("sidebar", !sidebarBox.isVisible());
+            showSidebar();
+            return;
+        }
         history.refresh();
         showCard("history");
     }
@@ -693,6 +1043,7 @@ final class ChatPanel extends JPanel {
             store.rename(chat.id(), t.strip());
             chat = store.chat(chat.id());
             title.setText(chat.title());
+            chatsChanged();
         }
     }
 
@@ -707,6 +1058,7 @@ final class ChatPanel extends JPanel {
 
     private void sendOrStop() {
         if (busy) {
+            gate.cancel();
             if (session != null) {
                 session.stop();
             }
@@ -726,7 +1078,12 @@ final class ChatPanel extends JPanel {
             chat = store.create(ChatSession.title(q), m.id(), logs.isEmpty() ? null : logs.get(0).where());
             title.setText(chat.title());
             transcript.show(chat.id());
+            chatsChanged();
         }
+        chatNow = chat.id();
+        logsift.agent.Workspace ws = host.workspace();
+        ws.setGate(gate.files());
+        ws.setAnswerCap(ANSWER_CAP);
         if (session == null) {
             session = new ChatSession(store, state.engine(), chat, ChatTools.of(logsift.agent.LogTools.all(),
                     host.workspace()), logsift.chat.ChatInstructions.text(service.options(), host.catalog()), m.id(), (String) effort.getSelectedItem(),
@@ -763,6 +1120,7 @@ final class ChatPanel extends JPanel {
                     busy = b;
                     updateSend();
                     if (!b) {
+                        chatsChanged(); // its cost and entries, at the left
                         refreshCredits(null);
                         service.quota().thenAccept(q -> SwingUtilities.invokeLater(() -> refreshCredits(q)));
                     }
@@ -771,7 +1129,10 @@ final class ChatPanel extends JPanel {
 
             @Override
             public void titled(String t) {
-                SwingUtilities.invokeLater(() -> title.setText(t));
+                SwingUtilities.invokeLater(() -> {
+                    title.setText(t);
+                    chatsChanged();
+                });
             }
         };
     }
@@ -783,7 +1144,32 @@ final class ChatPanel extends JPanel {
     String context() {
         String now = service.options().now() ? logsift.chat.ChatInstructions.now(java.time.ZonedDateTime.now()) : null;
         String window = window();
-        return now == null ? window : window == null ? now : now + "\n" + window;
+        String c = now == null ? window : window == null ? now : now + "\n" + window;
+        String named = named(input.getText());
+        return named == null ? c : c == null ? named : c + "\n" + named;
+    }
+
+    /** The files the question names with @: told in a line, and read without asking. */
+    private String named(String question) {
+        if (mentions == null || question.indexOf('@') < 0) {
+            return null;
+        }
+        List<ChatMentions.File> named = mentions.named(question, nameable());
+        logsift.agent.Workspace ws = host.workspace();
+        for (ChatMentions.File f : named) {
+            if (f.path() != null && ws != null) {
+                ws.know(f.path());
+            }
+        }
+        return ChatMentions.line(named);
+    }
+
+    ChatGate gateForTest() {
+        return gate;
+    }
+
+    ChatMentions mentionsForTest() {
+        return mentions;
     }
 
     private String window() {

@@ -792,7 +792,7 @@ public final class LogTools {
                 }
                 List<Path> checked = new ArrayList<>();
                 for (Path f : folders) {
-                    Path c = w.options().scope().check(f);
+                    Path c = w.check(f, "search the folder");
                     if (!Files.isDirectory(c)) {
                         throw new Tool.Failure("Not a folder: " + c + ". Use open_log and search for a file.");
                     }

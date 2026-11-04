@@ -19,23 +19,41 @@ Logsift opens the assistant when it starts, in a tab of its own. **View → Assi
 
 In a tab of its own, beside the logs' tabs, or at the side of the window next to the log shown: the button beside the gear in the chat's header moves it, and Logsift remembers where. In its tab, it asks about the log you looked at last, so **Ask the Assistant About This Line** and the chips work as they do beside it, and a line link takes you to the log.
 
+In its tab there's room for more: your **chats** at the left, as in other chat apps (*Today*, *Yesterday*, *Previous 7 days*…, the one open marked, with **New Chat** and a search at the top), and its **skills** at the right. The conversation, the welcome and the box stay in a column in the middle, so lines stay short enough to read however wide the window is. Each folds to a narrow strip with the button at its top (and opens again from the strip, or the clock and book buttons in the header). The question box takes the whole width; drag the handle on its top edge to make it taller or shorter, and Logsift keeps that height.
+
+![The assistant's tab: chats at the left, the conversation in the middle, skills at the right](../screenshots/assistant-tab.png)
+
 It opens when Logsift starts, in front only when nothing else was reopened (with the **Start** page beside it). Turn that off in **Settings → Assistant**.
 
 ![The assistant's tab when Logsift starts: questions to start with, for the services it knows, and what to set up](../screenshots/assistant-welcome.png)
 
 With nothing asked yet, it offers questions to start with, for what's open and for your services (*What went wrong in login this morning?*), and what you can set up: **Log Locations…** (where each service's logs are), **Assistant Settings…** (what it's told) and the model.
 
+## Skills
+
+The **Skills** panel says what the assistant can do, by what it's for: find and read logs; what happened (errors over time, exceptions, frequent messages, durations); SQL and pivots; follow a request; compare two logs, files or folders; JVMs (thread dumps, GC logs, profiles); crashes. A click on one shows its tools and what each does, and its question (*What's different between today's run and yesterday's?*) puts that in the box for you to change or send. Below are the step-by-step plans it follows for the usual jobs. None of this is sent to Copilot: the panel costs nothing.
+
 ## Asking
 
 - **Enter** asks; **Shift+Enter** starts a new line. While it answers, the button stops it.
 - What you're looking at goes with the question: the log shown, the other logs open, and the lines you selected. The chips above the box say what; **×** leaves one out of the next question.
+- **Name a file with @.** Type `@` and pick from the logs open in the window, then the files you opened lately (`@payments.log`). The assistant is told which file that is, in one line, and reads it without asking.
 - **Right-click a line** (or selected lines) and choose **Ask the Assistant About This Line**: the question waits in the box, with the lines chosen, for you to change or send.
 - Each question also goes with the date, time and time zone now, so *this morning* or *an hour ago* means what you mean, read in each service's own time zone.
+
+## It asks before reading anything else
+
+The logs you have open, and files you name with `@`, it reads freely. To open another file, or search a folder, it first asks above the box, naming the file: **Allow**, **Allow for This Chat** (that file's folder too, for the rest of the chat) or **Deny**. Your answer is written in the chat; after a no it works with what's open, or says what it would need and why. Reading what you didn't ask about is where answers get expensive, so this is on by default; turn it off in **Settings → Assistant → What it reads**.
+
+![The assistant asks before it opens a file you didn't open or name](../screenshots/assistant-asks.png)
+
+Each tool's answer is also kept to 8,000 characters (about 2,000 tokens; coding agents get up to 24,000). When there is more, the assistant is told how much was cut and asks for a narrower range.
 
 ## The answer
 
 - **Lines are links.** The assistant cites each line it relies on, like *checkout.log:1201-1209*; a click selects those lines in the log (showing all lines if filters hide them). A log it opened by itself opens in a tab of its own at those lines, and a file it names by its path (*/var/log/app.log:120*) opens in Logsift too.
 - **Each tool it calls is shown** (*read lines 3–4 in log:1 ✓ 9 ms*). A click anywhere on the row (the arrow at its end says which way) shows what Logsift answered, with **Show these lines**, **Find in the log** (for a search) or **Open in Query** (for SQL, run in the Query tab), and **Copy**.
+- **Tables** come as tables: several items with the same fields (errors by host, slow requests) are a table, with numbers lined up at the right. Headings and the assistant's own marks are in its violet; each tool has its own color and icon (search blue, read teal, SQL violet, insights amber, exceptions red), so a long answer reads at a glance.
 - **What it cost** is above each answer: the model, the AI credits Copilot reported for it, the tokens, and how long it took.
 
 ## Models and credits
@@ -48,7 +66,7 @@ The header shows what this chat cost and how much of your premium requests is le
 
 Chats are kept on your computer, in a DuckDB file in Logsift's folder (`~/.logsift/chat/chats.duckdb`), with each question, answer, tool call and its result, and what it cost. A long chat opens at its end and scrolls back a page at a time, as far as it goes.
 
-**Chats** (the clock button) lists them, newest first, with what each cost. **Search every chat** finds words in any question, answer or tool result and opens the chat at that very entry. Right-click a chat to delete it. Double-click a chat's name to rename it. **New chat** (the pen) starts another.
+In its tab the chats are at the left. Beside the logs, **Chats** (the clock button) lists them, newest first, with what each cost. **Search every chat** finds words in any question, answer or tool result and opens the chat at that very entry. Right-click a chat to delete it. Double-click a chat's name to rename it. **New chat** (the pen) starts another.
 
 ![Search across every chat](../screenshots/assistant-search.png)
 

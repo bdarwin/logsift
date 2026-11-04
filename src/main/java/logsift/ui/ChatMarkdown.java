@@ -25,7 +25,29 @@ final class ChatMarkdown {
         if (node instanceof Link && attrs.containsKey("href") && !allowed(attrs.get("href"))) {
             attrs.remove("href");
         }
+        if (node instanceof org.commonmark.ext.gfm.tables.TableCell c && c.getAlignment() == null && numeric(text(c))) {
+            attrs.put("align", "right"); // numbers line up
+        }
     };
+
+    /** A table cell that is a number: "1,204", "-3.5", "12%", "850 ms", "2.1 GB". */
+    static boolean numeric(String s) {
+        return s.strip().matches("[-+]?[\\d,]*\\.?\\d+\\s*(%|[a-zA-Z]{1,3})?");
+    }
+
+    private static String text(Node n) {
+        StringBuilder b = new StringBuilder();
+        for (Node c = n.getFirstChild(); c != null; c = c.getNext()) {
+            if (c instanceof org.commonmark.node.Text t) {
+                b.append(t.getLiteral());
+            } else if (c instanceof org.commonmark.node.Code t) {
+                b.append(t.getLiteral());
+            } else {
+                b.append(text(c));
+            }
+        }
+        return b.toString();
+    }
 
     private static final HtmlRenderer RENDERER = HtmlRenderer.builder().extensions(EXTENSIONS).escapeHtml(true)
             .attributeProviderFactory(c -> LINKS).build(); // links: only Logsift's and the web (LINKS)
@@ -57,17 +79,19 @@ final class ChatMarkdown {
         return "body{font-family:'" + font.getFamily() + "';font-size:" + size + "pt;color:" + hex(fg)
                 + ";margin:0}"
                 + "p{margin-top:0;margin-bottom:6px}"
-                + "h1,h2,h3,h4{margin-top:6px;margin-bottom:4px}"
+                + "h1,h2,h3,h4{margin-top:6px;margin-bottom:4px;color:" + hex(ChatColors.accent()) + "}"
                 + "h1{font-size:" + (size + 4) + "pt}h2{font-size:" + (size + 2) + "pt}h3,h4{font-size:" + (size + 1) + "pt}"
                 + "ul,ol{margin-top:0;margin-bottom:6px;margin-left:18px}"
                 + "li{margin-bottom:2px}"
-                + "code{font-family:'" + mono + "';background:" + hex(code) + "}"
+                + "code{font-family:'" + mono + "';background:" + hex(code) + ";color:" + hex(ChatColors.code()) + "}"
                 + "pre{font-family:'" + mono + "';background:" + hex(code) + ";padding:6px;margin-top:2px;margin-bottom:6px}"
                 + "a{color:" + hex(link) + ";text-decoration:none}"
-                + "blockquote{color:" + hex(dim) + ";margin-left:8px;padding-left:6px;border-left:2px solid " + hex(rule) + "}"
+                + "blockquote{color:" + hex(dim) + ";margin-left:8px;padding-left:6px;border-left:2px solid "
+                + hex(ChatColors.accent()) + "}"
                 + "table{border-collapse:collapse;margin-bottom:6px}"
-                + "th,td{border:1px solid " + hex(rule) + ";padding:2px 6px}"
-                + "th{background:" + hex(code) + "}";
+                + "th,td{border:1px solid " + hex(rule) + ";padding:3px 8px}"
+                + "th{color:" + hex(ChatColors.accent()) + ";text-align:left}"
+                + "th{background:" + hex(ChatColors.accentWash()) + "}";
     }
 
     static String hex(Color c) {

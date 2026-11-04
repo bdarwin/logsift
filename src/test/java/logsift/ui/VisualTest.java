@@ -2687,6 +2687,8 @@ class VisualTest {
         final List<String> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
         /** What each conversation was told before its first question. */
         final List<String> told = new java.util.concurrent.CopyOnWriteArrayList<>();
+        /** What the tools answered (calls the script makes on "please open …"). */
+        final List<String> results = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         @Override
         public String name() {
@@ -2729,6 +2731,25 @@ class VisualTest {
                 @Override
                 public void send(String text) {
                     asked.add(text);
+                    java.util.regex.Matcher open = java.util.regex.Pattern.compile("please open (\\S+)").matcher(text);
+                    if (open.find()) {
+                        String path = open.group(1);
+                        new Thread(() -> {
+                            try {
+                                l.on(new logsift.chat.ChatEvent.ToolStarted("o1", "open_log", "{\"path\": \"" + path + "\"}"));
+                                var t = setup.tools().stream().filter(x -> x.name().equals("open_log")).findFirst().orElseThrow();
+                                var r = t.handler().call("o1", Map.of("path", path));
+                                results.add(r.text());
+                                l.on(new logsift.chat.ChatEvent.ToolFinished("o1", !r.failed()));
+                                l.on(new logsift.chat.ChatEvent.Text("o2", r.failed() ? "I'll stay with the open logs." : "Opened."));
+                                l.on(new logsift.chat.ChatEvent.Idle(false));
+                            } catch (Exception e) {
+                                l.on(new logsift.chat.ChatEvent.Failed(e.toString()));
+                                l.on(new logsift.chat.ChatEvent.Idle(false));
+                            }
+                        }).start();
+                        return;
+                    }
                     java.util.regex.Matcher m = java.util.regex.Pattern.compile("Shown: (log:\\d+) = (\\S+)").matcher(text);
                     boolean shown = m.find();
                     String h = shown ? m.group(1) : "log:1";
@@ -2935,6 +2956,7 @@ class VisualTest {
         // a line link to a log the assistant opened itself (not in a tab): opened in one too
         Path own = dir.resolve("inventory.log");
         Files.writeString(own, "a\nb\nc\nd\ne\n");
+        frame.chatWorkspaceForTest().know(own); // as if allowed: the gate is tried below
         String ownHandle = frame.chatWorkspaceForTest().open(own);
         onEdt(() -> {
             chat.linkForTest("logsift:" + ownHandle + ":3-4");
@@ -2949,6 +2971,105 @@ class VisualTest {
             }
         }, 30_000, "inventory.log at its line");
         assertArrayEquals(new long[] {2, 3}, onEdt(() -> frame.currentTab().chosenLines()), "lines 3–4");
+        // a file nobody opened or named: the assistant asks first, and a no is an answer it reads
+        Path elsewhere = Files.createDirectories(dir.resolve("elsewhere"));
+        Path notAsked = elsewhere.resolve("billing.log");
+        Files.writeString(notAsked, "2026-11-04 10:00:00 INFO billing up\n");
+        Files.writeString(elsewhere.resolve("billing-2.log"), "2026-11-04 10:00:00 INFO billing two\n");
+        onEdt(() -> {
+            frame.showChat();
+            chat.inputForTest().setText("please open " + notAsked);
+            chat.sendForTest();
+            return null;
+        });
+        ChatGate gate = onEdt(chat::gateForTest);
+        waitFor(() -> {
+            try {
+                return onEdt(gate::isAsking);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the question");
+        assertTrue(onEdt(gate::textForTest).contains("open billing.log")
+                && onEdt(gate::textForTest).contains(ChatGate.shortPath(notAsked)), onEdt(gate::textForTest));
+        settle();
+        shot("130c-assistant-asks");
+        onEdt(() -> {
+            gate.answerForTest(ChatGate.Answer.DENY);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !chat.busyForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the answer after a no");
+        assertTrue(engine.results.get(engine.results.size() - 1).contains("The person said no to: open billing.log"),
+                engine.results.toString());
+        assertTrue(onEdt(() -> chat.transcriptForTest().viewsForTest().stream()
+                .anyMatch(v -> "You said no: open billing.log.".equals(v.message().text()))), "the no is in the chat");
+        // allowed for the chat: its folder too, not asked again
+        onEdt(() -> {
+            chat.inputForTest().setText("please open " + notAsked);
+            chat.sendForTest();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(gate::isAsking);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "asked again");
+        onEdt(() -> {
+            gate.answerForTest(ChatGate.Answer.CHAT);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !chat.busyForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "opened");
+        assertTrue(engine.results.get(engine.results.size() - 1).contains("log:"), engine.results.toString());
+        onEdt(() -> {
+            chat.inputForTest().setText("please open " + elsewhere.resolve("billing-2.log"));
+            chat.sendForTest();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !chat.busyForTest()) && engine.results.size() >= 3;
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the file beside it, without asking");
+        assertTrue(engine.results.get(engine.results.size() - 1).contains("log:"), engine.results.toString());
+        assertFalse(onEdt(gate::isAsking));
+        // @ names a file: open logs first, then recent ones; the assistant is told which it is
+        onEdt(() -> {
+            chat.inputForTest().setText("");
+            chat.inputForTest().requestFocusInWindow();
+            chat.inputForTest().replaceSelection("Why is @pay");
+            return null;
+        });
+        settle();
+        List<ChatMentions.File> offered = onEdt(() -> chat.mentionsForTest().shownForTest());
+        assertTrue(!offered.isEmpty() && offered.get(0).name().equals("payments.log") && offered.get(0).handle() != null,
+                offered.toString());
+        onEdt(() -> {
+            chat.mentionsForTest().pick();
+            return null;
+        });
+        assertEquals("Why is @payments.log ", onEdt(() -> chat.inputForTest().getText()));
+        String withNamed = onEdt(chat::context);
+        assertTrue(withNamed.contains("[Named] @payments.log = log:"), withNamed);
+        onEdt(() -> {
+            chat.inputForTest().setText("");
+            return null;
+        });
         String usage = onEdt(chat::usageForTest);
         assertTrue(usage.contains("12 of 1,500 used") && usage.contains("This month") && usage.contains("Claude Haiku 5.5"),
                 usage);
@@ -3072,8 +3193,8 @@ class VisualTest {
             logsift.agent.LogCatalog.save(userList, services);
             MainFrame w = onEdt(() -> {
                 MainFrame m = new MainFrame();
-                m.setSize(1200, 780);
-                m.setLocation(60, 60);
+                m.setSize(1440, 820);
+                m.setLocation(40, 40);
                 m.setVisible(true);
                 m.openAssistantAtStart();
                 return m;
@@ -3095,6 +3216,31 @@ class VisualTest {
             List<String> examples = onEdt(chat::examplesForTest);
             assertTrue(examples.contains("What went wrong in login this morning?"), examples.toString());
             assertEquals(List.of("locations", "settings", "model"), onEdt(chat::settingsForTest));
+            // in its tab: the chats at the left, the skills at the right
+            assertTrue(onEdt(chat::sidebarShownForTest), "the chats at the left");
+            assertTrue(onEdt(chat::skillsShownForTest), "the skills at the right");
+            assertNull(onEdt(() -> chat.sidebarForTest().currentForTest()), "a new chat: none marked");
+            ChatSkills skills = onEdt(chat::skillsForTest);
+            assertNull(onEdt(() -> findNamed(skills.listForTest(), "tool:compare_logs")), "its tools only on a click");
+            onEdt(() -> {
+                skills.toggleForTest("Compare");
+                return null;
+            });
+            assertNotNull(onEdt(() -> findNamed(skills.listForTest(), "tool:compare_logs")), "Compare's tools shown");
+            assertNotNull(onEdt(() -> findNamed(skills.listForTest(), "plan:investigate")), "the plans");
+            onEdt(() -> {
+                ((javax.swing.JButton) findNamed((java.awt.Container) findNamed(skills.listForTest(), "skill:Compare"), "try")).doClick();
+                return null;
+            });
+            assertEquals("What's different between today's run and yesterday's?", onEdt(() -> chat.inputForTest().getText()),
+                    "a skill's question waits in the box: nothing sent");
+            assertTrue(engine.asked.isEmpty(), "nothing asked");
+            settle();
+            assertEquals(0, onEdt(skills::scrolledForTest), "the skills stay at the top");
+            onEdt(() -> {
+                chat.inputForTest().setText("");
+                return null;
+            });
             settle();
             shotOf(w.getRootPane(), "131a-assistant-tab-welcome");
 
@@ -3110,6 +3256,43 @@ class VisualTest {
                     return false;
                 }
             }, 20_000, "the answer");
+            assertEquals(onEdt(() -> chat.transcriptForTest().viewsForTest().get(0).message().chat()),
+                    onEdt(() -> chat.sidebarForTest().currentForTest()), "the chat asked in is marked at the left");
+            assertEquals("What went wrong in login this morning?",
+                    onEdt(() -> chat.sidebarForTest().rowForTest(0).chat().title()));
+            int widest = onEdt(() -> chat.transcriptForTest().viewsForTest().stream().mapToInt(java.awt.Component::getWidth)
+                    .max().orElse(0));
+            assertTrue(widest > 300 && widest <= ChatTranscript.Stack.READ, "a column to read, not the tab's width: " + widest);
+            settle();
+            shotOf(w.getRootPane(), "131c-assistant-tab-chat");
+            // the question box is as tall as dragged (and stays so); the chats and skills fold to strips
+            int line = onEdt(() -> chat.inputForTest().getFontMetrics(chat.inputForTest().getFont()).getHeight());
+            assertTrue(onEdt(chat::boxHeightForTest) >= 5 * line, "five lines at first: " + onEdt(chat::boxHeightForTest));
+            onEdt(() -> {
+                chat.resizeBox(10 * line);
+                return null;
+            });
+            settle();
+            assertTrue(Math.abs(onEdt(chat::boxHeightForTest) - 10 * line - 14) <= 16, "dragged taller: "
+                    + onEdt(chat::boxHeightForTest));
+            onEdt(() -> {
+                ((javax.swing.JButton) findNamed(chat.sidebarForTest(), "collapse")).doClick();
+                chat.collapseSkillsForTest();
+                return null;
+            });
+            settle();
+            assertTrue(onEdt(() -> !chat.sidebarShownForTest() && chat.chatsStripShownForTest()), "chats folded");
+            assertTrue(onEdt(() -> !chat.skillsShownForTest() && chat.skillsStripShownForTest()), "skills folded");
+            shotOf(w.getRootPane(), "131d-assistant-tab-folded");
+            onEdt(() -> {
+                chat.expandChatsForTest();
+                chat.resizeBox(5 * line + 14);
+                ((javax.swing.JButton) chat.skillsStripForTest().getComponent(0)).doClick();
+                return null;
+            });
+            settle();
+            assertTrue(onEdt(() -> chat.sidebarShownForTest() && !chat.chatsStripShownForTest()), "chats open again");
+            assertTrue(onEdt(() -> chat.skillsShownForTest() && !chat.skillsStripShownForTest()), "skills open again");
             String told = engine.told.get(0);
             assertTrue(told.contains("**login**: Signs people in") && told.contains(logs.toString())
                     && told.contains("Times in its logs are UTC"), told);
@@ -3165,6 +3348,8 @@ class VisualTest {
                 return null;
             });
             assertTrue(onEdt(() -> w.tabsForTest().indexOfComponent(chat) < 0 && chat.isShowing()), "beside the logs");
+            assertFalse(onEdt(chat::sidebarShownForTest), "no room beside the logs: Chats in the header instead");
+            assertFalse(onEdt(chat::skillsShownForTest));
             assertFalse(svc.options().inTab(), "remembered");
             onEdt(() -> {
                 w.moveChat();

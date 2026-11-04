@@ -35,6 +35,7 @@ final class AssistantPanel extends JPanel {
     private final JRadioButton inTab = new JRadioButton("In a tab of its own, beside the logs' tabs");
     private final JRadioButton beside = new JRadioButton("At the side of the window, next to the log shown");
     private final JCheckBox atStart = new JCheckBox("Open the assistant when Logsift starts");
+    private final JCheckBox askFiles = new JCheckBox("Ask me before it opens other files or folders");
     private final JTextArea own = new JTextArea(3, 40);
     private final JPanel parts = new JPanel();
     private final JLabel total = new JLabel();
@@ -59,6 +60,8 @@ final class AssistantPanel extends JPanel {
         JPanel center = new Fit();
         center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
         center.add(where());
+        center.add(Box.createVerticalStrut(12));
+        center.add(spending());
         center.add(Box.createVerticalStrut(12));
         center.add(told());
         add(new JScrollPane(center, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER) {
@@ -93,6 +96,25 @@ final class AssistantPanel extends JPanel {
         });
         atStart.addActionListener(e -> save());
         return p;
+    }
+
+    /** What keeps it from spending more than needed. */
+    private JPanel spending() {
+        JPanel p = section("What it reads");
+        askFiles.setName("assistantAskFiles");
+        askFiles.setAlignmentX(LEFT_ALIGNMENT);
+        askFiles.addActionListener(e -> save());
+        p.add(askFiles);
+        p.add(wrapped("The logs you have open, and files you name with @ in a question, it reads without asking. "
+                + "Opening anything else, or searching a folder, it asks first in the chat: reading what you didn't ask "
+                + "about is where answers get expensive. Each tool's answer is also kept to "
+                + String.format("%,d", ChatPanel.ANSWER_CAP) + " characters (about " + String.format("%,d", ChatPanel.ANSWER_CAP / 4)
+                + " tokens); the assistant asks for less, or a narrower range, to see more.", true));
+        return p;
+    }
+
+    JCheckBox askFilesForTest() {
+        return askFiles;
     }
 
     private JPanel told() {
@@ -166,6 +188,7 @@ final class AssistantPanel extends JPanel {
         inTab.setSelected(o.inTab());
         beside.setSelected(!o.inTab());
         atStart.setSelected(o.atStart());
+        askFiles.setSelected(o.askFiles());
         own.setText(o.own());
         loading = false;
         showParts();
@@ -230,7 +253,7 @@ final class AssistantPanel extends JPanel {
             return;
         }
         ChatInstructions.Options o = service.options().withInTab(inTab.isSelected()).withAtStart(atStart.isSelected())
-                .withOwn(own.getText());
+                .withAskFiles(askFiles.isSelected()).withOwn(own.getText());
         for (JCheckBox b : boxes) {
             switch (b.getName()) {
                 case "part:locations" -> o = o.withLocations(b.isSelected());
@@ -287,6 +310,9 @@ final class AssistantPanel extends JPanel {
         a.setFont(javax.swing.UIManager.getFont("Label.font"));
         a.setForeground(dim ? Theme.dimmedForeground() : javax.swing.UIManager.getColor("Label.foreground"));
         a.setAlignmentX(LEFT_ALIGNMENT);
+        if (a.getCaret() instanceof javax.swing.text.DefaultCaret c) {
+            c.setUpdatePolicy(javax.swing.text.DefaultCaret.NEVER_UPDATE); // filling it never scrolls the panel
+        }
         return a;
     }
 

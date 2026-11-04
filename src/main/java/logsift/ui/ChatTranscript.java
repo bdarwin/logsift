@@ -385,6 +385,15 @@ final class ChatTranscript extends JPanel implements Scrollable {
     static final class Stack implements LayoutManager {
         static final int GAP = 10;
         static final int PAD = 12;
+        /** The widest the words go: lines longer than this are hard to read (a chat in a wide tab). */
+        static final int READ = 760;
+
+        /** The column's width and where it starts, in a panel {@code w} wide inside {@code in}. */
+        static int[] column(int w, Insets in) {
+            int inner = w - in.left - in.right - 2 * PAD;
+            int col = Math.min(inner, READ);
+            return new int[] {col, in.left + PAD + Math.max(0, (inner - col) / 2)};
+        }
 
         @Override
         public void addLayoutComponent(String name, Component comp) {
@@ -405,7 +414,7 @@ final class ChatTranscript extends JPanel implements Scrollable {
         @Override
         public Dimension preferredLayoutSize(Container parent) {
             Insets in = parent.getInsets();
-            int w = width(parent) - in.left - in.right - 2 * PAD;
+            int w = column(width(parent), in)[0];
             int h = in.top + in.bottom + PAD;
             for (Component c : parent.getComponents()) {
                 h += height(c, w) + GAP;
@@ -428,11 +437,12 @@ final class ChatTranscript extends JPanel implements Scrollable {
         @Override
         public void layoutContainer(Container parent) {
             Insets in = parent.getInsets();
-            int w = parent.getWidth() - in.left - in.right - 2 * PAD;
+            int[] col = column(parent.getWidth(), in);
+            int w = col[0];
             int y = in.top + PAD;
             for (Component c : parent.getComponents()) {
                 int h = height(c, w);
-                c.setBounds(in.left + PAD, y, w, h);
+                c.setBounds(col[1], y, w, h);
                 y += h + GAP;
             }
         }

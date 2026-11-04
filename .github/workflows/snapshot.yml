@@ -88,9 +88,12 @@ jobs:
           grep -q -- "$GC" "$MCP_PROPS"
           if [[ "$LABEL" == beta-* ]]; then
             BETA=(--java-options -Dlogsift.channel=beta)
+            DESCRIPTION="Logsift Beta"
             sed -i.bak 's/^java-options=/java-options=-Dlogsift.channel=beta /' "$MCP_PROPS"
             grep -q 'logsift.channel=beta' "$MCP_PROPS"
           fi
+          # Windows shows the description as the program's name (Task Manager, Open With): the name, not a slogan
+          DESCRIPTION="${DESCRIPTION:-Logsift}"
           # splash screen, shown by the launcher before Java starts
           cp packaging/splash/splash.png packaging/splash/splash@2x.png build/install/logsift/lib/
           COMMON=(--name Logsift --input build/install/logsift/lib
@@ -99,7 +102,7 @@ jobs:
                   --java-options '-splash:$APPDIR/splash.png'
                   --add-modules java.base,java.desktop,java.prefs,java.logging,java.net.http,java.sql,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets,jdk.attach,java.management,java.management.rmi,jdk.naming.rmi,jdk.jfr,jdk.management.jfr
                   --add-launcher "logsift-mcp=$MCP_PROPS" ${BETA[@]+"${BETA[@]}"}
-                  --vendor bdarwin --description "Viewer for very large log files")
+                  --vendor bdarwin --description "$DESCRIPTION")
           mkdir -p dist
           ASSOC=(--file-associations packaging/file-associations/log.properties)
           case "${{ matrix.target }}" in

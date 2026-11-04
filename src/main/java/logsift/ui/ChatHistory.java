@@ -41,6 +41,14 @@ final class ChatHistory extends JPanel {
         void deleted(String chat);
 
         void back();
+
+        /** Starts a new chat (the sidebar's button). */
+        default void newChat() {
+        }
+
+        /** Folds the sidebar to a strip. */
+        default void collapse() {
+        }
     }
 
     /** A row: a chat, or a place where the words searched for are. */
@@ -50,28 +58,69 @@ final class ChatHistory extends JPanel {
     private final Host host;
     private final JTextField search = new JTextField();
     private final DefaultListModel<Row> rows = new DefaultListModel<>();
-    private final JList<Row> list = new JList<>(rows);
+    /** As wide as the panel: long names end in "…" instead of scrolling sideways. */
+    private final JList<Row> list = new JList<>(rows) {
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+    };
     private final JLabel empty = new JLabel(" ", JLabel.CENTER);
     private final Timer searchLater;
     private boolean more;
+    /** At the window's left, always there (else a page of its own, with Back). */
+    private final boolean sidebar;
+    /** The chat shown beside it (marked in the list), or null. */
+    private String current;
 
     ChatHistory(ChatStore store, Host host) {
+        this(store, host, false);
+    }
+
+    ChatHistory(ChatStore store, Host host, boolean sidebar) {
         super(new BorderLayout(0, 6));
         this.store = store;
         this.host = host;
+        this.sidebar = sidebar;
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        JPanel top = new JPanel(new BorderLayout(6, 0));
+        JPanel top = new JPanel(new BorderLayout(6, 6));
         top.setOpaque(false);
-        JButton back = new JButton("‹ Back");
-        back.putClientProperty("JButton.buttonType", "toolBarButton");
-        back.addActionListener(e -> host.back());
-        top.add(back, BorderLayout.WEST);
-        search.putClientProperty("JTextField.placeholderText", "Search every chat");
+        if (sidebar) {
+            JButton fresh = new JButton("New Chat", Icons.of("square-pen", ChatColors.accent(), 14));
+            fresh.setName("newChat");
+            fresh.setHorizontalAlignment(JButton.LEFT);
+            fresh.putClientProperty("JButton.buttonType", "toolBarButton");
+            fresh.setToolTipText("Start a new chat");
+            fresh.addActionListener(e -> host.newChat());
+            JButton fold = new JButton(Icons.of("panel-left-close"));
+            fold.setName("collapse");
+            fold.putClientProperty("JButton.buttonType", "toolBarButton");
+            fold.setToolTipText("Collapse the chats");
+            fold.setFocusable(false);
+            fold.addActionListener(e -> host.collapse());
+            JPanel row = new JPanel(new BorderLayout());
+            row.setOpaque(false);
+            row.add(fresh, BorderLayout.CENTER);
+            row.add(fold, BorderLayout.EAST);
+            top.add(row, BorderLayout.NORTH);
+        } else {
+            JButton back = new JButton("‹ Back");
+            back.putClientProperty("JButton.buttonType", "toolBarButton");
+            back.addActionListener(e -> host.back());
+            top.add(back, BorderLayout.WEST);
+        }
+        search.putClientProperty("JTextField.placeholderText", sidebar ? "Search chats" : "Search every chat");
         search.putClientProperty("JTextField.showClearButton", true);
         search.putClientProperty("JTextField.leadingIcon", Icons.of("search"));
         top.add(search, BorderLayout.CENTER);
         add(top, BorderLayout.NORTH);
         list.setCellRenderer(new Renderer());
+        if (sidebar) {
+            setOpaque(true);
+            setBackground(sidebarBackground());
+            list.setBackground(sidebarBackground());
+            search.putClientProperty("JComponent.roundRect", true);
+        }
         list.setFixedCellHeight(-1);
         list.addMouseListener(new MouseAdapter() {
             @Override
@@ -101,7 +150,7 @@ final class ChatHistory extends JPanel {
                 }
             }
         });
-        JScrollPane sp = new JScrollPane(list);
+        JScrollPane sp = new JScrollPane(list, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         sp.setBorder(null);
         sp.getVerticalScrollBar().getModel().addChangeListener(e -> {
             var b = sp.getVerticalScrollBar();
@@ -133,6 +182,20 @@ final class ChatHistory extends JPanel {
         });
     }
 
+    static java.awt.Color sidebarBackground() {
+        return Theme.pick(new java.awt.Color(0xF5F5F7), new java.awt.Color(0x232427));
+    }
+
+    /** Marks the chat shown (null: a new one). */
+    void setCurrent(String chatId) {
+        current = chatId;
+        list.repaint();
+    }
+
+    String currentForTest() {
+        return current;
+    }
+
     /** Reads the list again (or the search's hits). */
     void refresh() {
         rows.clear();
@@ -141,7 +204,8 @@ final class ChatHistory extends JPanel {
             List<ChatInfo> page = store.chats(null, PAGE);
             page.forEach(c -> rows.addElement(new Row(c, null)));
             more = page.size() == PAGE;
-            empty.setText(page.isEmpty() ? "No chats yet" : String.format("%,d chats", store.chatCount()));
+            long n = page.isEmpty() ? 0 : store.chatCount();
+            empty.setText(page.isEmpty() ? "No chats yet" : n == 1 ? "1 chat" : String.format("%,d chats", n));
         } else {
             List<ChatStore.Hit> hits = store.search(q, 200);
             hits.forEach(h -> rows.addElement(new Row(null, h)));
@@ -207,23 +271,75 @@ final class ChatHistory extends JPanel {
         return DateTimeFormatter.ofPattern("d MMM yyyy").format(t);
     }
 
-    private static final class Renderer extends JPanel implements ListCellRenderer<Row> {
+    /** "Today", "Yesterday", "Previous 7 days", "Previous 30 days", or the month: where a chat goes in the list. */
+    static String day(long ms) {
+        ZoneId z = ZoneId.systemDefault();
+        LocalDate d = Instant.ofEpochMilli(ms).atZone(z).toLocalDate();
+        LocalDate today = LocalDate.now(z);
+        if (!d.isBefore(today)) {
+            return "Today";
+        }
+        if (d.equals(today.minusDays(1))) {
+            return "Yesterday";
+        }
+        if (d.isAfter(today.minusDays(7))) {
+            return "Previous 7 days";
+        }
+        if (d.isAfter(today.minusDays(30))) {
+            return "Previous 30 days";
+        }
+        return DateTimeFormatter.ofPattern("MMMM yyyy").format(d);
+    }
+
+    private final class Renderer extends JPanel implements ListCellRenderer<Row> {
+        private final JLabel group = new JLabel();
+        private final JPanel card = new JPanel(new BorderLayout(0, 1)) {
+            @Override
+            protected void paintComponent(java.awt.Graphics g0) {
+                if (marked) {
+                    java.awt.Graphics2D g = (java.awt.Graphics2D) g0.create();
+                    g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                    g.setColor(ChatColors.accentWash());
+                    g.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+                    g.setColor(ChatColors.accent());
+                    g.fillRoundRect(0, 4, 3, getHeight() - 8, 3, 3);
+                    g.dispose();
+                }
+                super.paintComponent(g0);
+            }
+        };
         private final JLabel name = new JLabel();
         private final JLabel detail = new JLabel();
+        private boolean marked;
 
         Renderer() {
-            super(new BorderLayout(0, 1));
-            setBorder(BorderFactory.createEmptyBorder(5, 6, 5, 6));
-            add(name, BorderLayout.NORTH);
-            add(detail, BorderLayout.CENTER);
+            super(new BorderLayout(0, 2));
+            setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 2));
+            group.setFont(group.getFont().deriveFont(java.awt.Font.BOLD, group.getFont().getSize2D() - 1f));
+            group.setForeground(ChatColors.accent());
+            group.setBorder(BorderFactory.createEmptyBorder(8, 6, 2, 6));
+            card.setOpaque(false);
+            card.setBorder(BorderFactory.createEmptyBorder(5, 8, 5, 6));
+            card.add(name, BorderLayout.NORTH);
+            card.add(detail, BorderLayout.CENTER);
+            add(group, BorderLayout.NORTH);
+            add(card, BorderLayout.CENTER);
             detail.setFont(detail.getFont().deriveFont(detail.getFont().getSize2D() - 1f));
         }
 
         @Override
         public Component getListCellRendererComponent(JList<? extends Row> l, Row r, int index, boolean sel, boolean focus) {
-            setBackground(sel ? l.getSelectionBackground() : l.getBackground());
-            name.setForeground(sel ? l.getSelectionForeground() : l.getForeground());
-            detail.setForeground(sel ? l.getSelectionForeground() : Theme.dimmedForeground());
+            marked = r.chat() != null ? r.chat().id().equals(current) : sel;
+            boolean strong = sel && !marked && l.hasFocus();
+            setBackground(l.getBackground());
+            card.setOpaque(strong);
+            card.setBackground(l.getSelectionBackground());
+            name.setForeground(strong ? l.getSelectionForeground() : l.getForeground());
+            detail.setForeground(strong ? l.getSelectionForeground() : Theme.dimmedForeground());
+            String g = r.chat() != null ? day(r.chat().updated()) : null;
+            String before = index > 0 && rows.get(index - 1).chat() != null ? day(rows.get(index - 1).chat().updated()) : null;
+            group.setText(g == null ? "" : g);
+            group.setVisible(g != null && !g.equals(before));
             if (r.chat() != null) {
                 ChatInfo c = r.chat();
                 name.setText(c.title());
