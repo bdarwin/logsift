@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The assistant's chats are written through quackjvm 1.5:** a chat and its entries are saved by quackjvm's journal (one writer at a time, each entry numbered within its chat, a deleted chat gone with its entries in one step even if Logsift stops midway). Chats saved by earlier snapshots open as they are.
 - **The assistant looks into running JVMs:** new **list_jvms**, **thread_dump** and **heap_histogram** tools, for the assistant and coding agents. **Log Locations → Its JVMs** says where each service's JVM runs (this computer, SSH `user@host`, or a JMX port), saved and shared with the services, never a password. Each dump or histogram is asked for first (in the assistant above the box, in an agent's app when it can ask, else refused), answers with a short peek (states, deadlocks, blocked threads; the classes taking the memory, no full GC, refused over 8 GB) and keeps the whole of it as a log to read. Never a heap dump.
 - **Agents read web addresses:** **open_log** and **compare_files** take an `https://…` address too, downloaded once to Logsift's temporary folder (the assistant asks first, as for any file you didn't open).
 - **The assistant uses the whole width:** its answers fill the room between the chats and the skills.

@@ -1,6 +1,8 @@
 package logsift.chat;
 
 import io.quackjvm.core.Quack;
+import io.quackjvm.core.journal.Journal;
+import io.quackjvm.core.layout.ColumnarLayout;
 import io.quackjvm.core.page.Page;
 import io.quackjvm.core.page.PageKey;
 import io.quackjvm.core.page.Pages;
@@ -9,26 +11,39 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
  * Every chat with the assistant, in a DuckDB file of Logsift's own ({@code chats.duckdb} in its
- * folder): the chats, and each one's entries in order. Read a page at a time by quackjvm's
- * {@link Pages} (each page found from the row next to it), so a chat of thousands of entries
- * scrolls back as fast as a short one; and searched across all of them.
+ * folder): the chats, and each one's entries in order. Written through two quackjvm
+ * {@link Journal}s (one writer at a time, an entry numbered within its chat, a chat deleted with its
+ * entries in one go), and read a page at a time by {@link Pages} (each page found from the row next
+ * to it), so a chat of thousands of entries scrolls back as fast as a short one; and searched across
+ * all of them.
  *
  * <p>Safe from several threads: an answer streams in on one while the window reads pages.</p>
  */
 public final class ChatStore implements AutoCloseable {
-    /** The layout's version, kept in the file; later versions add to it. */
-    static final int VERSION = 1;
+    /** A chat as stored (its columns' names and order are the file's). */
+    record ChatRow(String id, String title, Long created, Long updated, String model, String session, String context) {}
+
+    /** An entry as stored. */
+    record MessageRow(String chat, Long seq, Long time, String kind, String text, String model, String tool, String args,
+                      Boolean ok, Long tokens_in, Long tokens_out, Double nano_aiu, Long millis) {}
 
     private final Quack db;
     private final Path file;
+    private final Journal<ChatRow> chats;
+    private final Journal<MessageRow> messages;
 
     private ChatStore(Quack db, Path file) {
         this.db = db;
         this.file = file;
+        // the tables made by Logsift before the journals have these columns in this order: they open as they are
+        chats = Journal.builder(db, "chat", ColumnarLayout.ofRecord(ChatRow.class)).index("updated", "id").open();
+        messages = Journal.builder(db, "message", ColumnarLayout.ofRecord(MessageRow.class))
+                .keyColumns("chat", "seq").sequence("seq").within("chat").newestBy("time").searchable("text").open();
     }
 
     /**
@@ -38,33 +53,17 @@ public final class ChatStore implements AutoCloseable {
     public static ChatStore open(Path dir) throws IOException {
         Files.createDirectories(dir);
         Path f = dir.resolve("chats.duckdb");
-        ChatStore s = new ChatStore(Quack.open(f.toString()), f);
-        s.migrate();
-        return s;
+        return new ChatStore(Quack.open(f.toString()), f);
     }
 
     /** Only in memory: for tests, or when the file can't be had. */
     public static ChatStore inMemory() {
-        ChatStore s = new ChatStore(Quack.inMemory(), null);
-        s.migrate();
-        return s;
+        return new ChatStore(Quack.inMemory(), null);
     }
 
     /** The file, or null in memory. */
     public Path file() {
         return file;
-    }
-
-    private void migrate() {
-        db.execute("CREATE TABLE IF NOT EXISTS meta (k VARCHAR PRIMARY KEY, v VARCHAR)");
-        db.execute("""
-                CREATE TABLE IF NOT EXISTS chat (id VARCHAR PRIMARY KEY, title VARCHAR, created BIGINT, updated BIGINT,
-                    model VARCHAR, session VARCHAR, context VARCHAR)""");
-        db.execute("""
-                CREATE TABLE IF NOT EXISTS message (chat VARCHAR, seq BIGINT, time BIGINT, kind VARCHAR, text VARCHAR,
-                    model VARCHAR, tool VARCHAR, args VARCHAR, ok BOOLEAN, tokens_in BIGINT, tokens_out BIGINT,
-                    nano_aiu DOUBLE, millis BIGINT, PRIMARY KEY (chat, seq))""");
-        db.execute("INSERT OR REPLACE INTO meta VALUES ('version', ?)", String.valueOf(VERSION));
     }
 
     // ---------------------------------------------------------------- chats
@@ -73,28 +72,28 @@ public final class ChatStore implements AutoCloseable {
     public synchronized ChatInfo create(String title, String model, String context) {
         String id = UUID.randomUUID().toString();
         long now = System.currentTimeMillis();
-        db.execute("INSERT INTO chat VALUES (?, ?, ?, ?, ?, NULL, ?)", id, title, now, now, model, context);
+        chats.append(new ChatRow(id, title, now, now, model, null, context));
         return new ChatInfo(id, title, now, now, model, null, context, 0, 0);
     }
 
     public synchronized void rename(String id, String title) {
-        db.execute("UPDATE chat SET title = ? WHERE id = ?", title, id);
+        chats.update(id, Map.of("title", title));
     }
 
     /** The model now chosen for it. */
     public synchronized void setModel(String id, String model) {
-        db.execute("UPDATE chat SET model = ? WHERE id = ?", model, id);
+        chats.update(id, Map.of("model", model));
     }
 
     /** The assistant's own id for the chat, to go on with it later. */
     public synchronized void setSession(String id, String session) {
-        db.execute("UPDATE chat SET session = ? WHERE id = ?", session, id);
+        chats.update(id, Map.of("session", session));
     }
 
     /** Removes a chat and its entries (only ever when the person asks). */
     public synchronized void delete(String id) {
-        db.execute("DELETE FROM message WHERE chat = ?", id);
-        db.execute("DELETE FROM chat WHERE id = ?", id);
+        messages.deleteWhere("chat = ?", id);
+        chats.delete(id);
     }
 
     private static final String CHAT_COLUMNS = """
@@ -149,26 +148,29 @@ public final class ChatStore implements AutoCloseable {
 
     /** Adds an entry at the end of its chat; gives it with its place. */
     public synchronized ChatMessage append(ChatMessage m) {
-        long seq = db.query("SELECT coalesce(max(seq), 0) + 1 FROM message WHERE chat = ?", m.chat()).scalar(Long.class);
-        ChatMessage s = m.withSeq(seq);
-        db.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", s.chat(), s.seq(), s.time(),
-                s.kind().name(), s.text(), s.model(), s.tool(), s.args(), s.ok(), s.tokensIn(), s.tokensOut(),
-                s.nanoAiu(), s.millis());
+        // numbered by the journal: one more than the chat's last entry, under its writer's turn
+        MessageRow stored = messages.appendAndGet(new MessageRow(m.chat(), null, m.time(), m.kind().name(), m.text(),
+                m.model(), m.tool(), m.args(), m.ok(), m.tokensIn(), m.tokensOut(), m.nanoAiu(), m.millis()));
         touch(m.chat());
-        return s;
+        return m.withSeq(stored.seq());
     }
 
     /** Stores an entry again as it is now (an answer that has streamed further, a tool that answered). */
     public synchronized void replace(ChatMessage s) {
-        db.execute("""
-                UPDATE message SET text = ?, model = ?, ok = ?, tokens_in = ?, tokens_out = ?, nano_aiu = ?, millis = ?
-                WHERE chat = ? AND seq = ?""", s.text(), s.model(), s.ok(), s.tokensIn(), s.tokensOut(), s.nanoAiu(),
-                s.millis(), s.chat(), s.seq());
+        Map<String, Object> now = new java.util.HashMap<>();
+        now.put("text", s.text());
+        now.put("model", s.model());
+        now.put("ok", s.ok());
+        now.put("tokens_in", s.tokensIn());
+        now.put("tokens_out", s.tokensOut());
+        now.put("nano_aiu", s.nanoAiu());
+        now.put("millis", s.millis());
+        messages.update(PageKey.of(s.chat(), s.seq()), now);
         touch(s.chat());
     }
 
     private void touch(String chat) {
-        db.execute("UPDATE chat SET updated = ? WHERE id = ?", System.currentTimeMillis(), chat);
+        chats.update(chat, Map.of("updated", System.currentTimeMillis()));
     }
 
     /** How many entries a chat has. */
@@ -291,7 +293,7 @@ public final class ChatStore implements AutoCloseable {
 
     /** For tests: when a chat last changed. */
     synchronized void updatedForTest(String id, long ms) {
-        db.execute("UPDATE chat SET updated = ? WHERE id = ?", ms, id);
+        chats.update(id, Map.of("updated", ms));
     }
 
     @Override

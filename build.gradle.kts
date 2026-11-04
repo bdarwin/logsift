@@ -34,8 +34,8 @@ dependencies {
     implementation("org.duckdb:duckdb_jdbc:2.0.0.0:$duckdbClassifier")
     // the big-table cache and the SQL guard: quackjvm, on the DuckDB above (its own would bring
     // every system's native library)
-    implementation("io.github.bdarwin:quackjvm-core:1.4.0") { exclude(group = "org.duckdb") }
-    implementation("io.github.bdarwin:quackjvm-agent:1.4.0") { exclude(group = "org.duckdb") }
+    implementation("io.github.bdarwin:quackjvm-core:1.5.0") { exclude(group = "org.duckdb") }
+    implementation("io.github.bdarwin:quackjvm-agent:1.5.0") { exclude(group = "org.duckdb") }
     // GitHub Copilot's SDK (MIT) for the assistant in the window. It runs the person's own Copilot
     // program; its native runtime isn't bundled.
     implementation("com.github:copilot-sdk-java:1.0.28")
