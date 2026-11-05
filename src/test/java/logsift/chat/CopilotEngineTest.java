@@ -129,4 +129,49 @@ class CopilotEngineTest {
         assertEquals("Not signed in to GitHub", CopilotEngine.why(e));
         assertEquals("no answer in time", CopilotEngine.why(new java.util.concurrent.TimeoutException()));
     }
+
+    @Test
+    void signInStepsAreReadAsCopilotSendsThem() throws Exception {
+        // the first step comes untyped (a map); later ones through the SDK's classes when it can read them
+        java.util.Map<String, Object> open = new java.util.LinkedHashMap<>();
+        open.put("kind", "open-url");
+        open.put("url", "https://github.com/login/oauth/authorize?client_id=x");
+        assertEquals("open-url", CopilotEngine.stepKind(open));
+        assertEquals("https://github.com/login/oauth/authorize?client_id=x", CopilotEngine.stepField(open, "url"));
+        assertEquals("error", CopilotEngine.stepKind(java.util.Map.of("kind", "error", "message", "denied")));
+        assertEquals("denied", CopilotEngine.stepField(java.util.Map.of("kind", "error", "message", "denied"), "message"));
+        assertEquals("declined", CopilotEngine.stepStatus(java.util.Map.of("kind", "completed",
+                "result", java.util.Map.of("status", "declined"))));
+        assertNull(CopilotEngine.stepStatus(java.util.Map.of("kind", "awaiting")));
+        assertEquals("none", CopilotEngine.stepKind(null));
+
+        com.github.copilot.generated.rpc.AuthLoginStepOpenUrl typed = new com.github.copilot.generated.rpc.AuthLoginStepOpenUrl();
+        typed.setUrl("https://github.com/login");
+        assertEquals("https://github.com/login", CopilotEngine.stepField(typed, "url"));
+        com.github.copilot.generated.rpc.AuthLoginStepCompleted done = new com.github.copilot.generated.rpc.AuthLoginStepCompleted();
+        done.setResult(new com.github.copilot.generated.rpc.AuthLoginResultDto(
+                com.github.copilot.generated.rpc.AuthLoginResultStatus.COMPLETED, "github.com", "bdarwin", List.of()));
+        assertEquals("completed", CopilotEngine.stepKind(done));
+        assertEquals("completed", CopilotEngine.stepStatus(done));
+    }
+
+    @Test
+    void copilotCanBeSignedInFromLogsiftAndAnotherFolderCanBeTried(@TempDir Path dir) throws Exception {
+        Path cli = Files.createFile(dir.resolve("copilot"));
+        ChatEngine e = ChatService.COPILOT.make(new ChatSettings(null, null, cli.toString()), dir.resolve("home"));
+        assertTrue(e.canSignIn());
+        String old = System.getProperty("logsift.copilotHome");
+        try {
+            System.setProperty("logsift.copilotHome", dir.resolve("try").toString());
+            CopilotEngine c = (CopilotEngine) ChatService.COPILOT.make(new ChatSettings(null, null, cli.toString()),
+                    dir.resolve("home"));
+            assertEquals(dir.resolve("try"), c.home(), "a sign-in to try, apart from the person's own");
+        } finally {
+            if (old == null) {
+                System.clearProperty("logsift.copilotHome");
+            } else {
+                System.setProperty("logsift.copilotHome", old);
+            }
+        }
+    }
 }

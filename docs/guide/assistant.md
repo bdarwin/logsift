@@ -14,7 +14,8 @@ Logsift opens the assistant when it starts, in a tab of its own. **View → Assi
 
 ## What you need
 
-- **GitHub Copilot**, installed and signed in: `npm install -g @github/copilot`, then run `copilot` once in a terminal and type `/login`. Your Copilot subscription pays for the answers. Logsift finds the program where npm, Homebrew, nvm or WinGet put it; elsewhere, choose it with **Choose Copilot Program…**.
+- **GitHub Copilot**, installed: `npm install -g @github/copilot`. Your Copilot subscription pays for the answers.
+- **Signed in to GitHub.** Not signed in yet, the assistant shows **Sign In to GitHub…**: GitHub's page opens in your browser, you sign in and authorize GitHub Copilot there, and the assistant is ready as soon as you're done (**Copy Link** if you'd rather use another browser; **Cancel** stops it). Copilot keeps the sign-in where `copilot`'s own `/login` does, so signing in once in a terminal works too. Logsift finds the program where npm, Homebrew, nvm or WinGet put it; elsewhere, choose it with **Choose Copilot Program…**.
 - Nothing else. Copilot starts the first time you look at the assistant, never before: a tab in the background costs nothing.
 
 ## Where it opens

@@ -21,11 +21,22 @@ public final class ChatService {
      * @param models  the models to choose from
      * @param quota   what's left of the allowance, or null
      * @param problem what's wrong, for people (not installed, not signed in, didn't start), or null
+     * @param signedOut it started, but no one is signed in
      */
     public record State(ChatEngine engine, String user, List<ChatEngine.Model> models, ChatEngine.Quota quota,
-                        String problem) {
+                        String problem, boolean signedOut) {
+        public State(ChatEngine engine, String user, List<ChatEngine.Model> models, ChatEngine.Quota quota,
+                     String problem) {
+            this(engine, user, models, quota, problem, false);
+        }
+
         public boolean ready() {
             return problem == null && engine != null;
+        }
+
+        /** No one is signed in, and they can sign in from Logsift. */
+        public boolean canSignIn() {
+            return signedOut && engine != null && engine.canSignIn();
         }
     }
 
@@ -35,15 +46,18 @@ public final class ChatService {
         ChatEngine make(ChatSettings settings, Path home);
 
         default String missing() {
-            return "GitHub Copilot isn't installed. Install it (npm install -g @github/copilot), sign in once in a "
-                    + "terminal (copilot, then /login), then try again.";
+            return "GitHub Copilot isn't installed. Install it (npm install -g @github/copilot), then try again: "
+                    + "you can sign in from here.";
         }
     }
 
     /** The real one: the person's own copilot program, in its own folder (~/.copilot), where its sign-in is. */
     public static final EngineFactory COPILOT = (settings, home) -> {
         Path cli = CopilotLocator.find(settings.copilot());
-        return cli == null ? null : new CopilotEngine(cli, null, home.resolve("chat").resolve("work"));
+        // logsift.copilotHome: another folder for Copilot's own (its sign-in), to try signing in apart from ~/.copilot
+        String own = System.getProperty("logsift.copilotHome");
+        return cli == null ? null : new CopilotEngine(cli, own == null || own.isBlank() ? null : Path.of(own),
+                home.resolve("chat").resolve("work"));
     };
 
     private static volatile EngineFactory factory = COPILOT;
@@ -188,8 +202,11 @@ public final class ChatService {
             e.start();
             String user = e.user();
             if (user == null) {
-                return new State(e, null, List.of(), null, "Not signed in to GitHub Copilot. Sign in once in a terminal "
-                        + "(copilot, then /login), then try again.");
+                return new State(e, null, List.of(), null, e.canSignIn()
+                        ? "Not signed in to GitHub Copilot. Sign in with your GitHub account: Logsift opens GitHub's page "
+                        + "in your browser, and the assistant is ready when you're done there."
+                        : "Not signed in to GitHub Copilot. Sign in once in a terminal (copilot, then /login), then try again.",
+                        true);
             }
             List<ChatEngine.Model> models = e.models();
             ChatEngine.Quota q;

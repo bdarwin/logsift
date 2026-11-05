@@ -899,7 +899,7 @@ final class ChatPanel extends JPanel {
     private void connected(ChatService.State s) {
         state = s;
         if (!s.ready()) {
-            showProblem(s.problem());
+            showProblem(s.problem(), s.canSignIn());
             return;
         }
         ChatEntryView.modelNames = id -> s.models().stream().filter(m -> m.id().equals(id))
@@ -924,7 +924,106 @@ final class ChatPanel extends JPanel {
         updateSend();
     }
 
-    private void showProblem(String problem) {
+    /** Opens a page in the browser (tests catch it instead). */
+    static java.util.function.BiConsumer<java.awt.Component, String> browser = HelpSupport::browse;
+
+    /** The sign-in under way: set to stop it. */
+    private java.util.concurrent.atomic.AtomicBoolean signingIn;
+
+    /**
+     * Signs in from here: GitHub's page in the browser, then waits for the person to be done
+     * there, and connects. Nothing is asked of a model.
+     */
+    void signIn() {
+        ChatService.State s = state;
+        if (s == null || !s.canSignIn() || signingIn != null) {
+            return;
+        }
+        ChatEngine engine = s.engine();
+        java.util.concurrent.atomic.AtomicBoolean stop = new java.util.concurrent.atomic.AtomicBoolean();
+        signingIn = stop;
+        showSigningIn(null, stop);
+        Thread t = new Thread(() -> {
+            String failed = null;
+            String user = null;
+            try (ChatEngine.SignIn si = engine.signIn()) {
+                String url = si.url();
+                if (url != null) {
+                    SwingUtilities.invokeLater(() -> {
+                        if (!stop.get()) {
+                            browser.accept(this, url);
+                            showSigningIn(url, stop);
+                        }
+                    });
+                }
+                user = si.await(stop::get);
+            } catch (Exception ex) {
+                failed = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+            }
+            String why = failed;
+            boolean signedIn = user != null;
+            SwingUtilities.invokeLater(() -> {
+                if (signingIn != stop) {
+                    return;
+                }
+                signingIn = null;
+                if (stop.get()) {
+                    connected(s); // cancelled: as before
+                } else if (why != null || !signedIn) {
+                    showProblem(why == null ? "The sign-in didn't finish. Try again." : why, true);
+                } else {
+                    showMessage("Signed in. Connecting to GitHub Copilot…", null);
+                    service.reconnect().thenAccept(st -> SwingUtilities.invokeLater(() -> connected(st)));
+                }
+            });
+        }, "logsift-sign-in");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** While the person signs in in the browser: what to do there, and Cancel. */
+    private void showSigningIn(String url, java.util.concurrent.atomic.AtomicBoolean stop) {
+        message.removeAll();
+        JPanel p = new JPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBorder(BorderFactory.createEmptyBorder(24, 16, 16, 16));
+        JLabel l = new JLabel(url == null ? "<html><b>Signing in…</b><br><br>Opening GitHub's page.</html>"
+                : "<html><b>Sign in on GitHub</b><br><br>GitHub's page is open in your browser. Sign in there and "
+                + "authorize GitHub Copilot; the assistant is ready as soon as you're done.<br>Copilot keeps the "
+                + "sign-in where <code>copilot</code>'s /login does.</html>");
+        l.setName("signingIn");
+        l.setAlignmentX(LEFT_ALIGNMENT);
+        p.add(l);
+        p.add(Box.createVerticalStrut(12));
+        JPanel b = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        b.setOpaque(false);
+        b.setAlignmentX(LEFT_ALIGNMENT);
+        if (url != null) {
+            JButton again = new JButton("Open the Page Again");
+            again.addActionListener(e -> browser.accept(this, url));
+            b.add(again);
+            b.add(Box.createHorizontalStrut(6));
+            JButton copy = new JButton("Copy Link");
+            copy.setToolTipText("For another browser");
+            copy.addActionListener(e -> java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                    .setContents(new java.awt.datatransfer.StringSelection(url), null));
+            b.add(copy);
+            b.add(Box.createHorizontalStrut(6));
+        }
+        JButton cancel = new JButton("Cancel");
+        cancel.setName("cancelSignIn");
+        cancel.addActionListener(e -> stop.set(true));
+        b.add(cancel);
+        p.add(b);
+        message.add(p, BorderLayout.NORTH);
+        status.setText("Signing in…");
+        showCard("message");
+        message.revalidate();
+        message.repaint();
+        updateSend();
+    }
+
+    private void showProblem(String problem, boolean canSignIn) {
         message.removeAll();
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
@@ -936,6 +1035,14 @@ final class ChatPanel extends JPanel {
         JPanel b = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         b.setOpaque(false);
         b.setAlignmentX(LEFT_ALIGNMENT);
+        if (canSignIn) {
+            JButton in = new JButton("Sign In to GitHub…", Icons.of("log-in", ChatColors.accent(), 14));
+            in.setName("signIn");
+            in.setToolTipText("Opens GitHub's sign-in page in your browser");
+            in.addActionListener(e -> signIn());
+            b.add(in);
+            b.add(Box.createHorizontalStrut(6));
+        }
         JButton again = new JButton("Try Again");
         again.addActionListener(e -> {
             showMessage("Connecting to GitHub Copilot…", null);

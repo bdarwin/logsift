@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Sign in to Copilot from Logsift:** not signed in, the assistant shows **Sign In to GitHub…**, which opens GitHub's page in your browser; when you're done there, the assistant is ready. No terminal needed.
 - **Charts, not text, in the assistant's answers:** asked to plot the heap, it drew a chart in text. Now, under its GC step, Logsift draws the heap chart itself (click a point for its line), with **Show GC Charts** for heap, pauses, allocation and time in GC in a tab; no tokens are spent on it.
 - **JVM connections are easy to find:** **JVM → JVM Connections (SSH, JMX)…** opens where the assistant's JVMs are kept, at the JVMs of the shown log's service; **Add JVM** keeps one with no folder of logs (a JMX port or SSH); the Attach dialog's SSH and JMX tabs link there.
 - **The assistant's links open the logs it opened itself, later too:** a link to a log the assistant had opened (not in a tab) said "That log isn't open any more" once the assistant was closed, after a restart, or for a file in a zip. Each question now keeps which file each log was, so the link opens that file at its line.

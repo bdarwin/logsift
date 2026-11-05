@@ -108,6 +108,196 @@ public final class CopilotEngine implements ChatEngine {
     }
 
     @Override
+    public boolean canSignIn() {
+        return true;
+    }
+
+    /** How long a sign-in in the browser may take. */
+    static final long SIGN_IN_MINUTES = 15;
+
+    /**
+     * Copilot's own sign-in (as {@code /login} does it): GitHub's page in the browser, and Copilot
+     * catches the answer on this computer. It keeps the sign-in where {@code /login} does. Runs in
+     * a session of its own, with no model and no tools: it costs nothing.
+     */
+    @Override
+    public SignIn signIn() throws Exception {
+        CopilotClient c = client();
+        java.nio.file.Files.createDirectories(work);
+        CopilotSession s = c.createSession(new SessionConfig().setWorkingDirectory(work.toString())
+                .setOnPermissionRequest(CopilotEngine::permission)).get(60, TimeUnit.SECONDS);
+        try {
+            var begun = s.getRpc().accounts.login.begin(
+                    new com.github.copilot.generated.rpc.SessionAccountsLoginBeginRequest(
+                            com.github.copilot.generated.rpc.LoginProviderKind.GITHUBDOTCOM)).get(60, TimeUnit.SECONDS);
+            Object step = begun.step();
+            String kind = stepKind(step);
+            String url = switch (kind) {
+                case "open-url" -> stepField(step, "url");
+                case "completed" -> null; // signed in already
+                case "error" -> throw new Exception(signInError(step));
+                default -> throw new Exception("Copilot wants to sign in a way Logsift can't show (" + kind
+                        + "). Sign in once in a terminal (copilot, then /login).");
+            };
+            if (url == null && !"completed".equals(kind)) {
+                throw new Exception("Copilot gave no page to sign in on.");
+            }
+            return new CopilotSignIn(c, s, begun.flowId(), url);
+        } catch (Exception e) {
+            s.close();
+            throw e;
+        }
+    }
+
+    /** A step of Copilot's sign-in, as it comes: its kind ("open-url", "awaiting", "completed", "error"…). */
+    static String stepKind(Object step) {
+        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStep st) {
+            return st.getKind();
+        }
+        if (step instanceof java.util.Map<?, ?> m && m.get("kind") != null) {
+            return m.get("kind").toString();
+        }
+        return step == null ? "none" : "unknown";
+    }
+
+    /** A field of a step: the page ({@code url}), why it failed ({@code message}), what it asks ({@code prompt}). */
+    static String stepField(Object step, String name) {
+        if (step instanceof java.util.Map<?, ?> m) {
+            Object v = m.get(name);
+            return v == null ? null : v.toString();
+        }
+        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStepOpenUrl u && name.equals("url")) {
+            return u.getUrl();
+        }
+        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStepError e && name.equals("message")) {
+            return e.getMessage();
+        }
+        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStepInputRequired i && name.equals("prompt")) {
+            return i.getPrompt();
+        }
+        return null;
+    }
+
+    /** What a finished step says of how it ended: "completed", "declined"…, or null when it doesn't say. */
+    static String stepStatus(Object step) {
+        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStepCompleted d && d.getResult() != null
+                && d.getResult().status() != null) {
+            return d.getResult().status().getValue();
+        }
+        if (step instanceof java.util.Map<?, ?> m && m.get("result") instanceof java.util.Map<?, ?> r
+                && r.get("status") != null) {
+            return r.get("status").toString();
+        }
+        return null;
+    }
+
+    private static String signInError(Object step) {
+        String m = stepField(step, "message");
+        return "The sign-in failed" + (m == null || m.isBlank() ? "." : ": " + m);
+    }
+
+    /** Copilot's sign-in under way, in its own session. */
+    private final class CopilotSignIn implements SignIn {
+        private final CopilotClient client;
+        private final CopilotSession session;
+        private final String flow;
+        private final String url;
+        private volatile boolean done;
+        private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+
+        CopilotSignIn(CopilotClient client, CopilotSession session, String flow, String url) {
+            this.client = client;
+            this.session = session;
+            this.flow = flow;
+            this.url = url;
+            done = url == null;
+        }
+
+        @Override
+        public String url() {
+            return url;
+        }
+
+        @Override
+        public String await(java.util.function.BooleanSupplier stop) throws Exception {
+            long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(SIGN_IN_MINUTES);
+            CompletableFuture<?> next = null;
+            boolean stepsWork = true; // a step Copilot sends that the SDK can't read: the status still tells
+            try {
+                while (!done) {
+                    if (stop.getAsBoolean()) {
+                        return null;
+                    }
+                    if (System.nanoTime() > deadline) {
+                        throw new Exception("The sign-in took too long. Try again.");
+                    }
+                    if (next == null && stepsWork) {
+                        next = session.getRpc().accounts.login.advance(
+                                new com.github.copilot.generated.rpc.SessionAccountsLoginAdvanceParams(
+                                        session.getSessionId(), flow, null));
+                    }
+                    if (next != null) {
+                        try {
+                            Object step = next.get(1, TimeUnit.SECONDS);
+                            next = null;
+                            switch (stepKind(step)) {
+                                case "completed" -> {
+                                    String status = stepStatus(step);
+                                    if (status == null || status.equals("completed")) {
+                                        done = true;
+                                    } else if (status.equals("declined")) {
+                                        throw new Exception("The sign-in was declined on GitHub.");
+                                    } else {
+                                        throw new Exception("Copilot needs an answer Logsift can't give (" + status
+                                                + "). Sign in once in a terminal (copilot, then /login).");
+                                    }
+                                }
+                                case "error" -> throw new Exception(signInError(step));
+                                case "input-required" -> throw new Exception("Copilot asks: " + stepField(step, "prompt")
+                                        + ". Sign in once in a terminal (copilot, then /login).");
+                                default -> Thread.sleep(500); // awaiting the browser
+                            }
+                        } catch (java.util.concurrent.TimeoutException stillWaiting) {
+                            // the browser isn't done yet
+                        } catch (java.util.concurrent.ExecutionException e) {
+                            next = null;
+                            stepsWork = false;
+                        }
+                    } else {
+                        Thread.sleep(1000);
+                    }
+                    if (!done && client.getAuthStatus().get(10, TimeUnit.SECONDS).isAuthenticated()) {
+                        done = true;
+                    }
+                }
+                return user();
+            } finally {
+                if (next != null) {
+                    next.cancel(true);
+                }
+                close();
+            }
+        }
+
+        @Override
+        public void close() {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            if (!done) {
+                try {
+                    session.getRpc().accounts.login.cancel(
+                            new com.github.copilot.generated.rpc.SessionAccountsLoginCancelParams(session.getSessionId(), flow))
+                            .get(10, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    // gone already
+                }
+            }
+            session.close();
+        }
+    }
+
+    @Override
     public List<Model> models() throws Exception {
         List<Model> out = new ArrayList<>();
         for (ModelInfo m : client().listModels().get(30, TimeUnit.SECONDS)) {

@@ -2699,9 +2699,46 @@ class VisualTest {
         public void start() {
         }
 
+        /** Who is signed in: null until a sign-in in the "browser" finishes ({@link #signedIn}). */
+        volatile String user = "tester";
+        /** Set by the test as the person finishes signing in on the page. */
+        final java.util.concurrent.CountDownLatch signedIn = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicBoolean signInClosed = new java.util.concurrent.atomic.AtomicBoolean();
+
         @Override
         public String user() {
-            return "tester";
+            return user;
+        }
+
+        @Override
+        public boolean canSignIn() {
+            return true;
+        }
+
+        @Override
+        public SignIn signIn() {
+            return new SignIn() {
+                @Override
+                public String url() {
+                    return "https://github.com/login/oauth/authorize?client_id=test";
+                }
+
+                @Override
+                public String await(java.util.function.BooleanSupplier stop) throws Exception {
+                    while (!signedIn.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        if (stop.getAsBoolean()) {
+                            return null;
+                        }
+                    }
+                    user = "tester";
+                    return user;
+                }
+
+                @Override
+                public void close() {
+                    signInClosed.set(true);
+                }
+            };
         }
 
         @Override
@@ -3279,6 +3316,73 @@ class VisualTest {
                 "stored answers aren't answering");
         settle();
         shot("130c-assistant-long-chat");
+
+        // signed out: Sign In to GitHub opens GitHub's page in the browser, and the assistant is
+        // ready when the person is done there; Cancel goes back
+        ScriptedAssistant out = new ScriptedAssistant();
+        out.user = null;
+        logsift.chat.ChatService.useFactory((settings, home) -> out);
+        List<String> opened = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.function.BiConsumer<java.awt.Component, String> realBrowser = ChatPanel.browser;
+        ChatPanel.browser = (c, url) -> opened.add(url);
+        try {
+            logsift.chat.ChatService.get().reconnect();
+            ChatPanel signedOut = onEdt(() -> new ChatPanel(chatHostForTest(), logsift.chat.ChatService.get()));
+            onEdt(() -> {
+                signedOut.connect();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> ((javax.swing.JButton) findNamed(signedOut, "signIn")) != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "Sign In to GitHub");
+            onEdt(() -> {
+                ((javax.swing.JButton) findNamed(signedOut, "signIn")).doClick();
+                return null;
+            });
+            waitFor(() -> !opened.isEmpty(), 10_000, "GitHub's page opened");
+            assertEquals(List.of("https://github.com/login/oauth/authorize?client_id=test"), opened);
+            assertEquals("Signing in…", onEdt(signedOut::statusForTest));
+            assertTrue(onEdt(() -> ((javax.swing.JLabel) findNamed(signedOut, "signingIn")).getText()).contains("Sign in on GitHub"));
+            // Cancel: back to signing in, nothing left running
+            onEdt(() -> {
+                ((javax.swing.JButton) findNamed(signedOut, "cancelSignIn")).doClick();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return out.signInClosed.get() && onEdt(() -> ((javax.swing.JButton) findNamed(signedOut, "signIn")) != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 10_000, "cancelled");
+            // again, and this time finished in the browser
+            opened.clear();
+            out.signInClosed.set(false);
+            onEdt(() -> {
+                ((javax.swing.JButton) findNamed(signedOut, "signIn")).doClick();
+                return null;
+            });
+            waitFor(() -> !opened.isEmpty(), 10_000, "GitHub's page opened again");
+            out.signedIn.countDown();
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> signedOut.statusForTest().equals("GitHub Copilot · tester"));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "signed in and connected");
+            assertTrue(out.signInClosed.get(), "the sign-in's session is closed");
+            onEdt(() -> {
+                signedOut.close();
+                return null;
+            });
+        } finally {
+            ChatPanel.browser = realBrowser;
+        }
 
         // without Copilot it says what to do
         logsift.chat.ChatService.useFactory(new logsift.chat.ChatService.EngineFactory() {
