@@ -174,11 +174,25 @@ public final class ChatSession implements AutoCloseable {
                     engine.name() + " no longer had this chat, so it was started again with what was said before."));
             view.changed(n, true);
         }
-        store.setSession(chat.id(), c.id());
         synchronized (this) {
             conversation = c;
         }
+        keepSession(c);
         return c;
+    }
+
+    /** The assistant's id for the chat, saved to go on with it later (Claude Code's comes with its first answer). */
+    private String keptSession;
+
+    private void keepSession(ChatEngine.Conversation c) {
+        String id = c == null ? null : c.id();
+        synchronized (this) {
+            if (id == null || id.equals(keptSession)) {
+                return;
+            }
+            keptSession = id;
+        }
+        store.setSession(chat.id(), id);
     }
 
     /** What was said in this chat, for an assistant that has forgotten it. */
@@ -291,6 +305,7 @@ public final class ChatSession implements AutoCloseable {
 
     /** The turn is over: the answer stored whole, with what the turn cost. */
     private void finish(boolean ok) {
+        ChatEngine.Conversation c;
         ChatMessage m;
         List<ChatEvent.Usage> used;
         synchronized (this) {
@@ -298,6 +313,7 @@ public final class ChatSession implements AutoCloseable {
                 return;
             }
             busy = false;
+            c = conversation;
             m = answer;
             used = new ArrayList<>(pendingUsage);
             pendingUsage.clear();
@@ -317,6 +333,7 @@ public final class ChatSession implements AutoCloseable {
             store.replace(m);
             view.changed(m, false);
         }
+        keepSession(c);
         view.busy(false);
     }
 

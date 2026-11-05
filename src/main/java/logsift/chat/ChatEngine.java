@@ -141,7 +141,7 @@ public interface ChatEngine extends AutoCloseable {
 
     /** One conversation. */
     interface Conversation extends AutoCloseable {
-        /** The engine's id for it (to go on with later). */
+        /** The engine's id for it (to go on with later); null until the engine says (Claude Code: with its first answer). */
         String id();
 
         /** Asks; the answer comes as events, ending with {@link ChatEvent.Idle}. */

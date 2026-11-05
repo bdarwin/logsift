@@ -1,6 +1,7 @@
 package logsift.jvm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,9 +55,13 @@ class LocalJvmsTest {
             assertEquals("attach", s.how());
             ThreadDump d1 = s.dump();
             checkDump(d1);
-            Thread.sleep(600);
-            ThreadDump d2 = s.dump();
-            List<ThreadAnalysis.Hot> hot = ThreadAnalysis.hot(List.of(d1, d2));
+            // on a busy machine the loop may get little CPU at first: dumps again, for up to 5 s
+            List<ThreadAnalysis.Hot> hot = List.of();
+            for (long end = System.currentTimeMillis() + 5_000; hot.isEmpty() && System.currentTimeMillis() < end; ) {
+                Thread.sleep(600);
+                hot = ThreadAnalysis.hot(List.of(d1, s.dump()));
+            }
+            assertFalse(hot.isEmpty(), "no thread used CPU between the dumps");
             assertEquals("hot-loop", hot.get(0).thread().name(), "CPU use between two dumps");
         }
     }

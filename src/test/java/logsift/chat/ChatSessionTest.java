@@ -44,6 +44,9 @@ class ChatSessionTest {
         final List<Setup> opened = new ArrayList<>();
         Consumer<Turn> script;
         boolean resumeFails;
+        /** Its id, when it says it only with its first answer (as Claude Code does): set by the script. */
+        boolean idLater;
+        volatile String lateId;
 
         record Turn(String text, Setup setup, Listener l) {}
 
@@ -80,7 +83,7 @@ class ChatSessionTest {
             return new Conversation() {
                 @Override
                 public String id() {
-                    return "conv-" + opened.size();
+                    return idLater ? lateId : "conv-" + opened.size();
                 }
 
                 @Override
@@ -209,6 +212,26 @@ class ChatSessionTest {
         assertEquals("busy", seen.get(0));
         assertEquals("idle", seen.get(seen.size() - 1));
         assertTrue(Files.readString(dir.resolve("audit.log")).contains("read_lines"), "audited like MCP calls");
+    }
+
+    @Test
+    void anAssistantThatSaysItsIdWithItsAnswerIsKeptToo() throws Exception {
+        Scripted engine = new Scripted();
+        engine.idLater = true; // Claude Code's session id comes in its first answer
+        engine.script = t -> {
+            engine.lateId = "late-1";
+            t.l().on(new ChatEvent.Text("m1", "Answered."));
+            t.l().on(new ChatEvent.Idle(false));
+        };
+        ChatInfo chat = store.create("c", "cheap", null);
+        try (ChatSession s = session(engine, chat)) {
+            s.ask("Anything odd?", null);
+            assertTrue(idle.await(10, TimeUnit.SECONDS));
+        }
+        List<ChatMessage> all = store.last(chat.id(), 10);
+        assertEquals(List.of(ChatMessage.Kind.USER, ChatMessage.Kind.ASSISTANT),
+                all.stream().map(ChatMessage::kind).toList(), "no error for an id not known yet");
+        assertEquals("late-1", store.chat(chat.id()).session(), "kept, to go on with it later");
     }
 
     @Test
