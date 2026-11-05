@@ -58,7 +58,8 @@ public final class Scope {
             }
         }
         throw new IOException("Outside the folders Logsift may read for agents (" + describe() + "): " + abs
-                + ". Start logsift-mcp with --root <folder> to allow more.");
+                + ". To allow more, add its folder in Logsift's Settings → Agents (Folders agents may read), or start "
+                + "logsift-mcp with --root <folder>.");
     }
 
     /** Whether a file found while walking a folder may be read (no exception). */

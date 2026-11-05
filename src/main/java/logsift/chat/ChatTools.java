@@ -48,5 +48,6 @@ public final class ChatTools {
             the person can click to see it, written exactly like [app.log:1204](logsift:log:1:1204) (the file's \
             name, the line, then logsift: the handle and the line); a range: [app.log:1204-1230](logsift:log:1:1204-1230). \
             A file not open: link its path, [app.log:12](/var/log/app.log:12). \
-            Never invent line numbers: only ones the tools gave. Never draw charts in text: under analyze_gc the             window shows the heap chart itself, with Show GC Charts for the rest; otherwise give a table.""";
+            Never invent line numbers: only ones the tools gave. Never draw charts in text: after analyze_gc the chat shows the heap chart \
+            just above your answer ("the chart above"), with Show GC Charts for the rest; otherwise give a table.""";
 }

@@ -42,6 +42,8 @@ final class ChatGate extends JPanel {
     private final Supplier<String> chatId;
     private final BooleanSupplier asking;
     private final Consumer<String> note;
+    /** Who asks: the assistant answering now (GitHub Copilot, Claude Code). */
+    private final Supplier<String> who;
     /** Per chat: what was allowed for all of it (a folder covers its files). */
     private final Map<String, Set<String>> allowed = new ConcurrentHashMap<>();
     private volatile CompletableFuture<Answer> pending;
@@ -52,7 +54,13 @@ final class ChatGate extends JPanel {
      * @param note   writes what was decided in the chat
      */
     ChatGate(Supplier<String> chatId, BooleanSupplier asking, Consumer<String> note) {
+        this(chatId, asking, note, () -> "The assistant");
+    }
+
+    /** @param who the assistant answering now, by name */
+    ChatGate(Supplier<String> chatId, BooleanSupplier asking, Consumer<String> note, Supplier<String> who) {
         super(new BorderLayout(8, 6));
+        this.who = who;
         this.chatId = chatId;
         this.asking = asking;
         this.note = note;
@@ -91,7 +99,7 @@ final class ChatGate extends JPanel {
             public void allow(String what, Path where) throws Tool.Failure, InterruptedException {
                 if (asking.getAsBoolean()) {
                     ask(what, where.toString(), "file:" + key(where),
-                            "Copilot wants to " + what + ", which you didn't open or name.", shortPath(where),
+                            who.get() + " wants to " + what + ", which you didn't open or name.", shortPath(where),
                             "Work with the logs that are open or that the person named; say what else you would need and why.");
                 }
             }
@@ -100,7 +108,7 @@ final class ChatGate extends JPanel {
             public void allowUrl(String what, String url) throws Tool.Failure, InterruptedException {
                 if (asking.getAsBoolean()) {
                     String host = java.net.URI.create(url).getHost();
-                    ask(what, url, "url:" + host, "Copilot wants to " + what + ", which you didn't open or name.", url,
+                    ask(what, url, "url:" + host, who.get() + " wants to " + what + ", which you didn't open or name.", url,
                             "Work with the logs that are open or that the person named.");
                 }
             }
@@ -108,7 +116,7 @@ final class ChatGate extends JPanel {
             @Override
             public void approve(String what, String key, String detail) throws Tool.Failure, InterruptedException {
                 // a running program: always asked, whatever the setting for files
-                ask(what, what, key, "Copilot wants to " + what + ".", detail,
+                ask(what, what, key, who.get() + " wants to " + what + ".", detail,
                         "Don't ask again for it in this answer; say what it would have shown, or work from the logs.");
             }
         };

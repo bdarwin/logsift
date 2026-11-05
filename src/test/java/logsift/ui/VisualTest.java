@@ -3056,6 +3056,7 @@ class VisualTest {
                 return false;
             }
         }, 20_000, "the question");
+        assertTrue(onEdt(gate::textForTest).startsWith("GitHub Copilot wants to"), "who asks, by name");
         assertTrue(onEdt(gate::textForTest).contains("open billing.log")
                 && onEdt(gate::textForTest).contains(ChatGate.shortPath(notAsked)), onEdt(gate::textForTest));
         settle();

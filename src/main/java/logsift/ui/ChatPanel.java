@@ -200,7 +200,7 @@ final class ChatPanel extends JPanel {
                 ChatMessage n = store.append(ChatMessage.note(id, words));
                 SwingUtilities.invokeLater(() -> transcript.changed(n, true));
             }
-        });
+        }, this::engineName);
         history = new ChatHistory(store, new ChatHistory.Host() {
             @Override
             public void open(String chatId, long seq) {

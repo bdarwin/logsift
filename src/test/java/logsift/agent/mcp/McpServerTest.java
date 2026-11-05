@@ -347,6 +347,8 @@ class McpServerTest {
         Path outside = serviceLog(dir.resolve("elsewhere.log"));
         Answer a = call("open_log", "path", outside.toString());
         assertTrue(a.error() && a.text().startsWith("Outside the folders Logsift may read for agents"), a.text());
+        assertTrue(a.text().contains("Settings → Agents (Folders agents may read)") && a.text().contains("--root"),
+                "how to allow more, in the app and for logsift-mcp: " + a.text());
 
         Path key = Files.createDirectories(logs.resolve(".ssh")).resolve("id_rsa");
         Files.writeString(key, "-----BEGIN OPENSSH PRIVATE KEY-----\n");
