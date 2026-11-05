@@ -68,4 +68,21 @@ class ChatLinksTest {
         assertFalse(ChatMarkdown.numeric("web-1"));
         assertTrue(ChatMarkdown.numeric("12%"));
     }
+
+    @Test
+    void aLogTheAssistantOpenedCanBeOpenedAgainEvenInAZip(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        // what a link's log was: a file, a file in a zip (opened from inside it), or a server's log by name
+        Path log = java.nio.file.Files.writeString(dir.resolve("app.log"), "a\n");
+        Path zip = dir.resolve("logs.zip");
+        try (var out = new java.util.zip.ZipOutputStream(java.nio.file.Files.newOutputStream(zip))) {
+            out.putNextEntry(new java.util.zip.ZipEntry("node1/app.log"));
+            out.write("b\n".getBytes());
+            out.closeEntry();
+        }
+        assertEquals(log, logsift.chat.ChatHandles.openable(log.toString()));
+        assertEquals(zip.resolve("node1").resolve("app.log"), logsift.chat.ChatHandles.openable(zip.resolve("node1/app.log").toString()));
+        assertNull(logsift.chat.ChatHandles.openable(dir.resolve("gone.log").toString()), "gone: by its handle, as before");
+        assertNull(logsift.chat.ChatHandles.openable(dir.resolve("gone.zip/app.log").toString()));
+        assertNull(logsift.chat.ChatHandles.openable("prod-7: /var/log/app.log"), "a server's log isn't opened as a file here");
+    }
 }

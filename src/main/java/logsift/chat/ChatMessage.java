@@ -27,6 +27,11 @@ public record ChatMessage(String chat, long seq, long time, Kind kind, String te
         return new ChatMessage(chat, 0, System.currentTimeMillis(), Kind.USER, text, null, null, null, null, 0, 0, 0, 0);
     }
 
+    /** A question, with what it was asked with ({@link ChatHandles#record}: the window's logs), kept unseen. */
+    public static ChatMessage user(String chat, String text, String with) {
+        return new ChatMessage(chat, 0, System.currentTimeMillis(), Kind.USER, text, null, null, with, null, 0, 0, 0, 0);
+    }
+
     public static ChatMessage note(String chat, String text) {
         return new ChatMessage(chat, 0, System.currentTimeMillis(), Kind.NOTE, text, null, null, null, null, 0, 0, 0, 0);
     }

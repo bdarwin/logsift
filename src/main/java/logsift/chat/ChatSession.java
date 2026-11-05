@@ -110,6 +110,14 @@ public final class ChatSession implements AutoCloseable {
      * the question to the model but is stored on its own, so the chat shows the question as asked.
      */
     public void ask(String question, String context) throws Exception {
+        ask(question, context, null);
+    }
+
+    /**
+     * Asks, with the window's logs by handle ({@code log:1} → its path), kept with the question so
+     * its answer's links open those files later on.
+     */
+    public void ask(String question, String context, java.util.Map<String, String> logs) throws Exception {
         ChatEngine.Conversation c;
         synchronized (this) {
             if (busy) {
@@ -122,7 +130,7 @@ public final class ChatSession implements AutoCloseable {
             turnStarted = System.currentTimeMillis();
         }
         view.busy(true);
-        ChatMessage q = store.append(ChatMessage.user(chat.id(), question));
+        ChatMessage q = store.append(ChatMessage.user(chat.id(), question, ChatHandles.record(logs)));
         view.changed(q, true);
         if (!titled) {
             titled = true;

@@ -31,6 +31,10 @@ For a JVM started with `-Dcom.sun.management.jmxremote.port=9010` (and `-Djava.r
 
 Over JMX, Logsift takes thread dumps and heap histograms, and profiles with Flight Recorder. **Save Heap Dump…** works too: the JVM writes the dump on its own machine, in its temporary folder. Logsift then offers to copy it here over SSH (**Copy Here**) and opens it, or **Leave It There**. async-profiler needs SSH or this computer.
 
+### Keeping JVMs for the assistant
+
+**JVM → JVM Connections (SSH, JMX)…** keeps where your JVMs run, so the [assistant](assistant.md) and coding agents can take a thread dump or a heap histogram when you ask (and say yes). It opens [Log Locations](agents.md#where-your-logs-are) at the JVMs of the shown log's service: **Add** a row there, or **Add JVM** at the bottom left for a JVM with no folder of logs (a JMX port like `prod-7:9010`, or SSH as `user@host`). Never a password: Logsift asks when it needs one. The SSH and JMX tabs above link there too.
+
 ## A log and its JVM
 
 A log tab shows which JVM writes the log, in a bar above it, with **Threads**, **Profile** and **Heap** buttons.

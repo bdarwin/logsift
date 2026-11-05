@@ -58,7 +58,7 @@ final class ChatEntryView extends JPanel {
         body.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
         body.addHyperlinkListener(e -> {
             if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
-                actions.link(e.getDescription());
+                actions.link(m, e.getDescription());
             }
         });
         render = new Timer(80, e -> renderNow());

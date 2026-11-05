@@ -1130,6 +1130,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         Path knownHosts = knownHostsFile();
         jvmDialog = new JvmDialog(this, knownHosts, this::trustHost,
                 c -> openLiveThreads(c.source(), c.first(), c.capture(), c.target()));
+        jvmDialog.onConnections(this::openJvmConnections);
         jvmDialog.setVisible(true);
     }
 
@@ -2204,6 +2205,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** Opens Log Locations for Agents, starting from a log or folder (null: the list). */
     void openLogLocations(Path focus) {
         LogLocationsDialog d = new LogLocationsDialog(this, focus);
+        lastLogLocationsForTest = d;
+        d.setVisible(true);
+    }
+
+    /**
+     * Where JVMs are kept for the assistant and agents (SSH or a JMX port): Log Locations, at the
+     * JVMs of the shown log's service.
+     */
+    void openJvmConnections() {
+        LogTab t = shownLogTab();
+        LogLocationsDialog d = new LogLocationsDialog(this, t == null ? null : t.path(), true);
         lastLogLocationsForTest = d;
         d.setVisible(true);
     }
@@ -3320,6 +3332,29 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
 
             @Override
+            public void showLines(String handle, String file, long from, long to) {
+                if (file != null) {
+                    // the file the chat says it was: its tab, else opened again (a file in a zip too)
+                    for (LogTab t : allTabs()) {
+                        if (t.path() != null && (t.path().toString().equals(file) || file.equals(t.remoteLabel()))) {
+                            tabs.setSelectedComponent(t);
+                            t.showLines(from - 1, to - 1);
+                            return;
+                        }
+                    }
+                    Path p = logsift.chat.ChatHandles.openable(file);
+                    if (p != null) {
+                        MainFrame.this.openFile(p, null, opened -> {
+                            tabs.setSelectedComponent(opened);
+                            opened.showLinesWhenAvailable(from - 1, to - 1);
+                        });
+                        return;
+                    }
+                }
+                showLines(handle, from, to);
+            }
+
+            @Override
             public void showLines(String handle, long from, long to) {
                 LogTab t = tabOf(handle);
                 if (t != null) {
@@ -3329,7 +3364,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 }
                 // a log the assistant opened itself: opened in a tab too, at the line
                 Path p = chatWorkspace == null ? null : chatWorkspace.shownPath(handle);
-                if (p == null || !Files.isRegularFile(p)) {
+                if (p == null || logsift.chat.ChatHandles.openable(p.toString()) == null) {
                     status.setText("That log isn't open any more");
                     return;
                 }
@@ -3642,6 +3677,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         JMenu jvm = menu("JVM");
         jvm.add(item("Attach to a Running JVM…", "cpu", KeyStroke.getKeyStroke(KeyEvent.VK_J, MENU | shift),
                 e -> openJvmDialog()));
+        jvm.add(item("JVM Connections (SSH, JMX)…", "plug", null, e -> openJvmConnections()));
         jvm.add(item("Link This Log to a JVM…", "link", null, e -> linkCurrentLog()));
         jvm.addSeparator();
         jvm.add(item("Open Thread Dump…", "file-text", null, e -> openThreadDumpDialog()));

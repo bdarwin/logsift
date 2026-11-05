@@ -32,7 +32,8 @@ final class ChatTranscript extends JPanel implements Scrollable {
 
     /** What an entry does when clicked: show lines, open a query… */
     interface Actions {
-        void link(String href);
+        /** A link clicked in an entry ({@code from}: the entry, for what its handles meant). */
+        void link(ChatMessage from, String href);
 
         void action(ChatMessage tool, String what);
     }

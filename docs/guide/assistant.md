@@ -49,7 +49,7 @@ The logs you have open, and files you name with `@`, it reads freely. To open an
 
 ![The assistant asks before it opens a file you didn't open or name](../screenshots/assistant-asks.png)
 
-A **thread dump** or a **heap histogram** of a running JVM is always asked for, whatever that setting, with what it does to the program (*the JVM pauses for a moment while its threads are listed*). Tell Logsift where each service's JVM runs in [Log Locations](agents.md#where-your-logs-are) (**Its JVMs**: this computer, SSH or a JMX port), and ask *why is orders slow right now?*: the assistant takes a dump, shows the busy and blocked threads, and keeps the whole dump as a log to read. Over SSH it uses your key and a server you already trust; for a password, a new server's key or a JMX password, Logsift asks you. Never a heap dump.
+A **thread dump** or a **heap histogram** of a running JVM is always asked for, whatever that setting, with what it does to the program (*the JVM pauses for a moment while its threads are listed*). Tell Logsift where each service's JVM runs with **JVM → JVM Connections (SSH, JMX)…** (in [Log Locations](agents.md#where-your-logs-are), **Its JVMs**: this computer, SSH or a JMX port; **Add JVM** for one with no folder of logs), and ask *why is orders slow right now?*: the assistant takes a dump, shows the busy and blocked threads, and keeps the whole dump as a log to read. Over SSH it uses your key and a server you already trust; for a password, a new server's key or a JMX password, Logsift asks you. Never a heap dump.
 
 ![The assistant asks before it takes a thread dump](../screenshots/assistant-asks-thread-dump.png)
 

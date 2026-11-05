@@ -139,6 +139,14 @@ final class LogLocationsDialog extends JDialog {
      *              for its folder; null: just the list
      */
     LogLocationsDialog(java.awt.Window owner, Path focus) {
+        this(owner, focus, false);
+    }
+
+    /**
+     * @param jvms opened for JVM connections (JVM → JVM Connections…): the service of {@code focus}
+     *             if there is one (none is added for it), its JVMs in view
+     */
+    LogLocationsDialog(java.awt.Window owner, Path focus, boolean jvms) {
         super(owner, "Log Locations for Agents", ModalityType.APPLICATION_MODAL);
         this.home = AppState.home();
         setLayout(new BorderLayout());
@@ -149,12 +157,35 @@ final class LogLocationsDialog extends JDialog {
         add(split, BorderLayout.CENTER);
         add(footer(), BorderLayout.SOUTH);
         load();
-        if (focus != null) {
+        if (jvms) {
+            int at = focus == null ? -1 : serviceOf(focus);
+            if (at < 0) {
+                for (int i = 0; i < items.size() && at < 0; i++) {
+                    if (!items.get(i).jvms.isEmpty()) {
+                        at = i; // the first that has JVMs
+                    }
+                }
+            }
+            if (at < 0 && !items.isEmpty()) {
+                at = 0;
+            }
+            if (at >= 0) {
+                list.setSelectedIndex(at);
+            }
+        } else if (focus != null) {
             focusOn(focus);
         } else if (!items.isEmpty()) {
             list.setSelectedIndex(0);
         }
         showSelected();
+        if (jvms) {
+            addComponentListener(new java.awt.event.ComponentAdapter() {
+                @Override
+                public void componentShown(java.awt.event.ComponentEvent e) {
+                    SwingUtilities.invokeLater(() -> focusJvms(false));
+                }
+            });
+        }
         getRootPane().registerKeyboardAction(e -> close(), KeyStroke.getKeyStroke("ESCAPE"),
                 JComponent.WHEN_IN_FOCUSED_WINDOW);
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
@@ -169,9 +200,10 @@ final class LogLocationsDialog extends JDialog {
     }
 
     private JComponent header() {
-        JLabel l = new JLabel("<html><b style='font-size:1.15em'>Where are your logs?</b><br>"
-                + "<span style='color:#6b7280'>Tell coding agents where each service writes its logs and what each "
-                + "file holds. Then ask “why did orders fail last night?” and the agent finds the files itself. "
+        JLabel l = new JLabel("<html><b style='font-size:1.15em'>Where are your logs and JVMs?</b><br>"
+                + "<span style='color:#6b7280'>Tell the assistant and coding agents where each service writes its logs "
+                + "and what each file holds, and where its JVMs run (SSH or a JMX port) for a thread dump or a heap "
+                + "histogram. Then ask “why did orders fail last night?” and it finds the files itself. "
                 + "Logsift finds the files and guesses what they hold: correct what it got wrong.</span></html>",
                 Icons.of("sparkles"), JLabel.LEFT);
         l.setIconTextGap(10);
@@ -207,13 +239,23 @@ final class LogLocationsDialog extends JDialog {
         JButton add = new JButton("Add Folder…", Icons.of("folder-open"));
         add.setToolTipText("A new service for a folder of logs: Logsift finds its files and guesses what they hold");
         add.addActionListener(e -> addFromFolder());
+        JButton addJvm = new JButton("Add JVM", Icons.of("cpu"));
+        addJvm.setName("addJvmService");
+        addJvm.setToolTipText("A JVM to reach over SSH or a JMX port, with or without a folder of logs");
+        addJvm.addActionListener(e -> addJvmOnly());
         JButton remove = new JButton(Icons.of("x"));
         remove.setToolTipText("Remove the selected service");
         remove.addActionListener(e -> removeSelected());
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        buttons.add(add);
-        buttons.add(remove);
-        buttons.add(shareButton());
+        // two rows: the column is narrow
+        JPanel adds = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        adds.add(add);
+        JPanel more = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        more.add(addJvm);
+        more.add(remove);
+        more.add(shareButton());
+        JPanel buttons = new JPanel(new java.awt.GridLayout(2, 1, 0, 4));
+        buttons.add(adds);
+        buttons.add(more);
         JPanel p = new JPanel(new BorderLayout(0, 6));
         p.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 6));
         JLabel title = new JLabel("Services");
@@ -251,6 +293,19 @@ final class LogLocationsDialog extends JDialog {
             }
         }
         loading = false;
+    }
+
+    /** The index of the service whose folders hold this log, or -1. */
+    private int serviceOf(Path p) {
+        Path abs = p.toAbsolutePath().normalize();
+        for (int i = 0; i < items.size(); i++) {
+            for (Path d : items.get(i).entry().folders()) {
+                if (abs.startsWith(d)) {
+                    return i;
+                }
+            }
+        }
+        return -1;
     }
 
     /** Shows the service of a log or folder, or a new one for its folder. */
@@ -304,6 +359,44 @@ final class LogLocationsDialog extends JDialog {
         list.setSelectedIndex(items.size() - 1);
         dirty = true;
         SwingUtilities.invokeLater(() -> description.requestFocusInWindow());
+    }
+
+    /**
+     * A service for a JVM, with no folder of logs yet: a JMX port to fill in (or SSH, chosen in the
+     * row). Its name and the row are ready to edit.
+     */
+    void addJvmOnly() {
+        String n = "service";
+        for (int k = 2; nameTaken(n, null); k++) {
+            n = "service-" + k;
+        }
+        Item it = new Item(new LogCatalog.Service(n, "", List.of(), List.of(), "", "",
+                List.of(new LogCatalog.JvmPlace("app.jar", "", "host:9010"))), LogCatalog.userFile(home), false);
+        items.addElement(it);
+        list.setSelectedIndex(items.size() - 1);
+        dirty = true;
+        SwingUtilities.invokeLater(() -> focusJvms(true));
+    }
+
+    /** Shows the selected service's JVMs: scrolled to, the first row selected ({@code edit}: its address being typed). */
+    void focusJvms(boolean edit) {
+        if (current == null) {
+            return;
+        }
+        if (jvmRowPanel != null) {
+            jvmRowPanel.scrollRectToVisible(new java.awt.Rectangle(0, 0, jvmRowPanel.getWidth(), jvmRowPanel.getHeight()));
+        }
+        if (jvmModel.getRowCount() > 0) {
+            jvmTable.setRowSelectionInterval(0, 0);
+            if (edit) {
+                jvmTable.editCellAt(0, 2);
+                if (jvmTable.getEditorComponent() != null) {
+                    jvmTable.getEditorComponent().requestFocusInWindow();
+                }
+                return;
+            }
+        }
+        jvmTable.requestFocusInWindow();
     }
 
     private boolean nameTaken(String n, Item except) {
@@ -519,7 +612,8 @@ final class LogLocationsDialog extends JDialog {
 
         empty.setText("<html><div style='width:420px;text-align:center'><b>No services yet.</b><br><br>"
                 + "Click <b>Add Folder…</b> and choose a folder a service writes its logs to: Logsift finds the files "
-                + "and guesses what each holds.</div></html>");
+                + "and guesses what each holds.<br><br>Or <b>Add JVM</b> for a JVM to reach over SSH or a JMX port "
+                + "(<tt>host:9010</tt>), for a thread dump or a heap histogram.</div></html>");
         empty.setHorizontalAlignment(JLabel.CENTER);
         formScroll = new JScrollPane(f, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         formScroll.setBorder(BorderFactory.createEmptyBorder());
@@ -617,6 +711,8 @@ final class LogLocationsDialog extends JDialog {
         }
     };
     private final JTable jvmTable = new JTable(jvmModel);
+    /** The JVMs row, to scroll to. */
+    private JPanel jvmRowPanel;
 
     private JComponent jvmsRow() {
         jvmTable.setName("jvms");
@@ -662,6 +758,7 @@ final class LogLocationsDialog extends JDialog {
         b.add(Box.createVerticalStrut(4));
         b.add(remove);
         JPanel row = new JPanel(new BorderLayout(8, 4));
+        jvmRowPanel = row;
         row.add(sp, BorderLayout.CENTER);
         row.add(b, BorderLayout.EAST);
         JLabel hint = new JLabel("where it runs, for a thread dump or a heap histogram (never a password)");

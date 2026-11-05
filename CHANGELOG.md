@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **JVM connections are easy to find:** **JVM → JVM Connections (SSH, JMX)…** opens where the assistant's JVMs are kept, at the JVMs of the shown log's service; **Add JVM** keeps one with no folder of logs (a JMX port or SSH); the Attach dialog's SSH and JMX tabs link there.
+- **The assistant's links open the logs it opened itself, later too:** a link to a log the assistant had opened (not in a tab) said "That log isn't open any more" once the assistant was closed, after a restart, or for a file in a zip. Each question now keeps which file each log was, so the link opens that file at its line.
 - **The assistant is marked beta:** a **BETA** pill beside the chat's name, **View → Assistant (Beta)**, and a line in the welcome saying where to tell us what works and what doesn't.
 - **quackjvm 1.6.1:** queries without parameters run unprepared, which DuckDB runs faster for some (large results read up to twice as fast).
 - **Big tables' caches follow the file, and logs are kept for SQL:** the Pivot cache, the column filters' and value counts' cache, and the Query tab's cache of a big table are now quackjvm 1.6 file tables: when the file grows, only its new rows are read into them (before, a grown file got a whole new cache), and a file written again is read again. A log read for the Query tab is kept on disk with them, so the next time Logsift starts it's ready at once and only the lines written since are read (logs under 32 MB are just read again). **Values as One** totals are kept from one start to the next.

@@ -62,6 +62,14 @@ final class ChatPanel extends JPanel {
 
         void showLines(String handle, long from, long to);
 
+        /**
+         * Shows lines of a log by the file the chat says its handle meant ({@code file}, null if
+         * it doesn't say): that file's tab, opened again if need be; else as {@link #showLines}.
+         */
+        default void showLines(String handle, String file, long from, long to) {
+            showLines(handle, from, to);
+        }
+
         void find(String handle, String text);
 
         void query(String handle, String sql);
@@ -167,8 +175,8 @@ final class ChatPanel extends JPanel {
 
         transcript = new ChatTranscript(store, new ChatTranscript.Actions() {
             @Override
-            public void link(String href) {
-                openLink(href);
+            public void link(ChatMessage from, String href) {
+                openLink(from, href);
             }
 
             @Override
@@ -1098,10 +1106,17 @@ final class ChatPanel extends JPanel {
         busy = true; // until the session says otherwise
         updateSend();
         ChatSession s = session;
+        // the window's logs by handle, kept with the question: its answer's links open these files later on
+        java.util.Map<String, String> asked = new java.util.LinkedHashMap<>();
+        for (OpenLog o : host.openLogs()) {
+            if (o.handle() != null && o.where() != null) {
+                asked.put(o.handle(), o.where());
+            }
+        }
         // starting Copilot's session and sending wait on it: not on the window's thread
         Thread t = new Thread(() -> {
             try {
-                s.ask(q, context);
+                s.ask(q, context, asked);
             } catch (Exception e) {
                 // shown in the chat as an error, and the turn is over
             }
@@ -1425,10 +1440,10 @@ final class ChatPanel extends JPanel {
 
     // ---------------------------------------------------------------- links and tool actions
 
-    private void openLink(String href) {
+    private void openLink(ChatMessage from, String href) {
         ChatMarkdown.LineLink l = ChatMarkdown.LineLink.parse(href);
         if (l != null) {
-            host.showLines(l.handle(), l.from(), l.to());
+            host.showLines(l.handle(), fileOf(from, l.handle()), l.from(), l.to());
             return;
         }
         ChatMarkdown.FileLink f = ChatMarkdown.FileLink.parse(href);
@@ -1449,6 +1464,19 @@ final class ChatPanel extends JPanel {
         }
     }
 
+    /** The file a handle meant in this entry's chat, or null if the chat doesn't say. */
+    private String fileOf(ChatMessage from, String handle) {
+        String chatId = from != null ? from.chat() : transcript.chat();
+        if (chatId == null || handle == null || handle.isBlank()) {
+            return null;
+        }
+        try {
+            return logsift.chat.ChatHandles.find(store, chatId, from == null ? 0 : from.seq(), handle);
+        } catch (RuntimeException e) {
+            return null; // the store is closing: as before, by the handle
+        }
+    }
+
     private void toolAction(ChatMessage tool, String what) {
         var a = ChatEntryView.args(tool);
         String h = String.valueOf(a.getOrDefault("log", ""));
@@ -1456,7 +1484,7 @@ final class ChatPanel extends JPanel {
             case ChatEntryView.SHOW_LINES -> {
                 long from = ChatEntryView.toLong(a.get("from"));
                 long count = a.get("count") == null ? 50 : ChatEntryView.toLong(a.get("count"));
-                host.showLines(h, from, from + Math.max(1, count) - 1);
+                host.showLines(h, fileOf(tool, h), from, from + Math.max(1, count) - 1);
             }
             case ChatEntryView.FIND_IN_LOG -> host.find(h, String.valueOf(a.get("query")));
             case ChatEntryView.OPEN_QUERY -> host.query(h, String.valueOf(a.get("sql")));
@@ -1486,7 +1514,11 @@ final class ChatPanel extends JPanel {
     // ---------------------------------------------------------------- for tests
 
     void linkForTest(String href) {
-        openLink(href);
+        openLink(null, href);
+    }
+
+    void linkForTest(ChatMessage from, String href) {
+        openLink(from, href);
     }
 
     void toolActionForTest(ChatMessage tool, String what) {

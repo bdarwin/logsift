@@ -342,8 +342,40 @@ final class JvmDialog extends JDialog {
         JLabel how = new JLabel("<html>Dumps are taken with jcmd (from the JDK folder, the PATH or the JVM's own JDK)."
                 + " Without a JDK, Logsift copies async-profiler to the server's /tmp and uses that.</html>");
         how.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
-        panel.add(how, BorderLayout.SOUTH);
+        JPanel south = new JPanel(new BorderLayout(0, 4));
+        south.add(how, BorderLayout.CENTER);
+        south.add(keepLink(), BorderLayout.SOUTH);
+        panel.add(south, BorderLayout.SOUTH);
         return panel;
+    }
+
+    /** Opens where JVMs are kept for the assistant and agents (JVM → JVM Connections…). */
+    private Runnable connections;
+    private final List<JLabel> keepLinks = new ArrayList<>();
+
+    void onConnections(Runnable r) {
+        connections = r;
+        keepLinks.forEach(l -> l.setVisible(r != null));
+    }
+
+    /** "Keep it for the assistant: JVM Connections…", shown once there's somewhere to open. */
+    private JLabel keepLink() {
+        JLabel l = new JLabel("<html>To let the assistant reach this JVM too, keep its address in "
+                + "<a href=''>JVM Connections…</a> (no password is kept).</html>");
+        l.setName("jvmConnections");
+        l.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        l.setBorder(BorderFactory.createEmptyBorder(8, 6, 0, 6));
+        l.setVisible(connections != null);
+        l.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (connections != null) {
+                    connections.run();
+                }
+            }
+        });
+        keepLinks.add(l);
+        return l;
     }
 
     void setSshForTest(String h, int port, String u, String pw) {
@@ -471,6 +503,7 @@ final class JvmDialog extends JDialog {
         panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
         panel.add(conn, BorderLayout.NORTH);
         panel.add(how, BorderLayout.CENTER);
+        panel.add(keepLink(), BorderLayout.SOUTH);
         return panel;
     }
 

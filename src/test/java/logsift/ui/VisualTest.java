@@ -3055,6 +3055,32 @@ class VisualTest {
         }, 20_000, "the file beside it, without asking");
         assertTrue(engine.results.get(engine.results.size() - 1).contains("log:"), engine.results.toString());
         assertFalse(onEdt(gate::isAsking));
+        // the assistant's logs gone (as when it's closed, or Logsift starts again), and this one never was in a
+        // tab: a link in the answer still opens the file, as the chat says it was ("That log isn't open any more")
+        String billingHandle = engine.results.get(engine.results.size() - 1).replaceAll("(?s)^(log:\\d+).*", "$1");
+        assertTrue(billingHandle.matches("log:\\d+"), billingHandle);
+        logsift.chat.ChatMessage billingAnswer = logsift.chat.ChatService.get().store()
+                .last(onEdt(chat::chatForTest).id(), 1).get(0);
+        Path billing2 = elsewhere.resolve("billing-2.log");
+        frame.chatWorkspaceForTest().forget(frame.chatWorkspaceForTest().logs().get(billingHandle).document());
+        assertNull(frame.chatWorkspaceForTest().shownPath(billingHandle));
+        onEdt(() -> {
+            chat.linkForTest(billingAnswer, "logsift:" + billingHandle + ":1");
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentTab() != null && frame.currentTab().path().equals(billing2)
+                        && frame.currentTab().chosenLines() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "billing-2.log at its line, its handle forgotten");
+        assertArrayEquals(new long[] {0, 0}, onEdt(() -> frame.currentTab().chosenLines()));
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(frame.currentTab()));
+            return null;
+        });
         // @ names a file: open logs first, then recent ones; the assistant is told which it is
         onEdt(() -> {
             chat.inputForTest().setText("");
@@ -9325,6 +9351,52 @@ class VisualTest {
                 c.entries().get(0).service().describe("app.log.1"));
         assertEquals(appLog, c.resolve("orders/app"));
         assertEquals(logs.resolve("gc.log"), c.resolve("orders/gc"));
+        // JVM → JVM Connections…: the same list, at the JVMs of the service that has some, in view
+        javax.swing.SwingUtilities.invokeLater(frame::openJvmConnections);
+        waitFor(() -> frame.lastLogLocationsForTest() != d && frame.lastLogLocationsForTest() != null
+                && frame.lastLogLocationsForTest().isShowing(), 10_000, "JVM Connections");
+        LogLocationsDialog j = frame.lastLogLocationsForTest();
+        waitFor(() -> {
+            try {
+                return onEdt(() -> j.jvmTableForTest().getSelectedRow() == 0);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "its JVMs chosen");
+        assertEquals(2, (int) onEdt(() -> j.jvmTableForTest().getRowCount()));
+        assertTrue(onEdt(() -> j.jvmTableForTest().getVisibleRect().height > 0), "scrolled to");
+        // a JVM with no folder of logs: a JMX port to fill in, its address being typed
+        javax.swing.JButton addJvm = (javax.swing.JButton) findNamed(j.getContentPane(), "addJvmService");
+        assertTrue(onEdt(() -> addJvm.isShowing() && addJvm.getWidth() > 0
+                && javax.swing.SwingUtilities.isDescendingFrom(addJvm, j)
+                && addJvm.getParent().getWidth() >= addJvm.getX() + addJvm.getWidth()), "Add JVM fits, in view");
+        onEdt(() -> {
+            j.addJvmOnly();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> j.jvmTableForTest().isEditing());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "its address being typed");
+        assertEquals(1, (int) onEdt(() -> j.jvmTableForTest().getRowCount()));
+        assertEquals("JMX port", onEdt(() -> j.jvmTableForTest().getValueAt(0, 1)));
+        onEdt(() -> {
+            j.jvmTableForTest().getCellEditor().cancelCellEditing();
+            j.jvmTableForTest().setValueAt("prod-9:9010", 0, 2);
+            return null;
+        });
+        settle();
+        shotOf(j.getRootPane(), "114b-jvm-connections");
+        onEdt(() -> {
+            j.closeForTest();
+            return null;
+        });
+        String withJvm = Files.readString(logsift.agent.LogCatalog.userFile(home));
+        assertTrue(withJvm.contains("\"jmx\": \"prod-9:9010\""), withJvm);
+        assertEquals(2, logsift.agent.LogCatalog.load(home, null, List.of()).entries().size(), "kept with no folder");
         // put back what other tests expect
         Files.deleteIfExists(logsift.agent.LogCatalog.userFile(home));
         logsift.agent.AgentSettings.DEFAULT.save(home);
