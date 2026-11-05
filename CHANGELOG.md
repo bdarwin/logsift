@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Claude Code can answer too:** **Settings → Assistant → Who answers** chooses GitHub Copilot or Claude Code (your own `claude`, signed in with your Claude subscription). Claude gets Logsift's tools only, served from inside the window on this computer, so they read what's open and ask first as they do for Copilot; what each answer cost is shown in dollars at API prices. Chats go on with the other assistant, told what was said.
 - **The assistant in a window of its own:** the button beside the gear in its header (and **Settings → Assistant**) now offers a window of its own as well as a tab or the side of the window, to put beside Logsift or on another screen. Its links show the lines in Logsift's window, ⌘I goes from one window to the other, and it opens again where you left it (beside Logsift's window if that screen is gone). In a narrow tab or window, the chats and skills fold away so the conversation keeps its room.
 - **Sign in to Copilot from Logsift:** not signed in, the assistant shows **Sign In to GitHub…**, which opens GitHub's page in your browser; when you're done there, the assistant is ready. No terminal needed.
 - **Charts, not text, in the assistant's answers:** asked to plot the heap, it drew a chart in text. Now, under its GC step, Logsift draws the heap chart itself (click a point for its line), with **Show GC Charts** for heap, pauses, allocation and time in GC in a tab; no tokens are spent on it.

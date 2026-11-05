@@ -79,4 +79,16 @@ class CopilotLocatorTest {
         assertTrue(CopilotLocator.version(Path.of("v22.22.3")) > CopilotLocator.version(Path.of("v22.9.10")));
         assertTrue(CopilotLocator.version(Path.of("v10.0.0")) > CopilotLocator.version(Path.of("v9.11.2")));
     }
+
+    @Test
+    void claudeIsLookedForWhereItsInstalled() throws Exception {
+        // its own installer puts it in ~/.local/bin (and once in ~/.claude/local)
+        var c = CopilotLocator.candidates("claude", null, dir, false, null, null);
+        assertTrue(c.contains(dir.resolve(".local/bin/claude")), c.toString());
+        assertTrue(c.contains(dir.resolve(".claude/local/claude")), c.toString());
+        var w = CopilotLocator.candidates("claude", null, dir, true, null, null);
+        assertTrue(w.contains(dir.resolve(".local").resolve("bin").resolve("claude.exe")), w.toString());
+        Path mine = program(dir.resolve(".local/bin"), "claude");
+        assertEquals(mine, CopilotLocator.find("claude", null, null, dir, false, null, null));
+    }
 }

@@ -2690,9 +2690,12 @@ class VisualTest {
         /** What the tools answered (calls the script makes on "please open …"). */
         final List<String> results = new java.util.concurrent.CopyOnWriteArrayList<>();
 
+        /** Which assistant it plays. */
+        volatile String name = "GitHub Copilot";
+
         @Override
         public String name() {
-            return "GitHub Copilot";
+            return name;
         }
 
         @Override
@@ -3424,7 +3427,12 @@ class VisualTest {
         // as Logsift starts: the assistant's tab in front, with questions to start with (for the services
         // described) and what can be set up; Settings → Assistant shows what it's told, part by part
         ScriptedAssistant engine = new ScriptedAssistant();
-        logsift.chat.ChatService.useFactory((settings, home) -> engine);
+        ScriptedAssistant claude = new ScriptedAssistant();
+        claude.name = "Claude Code";
+        claude.user = "Claude Max";
+        // the one chosen in Settings → Assistant → Who answers
+        logsift.chat.ChatService.useFactory((settings, home) ->
+                logsift.chat.ChatSettings.CLAUDE.equals(settings.engineOrDefault()) ? claude : engine);
         logsift.chat.ChatService svc = logsift.chat.ChatService.get();
         svc.saveOptions(logsift.chat.ChatInstructions.Options.DEFAULT);
         Path userList = logsift.agent.LogCatalog.userFile(AppState.home());
@@ -3712,6 +3720,41 @@ class VisualTest {
             String now = logsift.chat.ChatInstructions.text(svc.options(), w.assistantCatalog());
             assertFalse(now.contains("### Investigate a problem"), "left out");
             assertTrue(now.endsWith("Answer in short bullets."), "the person's own words last");
+            // who answers: Copilot, or Claude Code; the open chat connects again to the one chosen
+            logsift.chat.ChatSettings had = svc.settings();
+            assertTrue(onEdt(() -> ap.copilotForTest().isSelected()));
+            onEdt(() -> {
+                ap.claudeForTest().doClick();
+                return null;
+            });
+            assertEquals(logsift.chat.ChatSettings.CLAUDE, svc.settings().engineOrDefault());
+            assertEquals(logsift.chat.ChatSettings.CLAUDE, logsift.chat.ChatSettings.load(svc.home()).engineOrDefault(),
+                    "kept");
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> chat.statusForTest().equals("Claude Code · Claude Max"));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "the chat on Claude Code");
+            onEdt(() -> {
+                ap.claudeForTest().scrollRectToVisible(new java.awt.Rectangle(0, -40, 10, 10));
+                return null;
+            });
+            settle();
+            shotOf(sd.getRootPane(), "131e-settings-who-answers");
+            onEdt(() -> {
+                ap.copilotForTest().doClick();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> chat.statusForTest().equals("GitHub Copilot · tester"));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "back on Copilot");
+            svc.saveSettings(had);
             settle();
             shotOf(sd.getRootPane(), "131b-settings-assistant");
             onEdt(() -> {

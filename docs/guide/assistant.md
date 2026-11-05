@@ -1,7 +1,7 @@
 ---
 layout: guide
 title: Assistant
-description: Ask GitHub Copilot about your logs beside them, in Logsift's window. It reads them with Logsift's tools, cites lines you can click, shows what each answer cost, and keeps every chat.
+description: Ask GitHub Copilot or Claude Code about your logs beside them, in Logsift's window. It reads them with Logsift's tools, cites lines you can click, shows what each answer cost, and keeps every chat.
 ---
 
 # Assistant
@@ -14,9 +14,13 @@ Logsift opens the assistant when it starts, in a tab of its own. **View → Assi
 
 ## What you need
 
-- **GitHub Copilot**, installed: `npm install -g @github/copilot`. Your Copilot subscription pays for the answers.
-- **Signed in to GitHub.** Not signed in yet, the assistant shows **Sign In to GitHub…**: GitHub's page opens in your browser, you sign in and authorize GitHub Copilot there, and the assistant is ready as soon as you're done (**Copy Link** if you'd rather use another browser; **Cancel** stops it). Copilot keeps the sign-in where `copilot`'s own `/login` does, so signing in once in a terminal works too. Logsift finds the program where npm, Homebrew, nvm or WinGet put it; elsewhere, choose it with **Choose Copilot Program…**.
-- Nothing else. Copilot starts the first time you look at the assistant, never before: a tab in the background costs nothing.
+One of these, chosen in **Settings → Assistant → Who answers** (GitHub Copilot unless you choose Claude Code):
+
+- **GitHub Copilot**, installed: `npm install -g @github/copilot`. Your Copilot subscription pays for the answers. Not signed in yet, the assistant shows **Sign In to GitHub…**: GitHub's page opens in your browser, you sign in and authorize GitHub Copilot there, and the assistant is ready as soon as you're done (**Copy Link** if you'd rather use another browser; **Cancel** stops it). Copilot keeps the sign-in where `copilot`'s own `/login` does, so signing in once in a terminal works too. Logsift finds the program where npm, Homebrew, nvm or WinGet put it; elsewhere, choose it with **Choose Copilot Program…**.
+- **Claude Code**, installed and signed in: install it from [claude.com/claude-code](https://claude.com/claude-code), then run `claude auth login` once in a terminal. Your Claude subscription (or Anthropic Console account) pays for the answers. Logsift finds `claude` where its installer, npm or Homebrew put it; elsewhere, choose it with **Choose Claude Program…**. It gets Logsift's tools and nothing else: no files, shell or web of its own, none of your Claude Code settings, MCP servers, skills or commands. Logsift's tools reach it from inside the window, on this computer only, so they read what the window has open and ask you first as they do for Copilot.
+- Nothing else. The assistant starts the first time you look at it, never before: a tab in the background costs nothing.
+
+Switching from one to the other keeps your chats: a chat started with one goes on with the other, told what was said.
 
 ## Where it opens
 
@@ -78,6 +82,8 @@ The assistant doesn't draw charts in text. When it explains a GC log (**analyze_
 The list at the bottom has the models your Copilot account offers, each with its price in AI credits per million tokens read · written. A model your organization turned off is greyed. Models that can think harder have a second list (*low*, *medium*, *high*…): harder is slower and costs more. Your choice is kept for new chats; changing it mid-chat applies from the next question.
 
 The header shows what this chat cost and how much of your premium requests is left. Click it for the details: premium requests used and when they start again, this chat, today, and this month by model.
+
+With **Claude Code**, the list has Claude Haiku, Sonnet and Opus (each the latest), and the thinking levels *low* to *max*. What each answer cost is shown in dollars at API prices, as Claude Code reports it: on a Claude subscription you aren't charged that, but it says how much was read and written, and it counts toward your plan's usage limits. Totals keep AI credits and dollars apart.
 
 ## Every chat is kept
 

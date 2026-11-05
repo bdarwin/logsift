@@ -63,6 +63,11 @@ public interface ChatEngine extends AutoCloseable {
         void close();
     }
 
+    /** How to sign in when no one is, for people. */
+    default String signInHint() {
+        return "Sign in, then try again.";
+    }
+
     /**
      * A model.
      *

@@ -171,7 +171,7 @@ public final class ChatSession implements AutoCloseable {
             // the assistant no longer has it: a new conversation, told what was said
             c = engine.open(new ChatEngine.Setup(model, effort, instructions + recap(), tools, null), this::on);
             ChatMessage n = store.append(ChatMessage.note(chat.id(),
-                    "Copilot no longer had this chat, so it was started again with what was said before."));
+                    engine.name() + " no longer had this chat, so it was started again with what was said before."));
             view.changed(n, true);
         }
         store.setSession(chat.id(), c.id());

@@ -67,7 +67,7 @@ In `~/.logsift` (your home folder):
 | `heap-index/` | Indexes of big heap dumps, removed when their tab closes |
 | `agent.properties` | Settings → Agents: what is masked, which folders agents may read |
 | `agent.log` | Each call coding agents and the assistant made (never the answers) |
-| `chat/` | The [assistant](assistant.md)'s chats (`chats.duckdb`), its settings (model, the copilot program: `settings.properties`; where it opens and what it's told: `assistant.properties`), and your own instructions for it (`instructions.md`). Copilot keeps its own sessions in `~/.copilot` |
+| `chat/` | The [assistant](assistant.md)'s chats (`chats.duckdb`), its settings (who answers, model, the copilot and claude programs: `settings.properties`; where it opens and what it's told: `assistant.properties`), and your own instructions for it (`instructions.md`). Copilot keeps its own sessions in `~/.copilot`, Claude Code in `~/.claude`; `chat/claude-work` is the folder Claude Code works in |
 | `logs.json` | Log Locations for Agents: your services, their log folders and what each file holds |
 | `crash.properties` | Settings → Crash Dumps: PDB folders, and whether Windows' names may be downloaded |
 | `symbols/` | PDBs of Windows' own files, when you let Logsift download them |
@@ -95,4 +95,4 @@ How to let a coding agent such as GitHub Copilot ask Logsift about your logs, wh
 
 ## Assistant
 
-Where the [assistant](assistant.md) opens (in a tab of its own, at the side of the window, or in a window of its own), whether it opens when Logsift starts, and what it's told before the first question: Logsift's instructions, where your logs are, the step-by-step plans, the date and time, and your own instructions. Each part shows about how many tokens it costs with each question, and its words. See [What it's told](assistant.md#what-its-told).
+Who answers (GitHub Copilot or Claude Code, each your own program and sign-in), where the [assistant](assistant.md) opens (in a tab of its own, at the side of the window, or in a window of its own), whether it opens when Logsift starts, and what it's told before the first question: Logsift's instructions, where your logs are, the step-by-step plans, the date and time, and your own instructions. Each part shows about how many tokens it costs with each question, and its words. See [What it's told](assistant.md#what-its-told).

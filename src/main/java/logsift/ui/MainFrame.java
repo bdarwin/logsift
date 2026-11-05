@@ -3006,7 +3006,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         askButton.putClientProperty("JButton.buttonType", "borderless");
         askButton.setFocusable(false);
         askButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
-        askButton.setToolTipText("Ask GitHub Copilot about the open logs (" + (isMac() ? "⌘I" : "Ctrl+I") + ")");
+        askButton.setToolTipText("Ask the assistant about the open logs (" + (isMac() ? "⌘I" : "Ctrl+I") + ")");
         askButton.addActionListener(e -> toggleChat());
         buttons.add(askButton);
         right.add(buttons, BorderLayout.WEST);
@@ -3115,7 +3115,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             removeChatSplit();
             if (tabs.indexOfComponent(chatPanel) < 0) {
                 tabs.insertTab("Assistant", Icons.of("sparkles"), chatPanel,
-                        "Beta: GitHub Copilot, with Logsift's tools (" + (isMac() ? "⌘I" : "Ctrl+I") + ")", 0);
+                        "Beta: GitHub Copilot or Claude Code, with Logsift's tools (" + (isMac() ? "⌘I" : "Ctrl+I") + ")", 0);
                 updateEmptyState();
             }
             if (select) {
@@ -3297,7 +3297,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             Path home = logsift.core.CacheSettings.home();
             chatWorkspace = new logsift.agent.Workspace(logsift.agent.mcp.McpMain.options(new String[0], home,
                     Path.of(System.getProperty("user.home"))));
-            chatWorkspace.setClient("Logsift assistant (GitHub Copilot)");
+            chatWorkspace.setClient("Logsift assistant");
             chatWorkspace.setCatalog(this::assistantCatalog);
             chatWorkspace.setJvms(windowJvms(chatWorkspace));
         }
