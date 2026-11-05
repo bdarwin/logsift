@@ -2682,6 +2682,11 @@ class VisualTest {
         return counts;
     }
 
+    /** A JSON string, as an assistant sends it: a Windows path's backslashes escaped. */
+    static String jsonString(String s) {
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
     /** An assistant that answers by a script: Logsift's real tools on the log, then words with line links. */
     private static final class ScriptedAssistant implements logsift.chat.ChatEngine {
         final List<String> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -2776,7 +2781,7 @@ class VisualTest {
                         String path = gc.group(1);
                         new Thread(() -> {
                             try {
-                                l.on(new logsift.chat.ChatEvent.ToolStarted("g1", "analyze_gc", "{\"log\": \"" + path + "\"}"));
+                                l.on(new logsift.chat.ChatEvent.ToolStarted("g1", "analyze_gc", "{\"log\": " + jsonString(path) + "}"));
                                 var t = setup.tools().stream().filter(x -> x.name().equals("analyze_gc")).findFirst().orElseThrow();
                                 var r = t.handler().call("g1", Map.of("log", path));
                                 results.add(r.text());
@@ -2795,7 +2800,7 @@ class VisualTest {
                         String path = open.group(1);
                         new Thread(() -> {
                             try {
-                                l.on(new logsift.chat.ChatEvent.ToolStarted("o1", "open_log", "{\"path\": \"" + path + "\"}"));
+                                l.on(new logsift.chat.ChatEvent.ToolStarted("o1", "open_log", "{\"path\": " + jsonString(path) + "}"));
                                 var t = setup.tools().stream().filter(x -> x.name().equals("open_log")).findFirst().orElseThrow();
                                 var r = t.handler().call("o1", Map.of("path", path));
                                 results.add(r.text());
@@ -9686,7 +9691,9 @@ class VisualTest {
         assertEquals(1, (int) onEdt(() -> j.jvmTableForTest().getRowCount()));
         assertEquals("JMX port", onEdt(() -> j.jvmTableForTest().getValueAt(0, 1)));
         onEdt(() -> {
-            j.jvmTableForTest().getCellEditor().cancelCellEditing();
+            if (j.jvmTableForTest().isEditing()) { // a virtual display may have ended it, focus gone
+                j.jvmTableForTest().getCellEditor().cancelCellEditing();
+            }
             j.jvmTableForTest().setValueAt("prod-9:9010", 0, 2);
             return null;
         });
