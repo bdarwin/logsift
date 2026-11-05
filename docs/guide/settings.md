@@ -95,4 +95,4 @@ How to let a coding agent such as GitHub Copilot ask Logsift about your logs, wh
 
 ## Assistant
 
-Where the [assistant](assistant.md) opens (in a tab of its own, or at the side of the window), whether it opens when Logsift starts, and what it's told before the first question: Logsift's instructions, where your logs are, the step-by-step plans, the date and time, and your own instructions. Each part shows about how many tokens it costs with each question, and its words. See [What it's told](assistant.md#what-its-told).
+Where the [assistant](assistant.md) opens (in a tab of its own, at the side of the window, or in a window of its own), whether it opens when Logsift starts, and what it's told before the first question: Logsift's instructions, where your logs are, the step-by-step plans, the date and time, and your own instructions. Each part shows about how many tokens it costs with each question, and its words. See [What it's told](assistant.md#what-its-told).

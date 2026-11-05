@@ -34,6 +34,7 @@ final class AssistantPanel extends JPanel {
     private final Runnable placed;
     private final JRadioButton inTab = new JRadioButton("In a tab of its own, beside the logs' tabs");
     private final JRadioButton beside = new JRadioButton("At the side of the window, next to the log shown");
+    private final JRadioButton window = new JRadioButton("In a window of its own, to put beside Logsift or on another screen");
     private final JCheckBox atStart = new JCheckBox("Open the assistant when Logsift starts");
     private final JCheckBox askFiles = new JCheckBox("Ask me before it opens other files or folders");
     private final JTextArea own = new JTextArea(3, 40);
@@ -78,12 +79,14 @@ final class AssistantPanel extends JPanel {
         ButtonGroup g = new ButtonGroup();
         g.add(inTab);
         g.add(beside);
-        for (JComponent c : List.of(inTab, beside, atStart)) {
+        g.add(window);
+        for (JComponent c : List.of(inTab, beside, window, atStart)) {
             c.setAlignmentX(LEFT_ALIGNMENT);
             p.add(c);
         }
         inTab.setName("assistantInTab");
         beside.setName("assistantBeside");
+        window.setName("assistantWindow");
         atStart.setName("assistantAtStart");
         atStart.setToolTipText("It connects to Copilot when you first look at it, so an unseen tab costs nothing");
         inTab.addActionListener(e -> {
@@ -91,6 +94,10 @@ final class AssistantPanel extends JPanel {
             placed.run();
         });
         beside.addActionListener(e -> {
+            save();
+            placed.run();
+        });
+        window.addActionListener(e -> {
             save();
             placed.run();
         });
@@ -185,8 +192,9 @@ final class AssistantPanel extends JPanel {
     private void load() {
         loading = true;
         ChatInstructions.Options o = service.options();
-        inTab.setSelected(o.inTab());
-        beside.setSelected(!o.inTab());
+        inTab.setSelected(o.where() == ChatInstructions.Where.TAB);
+        beside.setSelected(o.where() == ChatInstructions.Where.SIDE);
+        window.setSelected(o.where() == ChatInstructions.Where.WINDOW);
         atStart.setSelected(o.atStart());
         askFiles.setSelected(o.askFiles());
         own.setText(o.own());
@@ -252,7 +260,9 @@ final class AssistantPanel extends JPanel {
         if (loading) {
             return;
         }
-        ChatInstructions.Options o = service.options().withInTab(inTab.isSelected()).withAtStart(atStart.isSelected())
+        ChatInstructions.Options o = service.options()
+                .withWhere(window.isSelected() ? ChatInstructions.Where.WINDOW
+                        : beside.isSelected() ? ChatInstructions.Where.SIDE : ChatInstructions.Where.TAB).withAtStart(atStart.isSelected())
                 .withAskFiles(askFiles.isSelected()).withOwn(own.getText());
         for (JCheckBox b : boxes) {
             switch (b.getName()) {
@@ -366,6 +376,10 @@ final class AssistantPanel extends JPanel {
 
     JTextArea ownForTest() {
         return own;
+    }
+
+    JRadioButton windowForTest() {
+        return window;
     }
 
     JRadioButton inTabForTest() {

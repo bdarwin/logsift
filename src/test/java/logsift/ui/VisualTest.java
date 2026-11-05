@@ -3619,6 +3619,76 @@ class VisualTest {
             });
             assertTrue(onEdt(() -> w.tabsForTest().indexOfComponent(chat) >= 0), "a tab again");
 
+            // pulled out into a window of its own: the whole chat, with its chats and skills
+            onEdt(() -> {
+                javax.swing.JPopupMenu m = chat.moveMenu();
+                assertTrue(((javax.swing.JCheckBoxMenuItem) m.getComponent(0)).isSelected(), "in a tab now");
+                assertEquals("In Its Own Window", ((javax.swing.JMenuItem) m.getComponent(2)).getText());
+                ((javax.swing.JMenuItem) m.getComponent(2)).doClick();
+                return null;
+            });
+            assertEquals(logsift.chat.ChatInstructions.Where.WINDOW, svc.options().where(), "remembered");
+            ChatWindow cw = onEdt(w::chatWindowForTest);
+            assertNotNull(cw);
+            waitFor(() -> cw.isShowing() && chat.isShowing(), 10_000, "the assistant's window");
+            assertTrue(onEdt(() -> w.tabsForTest().indexOfComponent(chat) < 0), "no tab");
+            assertSame(cw, onEdt(() -> javax.swing.SwingUtilities.getWindowAncestor(chat)));
+            assertTrue(onEdt(chat::sidebarShownForTest), "room for the chats in a window");
+            java.awt.Rectangle placed = onEdt(cw::getBounds);
+            assertTrue(onEdt(() -> ChatWindow.screens().stream().anyMatch(sc -> sc.intersects(placed))), "on a screen");
+            // its line links show the lines in the logs' window
+            onEdt(() -> {
+                chat.linkForTest("logsift:" + context.replaceAll("(?s).*Shown: (log:\\d+).*", "$1") + ":2");
+                return null;
+            });
+            assertSame(tab, onEdt(() -> w.tabsForTest().getSelectedComponent()));
+            assertArrayEquals(new long[] {1, 1}, onEdt(tab::chosenLines));
+            // made narrow, the chat has the window to itself; wide, the skills are at the right too
+            onEdt(() -> {
+                cw.setBounds(placed.x + 20, placed.y + 10, 640, 600);
+                return null;
+            });
+            waitFor(() -> !chat.sidebarShownForTest() && !chat.skillsShownForTest(), 10_000, "narrow: the chat alone");
+            settle();
+            shotOf(cw.getRootPane(), "131e-assistant-window-narrow");
+            onEdt(() -> {
+                cw.setBounds(placed.x, placed.y, 1080, 720);
+                return null;
+            });
+            waitFor(() -> chat.sidebarShownForTest() && chat.skillsShownForTest(), 10_000, "wide: chats and skills");
+            settle();
+            shotOf(cw.getRootPane(), "131e-assistant-window");
+            onEdt(() -> {
+                cw.setBounds(placed.x + 20, placed.y + 10, 640, 600);
+                return null;
+            });
+            settle();
+            // its close box hides it; ⌘I brings it back where it was
+            onEdt(() -> {
+                cw.dispatchEvent(new java.awt.event.WindowEvent(cw, java.awt.event.WindowEvent.WINDOW_CLOSING));
+                return null;
+            });
+            assertNull(onEdt(w::chatWindowForTest));
+            assertFalse(onEdt(chat::isShowing), "hidden");
+            assertFalse(onEdt(cw::isDisplayable), "the window is gone");
+            onEdt(() -> {
+                w.toggleChat();
+                return null;
+            });
+            ChatWindow again = onEdt(w::chatWindowForTest);
+            assertNotNull(again);
+            waitFor(again::isShowing, 10_000, "the window again");
+            java.awt.Rectangle back = onEdt(again::getBounds);
+            assertEquals(new java.awt.Rectangle(placed.x + 20, placed.y + 10, 640, 600), back, "where it was put");
+            // and into its tab again
+            onEdt(() -> {
+                w.moveChat(logsift.chat.ChatInstructions.Where.TAB);
+                return null;
+            });
+            assertNull(onEdt(w::chatWindowForTest));
+            assertFalse(onEdt(again::isDisplayable));
+            assertTrue(onEdt(() -> w.tabsForTest().indexOfComponent(chat) >= 0), "a tab again");
+
             // Settings → Assistant: what it's told, part by part
             SettingsDialog before = SettingsDialog.lastForTest();
             javax.swing.SwingUtilities.invokeLater(() -> w.showSettings(SettingsDialog.ASSISTANT));
@@ -3627,6 +3697,7 @@ class VisualTest {
             SettingsDialog sd = SettingsDialog.lastForTest();
             AssistantPanel ap = sd.assistant();
             assertTrue(onEdt(() -> ap.inTabForTest().isSelected() && ap.atStartForTest().isSelected()));
+            assertFalse(onEdt(() -> ap.windowForTest().isSelected()));
             assertTrue(onEdt(() -> ap.partForTest("locations").isSelected() && ap.partForTest("plans").isSelected()
                     && ap.partForTest("now").isSelected()));
             assertFalse(onEdt(() -> ap.partForTest("logsift").isEnabled()), "Logsift's own is always told");

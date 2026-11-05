@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The assistant in a window of its own:** the button beside the gear in its header (and **Settings → Assistant**) now offers a window of its own as well as a tab or the side of the window, to put beside Logsift or on another screen. Its links show the lines in Logsift's window, ⌘I goes from one window to the other, and it opens again where you left it (beside Logsift's window if that screen is gone). In a narrow tab or window, the chats and skills fold away so the conversation keeps its room.
 - **Sign in to Copilot from Logsift:** not signed in, the assistant shows **Sign In to GitHub…**, which opens GitHub's page in your browser; when you're done there, the assistant is ready. No terminal needed.
 - **Charts, not text, in the assistant's answers:** asked to plot the heap, it drew a chart in text. Now, under its GC step, Logsift draws the heap chart itself (click a point for its line), with **Show GC Charts** for heap, pauses, allocation and time in GC in a tab; no tokens are spent on it.
 - **JVM connections are easy to find:** **JVM → JVM Connections (SSH, JMX)…** opens where the assistant's JVMs are kept, at the JVMs of the shown log's service; **Add JVM** keeps one with no folder of logs (a JMX port or SSH); the Attach dialog's SSH and JMX tabs link there.

@@ -20,7 +20,13 @@ Logsift opens the assistant when it starts, in a tab of its own. **View → Assi
 
 ## Where it opens
 
-In a tab of its own, beside the logs' tabs, or at the side of the window next to the log shown: the button beside the gear in the chat's header moves it, and Logsift remembers where. In its tab, it asks about the log you looked at last, so **Ask the Assistant About This Line** and the chips work as they do beside it, and a line link takes you to the log.
+In a tab of its own, beside the logs' tabs; at the side of the window next to the log shown; or in a window of its own, to put beside Logsift or on another screen. The button beside the gear in the chat's header lists the three and moves it, and Logsift remembers where. In its tab or its window, it asks about the log you looked at last, so **Ask the Assistant About This Line** and the chips work as they do beside it, and a line link takes you to the log.
+
+**In its own window:** a line link, **Show these lines**, **Find in the log** and **Open in Query** bring Logsift's window forward at the log. **⌘I** (Ctrl+I) goes from either window to the other. Closing the assistant's window hides the assistant, as closing its tab does; ⌘I opens it again where you left it. If that screen isn't there any more (a laptop away from its monitor), it opens beside Logsift's window instead.
+
+When the tab or the window is narrow, the chats at the left and the skills at the right fold away and the conversation has the room; **Chats** (the clock button) lists the chats then.
+
+![The assistant in a window of its own: chats at the left, skills at the right](../screenshots/assistant-window.png)
 
 In its tab there's room for more: your **chats** at the left, as in other chat apps (*Today*, *Yesterday*, *Previous 7 days*…, the one open marked, with **New Chat** and a search at the top), and its **skills** at the right. The conversation takes the room between them. Each folds to a narrow strip with the button at its top (and opens again from the strip, or the clock and book buttons in the header). The question box takes the whole width; drag the handle on its top edge to make it taller or shorter, and Logsift keeps that height.
 

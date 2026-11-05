@@ -25,11 +25,37 @@ import logsift.agent.Skill;
 public final class ChatInstructions {
     private ChatInstructions() {}
 
+    /** Where the assistant opens. */
+    public enum Where {
+        TAB("tab"), SIDE("side"), WINDOW("window");
+
+        private final String key;
+
+        Where(String key) {
+            this.key = key;
+        }
+
+        /** As saved in {@code assistant.properties}. */
+        public String key() {
+            return key;
+        }
+
+        /** The place saved, or a tab when it's missing or unknown. */
+        public static Where of(String key) {
+            for (Where w : values()) {
+                if (w.key.equals(key)) {
+                    return w;
+                }
+            }
+            return TAB;
+        }
+    }
+
     /**
      * The assistant's options, in Logsift's folder ({@code chat/assistant.properties}, and the
      * person's own instructions in {@code chat/instructions.md}).
      *
-     * @param inTab     the chat opens as a tab (else beside the logs)
+     * @param where     where the chat opens: a tab of its own, beside the logs, or its own window
      * @param atStart   it opens when Logsift starts
      * @param locations it's told where the person's logs are (services, folders, time zones, notes)
      * @param plans     it's given the step-by-step plans
@@ -38,16 +64,22 @@ public final class ChatInstructions {
      * @param askFiles  it asks before it opens a file or folder the person didn't open or name
      *                  (reading what wasn't asked about is where answers get expensive)
      */
-    public record Options(boolean inTab, boolean atStart, boolean locations, boolean plans, boolean now, String own,
+    public record Options(Where where, boolean atStart, boolean locations, boolean plans, boolean now, String own,
                           boolean askFiles) {
-        public static final Options DEFAULT = new Options(true, true, true, true, true, "", true);
+        public static final Options DEFAULT = new Options(Where.TAB, true, true, true, true, "", true);
 
         public Options {
             own = own == null ? "" : own.strip();
+            where = where == null ? Where.TAB : where;
         }
 
         public Options(boolean inTab, boolean atStart, boolean locations, boolean plans, boolean now, String own) {
-            this(inTab, atStart, locations, plans, now, own, true);
+            this(inTab ? Where.TAB : Where.SIDE, atStart, locations, plans, now, own, true);
+        }
+
+        /** In a tab of its own. */
+        public boolean inTab() {
+            return where == Where.TAB;
         }
 
         static Path file(Path home) {
@@ -77,7 +109,7 @@ public final class ChatInstructions {
             } catch (IOException e) {
                 own = "";
             }
-            return new Options(!"side".equals(p.getProperty("where")), on(p, "atStart"), on(p, "locations"),
+            return new Options(Where.of(p.getProperty("where")), on(p, "atStart"), on(p, "locations"),
                     on(p, "plans"), on(p, "now"), own, on(p, "askFiles"));
         }
 
@@ -87,7 +119,7 @@ public final class ChatInstructions {
 
         public void save(Path home) throws IOException {
             Properties p = new Properties();
-            p.setProperty("where", inTab ? "tab" : "side");
+            p.setProperty("where", where.key());
             p.setProperty("atStart", String.valueOf(atStart));
             p.setProperty("locations", String.valueOf(locations));
             p.setProperty("plans", String.valueOf(plans));
@@ -107,31 +139,35 @@ public final class ChatInstructions {
         }
 
         public Options withInTab(boolean v) {
+            return withWhere(v ? Where.TAB : Where.SIDE);
+        }
+
+        public Options withWhere(Where v) {
             return new Options(v, atStart, locations, plans, now, own, askFiles);
         }
 
         public Options withAtStart(boolean v) {
-            return new Options(inTab, v, locations, plans, now, own, askFiles);
+            return new Options(where, v, locations, plans, now, own, askFiles);
         }
 
         public Options withLocations(boolean v) {
-            return new Options(inTab, atStart, v, plans, now, own, askFiles);
+            return new Options(where, atStart, v, plans, now, own, askFiles);
         }
 
         public Options withPlans(boolean v) {
-            return new Options(inTab, atStart, locations, v, now, own, askFiles);
+            return new Options(where, atStart, locations, v, now, own, askFiles);
         }
 
         public Options withNow(boolean v) {
-            return new Options(inTab, atStart, locations, plans, v, own, askFiles);
+            return new Options(where, atStart, locations, plans, v, own, askFiles);
         }
 
         public Options withAskFiles(boolean v) {
-            return new Options(inTab, atStart, locations, plans, now, own, v);
+            return new Options(where, atStart, locations, plans, now, own, v);
         }
 
         public Options withOwn(String v) {
-            return new Options(inTab, atStart, locations, plans, now, v, askFiles);
+            return new Options(where, atStart, locations, plans, now, v, askFiles);
         }
     }
 

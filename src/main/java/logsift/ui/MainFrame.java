@@ -3037,6 +3037,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private final JPanel mainArea = new JPanel(new BorderLayout());
     private ChatPanel chatPanel;
     private javax.swing.JSplitPane chatSplit;
+    private ChatWindow chatWindow;
     private logsift.agent.Workspace chatWorkspace;
     private static final java.util.prefs.Preferences CHAT_PREFS = PREFS.node("chat");
 
@@ -3052,8 +3053,17 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return lastLogTab != null && tabs.indexOfComponent(lastLogTab) >= 0 ? lastLogTab : null;
     }
 
+    private logsift.chat.ChatInstructions.Where chatWhere() {
+        return logsift.chat.ChatService.get().options().where();
+    }
+
     private boolean chatInTab() {
-        return logsift.chat.ChatService.get().options().inTab();
+        return chatWhere() == logsift.chat.ChatInstructions.Where.TAB;
+    }
+
+    /** The assistant's own window, when it's in one and open. */
+    ChatWindow chatWindowForTest() {
+        return chatWindow;
     }
 
     /** Whether the assistant is in view: its tab in front, or beside the logs. */
@@ -3063,6 +3073,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** ⌘I: shows the assistant; again, back to the log (its tab) or hides it (beside the logs). */
     void toggleChat() {
+        if (chatWindow != null && chatWindow.isVisible()) {
+            if (chatWindow.isActive()) {
+                backToLogs(); // the window stays open behind
+            } else {
+                showChat();
+            }
+            return;
+        }
         if (chatShown()) {
             if (tabs.indexOfComponent(chatPanel) >= 0) {
                 LogTab back = shownLogTab();
@@ -3089,7 +3107,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         if (chatPanel == null) {
             chatPanel = new ChatPanel(chatHost(), logsift.chat.ChatService.get());
         }
-        if (chatInTab()) {
+        logsift.chat.ChatInstructions.Where where = chatWhere();
+        if (where != logsift.chat.ChatInstructions.Where.WINDOW) {
+            closeChatWindow();
+        }
+        if (where == logsift.chat.ChatInstructions.Where.TAB) {
             removeChatSplit();
             if (tabs.indexOfComponent(chatPanel) < 0) {
                 tabs.insertTab("Assistant", Icons.of("sparkles"), chatPanel,
@@ -3104,7 +3126,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 tabs.remove(chatPanel);
                 updateEmptyState();
             }
-            showChatBeside();
+            if (where == logsift.chat.ChatInstructions.Where.WINDOW) {
+                removeChatSplit();
+                showChatWindow(select);
+            } else {
+                showChatBeside();
+            }
         }
         chatPanel.placed();
         if (select) {
@@ -3133,8 +3160,54 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    /** The assistant in a window of its own, where it was last (on a screen there is). */
+    private void showChatWindow(boolean front) {
+        if (chatWindow == null) {
+            chatWindow = new ChatWindow(chatPanel, this, CHAT_PREFS, this::backToLogs, this::hideChat);
+        }
+        if (!chatWindow.isVisible()) {
+            chatWindow.setVisible(true);
+        }
+        if (front) {
+            chatWindow.toFront();
+        } else {
+            toFront(); // opened with Logsift: the logs stay in front
+        }
+    }
+
+    private boolean closeChatWindow() {
+        if (chatWindow == null) {
+            return false;
+        }
+        ChatWindow w = chatWindow;
+        chatWindow = null;
+        w.getContentPane().remove(chatPanel);
+        w.dispose();
+        return true;
+    }
+
+    /** From the assistant's window to the logs: this window in front, at the log shown. */
+    private void backToLogs() {
+        toFront();
+        requestFocus();
+        LogTab t = shownLogTab();
+        if (t != null) {
+            t.mainView().requestFocusInWindow();
+        }
+    }
+
+    /** Before the assistant shows something in the logs: from its window, this one comes forward. */
+    private void logsFront() {
+        if (chatWindow != null && chatWindow.isVisible()) {
+            toFront();
+        }
+    }
+
     /** Hides the assistant (its tab closes; the chat is kept for next time). */
     void hideChat() {
+        if (closeChatWindow()) {
+            toFront();
+        }
         if (chatPanel != null && tabs.indexOfComponent(chatPanel) >= 0) {
             tabs.remove(chatPanel);
             updateEmptyState();
@@ -3162,14 +3235,20 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Moves the assistant between its own tab and the side of the window, and remembers where. */
     void moveChat() {
+        moveChat(chatInTab() ? logsift.chat.ChatInstructions.Where.SIDE : logsift.chat.ChatInstructions.Where.TAB);
+    }
+
+    /** Moves the assistant to a tab of its own, beside the logs or its own window, and remembers where. */
+    void moveChat(logsift.chat.ChatInstructions.Where to) {
         var service = logsift.chat.ChatService.get();
-        service.saveOptions(service.options().withInTab(!service.options().inTab()));
+        service.saveOptions(service.options().withWhere(to));
         assistantPlaced();
     }
 
     /** Settings changed where the assistant opens: if it's open, it goes there. */
     void assistantPlaced() {
-        if (chatPanel != null && (tabs.indexOfComponent(chatPanel) >= 0 || chatSplit != null)) {
+        if (chatPanel != null && (tabs.indexOfComponent(chatPanel) >= 0 || chatSplit != null
+                || chatWindow != null && chatWindow.isVisible())) {
             showChat();
         }
     }
@@ -3202,6 +3281,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     private void closeChat() {
+        closeChatWindow();
         if (chatPanel != null) {
             chatPanel.close();
         }
@@ -3333,6 +3413,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
             @Override
             public void showLines(String handle, String file, long from, long to) {
+                logsFront();
                 if (file != null) {
                     // the file the chat says it was: its tab, else opened again (a file in a zip too)
                     for (LogTab t : allTabs()) {
@@ -3356,6 +3437,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
             @Override
             public void gcCharts(String handle, String file) {
+                logsFront();
                 if (file != null) {
                     for (LogTab t : allTabs()) {
                         if (t.path() != null && (t.path().toString().equals(file) || file.equals(t.remoteLabel()))) {
@@ -3384,6 +3466,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
             @Override
             public void showLines(String handle, long from, long to) {
+                logsFront();
                 LogTab t = tabOf(handle);
                 if (t != null) {
                     tabs.setSelectedComponent(t);
@@ -3404,6 +3487,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
             @Override
             public void openFile(Path file, long line) {
+                logsFront();
                 MainFrame.this.openFile(file, null, t -> {
                     tabs.setSelectedComponent(t);
                     if (line > 0) {
@@ -3414,6 +3498,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
             @Override
             public void find(String handle, String text) {
+                logsFront();
                 LogTab t = tabOf(handle);
                 if (t != null) {
                     tabs.setSelectedComponent(t);
@@ -3423,6 +3508,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
             @Override
             public void query(String handle, String sql) {
+                logsFront();
                 LogTab t = tabOf(handle);
                 if (t != null) {
                     tabs.setSelectedComponent(t);
@@ -3447,13 +3533,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
 
             @Override
-            public boolean inTab() {
-                return chatInTab();
+            public logsift.chat.ChatInstructions.Where where() {
+                return chatWhere();
             }
 
             @Override
-            public void moveChat() {
-                MainFrame.this.moveChat();
+            public void moveChat(logsift.chat.ChatInstructions.Where to) {
+                MainFrame.this.moveChat(to);
             }
 
             @Override
@@ -3463,6 +3549,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
             @Override
             public void openLocations() {
+                logsFront();
                 LogTab t = shownLogTab();
                 openLogLocations(t == null ? null : t.path());
             }

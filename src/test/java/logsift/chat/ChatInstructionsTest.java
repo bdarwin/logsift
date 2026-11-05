@@ -80,6 +80,19 @@ class ChatInstructionsTest {
     }
 
     @Test
+    void itOpensWhereItWasPut(@TempDir Path home) throws Exception {
+        for (ChatInstructions.Where w : ChatInstructions.Where.values()) {
+            ChatInstructions.Options.DEFAULT.withWhere(w).save(home);
+            assertEquals(w, ChatInstructions.Options.load(home).where());
+        }
+        assertTrue(Files.readString(home.resolve("chat/assistant.properties")).contains("where=window"));
+        assertFalse(ChatInstructions.Options.load(home).inTab());
+        Files.writeString(home.resolve("chat/assistant.properties"), "where=somewhere\n");
+        assertEquals(ChatInstructions.Where.TAB, ChatInstructions.Options.load(home).where(), "unknown: a tab");
+        assertEquals(ChatInstructions.Where.SIDE, ChatInstructions.Options.DEFAULT.withInTab(false).where());
+    }
+
+    @Test
     void eachQuestionSaysWhenItIs() {
         ZonedDateTime t = ZonedDateTime.of(2026, 11, 4, 9, 42, 10, 0, ZoneId.of("Asia/Singapore"));
         assertEquals("[Now] Wednesday 4 November 2026, 09:42 (Asia/Singapore, UTC+08:00).", ChatInstructions.now(t));

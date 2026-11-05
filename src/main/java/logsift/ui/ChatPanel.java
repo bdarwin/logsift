@@ -84,13 +84,13 @@ final class ChatPanel extends JPanel {
 
         void closeChat();
 
-        /** Whether the chat is a tab of its own (else beside the logs). */
-        default boolean inTab() {
-            return false;
+        /** Where the chat is: a tab of its own, beside the logs, or its own window. */
+        default logsift.chat.ChatInstructions.Where where() {
+            return logsift.chat.ChatInstructions.Where.SIDE;
         }
 
-        /** Moves the chat to a tab of its own, or back beside the logs. */
-        default void moveChat() {
+        /** Moves the chat there, and remembers it. */
+        default void moveChat(logsift.chat.ChatInstructions.Where to) {
         }
 
         /** Opens Settings → Assistant. */
@@ -277,6 +277,14 @@ final class ChatPanel extends JPanel {
             showSidebar();
         });
         add(main, BorderLayout.CENTER);
+        addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                if (room() != roomShown) {
+                    showSidebar();
+                }
+            }
+        });
         main.add(header(), BorderLayout.NORTH);
         JPanel chatCard = new JPanel(new BorderLayout());
         chatCard.setOpaque(false);
@@ -383,8 +391,8 @@ final class ChatPanel extends JPanel {
         move.putClientProperty("JButton.buttonType", "toolBarButton");
         move.setFocusable(false);
         move.addActionListener(e -> {
-            host.moveChat();
-            placed();
+            javax.swing.JPopupMenu m = moveMenu();
+            m.show(move, move.getWidth() - m.getPreferredSize().width, move.getHeight());
         });
         buttons.add(move);
         buttons.add(toolButton("settings", "Settings → Assistant: where it opens, and what it's told", e -> host.openSettings()));
@@ -422,12 +430,72 @@ final class ChatPanel extends JPanel {
     private final JButton move = new JButton();
     private final JButton historyButton = toolButton("history", "Chats: every chat, and search them", null);
 
-    /** The move button says where the chat goes; the chats are at the left in a tab of its own. */
+    /** The places the chat can go, the one it's in checked. */
+    javax.swing.JPopupMenu moveMenu() {
+        javax.swing.JPopupMenu m = new javax.swing.JPopupMenu();
+        m.setName("moveMenu");
+        logsift.chat.ChatInstructions.Where now = host.where();
+        for (logsift.chat.ChatInstructions.Where w : logsift.chat.ChatInstructions.Where.values()) {
+            javax.swing.JCheckBoxMenuItem i = new javax.swing.JCheckBoxMenuItem(placeName(w), Icons.of(placeIcon(w)), w == now);
+            i.setName("move-" + w.key());
+            i.addActionListener(e -> {
+                if (w != host.where()) {
+                    host.moveChat(w);
+                    placed();
+                }
+            });
+            m.add(i);
+        }
+        return m;
+    }
+
+    static String placeName(logsift.chat.ChatInstructions.Where w) {
+        return switch (w) {
+            case TAB -> "In a Tab of Its Own";
+            case SIDE -> "Beside the Logs";
+            case WINDOW -> "In Its Own Window";
+        };
+    }
+
+    private static String placeIcon(logsift.chat.ChatInstructions.Where w) {
+        return switch (w) {
+            case TAB -> "app-window";
+            case SIDE -> "panel-right";
+            case WINDOW -> "picture-in-picture-2";
+        };
+    }
+
+    /** Narrower than this, the chats aren't at the left (Chats in the header shows them instead). */
+    static final int CHATS_WIDTH = 720;
+    /** Narrower than this, the skills aren't at the right. */
+    static final int SKILLS_WIDTH = 1000;
+
+    /**
+     * Room for the chats at the left: in a tab or a window of its own, wide enough for them and
+     * the conversation (a window made narrow, or a narrow Logsift, has the chat alone).
+     */
+    private boolean roomy() {
+        return host.where() != logsift.chat.ChatInstructions.Where.SIDE && (getWidth() == 0 || getWidth() >= CHATS_WIDTH);
+    }
+
+    /** Room for the skills at the right too. */
+    private boolean roomyForSkills() {
+        return roomy() && (getWidth() == 0 || getWidth() >= SKILLS_WIDTH);
+    }
+
+    /** What showSidebar last showed, by width: a resize past a step shows or hides them. */
+    private int roomShown = -1;
+
+    private int room() {
+        return roomyForSkills() ? 2 : roomy() ? 1 : 0;
+    }
+
+    /** The move button shows where the chat is; the chats are at the left when there's room. */
     void placed() {
-        boolean tab = host.inTab();
-        move.setIcon(Icons.of(tab ? "panel-right" : "app-window"));
-        move.setToolTipText(tab ? "Move beside the logs" : "Move to a tab of its own");
-        historyButton.setToolTipText(tab ? "Show or hide the chats at the left" : "Chats: every chat, and search them");
+        logsift.chat.ChatInstructions.Where w = host.where();
+        move.setIcon(Icons.of(placeIcon(w)));
+        move.setToolTipText("Move the assistant: " + placeName(w).toLowerCase(java.util.Locale.ROOT) + " now");
+        historyButton.setToolTipText(roomy() ? "Show or hide the chats at the left" : "Chats: every chat, and search them");
         showSidebar();
     }
 
@@ -436,16 +504,17 @@ final class ChatPanel extends JPanel {
         if (sidebar == null || skills == null) {
             return; // still being built
         }
-        boolean show = host.inTab() && PREFS.getBoolean("sidebar", true);
+        boolean show = roomy() && PREFS.getBoolean("sidebar", true);
         if (show && !sidebarBox.isVisible() || show && sidebar.rowsForTest() == 0) {
             sidebar.refresh();
             sidebar.setCurrent(chat == null ? null : chat.id());
         }
         sidebarBox.setVisible(show);
-        chatsStrip.setVisible(host.inTab() && !show);
-        skills.setVisible(host.inTab() && PREFS.getBoolean("skills", true));
-        skillsStrip.setVisible(host.inTab() && !skills.isVisible());
-        skillsButton.setVisible(host.inTab());
+        chatsStrip.setVisible(roomy() && !show);
+        skills.setVisible(roomyForSkills() && PREFS.getBoolean("skills", true));
+        skillsStrip.setVisible(roomyForSkills() && !skills.isVisible());
+        skillsButton.setVisible(roomyForSkills());
+        roomShown = room();
         revalidate();
         repaint();
     }
@@ -1151,7 +1220,7 @@ final class ChatPanel extends JPanel {
     }
 
     private void showHistory() {
-        if (host.inTab()) {
+        if (roomy()) {
             PREFS.putBoolean("sidebar", !sidebarBox.isVisible());
             showSidebar();
             return;
