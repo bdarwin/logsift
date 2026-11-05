@@ -293,6 +293,8 @@ public final class LogFormat {
         List<String> out = new ArrayList<>();
         java.util.Set<String> taken = new java.util.HashSet<>(); // out's names: thousands, looked up each time
         java.util.Set<String> used = new java.util.HashSet<>();
+        // the number to try next for a repeated name: thousands of "value" don't each count up from 2
+        java.util.Map<String, Integer> next = new java.util.HashMap<>();
         for (int i = 0; i < header.size(); i++) {
             String h = header.get(i).trim();
             String name = h.isEmpty() ? "column " + (i + 1) : h;
@@ -304,8 +306,13 @@ public final class LogFormat {
                 }
             }
             String unique = name;
-            for (int k = 2; taken.contains(unique); k++) {
+            if (taken.contains(unique)) {
+                int k = next.getOrDefault(name, 2); // the ones below are taken already
+                while (taken.contains(name + " " + k)) {
+                    k++;
+                }
                 unique = name + " " + k;
+                next.put(name, k + 1);
             }
             out.add(unique);
             taken.add(unique);
