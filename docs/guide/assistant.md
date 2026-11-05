@@ -6,7 +6,9 @@ description: Ask GitHub Copilot about your logs beside them, in Logsift's window
 
 # Assistant
 
-Logsift opens the assistant when it starts, in a tab of its own. **View → Assistant** (Ctrl+I, ⌘I on macOS), or **Ask** in the status bar, brings it to the front; pressing it again goes back to the log. Ask anything about what's open, or about your services' logs: *why did checkout fail at 10:42?*, *errors by hour and what changed*, *compare this log with yesterday's*. GitHub Copilot answers with Logsift's own tools, the ones [coding agents](agents.md) use, on the logs the window has open, so nothing is read twice and line numbers are the ones you see.
+**The assistant is in beta**, marked **BETA** beside the chat's name: it's new, and what works and what doesn't helps shape it. Tell us with **Help → Report a Bug or Suggest a Feature…**.
+
+Logsift opens the assistant when it starts, in a tab of its own. **View → Assistant (Beta)** (Ctrl+I, ⌘I on macOS), or **Ask** in the status bar, brings it to the front; pressing it again goes back to the log. Ask anything about what's open, or about your services' logs: *why did checkout fail at 10:42?*, *errors by hour and what changed*, *compare this log with yesterday's*. GitHub Copilot answers with Logsift's own tools, the ones [coding agents](agents.md) use, on the logs the window has open, so nothing is read twice and line numbers are the ones you see.
 
 ![The assistant beside a log: the question, the lines Logsift read for it, and the answer with links to them](../screenshots/assistant.png)
 

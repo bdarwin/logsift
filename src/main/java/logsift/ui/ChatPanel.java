@@ -110,6 +110,8 @@ final class ChatPanel extends JPanel {
     private final ChatStore store;
     private final ChatTranscript transcript;
     private final JLabel title = new JLabel("New chat");
+    /** The assistant is new: a pill beside the chat's name says so. */
+    private final JLabel beta = betaPill();
     private final JLabel status = new JLabel(" ");
     private final JLabel credits = new JLabel(" ");
     private final JTextArea input = new JTextArea(3, 20);
@@ -316,6 +318,25 @@ final class ChatPanel extends JPanel {
 
     // ---------------------------------------------------------------- parts
 
+    static final String BETA_TIP = "The assistant is in beta: what works and what doesn't helps. "
+            + "Help → Report a Bug or Suggest a Feature…";
+
+    private static JLabel betaPill() {
+        JLabel b = new JLabel("BETA");
+        b.setName("beta");
+        b.setFont(b.getFont().deriveFont(Font.BOLD, b.getFont().getSize2D() - 2f));
+        b.setForeground(ChatColors.accent());
+        b.setBorder(BorderFactory.createCompoundBorder(
+                new javax.swing.border.LineBorder(ChatColors.accent(), 1, true),
+                BorderFactory.createEmptyBorder(0, 5, 0, 5)));
+        b.setToolTipText(BETA_TIP);
+        return b;
+    }
+
+    JLabel betaForTest() {
+        return beta;
+    }
+
     private JComponent header() {
         JPanel h = new JPanel(new BorderLayout(6, 2));
         h.setBorder(BorderFactory.createCompoundBorder(
@@ -354,7 +375,11 @@ final class ChatPanel extends JPanel {
         placed();
         JPanel top = new JPanel(new BorderLayout());
         top.setOpaque(false);
-        top.add(title, BorderLayout.CENTER);
+        JPanel named = new JPanel(new BorderLayout(6, 0));
+        named.setOpaque(false);
+        named.add(beta, BorderLayout.WEST);
+        named.add(title, BorderLayout.CENTER);
+        top.add(named, BorderLayout.CENTER);
         top.add(buttons, BorderLayout.EAST);
         h.add(top, BorderLayout.NORTH);
         JPanel line = new JPanel(new BorderLayout(8, 0));
@@ -703,7 +728,8 @@ final class ChatPanel extends JPanel {
     private void refreshSuggestions() {
         suggestions.removeAll();
         JLabel hello = new JLabel("<html><span style='font-size:120%'><b>Ask about your logs</b></span><br>Copilot reads "
-                + "them with Logsift's tools, and every line it cites is a click away.</html>");
+                + "them with Logsift's tools, and every line it cites is a click away.<br><span style='font-size:90%'>"
+                + "In beta: tell us what works and what doesn't (Help → Report a Bug or Suggest a Feature…).</span></html>");
         hello.setIcon(Icons.of("sparkles", ChatColors.accent(), 24));
         hello.setIconTextGap(10);
         hello.setAlignmentX(LEFT_ALIGNMENT);

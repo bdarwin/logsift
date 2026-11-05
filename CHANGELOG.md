@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The assistant is marked beta:** a **BETA** pill beside the chat's name, **View → Assistant (Beta)**, and a line in the welcome saying where to tell us what works and what doesn't.
+- **quackjvm 1.6.1:** queries without parameters run unprepared, which DuckDB runs faster for some (large results read up to twice as fast).
 - **Big tables' caches follow the file, and logs are kept for SQL:** the Pivot cache, the column filters' and value counts' cache, and the Query tab's cache of a big table are now quackjvm 1.6 file tables: when the file grows, only its new rows are read into them (before, a grown file got a whole new cache), and a file written again is read again. A log read for the Query tab is kept on disk with them, so the next time Logsift starts it's ready at once and only the lines written since are read (logs under 32 MB are just read again). **Values as One** totals are kept from one start to the next.
 - **Query examples from quackjvm:** the Query tab's **Examples** and agents' `query_examples` are now quackjvm's, told by Logsift what each column holds: the range and percentiles of a number, rows per hour with an average, each of a wide table's columns ranked by average, and joins to the other open tables on a column they share (never on line numbers).
 - **SQL on a quackjvm query session:** the Query tab and agents' SQL run in a quackjvm session: every table and log by its name, the session's folders widened when another table lives elsewhere, the same read-only rules.

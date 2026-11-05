@@ -3245,9 +3245,14 @@ class VisualTest {
             settle();
             assertTrue(onEdt(() -> w.tabsForTest().getSelectedComponent() instanceof ChatPanel), "in front");
             assertEquals("Assistant", onEdt(() -> w.tabsForTest().getTitleAt(0)));
+            assertTrue(onEdt(() -> w.tabsForTest().getToolTipTextAt(0)).startsWith("Beta: "), "the tab says it's in beta");
             assertTrue(onEdt(() -> java.util.stream.IntStream.range(0, w.tabsForTest().getTabCount())
                     .anyMatch(i -> w.tabsForTest().getComponentAt(i) instanceof StartPage)), "the start page beside it");
             ChatPanel chat = onEdt(w::chatPanelForTest);
+            // the assistant is new: a BETA pill beside the chat's name, with where to tell us
+            assertEquals("BETA", onEdt(() -> chat.betaForTest().getText()));
+            assertTrue(onEdt(() -> chat.betaForTest().isShowing()), "the pill shows");
+            assertTrue(onEdt(() -> chat.betaForTest().getToolTipText()).contains("Report a Bug"));
             waitFor(() -> {
                 try {
                     return onEdt(() -> chat.modelForTest().getItemCount() == 4 && !chat.examplesForTest().isEmpty());

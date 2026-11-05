@@ -3081,7 +3081,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             removeChatSplit();
             if (tabs.indexOfComponent(chatPanel) < 0) {
                 tabs.insertTab("Assistant", Icons.of("sparkles"), chatPanel,
-                        "GitHub Copilot, with Logsift's tools (" + (isMac() ? "⌘I" : "Ctrl+I") + ")", 0);
+                        "Beta: GitHub Copilot, with Logsift's tools (" + (isMac() ? "⌘I" : "Ctrl+I") + ")", 0);
                 updateEmptyState();
             }
             if (select) {
@@ -3555,7 +3555,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         // ---- View: what is shown and how
         JMenu view = menu("View");
-        view.add(check("Assistant", "sparkles", KeyStroke.getKeyStroke(KeyEvent.VK_I, MENU),
+        view.add(check("Assistant (Beta)", "sparkles", KeyStroke.getKeyStroke(KeyEvent.VK_I, MENU),
                 this::chatShown, e -> toggleChat()));
         view.addSeparator();
         view.add(check("Follow (Tail)", "arrow-down-to-line", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU),
