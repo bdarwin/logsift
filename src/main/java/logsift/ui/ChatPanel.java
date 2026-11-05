@@ -70,6 +70,10 @@ final class ChatPanel extends JPanel {
             showLines(handle, from, to);
         }
 
+        /** The GC charts of a log (Analyze GC), by its handle or the file the chat says it was. */
+        default void gcCharts(String handle, String file) {
+        }
+
         void find(String handle, String text);
 
         void query(String handle, String sql);
@@ -182,6 +186,11 @@ final class ChatPanel extends JPanel {
             @Override
             public void action(ChatMessage tool, String what) {
                 toolAction(tool, what);
+            }
+
+            @Override
+            public JComponent inline(ChatMessage tool) {
+                return inlineFor(tool);
             }
         });
         transcript.onEndChanged(atEnd -> newer.setVisible(!atEnd));
@@ -1464,6 +1473,29 @@ final class ChatPanel extends JPanel {
         }
     }
 
+    /** A tool's log, as a file: its handle as the chat says it was, or the path it was given. */
+    private String logFile(ChatMessage tool, String log) {
+        return log.startsWith("log:") ? fileOf(tool, log) : log;
+    }
+
+    /** The heap chart under analyze_gc: Logsift draws it, so the answer needn't (and no token is spent). */
+    private JComponent inlineFor(ChatMessage tool) {
+        if (!"analyze_gc".equals(tool.tool())) {
+            return null;
+        }
+        String h = String.valueOf(ChatEntryView.args(tool).getOrDefault("log", ""));
+        if (h.isBlank()) {
+            return null;
+        }
+        String file = logFile(tool, h);
+        java.nio.file.Path p = file == null ? null : logsift.chat.ChatHandles.openable(file);
+        return new ChatGcCard(p, () -> host.gcCharts(h, file), line -> {
+            if (p != null) {
+                host.openFile(p, line + 1);
+            }
+        });
+    }
+
     /** The file a handle meant in this entry's chat, or null if the chat doesn't say. */
     private String fileOf(ChatMessage from, String handle) {
         String chatId = from != null ? from.chat() : transcript.chat();
@@ -1488,6 +1520,7 @@ final class ChatPanel extends JPanel {
             }
             case ChatEntryView.FIND_IN_LOG -> host.find(h, String.valueOf(a.get("query")));
             case ChatEntryView.OPEN_QUERY -> host.query(h, String.valueOf(a.get("sql")));
+            case ChatEntryView.SHOW_GC -> host.gcCharts(h, logFile(tool, h));
             case ChatEntryView.COPY -> java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
                     .setContents(new java.awt.datatransfer.StringSelection(tool.text() == null ? "" : tool.text()), null);
             default -> {

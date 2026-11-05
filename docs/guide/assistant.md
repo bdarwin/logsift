@@ -62,6 +62,10 @@ Each tool's answer is also kept to 8,000 characters (about 2,000 tokens; coding 
 - **Tables** come as tables: several items with the same fields (errors by host, slow requests) are a table, with numbers lined up at the right. Headings and the assistant's own marks are in its violet; each tool has its own color and icon (search blue, read teal, SQL violet, insights amber, exceptions red), so a long answer reads at a glance.
 - **What it cost** is above each answer: the model, the AI credits Copilot reported for it, the tokens, and how long it took.
 
+## Charts
+
+The assistant doesn't draw charts in text. When it explains a GC log (**analyze_gc**), Logsift draws the heap chart under that step itself: memory in use before and after each collection, the heap's size, and full GCs. A click on a point shows its line in the log; **Show GC Charts** opens heap, pauses, allocation and time in GC in a tab beside the log, as **Analyze GC** does. The chart costs no tokens: Logsift reads it from the log, not from the answer. For anything else, the answer gives a table.
+
 ## Models and credits
 
 The list at the bottom has the models your Copilot account offers, each with its price in AI credits per million tokens read · written. A model your organization turned off is greyed. Models that can think harder have a second list (*low*, *medium*, *high*…): harder is slower and costs more. Your choice is kept for new chats; changing it mid-chat applies from the next question.

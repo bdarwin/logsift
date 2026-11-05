@@ -2731,6 +2731,25 @@ class VisualTest {
                 @Override
                 public void send(String text) {
                     asked.add(text);
+                    java.util.regex.Matcher gc = java.util.regex.Pattern.compile("please chart gc (\\S+)").matcher(text);
+                    if (gc.find()) {
+                        String path = gc.group(1);
+                        new Thread(() -> {
+                            try {
+                                l.on(new logsift.chat.ChatEvent.ToolStarted("g1", "analyze_gc", "{\"log\": \"" + path + "\"}"));
+                                var t = setup.tools().stream().filter(x -> x.name().equals("analyze_gc")).findFirst().orElseThrow();
+                                var r = t.handler().call("g1", Map.of("log", path));
+                                results.add(r.text());
+                                l.on(new logsift.chat.ChatEvent.ToolFinished("g1", !r.failed()));
+                                l.on(new logsift.chat.ChatEvent.Text("g2", "The heap after GC keeps growing: see the chart."));
+                                l.on(new logsift.chat.ChatEvent.Idle(false));
+                            } catch (Exception e) {
+                                l.on(new logsift.chat.ChatEvent.Failed(e.toString()));
+                                l.on(new logsift.chat.ChatEvent.Idle(false));
+                            }
+                        }).start();
+                        return;
+                    }
                     java.util.regex.Matcher open = java.util.regex.Pattern.compile("please open (\\S+)").matcher(text);
                     if (open.find()) {
                         String path = open.group(1);
@@ -3079,6 +3098,70 @@ class VisualTest {
         assertArrayEquals(new long[] {0, 0}, onEdt(() -> frame.currentTab().chosenLines()));
         onEdt(() -> {
             frame.closeTab(frame.tabsForTest().indexOfComponent(frame.currentTab()));
+            return null;
+        });
+        // "plot the heap": Logsift draws the heap chart under analyze_gc, so the answer needn't draw one in text;
+        // Show GC Charts opens them all
+        Path gcLog = dir.resolve("orders-gc.log");
+        StringBuilder gcText = new StringBuilder("[2026-10-28T10:00:00.000+0000][0.010s][info][gc] Using G1\n");
+        for (int i = 0; i < 60; i++) {
+            long before = 40 + i * 3L;
+            long after = 8 + i * 2L; // a leak: what's left after each GC keeps growing
+            gcText.append(String.format(java.util.Locale.ROOT, "[2026-10-28T10:%02d:%02d.000+0000][%d.000s][info][gc] GC(%d) "
+                    + "Pause Young (Normal) (G1 Evacuation Pause) %dM->%dM(512M) %d.%03dms%n", i / 6, (i % 6) * 10,
+                    i * 10 + 1, i, before, after, 2 + i % 5, 100 + i));
+        }
+        Files.writeString(gcLog, gcText);
+        frame.chatWorkspaceForTest().know(gcLog);
+        onEdt(() -> {
+            chat.inputForTest().setText("please chart gc " + gcLog);
+            chat.sendForTest();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !chat.busyForTest() && chat.transcriptForTest().viewsForTest().stream()
+                        .anyMatch(v -> "analyze_gc".equals(v.message().tool()) && v.inlineForTest() instanceof ChatGcCard c
+                                && c.reportForTest() != null));
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the heap chart under analyze_gc");
+        ChatGcCard card = onEdt(() -> (ChatGcCard) chat.transcriptForTest().viewsForTest().stream()
+                .filter(v -> "analyze_gc".equals(v.message().tool())).findFirst().orElseThrow().inlineForTest());
+        assertEquals(60, onEdt(() -> card.reportForTest().withHeap().size()));
+        assertNotNull(onEdt(() -> findNamed(card, "gcHeap")), "the chart itself");
+        onEdt(() -> {
+            card.scrollRectToVisible(new java.awt.Rectangle(0, 0, card.getWidth(), card.getHeight()));
+            return null;
+        });
+        settle();
+        shotOf(chat, "130f-assistant-gc-chart");
+        java.util.Set<java.awt.Component> tabsBefore = onEdt(() -> {
+            java.util.Set<java.awt.Component> had = new java.util.HashSet<>();
+            for (int i = 0; i < frame.tabsForTest().getTabCount(); i++) {
+                had.add(frame.tabsForTest().getComponentAt(i));
+            }
+            return had;
+        });
+        onEdt(() -> {
+            ((javax.swing.JButton) findNamed(card, "showGcCharts")).doClick();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.tabsForTest().getSelectedComponent() instanceof GcTab);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the GC charts in a tab");
+        onEdt(() -> {
+            // the GC tab and the log it read
+            for (int i = frame.tabsForTest().getTabCount() - 1; i >= 0; i--) {
+                if (!tabsBefore.contains(frame.tabsForTest().getComponentAt(i))) {
+                    frame.closeTab(i);
+                }
+            }
             return null;
         });
         // @ names a file: open logs first, then recent ones; the assistant is told which it is

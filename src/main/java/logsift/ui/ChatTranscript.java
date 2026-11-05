@@ -36,6 +36,11 @@ final class ChatTranscript extends JPanel implements Scrollable {
         void link(ChatMessage from, String href);
 
         void action(ChatMessage tool, String what);
+
+        /** Something the window shows under a tool's row (a chart), or null. */
+        default javax.swing.JComponent inline(ChatMessage tool) {
+            return null;
+        }
     }
 
     private final ChatStore store;

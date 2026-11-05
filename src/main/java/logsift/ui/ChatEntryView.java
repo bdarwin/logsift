@@ -255,6 +255,21 @@ final class ChatEntryView extends JPanel {
         }
         add(row, BorderLayout.NORTH);
         buildTool2();
+        if (Boolean.TRUE.equals(m.ok()) && !inlineAsked) {
+            inlineAsked = true; // made once: the row is built again as it changes
+            inline = actions.inline(m);
+        }
+        if (inline != null) {
+            add(inline, BorderLayout.SOUTH);
+        }
+    }
+
+    /** What the window shows under this tool's row (a heap chart under analyze_gc), or null. */
+    private javax.swing.JComponent inline;
+    private boolean inlineAsked;
+
+    javax.swing.JComponent inlineForTest() {
+        return inline;
     }
 
     static final String TOOL_TIP = "Show what Logsift answered";
@@ -325,6 +340,8 @@ final class ChatEntryView extends JPanel {
             l.add(FIND_IN_LOG);
         } else if ("query".equals(m.tool()) && a.get("sql") != null && !a.containsKey("tables")) {
             l.add(OPEN_QUERY);
+        } else if ("analyze_gc".equals(m.tool()) && a.get("log") != null) {
+            l.add(SHOW_GC);
         }
         l.add(COPY);
         return l;
@@ -333,6 +350,7 @@ final class ChatEntryView extends JPanel {
     static final String SHOW_LINES = "Show these lines";
     static final String FIND_IN_LOG = "Find in the log";
     static final String OPEN_QUERY = "Open in Query";
+    static final String SHOW_GC = "Show GC Charts";
     static final String COPY = "Copy";
 
     Map<String, Object> args() {

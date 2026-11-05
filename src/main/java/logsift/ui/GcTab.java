@@ -279,6 +279,11 @@ final class GcTab extends JPanel {
 
     /** Times on the axis: the clock if the log has dates (tenths of a second for a short log), else since the start. */
     private DoubleFunction<String> timeLabel() {
+        return timeLabel(report);
+    }
+
+    static DoubleFunction<String> timeLabel(GcReport report) {
+        DateTimeFormatter clock = DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT).withZone(ZoneId.systemDefault());
         GcLog g = report.log();
         boolean dates = g.wallOf(report.start()) != Long.MIN_VALUE;
         boolean shortLog = report.seconds() < 60;
@@ -287,13 +292,9 @@ final class GcTab extends JPanel {
                 : shortLog ? String.format(Locale.ROOT, "%.1f s", x) : GcReport.duration(x);
     }
 
-    private void fillCharts() {
-        double from = report.start();
-        double to = Math.max(from + 0.001, report.end());
-        DoubleFunction<String> tx = timeLabel();
-        LongConsumer go = showLine;
-
-        // heap
+    /** The heap chart of a report: in use before and after each collection, the heap's size, full GCs. */
+    static void fillHeap(GcChart heap, GcReport report, DoubleFunction<String> tx, LongConsumer go, double from,
+                         double to) {
         List<GcLog.Event> h = report.withHeap();
         int n = h.size();
         double[] bx = new double[n];
@@ -330,6 +331,25 @@ final class GcTab extends JPanel {
                 new GcChart.Series("After a full GC", FULL, GcChart.Style.DOTS, toArray(fx), toArray(fy),
                         toLongs(fl))), from, to);
         heap.onPoint(go);
+    }
+
+    /** A heap chart on its own (the assistant's answer shows one under its analyze_gc call). */
+    static GcChart heapChart(GcReport report, LongConsumer go) {
+        GcChart c = new GcChart();
+        double from = report.start();
+        fillHeap(c, report, timeLabel(report), go, from, Math.max(from + 0.001, report.end()));
+        return c;
+    }
+
+    private void fillCharts() {
+        double from = report.start();
+        double to = Math.max(from + 0.001, report.end());
+        DoubleFunction<String> tx = timeLabel();
+        LongConsumer go = showLine;
+
+        // heap
+        fillHeap(heap, report, tx, go, from, to);
+        int n = report.withHeap().size();
 
         // pauses, by kind
         List<GcChart.Series> ps = new ArrayList<>();

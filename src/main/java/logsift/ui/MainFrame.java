@@ -3355,6 +3355,34 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
 
             @Override
+            public void gcCharts(String handle, String file) {
+                if (file != null) {
+                    for (LogTab t : allTabs()) {
+                        if (t.path() != null && (t.path().toString().equals(file) || file.equals(t.remoteLabel()))) {
+                            analyzeGc(t);
+                            return;
+                        }
+                    }
+                    Path p = logsift.chat.ChatHandles.openable(file);
+                    if (p != null) {
+                        MainFrame.this.openFile(p, null, MainFrame.this::analyzeGc);
+                        return;
+                    }
+                }
+                LogTab t = tabOf(handle);
+                if (t != null) {
+                    analyzeGc(t);
+                    return;
+                }
+                Path p = chatWorkspace == null ? null : chatWorkspace.shownPath(handle);
+                if (p != null && logsift.chat.ChatHandles.openable(p.toString()) != null) {
+                    MainFrame.this.openFile(p, null, MainFrame.this::analyzeGc);
+                } else {
+                    status.setText("That log isn't open any more");
+                }
+            }
+
+            @Override
             public void showLines(String handle, long from, long to) {
                 LogTab t = tabOf(handle);
                 if (t != null) {
