@@ -170,14 +170,14 @@ final class ChatEntryView extends JPanel {
         return switch (m.kind()) {
             case USER -> "You · " + when;
             case ASSISTANT -> {
-                StringBuilder b = new StringBuilder(m.model() == null ? "Copilot" : modelName(m.model()));
+                StringBuilder b = new StringBuilder(m.model() == null ? "Assistant" : modelName(m.model()));
                 if (m.millis() == 0) {
                     if (live) {
                         b.append(" · answering…");
                     }
                 } else {
                     if (m.nanoAiu() > 0) {
-                        b.append(" · ").append(credits(m.credits()));
+                        b.append(" · ").append(logsift.chat.ChatCost.format(m.model(), m.nanoAiu()));
                     }
                     if (m.tokensIn() + m.tokensOut() > 0) {
                         b.append(" · ").append(tokens(m.tokensIn() + m.tokensOut())).append(" tokens");
@@ -194,7 +194,8 @@ final class ChatEntryView extends JPanel {
     static java.util.function.Function<String, String> modelNames = id -> id;
 
     private static String modelName(String id) {
-        return modelNames.apply(id);
+        String n = modelNames.apply(id);
+        return n == null || n.equals(id) ? logsift.chat.ChatCost.name(id) : n;
     }
 
     static String credits(double c) {

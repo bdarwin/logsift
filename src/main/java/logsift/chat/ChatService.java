@@ -38,6 +38,11 @@ public final class ChatService {
             return "GitHub Copilot isn't installed. Install it (npm install -g @github/copilot), sign in once in a "
                     + "terminal (copilot, then /login), then try again.";
         }
+
+        /** Why there's no assistant with these settings. */
+        default String missing(ChatSettings settings) {
+            return missing();
+        }
     }
 
     /** The real one: the person's own copilot program, in its own folder (~/.copilot), where its sign-in is. */
@@ -46,7 +51,29 @@ public final class ChatService {
         return cli == null ? null : new CopilotEngine(cli, null, home.resolve("chat").resolve("work"));
     };
 
-    private static volatile EngineFactory factory = COPILOT;
+    /** Claude: the person's own claude program, signed in with their Claude account. */
+    public static final EngineFactory CLAUDE = (settings, home) -> {
+        Path cli = CopilotLocator.findProgram("claude", settings.claude());
+        return cli == null ? null : new ClaudeEngine(cli, home.resolve("chat").resolve("claude-work"));
+    };
+
+    /** The assistant chosen in Settings → Assistant: Copilot unless it's Claude. */
+    public static final EngineFactory CHOSEN = new EngineFactory() {
+        @Override
+        public ChatEngine make(ChatSettings settings, Path home) {
+            return (ChatSettings.CLAUDE.equals(settings.engineOrDefault()) ? CLAUDE : COPILOT).make(settings, home);
+        }
+
+        @Override
+        public String missing(ChatSettings settings) {
+            return ChatSettings.CLAUDE.equals(settings.engineOrDefault())
+                    ? "Claude Code isn't installed. Install it (see claude.com/claude-code), sign in once in a terminal "
+                    + "(claude auth login), then try again."
+                    : missing();
+        }
+    };
+
+    private static volatile EngineFactory factory = CHOSEN;
     private static ChatService instance;
 
     private final Path home;
@@ -75,7 +102,7 @@ public final class ChatService {
 
     /** For tests: another way to make the assistant, and a fresh service (the old one closed). */
     public static synchronized void useFactory(EngineFactory f) {
-        factory = f == null ? COPILOT : f;
+        factory = f == null ? CHOSEN : f;
         if (instance != null) {
             instance.close();
             instance = null;
@@ -130,8 +157,27 @@ public final class ChatService {
         return settings;
     }
 
-    public synchronized void saveSettings(ChatSettings s) {
-        boolean newProgram = !java.util.Objects.equals(s.copilot(), settings.copilot());
+    /** Told when another assistant (or program) is chosen: windows connect again. */
+    private final List<Runnable> engineChanged = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public void onEngineChanged(Runnable r) {
+        engineChanged.add(r);
+    }
+
+    public void removeEngineChanged(Runnable r) {
+        engineChanged.remove(r);
+    }
+
+    public void saveSettings(ChatSettings s) {
+        if (saveSettingsAndCheck(s)) {
+            engineChanged.forEach(Runnable::run);
+        }
+    }
+
+    private synchronized boolean saveSettingsAndCheck(ChatSettings s) {
+        boolean newProgram = !java.util.Objects.equals(s.copilot(), settings.copilot())
+                || !java.util.Objects.equals(s.claude(), settings.claude())
+                || !s.engineOrDefault().equals(settings.engineOrDefault());
         settings = s;
         try {
             s.save(home);
@@ -141,6 +187,7 @@ public final class ChatService {
         if (newProgram) {
             reconnect();
         }
+        return newProgram;
     }
 
     /** Connects the first time; after that, how it went. */
@@ -175,7 +222,7 @@ public final class ChatService {
             return new State(null, null, List.of(), null, ex.getMessage());
         }
         if (e == null) {
-            return new State(null, null, List.of(), null, f.missing());
+            return new State(null, null, List.of(), null, f.missing(s));
         }
         // Copilot's program goes when Logsift does
         ChatEngine started = e;
@@ -188,8 +235,7 @@ public final class ChatService {
             e.start();
             String user = e.user();
             if (user == null) {
-                return new State(e, null, List.of(), null, "Not signed in to GitHub Copilot. Sign in once in a terminal "
-                        + "(copilot, then /login), then try again.");
+                return new State(e, null, List.of(), null, "Not signed in to " + e.name() + ". " + e.signInHint());
             }
             List<ChatEngine.Model> models = e.models();
             ChatEngine.Quota q;

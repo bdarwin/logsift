@@ -35,6 +35,8 @@ final class AssistantPanel extends JPanel {
     private final JRadioButton inTab = new JRadioButton("In a tab of its own, beside the logs' tabs");
     private final JRadioButton beside = new JRadioButton("At the side of the window, next to the log shown");
     private final JCheckBox atStart = new JCheckBox("Open the assistant when Logsift starts");
+    private final JRadioButton copilot = new JRadioButton("GitHub Copilot: your Copilot subscription pays, in AI credits");
+    private final JRadioButton claude = new JRadioButton("Claude Code: your Claude subscription (or Console account) pays");
     private final JCheckBox askFiles = new JCheckBox("Ask me before it opens other files or folders");
     private final JTextArea own = new JTextArea(3, 40);
     private final JPanel parts = new JPanel();
@@ -54,11 +56,14 @@ final class AssistantPanel extends JPanel {
         this.placed = placed;
         setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
         JLabel intro = new JLabel("<html>The <b>assistant</b> (" + (MainFrame.isMac() ? "⌘I" : "Ctrl+I") + ") is "
-                + "GitHub Copilot in Logsift's window: it reads the open logs, and your services' logs, with Logsift's "
-                + "tools, and only reads. Your Copilot subscription pays for what it reads and writes, in tokens.</html>");
+                + "GitHub Copilot or Claude Code in Logsift's window: it reads the open logs, and your services' logs, "
+                + "with Logsift's tools, and only reads. Your own subscription pays for what it reads and writes, in "
+                + "tokens.</html>");
         add(intro, BorderLayout.NORTH);
         JPanel center = new Fit();
         center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+        center.add(who());
+        center.add(Box.createVerticalStrut(12));
         center.add(where());
         center.add(Box.createVerticalStrut(12));
         center.add(spending());
@@ -73,6 +78,39 @@ final class AssistantPanel extends JPanel {
         load();
     }
 
+    /** Who answers: Copilot or Claude Code, each through the person's own program and sign-in. */
+    private JPanel who() {
+        JPanel p = section("Who answers");
+        ButtonGroup g = new ButtonGroup();
+        g.add(copilot);
+        g.add(claude);
+        copilot.setName("engineCopilot");
+        claude.setName("engineClaude");
+        copilot.setToolTipText("The copilot program (npm install -g @github/copilot), signed in to GitHub");
+        claude.setToolTipText("The claude program, signed in with claude auth login. It gets Logsift's tools only: "
+                + "no files, shell or web of its own");
+        JLabel note = new JLabel("<html>Each uses its own program on this computer, signed in as you. Chats go on "
+                + "with the other one, told what was said.</html>");
+        note.setForeground(Theme.dimmedForeground());
+        for (JComponent c : List.of(copilot, claude, note)) {
+            c.setAlignmentX(LEFT_ALIGNMENT);
+            p.add(c);
+        }
+        boolean isClaude = logsift.chat.ChatSettings.CLAUDE.equals(service.settings().engineOrDefault());
+        (isClaude ? claude : copilot).setSelected(true);
+        copilot.addActionListener(e -> service.saveSettings(service.settings().withEngine(logsift.chat.ChatSettings.COPILOT)));
+        claude.addActionListener(e -> service.saveSettings(service.settings().withEngine(logsift.chat.ChatSettings.CLAUDE)));
+        return p;
+    }
+
+    JRadioButton claudeForTest() {
+        return claude;
+    }
+
+    JRadioButton copilotForTest() {
+        return copilot;
+    }
+
     private JPanel where() {
         JPanel p = section("Where it opens");
         ButtonGroup g = new ButtonGroup();
@@ -85,7 +123,7 @@ final class AssistantPanel extends JPanel {
         inTab.setName("assistantInTab");
         beside.setName("assistantBeside");
         atStart.setName("assistantAtStart");
-        atStart.setToolTipText("It connects to Copilot when you first look at it, so an unseen tab costs nothing");
+        atStart.setToolTipText("It connects when you first look at it, so an unseen tab costs nothing");
         inTab.addActionListener(e -> {
             save();
             placed.run();
@@ -238,7 +276,7 @@ final class AssistantPanel extends JPanel {
         }
         int n = ChatInstructions.parts(service.options(), catalog.get()).stream().filter(ChatInstructions.Part::on)
                 .mapToInt(ChatInstructions.Part::tokens).sum();
-        total.setText("All that's on: " + tokens(n) + ", read with each question (Copilot also reads its tools' "
+        total.setText("All that's on: " + tokens(n) + ", read with each question (the assistant also reads its tools' "
                 + "descriptions).");
         parts.revalidate();
         parts.repaint();
@@ -267,7 +305,7 @@ final class AssistantPanel extends JPanel {
         if (total.isShowing()) {
             int n = ChatInstructions.parts(o, catalog.get()).stream().filter(ChatInstructions.Part::on)
                     .mapToInt(ChatInstructions.Part::tokens).sum();
-            total.setText("All that's on: " + tokens(n) + ", read with each question (Copilot also reads its tools' "
+            total.setText("All that's on: " + tokens(n) + ", read with each question (the assistant also reads its tools' "
                     + "descriptions).");
         }
     }

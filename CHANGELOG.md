@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Claude Code can answer too:** **Settings → Assistant → Who answers** chooses GitHub Copilot or Claude Code (your own `claude`, signed in with your Claude subscription). Claude gets Logsift's tools only, served from inside the window on this computer, so they read what's open and ask first as they do for Copilot; what each answer cost is shown in dollars at API prices. Chats go on with the other assistant, told what was said.
 - **The assistant is marked beta:** a **BETA** pill beside the chat's name, **View → Assistant (Beta)**, and a line in the welcome saying where to tell us what works and what doesn't.
 - **quackjvm 1.6.1:** queries without parameters run unprepared, which DuckDB runs faster for some (large results read up to twice as fast).
 - **Big tables' caches follow the file, and logs are kept for SQL:** the Pivot cache, the column filters' and value counts' cache, and the Query tab's cache of a big table are now quackjvm 1.6 file tables: when the file grows, only its new rows are read into them (before, a grown file got a whole new cache), and a file written again is read again. A log read for the Query tab is kept on disk with them, so the next time Logsift starts it's ready at once and only the lines written since are read (logs under 32 MB are just read again). **Values as One** totals are kept from one start to the next.

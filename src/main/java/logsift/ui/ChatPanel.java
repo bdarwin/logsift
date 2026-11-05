@@ -291,13 +291,14 @@ final class ChatPanel extends JPanel {
         showSidebar();
 
         String problem = service.storeProblem();
-        showMessage("Connecting to GitHub Copilot…", null);
+        showMessage("Connecting to " + engineName() + "…", null);
         if (problem != null) {
             status.setText(problem);
         }
         contextTimer = new Timer(700, e -> refreshContext());
         contextTimer.start();
         // Copilot starts the first time the chat is seen: a tab in the background costs nothing
+        service.onEngineChanged(engineChanged);
         addHierarchyListener(e -> {
             if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
                 connect();
@@ -306,6 +307,21 @@ final class ChatPanel extends JPanel {
     }
 
     private boolean connecting;
+
+    /** Another assistant was chosen: the chat goes on with it (told what was said, if it must start again). */
+    private final Runnable engineChanged = () -> SwingUtilities.invokeLater(this::otherEngine);
+
+    private void otherEngine() {
+        if (session != null) {
+            session.close();
+            session = null;
+        }
+        if (!connecting) {
+            return; // never shown yet: it connects when it is
+        }
+        showMessage("Connecting to " + engineName() + "…", null);
+        service.state().thenAccept(st -> SwingUtilities.invokeLater(() -> connected(st)));
+    }
 
     /** Starts Copilot, once (the first time the chat is shown). */
     void connect() {
@@ -727,7 +743,8 @@ final class ChatPanel extends JPanel {
     /** The welcome: questions to start with, for what's open and the services described, and what to set up. */
     private void refreshSuggestions() {
         suggestions.removeAll();
-        JLabel hello = new JLabel("<html><span style='font-size:120%'><b>Ask about your logs</b></span><br>Copilot reads "
+        JLabel hello = new JLabel("<html><span style='font-size:120%'><b>Ask about your logs</b></span><br>"
+                + (claude() ? "Claude" : "Copilot") + " reads "
                 + "them with Logsift's tools, and every line it cites is a click away.<br><span style='font-size:90%'>"
                 + "In beta: tell us what works and what doesn't (Help → Report a Bug or Suggest a Feature…).</span></html>");
         hello.setIcon(Icons.of("sparkles", ChatColors.accent(), 24));
@@ -802,7 +819,9 @@ final class ChatPanel extends JPanel {
         l.add(new Setting("What it's told", "Logsift's instructions" + (told.isEmpty() ? "" : ", " + String.join(", ", told))
                 + ". Add your own: names you use, what's normal.", "Assistant Settings…", "settings"));
         l.add(new Setting("The model", (m == null ? "Chosen below" : m.name() + ", below")
-                + ": each shows its price in AI credits per million tokens. Each answer shows what it cost.",
+                + (m != null && logsift.chat.ChatCost.dollars(m.id())
+                        ? ". Each answer shows what it cost, in dollars at API prices."
+                        : ": each shows its price in AI credits per million tokens. Each answer shows what it cost."),
                 "Choose…", "model"));
         return l;
     }
@@ -907,6 +926,15 @@ final class ChatPanel extends JPanel {
         updateSend();
     }
 
+    /** Whether Claude Code answers (Settings → Assistant), else GitHub Copilot. */
+    private boolean claude() {
+        return logsift.chat.ChatSettings.CLAUDE.equals(service.settings().engineOrDefault());
+    }
+
+    private String engineName() {
+        return claude() ? "Claude Code" : "GitHub Copilot";
+    }
+
     private void showProblem(String problem) {
         message.removeAll();
         JPanel p = new JPanel();
@@ -921,12 +949,12 @@ final class ChatPanel extends JPanel {
         b.setAlignmentX(LEFT_ALIGNMENT);
         JButton again = new JButton("Try Again");
         again.addActionListener(e -> {
-            showMessage("Connecting to GitHub Copilot…", null);
+            showMessage("Connecting to " + engineName() + "…", null);
             service.reconnect().thenAccept(s -> SwingUtilities.invokeLater(() -> connected(s)));
         });
         b.add(again);
         b.add(Box.createHorizontalStrut(6));
-        JButton choose = new JButton("Choose Copilot Program…");
+        JButton choose = new JButton("Choose " + (claude() ? "Claude" : "Copilot") + " Program…");
         choose.addActionListener(e -> chooseProgram());
         b.add(choose);
         p.add(b);
@@ -949,10 +977,11 @@ final class ChatPanel extends JPanel {
 
     private void chooseProgram() {
         javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
-        fc.setDialogTitle("The copilot program");
+        fc.setDialogTitle(claude() ? "The claude program" : "The copilot program");
         if (fc.showOpenDialog(this) == javax.swing.JFileChooser.APPROVE_OPTION) {
-            service.saveSettings(service.settings().withCopilot(fc.getSelectedFile().getAbsolutePath()));
-            showMessage("Connecting to GitHub Copilot…", null);
+            String chosen = fc.getSelectedFile().getAbsolutePath();
+            service.saveSettings(claude() ? service.settings().withClaude(chosen) : service.settings().withCopilot(chosen));
+            showMessage("Connecting to " + engineName() + "…", null);
             service.state().thenAccept(s -> SwingUtilities.invokeLater(() -> connected(s)));
         }
     }
@@ -1234,7 +1263,7 @@ final class ChatPanel extends JPanel {
         lastContextKey = key;
         chips.removeAll();
         if (!logs.isEmpty() && !dropLog) {
-            chips.add(chip(logs.get(0).name(), "Copilot is told this log is shown. Click × to leave it out.",
+            chips.add(chip(logs.get(0).name(), "The assistant is told this log is shown. Click × to leave it out.",
                     () -> dropLog = true));
             if (lines != null && !dropLines) {
                 String l = lines[0] == lines[1] ? "line " + String.format("%,d", lines[0])
@@ -1338,7 +1367,7 @@ final class ChatPanel extends JPanel {
         if (chat != null) {
             ChatInfo c = store.chat(chat.id());
             if (c != null && c.nanoAiu() > 0) {
-                b.append("This chat ").append(ChatEntryView.credits(c.credits()));
+                b.append("This chat ").append(logsift.chat.ChatCost.format(c.model(), c.nanoAiu()));
             }
         }
         if (quota != null && !quota.unlimited() && quota.allowed() > 0) {
@@ -1375,24 +1404,28 @@ final class ChatPanel extends JPanel {
             }
         }
         if (chat != null) {
-            b.append("<tr><td><b>This chat</b></td><td align=right>").append(ChatEntryView.credits(chat.credits()))
+            b.append("<tr><td><b>This chat</b></td><td align=right>")
+                    .append(logsift.chat.ChatCost.format(chat.model(), chat.nanoAiu()))
                     .append("</td></tr>");
         }
         ZoneId z = ZoneId.systemDefault();
         long today = LocalDate.now(z).atStartOfDay(z).toInstant().toEpochMilli();
         long month = LocalDate.now(z).withDayOfMonth(1).atStartOfDay(z).toInstant().toEpochMilli();
-        double t = store.usage(today).stream().mapToDouble(ChatStore.Usage::credits).sum();
-        b.append("<tr><td><b>Today</b></td><td align=right>").append(ChatEntryView.credits(t)).append("</td></tr>");
+        b.append("<tr><td><b>Today</b></td><td align=right>").append(logsift.chat.ChatCost.total(store.usage(today)))
+                .append("</td></tr>");
         List<ChatStore.Usage> m = store.usage(month);
         b.append("<tr><td><b>This month</b></td><td align=right>")
-                .append(ChatEntryView.credits(m.stream().mapToDouble(ChatStore.Usage::credits).sum())).append("</td></tr>");
+                .append(logsift.chat.ChatCost.total(m)).append("</td></tr>");
         for (ChatStore.Usage u : m) {
-            b.append("<tr><td>&nbsp;&nbsp;").append(ChatMarkdownEsc.esc(ChatEntryView.modelNames.apply(u.model())))
-                    .append("</td><td align=right>").append(ChatEntryView.credits(u.credits())).append(" · ")
+            String named = ChatEntryView.modelNames.apply(u.model());
+            b.append("<tr><td>&nbsp;&nbsp;").append(ChatMarkdownEsc.esc(named == null || named.equals(u.model())
+                            ? logsift.chat.ChatCost.name(u.model()) : named))
+                    .append("</td><td align=right>").append(logsift.chat.ChatCost.format(u.model(), u.nanoAiu())).append(" · ")
                     .append(String.format("%,d", u.answers())).append(u.answers() == 1 ? " answer" : " answers")
                     .append(" · ").append(ChatEntryView.tokens(u.tokensIn() + u.tokensOut())).append(" tokens</td></tr>");
         }
-        b.append("</table><br><font size=-1>AI credits as Copilot reports them for each answer.</font></html>");
+        b.append("</table><br><font size=-1>As each assistant reports it for each answer: AI credits for GitHub Copilot, "
+                + "dollars at API prices for Claude Code (a Claude subscription doesn't charge them).</font></html>");
         return b.toString();
     }
 
@@ -1479,6 +1512,7 @@ final class ChatPanel extends JPanel {
     }
 
     void close() {
+        service.removeEngineChanged(engineChanged);
         contextTimer.stop();
         closeSession();
     }

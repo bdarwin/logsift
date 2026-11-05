@@ -102,6 +102,11 @@ public final class CopilotEngine implements ChatEngine {
     }
 
     @Override
+    public String signInHint() {
+        return "Sign in once in a terminal (copilot, then /login), then try again.";
+    }
+
+    @Override
     public String user() throws Exception {
         var s = client().getAuthStatus().get(30, TimeUnit.SECONDS);
         return s.isAuthenticated() ? (s.getLogin() == null ? "" : s.getLogin()) : null;

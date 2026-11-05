@@ -25,12 +25,23 @@ public final class CopilotLocator {
                 System.getenv("APPDATA"), System.getenv("LOCALAPPDATA"));
     }
 
+    /** Another assistant's program by its name ("claude"), looked for the same way. */
+    public static Path findProgram(String name, String chosen) {
+        return find(name, chosen, System.getenv("PATH"), Path.of(System.getProperty("user.home")), windows(),
+                System.getenv("APPDATA"), System.getenv("LOCALAPPDATA"));
+    }
+
     static Path find(String chosen, String pathVar, Path home, boolean windows, String appData, String localAppData) {
+        return find("copilot", chosen, pathVar, home, windows, appData, localAppData);
+    }
+
+    static Path find(String name, String chosen, String pathVar, Path home, boolean windows, String appData,
+                     String localAppData) {
         if (chosen != null && !chosen.isBlank()) {
             Path p = Path.of(chosen.strip());
             return Files.isRegularFile(p) ? p : null;
         }
-        for (Path p : candidates(pathVar, home, windows, appData, localAppData)) {
+        for (Path p : candidates(name, pathVar, home, windows, appData, localAppData)) {
             if (Files.isRegularFile(p) && (windows || Files.isExecutable(p))) {
                 return p;
             }
@@ -40,7 +51,12 @@ public final class CopilotLocator {
 
     /** Where to look, in order. */
     static List<Path> candidates(String pathVar, Path home, boolean windows, String appData, String localAppData) {
-        List<String> names = windows ? List.of("copilot.exe", "copilot.cmd") : List.of("copilot");
+        return candidates("copilot", pathVar, home, windows, appData, localAppData);
+    }
+
+    static List<Path> candidates(String name, String pathVar, Path home, boolean windows, String appData,
+                                 String localAppData) {
+        List<String> names = windows ? List.of(name + ".exe", name + ".cmd") : List.of(name);
         List<Path> dirs = new ArrayList<>();
         if (pathVar != null) {
             for (String d : pathVar.split(java.io.File.pathSeparator)) {
@@ -50,17 +66,19 @@ public final class CopilotLocator {
             }
         }
         if (windows) {
+            dirs.add(home.resolve(".local").resolve("bin"));
             if (appData != null) {
                 dirs.add(Path.of(appData, "npm"));
             }
             if (localAppData != null) {
                 dirs.add(Path.of(localAppData, "Microsoft", "WinGet", "Links"));
-                dirs.add(Path.of(localAppData, "Programs", "copilot"));
+                dirs.add(Path.of(localAppData, "Programs", name));
             }
         } else {
             dirs.add(Path.of("/opt/homebrew/bin"));
             dirs.add(Path.of("/usr/local/bin"));
             dirs.add(home.resolve(".local/bin"));
+            dirs.add(home.resolve("." + name + "/local")); // claude's own install
             dirs.add(home.resolve(".npm-global/bin"));
             dirs.addAll(nvm(home));
             dirs.add(Path.of("/usr/bin"));

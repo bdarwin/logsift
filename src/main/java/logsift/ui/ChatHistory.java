@@ -343,14 +343,14 @@ final class ChatHistory extends JPanel {
             if (r.chat() != null) {
                 ChatInfo c = r.chat();
                 name.setText(c.title());
-                String cost = c.nanoAiu() > 0 ? " · " + ChatEntryView.credits(c.credits()) : "";
+                String cost = c.nanoAiu() > 0 ? " · " + logsift.chat.ChatCost.format(c.model(), c.nanoAiu()) : "";
                 detail.setText(when(c.updated()) + " · " + c.messages() + (c.messages() == 1 ? " entry" : " entries") + cost);
             } else {
                 ChatStore.Hit h = r.hit();
                 name.setText(h.title());
                 String who = switch (h.kind()) {
                     case USER -> "You: ";
-                    case ASSISTANT -> "Copilot: ";
+                    case ASSISTANT -> "Assistant: ";
                     case TOOL -> "Logsift: ";
                     default -> "";
                 };
