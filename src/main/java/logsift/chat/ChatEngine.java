@@ -34,6 +34,35 @@ public interface ChatEngine extends AutoCloseable {
     @Override
     void close();
 
+    /** Whether the person can sign in from Logsift ({@link #signIn}); else they sign in the assistant's own way. */
+    default boolean canSignIn() {
+        return false;
+    }
+
+    /**
+     * Starts signing the person in: a page to open in the browser, then {@link SignIn#await} until
+     * they're done there. Only when {@link #canSignIn}.
+     */
+    default SignIn signIn() throws Exception {
+        throw new UnsupportedOperationException(name() + " is signed in its own way");
+    }
+
+    /** A sign-in under way. */
+    interface SignIn extends AutoCloseable {
+        /** The page where the person signs in, to open in their browser. */
+        String url();
+
+        /**
+         * Waits until the person has signed in in the browser: who they are. Throws why not (they
+         * declined, it failed, it took too long); null when {@code stop} stopped it.
+         */
+        String await(java.util.function.BooleanSupplier stop) throws Exception;
+
+        /** Stops it, if it isn't done. */
+        @Override
+        void close();
+    }
+
     /**
      * A model.
      *

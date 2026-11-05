@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Sign in to Copilot from Logsift:** not signed in, the assistant shows **Sign In to GitHub…**, which opens GitHub's page in your browser; when you're done there, the assistant is ready. No terminal needed.
 - **The assistant is marked beta:** a **BETA** pill beside the chat's name, **View → Assistant (Beta)**, and a line in the welcome saying where to tell us what works and what doesn't.
 - **quackjvm 1.6.1:** queries without parameters run unprepared, which DuckDB runs faster for some (large results read up to twice as fast).
 - **Big tables' caches follow the file, and logs are kept for SQL:** the Pivot cache, the column filters' and value counts' cache, and the Query tab's cache of a big table are now quackjvm 1.6 file tables: when the file grows, only its new rows are read into them (before, a grown file got a whole new cache), and a file written again is read again. A log read for the Query tab is kept on disk with them, so the next time Logsift starts it's ready at once and only the lines written since are read (logs under 32 MB are just read again). **Values as One** totals are kept from one start to the next.
