@@ -70,6 +70,17 @@ final class ChatEntryView extends JPanel {
         return m;
     }
 
+    /** Sized again (the assistant's text size): the answer is laid out in the new size. */
+    @Override
+    public void setFont(Font f) {
+        boolean changed = f != null && !f.equals(getFont());
+        super.setFont(f);
+        if (changed && render != null && rendered != null) {
+            rendered = null;
+            renderNow();
+        }
+    }
+
     /** The entry as it is now (more of an answer, a tool's result). */
     void update(ChatMessage now) {
         boolean kindChanged = now.kind() != m.kind();

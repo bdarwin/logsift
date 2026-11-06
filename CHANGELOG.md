@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Show GC Charts works however the assistant named the log:** when the assistant read a GC log by a service's name from Log Locations (`orders/gc.log`) or a `~/…` path, no heap chart was drawn under its step and **Show GC Charts** did nothing. The chat now finds the file as the assistant's tools did.
+- **The assistant's text is bigger, and its size is yours:** it was the size of the menus (13 points), and **Bigger Font** only changed the logs. The assistant now has a text size of its own, 14 points at first: **⌘+** / **⌘-** (Ctrl+= / Ctrl+-) while you're in it, in a tab, at the side or in its own window, or **Settings → Assistant → Text size**. Answers, questions, tables, its chats and skills all follow, and it's kept.
+
 ## 1.4.0
 
 - **Claude Code can answer too:** **Settings → Assistant → Who answers** chooses GitHub Copilot or Claude Code (your own `claude`, signed in with your Claude subscription). Claude gets Logsift's tools only, served from inside the window on this computer, so they read what's open and ask first as they do for Copilot; what each answer cost is shown in dollars at API prices. Chats go on with the other assistant, told what was said.

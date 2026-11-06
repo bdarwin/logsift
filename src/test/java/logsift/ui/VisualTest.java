@@ -3210,6 +3210,70 @@ class VisualTest {
             }
             return null;
         });
+        // the log named as the tools take it, by a service's name in Log Locations ("orders/orders-gc.log"):
+        // the chart and Show GC Charts find the same file (they found nothing, and the button did nothing)
+        Path gcUserList = logsift.agent.LogCatalog.userFile(AppState.home());
+        String gcHadList = Files.exists(gcUserList) ? Files.readString(gcUserList) : null;
+        try {
+            List<logsift.agent.LogCatalog.Service> services = new ArrayList<>(gcHadList == null ? List.of()
+                    : logsift.agent.LogCatalog.read(gcUserList));
+            services.removeIf(sv -> sv.name().equals("orders"));
+            services.add(new logsift.agent.LogCatalog.Service("orders", "Takes orders", List.of(dir.toString()),
+                    List.of(new logsift.agent.LogCatalog.FileKind("orders-gc.log", "GC log")), "UTC", ""));
+            logsift.agent.LogCatalog.save(gcUserList, services);
+            int gcViews = onEdt(() -> (int) chat.transcriptForTest().viewsForTest().stream()
+                    .filter(v -> "analyze_gc".equals(v.message().tool())).count());
+            onEdt(() -> {
+                chat.inputForTest().setText("please chart gc orders/orders-gc.log");
+                chat.sendForTest();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> !chat.busyForTest() && chat.transcriptForTest().viewsForTest().stream()
+                            .filter(v -> "analyze_gc".equals(v.message().tool())).count() > gcViews);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "analyze_gc of orders/orders-gc.log");
+            ChatGcCard named = onEdt(() -> (ChatGcCard) chat.transcriptForTest().viewsForTest().stream()
+                    .filter(v -> "analyze_gc".equals(v.message().tool())).reduce((x, y) -> y).orElseThrow().inlineForTest());
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> named.reportForTest() != null);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the heap chart of the log named by its service");
+            assertEquals(60, onEdt(() -> named.reportForTest().withHeap().size()));
+            onEdt(() -> {
+                ((javax.swing.JButton) findNamed(named, "showGcCharts")).doClick();
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> frame.tabsForTest().getSelectedComponent() instanceof GcTab);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 30_000, "the GC charts of the log named by its service");
+            assertEquals(gcLog.toAbsolutePath().normalize().toString(),
+                    onEdt(() -> frame.tabsForTest().getToolTipTextAt(frame.tabsForTest().getSelectedIndex())));
+        } finally {
+            if (gcHadList == null) {
+                Files.deleteIfExists(gcUserList);
+            } else {
+                Files.writeString(gcUserList, gcHadList);
+            }
+            onEdt(() -> {
+                for (int i = frame.tabsForTest().getTabCount() - 1; i >= 0; i--) {
+                    if (!tabsBefore.contains(frame.tabsForTest().getComponentAt(i))) {
+                        frame.closeTab(i);
+                    }
+                }
+                return null;
+            });
+        }
         // @ names a file: open logs first, then recent ones; the assistant is told which it is
         onEdt(() -> {
             chat.inputForTest().setText("");
@@ -3540,6 +3604,63 @@ class VisualTest {
             assertTrue(widest >= room - 2 * ChatTranscript.Stack.PAD - 2, "the whole width between the chats and the skills: "
                     + widest + " of " + room);
             settle();
+            // the model and effort boxes show their whole choice in the assistant's text size ("medi…" before)
+            Object modelBefore = onEdt(() -> chat.modelForTest().getSelectedItem());
+            onEdt(() -> {
+                for (int i = 0; i < chat.modelForTest().getItemCount(); i++) {
+                    if (!chat.modelForTest().getItemAt(i).efforts().isEmpty()) {
+                        chat.modelForTest().setSelectedIndex(i);
+                        break;
+                    }
+                }
+                return null;
+            });
+            waitFor(() -> chat.effortForTest().isShowing(), 10_000, "an effort to choose");
+            settle();
+            shotOf(w.getRootPane(), "131c-assistant-tab-effort");
+            onEdt(() -> {
+                for (javax.swing.JComboBox<?> box : List.of(chat.effortForTest(), chat.modelForTest())) {
+                    Object chosen = box.getSelectedItem();
+                    @SuppressWarnings("unchecked")
+                    javax.swing.ListCellRenderer<Object> r = (javax.swing.ListCellRenderer<Object>) box.getRenderer();
+                    java.awt.Component shown = r.getListCellRendererComponent(new javax.swing.JList<>(),
+                            chosen, -1, false, false);
+                    String text = shown instanceof javax.swing.JLabel l ? l.getText() : String.valueOf(chosen);
+                    shown.setFont(box.getFont()); // as the box paints it
+                    int need = shown.getPreferredSize().width;
+                    java.awt.Insets in = box.getInsets();
+                    int arrow = 0;
+                    for (java.awt.Component k : box.getComponents()) {
+                        if (k instanceof javax.swing.AbstractButton) {
+                            arrow = k.getWidth();
+                        }
+                    }
+                    int space = box.getWidth() - in.left - in.right - arrow;
+                    assertTrue(space >= need, text + ": " + space + " px for " + need + " px");
+                    // and it's painted in the size it was measured in (it was a step bigger: "medi…"): each paint
+                    // gives the value the box's font and puts it in the box's renderer pane
+                    javax.swing.CellRendererPane pane = null;
+                    for (java.awt.Component k : box.getComponents()) {
+                        if (k instanceof javax.swing.CellRendererPane p) {
+                            pane = p;
+                        }
+                    }
+                    assertNotNull(pane, text);
+                    for (int paint = 0; paint < 2; paint++) {
+                        shown.setFont(box.getFont());
+                        pane.add(shown);
+                        assertEquals(box.getFont().getSize2D(), shown.getFont().getSize2D(), 0.01,
+                                text + " painted in another size, paint " + (paint + 1));
+                        pane.remove(shown);
+                    }
+                }
+                return null;
+            });
+            onEdt(() -> {
+                chat.modelForTest().setSelectedItem(modelBefore);
+                return null;
+            });
+            settle();
             shotOf(w.getRootPane(), "131c-assistant-tab-chat");
             // the question box is as tall as dragged (and stays so); the chats and skills fold to strips
             int line = onEdt(() -> chat.inputForTest().getFontMetrics(chat.inputForTest().getFont()).getHeight());
@@ -3672,6 +3793,70 @@ class VisualTest {
             waitFor(() -> chat.sidebarShownForTest() && chat.skillsShownForTest(), 10_000, "wide: chats and skills");
             settle();
             shotOf(cw.getRootPane(), "131e-assistant-window");
+            // its own text size, a step above the window's at first: ⌘+ in it makes everything in it bigger,
+            // answers too, and it's kept; the logs keep theirs
+            assertEquals(14, svc.options().textSize());
+            float input = onEdt(() -> chat.inputForTest().getFont().getSize2D());
+            assertEquals(javax.swing.UIManager.getFont("Label.font").getSize2D() + 1, input, 0.01, "the box: a step above");
+            float logsFont = onEdt(w::fontSize);
+            java.util.function.Supplier<java.util.List<Float>> answers = () -> {
+                try {
+                    return onEdt(() -> chat.transcriptForTest().viewsForTest().stream()
+                            .map(v -> v.getFont().getSize2D()).toList());
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            };
+            java.util.List<Float> sizesBefore = answers.get();
+            assertFalse(sizesBefore.isEmpty(), "answers to size");
+            java.util.function.Supplier<java.util.Map<String, Float>> labels = () -> {
+                try {
+                    return onEdt(() -> {
+                        java.util.Map<String, Float> m = new java.util.LinkedHashMap<>();
+                        java.util.ArrayDeque<java.awt.Component> todo = new java.util.ArrayDeque<>(
+                                List.of(chat.transcriptForTest()));
+                        while (!todo.isEmpty()) {
+                            java.awt.Component c = todo.pop();
+                            if (c instanceof javax.swing.JLabel l && l.getText() != null && !l.getText().isBlank()) {
+                                m.put(l.getText(), l.getFont().getSize2D());
+                            }
+                            if (c instanceof java.awt.Container k) {
+                                todo.addAll(List.of(k.getComponents()));
+                            }
+                        }
+                        return m;
+                    });
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            };
+            java.util.Map<String, Float> labelsBefore = labels.get();
+            assertTrue(labelsBefore.keySet().stream().anyMatch(k -> k.contains("read lines")), labelsBefore.toString());
+            onEdt(() -> {
+                cw.getRootPane().getActionMap().get("bigger").actionPerformed(null);
+                cw.getRootPane().getActionMap().get("bigger").actionPerformed(null);
+                return null;
+            });
+            assertEquals(16, svc.options().textSize(), "kept");
+            assertEquals(input + 2, onEdt(() -> chat.inputForTest().getFont().getSize2D()), 0.01);
+            java.util.List<Float> after = answers.get();
+            for (int i = 0; i < sizesBefore.size(); i++) {
+                assertEquals(sizesBefore.get(i) + 2, after.get(i), 0.01, "each answer");
+            }
+            java.util.Map<String, Float> labelsAfter = labels.get();
+            for (var e : labelsBefore.entrySet()) {
+                assertEquals(e.getValue() + 2, labelsAfter.getOrDefault(e.getKey(), -1f), 0.01, "bigger: " + e.getKey());
+            }
+            assertEquals(logsFont, onEdt(w::fontSize), 0.01, "the logs' font is theirs");
+            settle();
+            shotOf(cw.getRootPane(), "131e-assistant-window-bigger");
+            onEdt(() -> {
+                cw.getRootPane().getActionMap().get("smaller").actionPerformed(null);
+                cw.getRootPane().getActionMap().get("smaller").actionPerformed(null);
+                return null;
+            });
+            assertEquals(14, svc.options().textSize());
+            assertEquals(input, onEdt(() -> chat.inputForTest().getFont().getSize2D()), 0.01, "back as it was");
             onEdt(() -> {
                 cw.setBounds(placed.x + 20, placed.y + 10, 640, 600);
                 return null;
@@ -3715,6 +3900,20 @@ class VisualTest {
             assertTrue(onEdt(() -> ap.partForTest("locations").isSelected() && ap.partForTest("plans").isSelected()
                     && ap.partForTest("now").isSelected()));
             assertFalse(onEdt(() -> ap.partForTest("logsift").isEnabled()), "Logsift's own is always told");
+            // its text size, here too
+            assertEquals(14, onEdt(() -> ap.textSizeForTest().getValue()));
+            float boxAt14 = onEdt(() -> chat.inputForTest().getFont().getSize2D());
+            onEdt(() -> {
+                ap.textSizeForTest().setValue(17);
+                return null;
+            });
+            assertEquals(17, svc.options().textSize());
+            assertEquals(boxAt14 + 3, onEdt(() -> chat.inputForTest().getFont().getSize2D()), 0.01, "the open chat at once");
+            onEdt(() -> {
+                ap.textSizeForTest().setValue(14);
+                return null;
+            });
+            assertEquals(boxAt14, onEdt(() -> chat.inputForTest().getFont().getSize2D()), 0.01);
             assertTrue(onEdt(ap::totalForTest).matches("All that's on: ≈ [0-9.]+k? tokens.*"), onEdt(ap::totalForTest));
             onEdt(() -> {
                 ap.partForTest("plans").doClick();

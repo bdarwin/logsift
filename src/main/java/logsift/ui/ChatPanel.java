@@ -329,6 +329,8 @@ final class ChatPanel extends JPanel {
                 connect();
             }
         });
+        // the assistant's own text size (⌘+ / ⌘- in it, Settings → Assistant), apart from the logs'
+        ChatFonts.follow(this);
     }
 
     private boolean connecting;
@@ -1682,9 +1684,24 @@ final class ChatPanel extends JPanel {
         }
     }
 
-    /** A tool's log, as a file: its handle as the chat says it was, or the path it was given. */
+    /**
+     * A tool's log, as a file: its handle as the chat says it was, or what it was given read as the
+     * tools read it (a path, {@code ~/…}, or a name from Log Locations such as {@code orders/gc.log}).
+     */
     private String logFile(ChatMessage tool, String log) {
-        return log.startsWith("log:") ? fileOf(tool, log) : log;
+        if (log.startsWith("log:")) {
+            return fileOf(tool, log);
+        }
+        if (log.regionMatches(true, 0, "http://", 0, 7) || log.regionMatches(true, 0, "https://", 0, 8)) {
+            return log; // read pathOf would download it again
+        }
+        try {
+            logsift.agent.Workspace ws = host.workspace();
+            java.nio.file.Path p = ws == null ? logsift.agent.Workspace.path(log) : ws.pathOf(log);
+            return p.toAbsolutePath().normalize().toString();
+        } catch (Exception e) {
+            return log;
+        }
     }
 
     /** The heap chart under analyze_gc: Logsift draws it, so the answer needn't (and no token is spent). */
@@ -1790,6 +1807,10 @@ final class ChatPanel extends JPanel {
 
     JComboBox<ChatEngine.Model> modelForTest() {
         return model;
+    }
+
+    JComboBox<String> effortForTest() {
+        return effort;
     }
 
     String creditsForTest() {

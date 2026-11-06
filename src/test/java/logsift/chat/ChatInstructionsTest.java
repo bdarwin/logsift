@@ -93,6 +93,23 @@ class ChatInstructionsTest {
     }
 
     @Test
+    void itsTextSizeIsKept(@TempDir Path home) throws Exception {
+        assertEquals(14, ChatInstructions.Options.DEFAULT.textSize(), "a step above the window's 13");
+        assertEquals(14, ChatInstructions.Options.load(home).textSize(), "nothing saved yet");
+        ChatInstructions.Options.DEFAULT.withTextSize(18).withWhere(ChatInstructions.Where.WINDOW).save(home);
+        assertEquals(18, ChatInstructions.Options.load(home).textSize());
+        assertEquals(ChatInstructions.Where.WINDOW, ChatInstructions.Options.load(home).where());
+        assertEquals(18, ChatInstructions.Options.load(home).withAtStart(false).withOwn("x").textSize(), "other changes keep it");
+        assertEquals(28, ChatInstructions.Options.DEFAULT.withTextSize(99).textSize());
+        assertEquals(10, ChatInstructions.Options.DEFAULT.withTextSize(3).textSize());
+        // saved by 1.4.0 (no size): the size it has now
+        Files.writeString(home.resolve("chat/assistant.properties"), "where=tab\n");
+        assertEquals(14, ChatInstructions.Options.load(home).textSize());
+        Files.writeString(home.resolve("chat/assistant.properties"), "textSize=big\n");
+        assertEquals(14, ChatInstructions.Options.load(home).textSize());
+    }
+
+    @Test
     void eachQuestionSaysWhenItIs() {
         ZonedDateTime t = ZonedDateTime.of(2026, 11, 4, 9, 42, 10, 0, ZoneId.of("Asia/Singapore"));
         assertEquals("[Now] Wednesday 4 November 2026, 09:42 (Asia/Singapore, UTC+08:00).", ChatInstructions.now(t));

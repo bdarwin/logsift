@@ -36,6 +36,8 @@ final class AssistantPanel extends JPanel {
     private final JRadioButton beside = new JRadioButton("At the side of the window, next to the log shown");
     private final JRadioButton window = new JRadioButton("In a window of its own, to put beside Logsift or on another screen");
     private final JCheckBox atStart = new JCheckBox("Open the assistant when Logsift starts");
+    private final javax.swing.JSpinner textSize = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(
+            ChatInstructions.Options.TEXT_SIZE, ChatInstructions.Options.MIN_TEXT, ChatInstructions.Options.MAX_TEXT, 1));
     private final JRadioButton copilot = new JRadioButton("GitHub Copilot: your Copilot subscription pays, in AI credits");
     private final JRadioButton claude = new JRadioButton("Claude Code: your Claude subscription (or Console account) pays");
     private final JCheckBox askFiles = new JCheckBox("Ask me before it opens other files or folders");
@@ -118,10 +120,31 @@ final class AssistantPanel extends JPanel {
         g.add(inTab);
         g.add(beside);
         g.add(window);
-        for (JComponent c : List.of(inTab, beside, window, atStart)) {
+        JPanel size = new JPanel();
+        size.setLayout(new BoxLayout(size, BoxLayout.X_AXIS));
+        size.setOpaque(false);
+        size.setBorder(BorderFactory.createEmptyBorder(4, 4, 0, 0)); // in line with the boxes' text
+        size.add(new JLabel("Text size:"));
+        size.add(Box.createHorizontalStrut(6));
+        textSize.setMaximumSize(textSize.getPreferredSize());
+        size.add(textSize);
+        size.add(Box.createHorizontalStrut(6));
+        JLabel keys = new JLabel("points; " + (MainFrame.isMac() ? "⌘+ and ⌘-" : "Ctrl+= and Ctrl+-")
+                + " in the assistant change it too");
+        keys.setForeground(Theme.dimmedForeground());
+        size.add(keys);
+        size.setMaximumSize(new Dimension(Integer.MAX_VALUE, size.getPreferredSize().height));
+        for (JComponent c : List.of(inTab, beside, window, atStart, size)) {
             c.setAlignmentX(LEFT_ALIGNMENT);
             p.add(c);
         }
+        textSize.setName("assistantTextSize");
+        textSize.setToolTipText("The size of the assistant's answers and questions, apart from the logs' font");
+        textSize.addChangeListener(e -> {
+            if (!loading) {
+                ChatFonts.set((Integer) textSize.getValue());
+            }
+        });
         inTab.setName("assistantInTab");
         beside.setName("assistantBeside");
         window.setName("assistantWindow");
@@ -234,6 +257,7 @@ final class AssistantPanel extends JPanel {
         beside.setSelected(o.where() == ChatInstructions.Where.SIDE);
         window.setSelected(o.where() == ChatInstructions.Where.WINDOW);
         atStart.setSelected(o.atStart());
+        textSize.setValue(o.textSize());
         askFiles.setSelected(o.askFiles());
         own.setText(o.own());
         loading = false;
@@ -414,6 +438,10 @@ final class AssistantPanel extends JPanel {
 
     JTextArea ownForTest() {
         return own;
+    }
+
+    javax.swing.JSpinner textSizeForTest() {
+        return textSize;
     }
 
     JRadioButton windowForTest() {

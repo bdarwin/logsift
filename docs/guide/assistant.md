@@ -30,6 +30,8 @@ In a tab of its own, beside the logs' tabs; at the side of the window next to th
 
 When the tab or the window is narrow, the chats at the left and the skills at the right fold away and the conversation has the room; **Chats** (the clock button) lists the chats then.
 
+**Text size:** the assistant's text has a size of its own, apart from the logs' font: 14 points at first, a step above Logsift's menus. **⌘+** and **⌘-** (Ctrl+= and Ctrl+-) while you're in the assistant (typing a question, or after a click in the conversation) make it bigger or smaller, in its tab, at the side or in its window; in a log they change the log's font as before. It's kept, and also in **Settings → Assistant**.
+
 ![The assistant in a window of its own: chats at the left, skills at the right](../screenshots/assistant-window.png)
 
 In its tab there's room for more: your **chats** at the left, as in other chat apps (*Today*, *Yesterday*, *Previous 7 days*…, the one open marked, with **New Chat** and a search at the top), and its **skills** at the right. The conversation takes the room between them. Each folds to a narrow strip with the button at its top (and opens again from the strip, or the clock and book buttons in the header). The question box takes the whole width; drag the handle on its top edge to make it taller or shorter, and Logsift keeps that height.
@@ -75,7 +77,7 @@ Each tool's answer is also kept to 8,000 characters (about 2,000 tokens; coding 
 
 ## Charts
 
-The assistant doesn't draw charts in text. When it explains a GC log (**analyze_gc**), Logsift draws the heap chart under that step itself: memory in use before and after each collection, the heap's size, and full GCs. A click on a point shows its line in the log; **Show GC Charts** opens heap, pauses, allocation and time in GC in a tab beside the log, as **Analyze GC** does. The chart costs no tokens: Logsift reads it from the log, not from the answer. For anything else, the answer gives a table.
+The assistant doesn't draw charts in text. When it explains a GC log (**analyze_gc**), Logsift draws the heap chart under that step itself: memory in use before and after each collection, the heap's size, and full GCs. A click on a point shows its line in the log; **Show GC Charts** opens heap, pauses, allocation and time in GC in a tab beside the log, as **Analyze GC** does. It finds the log however the assistant named it: a log open in Logsift, a path (`~/logs/gc.log` too), or a service's log from [Log Locations](agents.md#where-your-logs-are) (`orders/gc.log`). The chart costs no tokens: Logsift reads it from the log, not from the answer. For anything else, the answer gives a table.
 
 ## Models and credits
 

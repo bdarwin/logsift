@@ -4189,7 +4189,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         t.goToTime(time);
     }
 
+    /** Bigger or smaller: the assistant's text when you're in it, else the logs'. */
     private void changeFont(int delta) {
+        java.awt.Component focus = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+        if (chatPanel != null && focus != null && SwingUtilities.isDescendingFrom(focus, chatPanel)) {
+            ChatFonts.step(delta);
+            return;
+        }
         setFont(Theme.fontFamily(), fontSize + delta);
     }
 

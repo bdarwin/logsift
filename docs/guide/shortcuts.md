@@ -67,7 +67,7 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Tree of loggers | Ctrl+Shift+B |
 | Fold or open the bottom panel | Ctrl+J |
 | The assistant (ask Copilot about the open logs) | Ctrl+I |
-| Bigger / smaller font | Ctrl+= / Ctrl+- |
+| Bigger / smaller font (in the assistant: its text) | Ctrl+= / Ctrl+- |
 
 ## Selecting and copying
 

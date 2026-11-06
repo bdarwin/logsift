@@ -67,6 +67,12 @@ final class ChatWindow extends JFrame {
         int menu = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
         bind(KeyStroke.getKeyStroke(KeyEvent.VK_I, menu), "back", back);
         bind(KeyStroke.getKeyStroke(KeyEvent.VK_W, menu), "close", close);
+        // its own text size: ⌘+ / ⌘- (Ctrl), as View → Bigger Font in Logsift's window
+        bind(KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, menu), "bigger", () -> ChatFonts.step(1));
+        bind(KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, menu | java.awt.event.InputEvent.SHIFT_DOWN_MASK), "bigger+",
+                () -> ChatFonts.step(1));
+        bind(KeyStroke.getKeyStroke(KeyEvent.VK_PLUS, menu), "plus", () -> ChatFonts.step(1));
+        bind(KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, menu), "smaller", () -> ChatFonts.step(-1));
     }
 
     private void bind(KeyStroke key, String name, Runnable r) {

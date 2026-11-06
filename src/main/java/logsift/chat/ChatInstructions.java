@@ -65,12 +65,22 @@ public final class ChatInstructions {
      *                  (reading what wasn't asked about is where answers get expensive)
      */
     public record Options(Where where, boolean atStart, boolean locations, boolean plans, boolean now, String own,
-                          boolean askFiles) {
-        public static final Options DEFAULT = new Options(Where.TAB, true, true, true, true, "", true);
+                          boolean askFiles, int textSize) {
+        /** The assistant's text size at first, in points: a step above the window's own text. */
+        public static final int TEXT_SIZE = 14;
+        public static final int MIN_TEXT = 10;
+        public static final int MAX_TEXT = 28;
+        public static final Options DEFAULT = new Options(Where.TAB, true, true, true, true, "", true, TEXT_SIZE);
 
         public Options {
             own = own == null ? "" : own.strip();
             where = where == null ? Where.TAB : where;
+            textSize = textSize <= 0 ? TEXT_SIZE : Math.max(MIN_TEXT, Math.min(MAX_TEXT, textSize));
+        }
+
+        public Options(Where where, boolean atStart, boolean locations, boolean plans, boolean now, String own,
+                       boolean askFiles) {
+            this(where, atStart, locations, plans, now, own, askFiles, TEXT_SIZE);
         }
 
         public Options(boolean inTab, boolean atStart, boolean locations, boolean plans, boolean now, String own) {
@@ -110,7 +120,15 @@ public final class ChatInstructions {
                 own = "";
             }
             return new Options(Where.of(p.getProperty("where")), on(p, "atStart"), on(p, "locations"),
-                    on(p, "plans"), on(p, "now"), own, on(p, "askFiles"));
+                    on(p, "plans"), on(p, "now"), own, on(p, "askFiles"), size(p.getProperty("textSize")));
+        }
+
+        private static int size(String v) {
+            try {
+                return v == null ? TEXT_SIZE : Integer.parseInt(v.strip());
+            } catch (NumberFormatException e) {
+                return TEXT_SIZE;
+            }
         }
 
         private static boolean on(Properties p, String key) {
@@ -125,6 +143,7 @@ public final class ChatInstructions {
             p.setProperty("plans", String.valueOf(plans));
             p.setProperty("now", String.valueOf(now));
             p.setProperty("askFiles", String.valueOf(askFiles));
+            p.setProperty("textSize", String.valueOf(textSize));
             Path f = file(home);
             Files.createDirectories(f.getParent());
             try (Writer w = Files.newBufferedWriter(f, StandardCharsets.UTF_8)) {
@@ -143,31 +162,36 @@ public final class ChatInstructions {
         }
 
         public Options withWhere(Where v) {
-            return new Options(v, atStart, locations, plans, now, own, askFiles);
+            return new Options(v, atStart, locations, plans, now, own, askFiles, textSize);
         }
 
         public Options withAtStart(boolean v) {
-            return new Options(where, v, locations, plans, now, own, askFiles);
+            return new Options(where, v, locations, plans, now, own, askFiles, textSize);
         }
 
         public Options withLocations(boolean v) {
-            return new Options(where, atStart, v, plans, now, own, askFiles);
+            return new Options(where, atStart, v, plans, now, own, askFiles, textSize);
         }
 
         public Options withPlans(boolean v) {
-            return new Options(where, atStart, locations, v, now, own, askFiles);
+            return new Options(where, atStart, locations, v, now, own, askFiles, textSize);
         }
 
         public Options withNow(boolean v) {
-            return new Options(where, atStart, locations, plans, v, own, askFiles);
+            return new Options(where, atStart, locations, plans, v, own, askFiles, textSize);
         }
 
         public Options withAskFiles(boolean v) {
-            return new Options(where, atStart, locations, plans, now, own, v);
+            return new Options(where, atStart, locations, plans, now, own, v, textSize);
+        }
+
+        /** The assistant's text size, in points (kept between the smallest and largest). */
+        public Options withTextSize(int v) {
+            return new Options(where, atStart, locations, plans, now, own, askFiles, v);
         }
 
         public Options withOwn(String v) {
-            return new Options(where, atStart, locations, plans, now, v, askFiles);
+            return new Options(where, atStart, locations, plans, now, v, askFiles, textSize);
         }
     }
 
