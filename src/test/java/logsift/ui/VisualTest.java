@@ -3956,11 +3956,12 @@ class VisualTest {
             waitFor(() -> chat.sidebarShownForTest() && chat.skillsShownForTest(), 10_000, "wide: chats and skills");
             settle();
             shotOf(cw.getRootPane(), "131e-assistant-window");
-            // its own text size, a step above the window's at first: ⌘+ in it makes everything in it bigger,
+            // its own text size, 14 points at first whatever the system's (13 on macOS, 12 on Windows, 14 on
+            // Linux): ⌘+ in it makes everything in it bigger,
             // answers too, and it's kept; the logs keep theirs
             assertEquals(14, svc.options().textSize());
             float input = onEdt(() -> chat.inputForTest().getFont().getSize2D());
-            assertEquals(javax.swing.UIManager.getFont("Label.font").getSize2D() + 1, input, 0.01, "the box: a step above");
+            assertEquals(14f, input, 0.01, "the box: the size chosen, on every system");
             float logsFont = onEdt(w::fontSize);
             java.util.function.Supplier<java.util.List<Float>> answers = () -> {
                 try {
