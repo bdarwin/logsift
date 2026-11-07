@@ -266,75 +266,124 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     // ---------------------------------------------------------------- updates
 
     private void autoCheckForUpdates() {
-        if (!PREFS.getBoolean("updates.auto", true) || logsift.core.UpdateChecker.url() == null) {
+        if (!PREFS.getBoolean("updates.auto", true) || !logsift.core.SelfUpdate.enabled()) {
             return;
         }
-        String known = PREFS.get("updates.latest", null);
-        if (known != null && logsift.core.Version.isNewer(known, logsift.core.Version.current())) {
-            showUpdate(known, logsift.core.UpdateChecker.page(known)); // known from an earlier check
-        }
         long last = PREFS.getLong("updates.lastCheck", 0);
+        logsift.core.SelfUpdate.Available known = availableOf(PREFS.get("updates.known", null));
+        if (known != null) {
+            showUpdate(known); // known from an earlier check
+        }
         if (System.currentTimeMillis() - last > 24L * 3600 * 1000) {
             checkForUpdates(false);
         }
     }
 
+    /** What this Logsift is (a release, a snapshot, built here). */
+    static logsift.core.SelfUpdate.Build build() {
+        return logsift.core.SelfUpdate.Build.current();
+    }
+
+    /** Where updates come from: Settings → General → Updates, else this build's own kind. */
+    static logsift.core.SelfUpdate.Channel updateChannel() {
+        return logsift.core.SelfUpdate.Channel.of(PREFS.get("updates.channel", null), build().defaultChannel());
+    }
+
+    /** Updates from another place: what was found before is forgotten, and it's asked again. */
+    void setUpdateChannel(logsift.core.SelfUpdate.Channel c) {
+        PREFS.put("updates.channel", c.key);
+        PREFS.remove("updates.known");
+        PREFS.putLong("updates.lastCheck", 0);
+        available = null;
+        updateButton.setVisible(false);
+        if (PREFS.getBoolean("updates.auto", true)) {
+            checkForUpdates(false);
+        }
+    }
+
+    /** An update as kept between runs: its tag, version, commit and date. */
+    static String keyOf(logsift.core.SelfUpdate.Available a) {
+        return String.join("\t", a.tag(), a.version(), a.commit(), a.date() == null ? "" : a.date().toString());
+    }
+
+    /** An update kept by {@link #keyOf}, if it's still newer than this Logsift (else null). */
+    static logsift.core.SelfUpdate.Available availableOf(String key) {
+        if (key == null) {
+            return null;
+        }
+        String[] f = key.split("\t", -1);
+        if (f.length != 4) {
+            return null;
+        }
+        java.time.Instant d;
+        try {
+            d = f[3].isEmpty() ? null : java.time.Instant.parse(f[3]);
+        } catch (RuntimeException e) {
+            d = null;
+        }
+        logsift.core.SelfUpdate.Available a = new logsift.core.SelfUpdate.Available(f[0], f[1], f[2], d);
+        return logsift.core.SelfUpdate.newer(a, build()) ? a : null;
+    }
+
     /**
-     * Asks GitHub for the latest release (in the background). A newer one shows a button in the
-     * status bar; when {@code manual}, the answer is also shown in a dialog.
+     * Asks GitHub for a newer Logsift (in the background): the latest release, or the latest
+     * snapshot build, as Settings says. A newer one shows a button in the status bar; when
+     * {@code manual}, the answer is also shown in a dialog.
      */
     void checkForUpdates(boolean manual) {
-        String url = logsift.core.UpdateChecker.url();
-        if (url == null) {
+        if (!logsift.core.SelfUpdate.enabled()) {
             if (manual) {
                 JOptionPane.showMessageDialog(this, "Update checks are turned off.");
             }
             return;
         }
+        logsift.core.SelfUpdate.Channel channel = updateChannel();
+        logsift.core.SelfUpdate.Build b = build();
         Thread t = new Thread(() -> {
-            java.util.Optional<logsift.core.UpdateChecker.Release> r;
+            java.util.Optional<logsift.core.SelfUpdate.Available> r = java.util.Optional.empty();
             String error = null;
+            boolean answered = false;
             try {
-                r = logsift.core.UpdateChecker.latest(url);
-            } catch (java.io.IOException e) {
-                r = java.util.Optional.empty();
+                r = logsift.core.SelfUpdate.check(channel, b);
+                answered = true;
+            } catch (java.io.IOException | RuntimeException e) {
                 error = e.getMessage();
             }
-            java.util.Optional<logsift.core.UpdateChecker.Release> result = r;
+            java.util.Optional<logsift.core.SelfUpdate.Available> result = r;
             String err = error;
-            SwingUtilities.invokeLater(() -> updateChecked(result, err, manual));
+            boolean ok = answered;
+            SwingUtilities.invokeLater(() -> updateChecked(result, ok, err, manual, channel));
         }, "logsift-update-check");
         t.setDaemon(true);
         t.start();
     }
 
-    private void updateChecked(java.util.Optional<logsift.core.UpdateChecker.Release> r, String error, boolean manual) {
-        String current = logsift.core.Version.current();
-        if (r.isPresent()) {
+    private void updateChecked(java.util.Optional<logsift.core.SelfUpdate.Available> r, boolean answered, String error,
+                               boolean manual, logsift.core.SelfUpdate.Channel channel) {
+        if (answered) {
             PREFS.putLong("updates.lastCheck", System.currentTimeMillis());
-            PREFS.put("updates.latest", r.get().version());
-            PREFS.put("updates.url", r.get().url());
+            if (r.isPresent()) {
+                PREFS.put("updates.known", keyOf(r.get()));
+            } else {
+                PREFS.remove("updates.known");
+            }
         }
-        boolean newer = r.isPresent() && logsift.core.Version.isNewer(r.get().version(), current);
-        if (newer) {
-            showUpdate(r.get().version(), r.get().url());
-        } else {
+        if (r.isPresent()) {
+            showUpdate(r.get());
+        } else if (answered) {
+            available = null;
             updateButton.setVisible(false);
         }
         if (!manual) {
             return;
         }
-        if (newer) {
-            int answer = JOptionPane.showOptionDialog(this,
-                    "Logsift " + r.get().version() + " is available. You have " + current + ".",
-                    "Update Available", JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null,
-                    new Object[] {"Download", "Later"}, "Download");
-            if (answer == 0) {
-                HelpSupport.browse(this, r.get().url());
-            }
-        } else if (r.isPresent()) {
-            JOptionPane.showMessageDialog(this, "You have the latest version (" + current + ").",
-                    "No Update", JOptionPane.INFORMATION_MESSAGE);
+        if (r.isPresent()) {
+            offerUpdate(r.get());
+        } else if (answered) {
+            logsift.core.SelfUpdate.Build b = build();
+            JOptionPane.showMessageDialog(this, channel == logsift.core.SelfUpdate.Channel.SNAPSHOTS
+                    ? "You have the latest snapshot build" + (b.commit().isEmpty() ? "." : " (" + b.shortCommit() + ").")
+                    : "You have the latest version (" + b.version() + ").", "No Update", JOptionPane.INFORMATION_MESSAGE);
         } else {
             JOptionPane.showMessageDialog(this, "Couldn't check for updates"
                     + (error == null ? "." : ": " + error) + "\nYou can look at " + HelpSupport.REPO + "/releases",
@@ -342,11 +391,159 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
-    private void showUpdate(String version, String url) {
-        updateUrl = url;
-        updateButton.setText("Logsift " + version + " is available");
-        updateButton.setToolTipText("Open the download page for version " + version);
+    /** The newer Logsift the status bar's button offers, or null. */
+    private logsift.core.SelfUpdate.Available available;
+
+    private void showUpdate(logsift.core.SelfUpdate.Available a) {
+        available = a;
+        updateUrl = a.page();
+        updateButton.setText(a.snapshot() ? "A newer snapshot build is available" : "Logsift " + a.version() + " is available");
+        updateButton.setToolTipText("Update to " + a.title());
         updateButton.setVisible(true);
+    }
+
+    /** The status bar's button: what's new, and updating to it. */
+    void updateClicked() {
+        if (available != null) {
+            offerUpdate(available);
+        } else {
+            HelpSupport.browse(this, updateUrl);
+        }
+    }
+
+    static final String UPDATE_RESTART = "Update and Restart";
+    static final String UPDATE_DOWNLOAD = "Download It";
+    static final String UPDATE_PAGE = "Open Its Page";
+    static final String UPDATE_LATER = "Later";
+    static final String RESTART_NOW = "Restart Now";
+    static final String RESTART_LATER = "When I Quit";
+
+    /** For tests: answers the update's questions (given the choices; null: as if closed). */
+    static java.util.function.Function<java.util.List<String>, String> answerUpdateForTest;
+    /** For tests: what was asked last. */
+    private String updateAsked;
+
+    String updateAskedForTest() {
+        return updateAsked;
+    }
+
+    /** The choices for updating a Logsift installed as {@code i} (null: one that can't update itself). */
+    static java.util.List<String> updateChoices(logsift.core.SelfUpdate.Install i, logsift.core.SelfUpdate.Build b) {
+        if (i == null || !b.updates()) {
+            return java.util.List.of(UPDATE_PAGE, UPDATE_LATER);
+        }
+        return java.util.List.of(i.automatic() ? UPDATE_RESTART : UPDATE_DOWNLOAD, UPDATE_PAGE, UPDATE_LATER);
+    }
+
+    private String ask(String text, String title, java.util.List<String> choices) {
+        updateAsked = text;
+        if (answerUpdateForTest != null) {
+            return answerUpdateForTest.apply(choices);
+        }
+        Object[] o = choices.toArray();
+        int n = JOptionPane.showOptionDialog(this, text, title, JOptionPane.DEFAULT_OPTION,
+                JOptionPane.INFORMATION_MESSAGE, null, o, o[0]);
+        return n < 0 ? null : choices.get(n);
+    }
+
+    void offerUpdate(logsift.core.SelfUpdate.Available a) {
+        offerUpdate(a, logsift.core.SelfUpdate.install());
+    }
+
+    void offerUpdate(logsift.core.SelfUpdate.Available a, logsift.core.SelfUpdate.Install i) {
+        logsift.core.SelfUpdate.Build b = build();
+        java.util.List<String> choices = updateChoices(i, b);
+        String have = b.kind().equals("snapshot") ? "the snapshot build " + b.shortCommit() + " (" + b.version() + ")"
+                : b.version();
+        StringBuilder text = new StringBuilder(a.title()).append(" is available. You have ").append(have).append('.');
+        if (choices.contains(UPDATE_RESTART)) {
+            text.append("\n\nLogsift downloads it, checks it against the release's checksums, and restarts with it. "
+                    + "The files you have open open again.");
+        } else if (choices.contains(UPDATE_DOWNLOAD)) {
+            text.append("\n\nLogsift can't change ").append(i.app())
+                    .append(" itself: it downloads the new one, checks it, and shows it to you to install.");
+        } else if (!b.updates()) {
+            text.append("\n\nThis Logsift wasn't installed from a release or a snapshot build, so it doesn't update itself.");
+        }
+        String answer = ask(text.toString(), "Update Available", choices);
+        if (UPDATE_PAGE.equals(answer)) {
+            HelpSupport.browse(this, a.page());
+        } else if (UPDATE_RESTART.equals(answer) || UPDATE_DOWNLOAD.equals(answer)) {
+            update(a, i);
+        }
+    }
+
+    /** Downloads and checks {@code a}, makes it ready beside the app, and asks when to restart with it. */
+    void update(logsift.core.SelfUpdate.Available a, logsift.core.SelfUpdate.Install i) {
+        java.nio.file.Path dir = logsift.core.SelfUpdate.dir(AppState.home());
+        ProgressDialog.run(this, "Downloading " + a.title() + "…", (progress, cancelled) -> {
+            long[] size = {0};
+            java.nio.file.Path f = logsift.core.SelfUpdate.download(a, i, dir, n -> {
+                if (n < 0) {
+                    size[0] = -1 - n;
+                } else if (size[0] > 0) {
+                    progress.accept(Math.min(0.95, n / (double) size[0]));
+                }
+            }, cancelled::getAsBoolean);
+            return logsift.core.SelfUpdate.prepare(i, f);
+        }, ready -> updateReady(a, i, ready), e -> updateFailed(e), () -> { });
+    }
+
+    private void updateFailed(Exception e) {
+        updateAsked = "Couldn't update: " + e.getMessage();
+        if (answerUpdateForTest == null) {
+            JOptionPane.showMessageDialog(this, updateAsked, "Update", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    /** For tests: the update made ready, and the script that puts it in place. */
+    private java.nio.file.Path updateScript;
+
+    java.nio.file.Path updateScriptForTest() {
+        return updateScript;
+    }
+
+    /** For tests: whether quitting is left to the test (else Restart Now quits). */
+    static boolean keepRunningForTest;
+
+    private void updateReady(logsift.core.SelfUpdate.Available a, logsift.core.SelfUpdate.Install i,
+                             java.nio.file.Path ready) {
+        java.nio.file.Path dir = logsift.core.SelfUpdate.dir(AppState.home());
+        if (!i.automatic()) {
+            String how = ready.getFileName().toString().endsWith(".deb")
+                    ? "\n\nInstall it with: sudo apt install " + ready : "";
+            ask(a.title() + " is downloaded and checked:\n" + ready + how, "Update Downloaded", java.util.List.of("OK"));
+            if (answerUpdateForTest == null) {
+                HelpSupport.reveal(this, ready);
+            }
+            return;
+        }
+        String answer = ask(a.title() + " is ready. Restart Logsift with it now?", "Update Ready",
+                java.util.List.of(RESTART_NOW, RESTART_LATER));
+        boolean now = RESTART_NOW.equals(answer);
+        try {
+            updateScript = logsift.core.SelfUpdate.script(i, ready, ProcessHandle.current().pid(), now, dir);
+            if (now) {
+                if (!keepRunningForTest) {
+                    logsift.core.SelfUpdate.start(updateScript, dir);
+                    dispose(); // as Exit: the session is kept, and the script goes on once Logsift has quit
+                }
+            } else {
+                java.nio.file.Path script = updateScript;
+                if (!keepRunningForTest) {
+                    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                        try {
+                            logsift.core.SelfUpdate.start(script, dir);
+                        } catch (java.io.IOException e) {
+                            // it's tried again from the button next time
+                        }
+                    }, "logsift-update-on-quit"));
+                }
+                status.setText(a.title() + " goes in when you quit Logsift.");
+            }
+        } catch (java.io.IOException e) {
+            updateFailed(e);
+        }
     }
 
     /** Shows the start page in a tab (the + after the tabs). */
@@ -3018,7 +3215,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         updateButton.setFocusable(false);
         updateButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
         updateButton.setVisible(false);
-        updateButton.addActionListener(e -> HelpSupport.browse(this, updateUrl));
+        updateButton.addActionListener(e -> updateClicked());
         JPanel left = new JPanel(new BorderLayout(10, 0));
         left.setOpaque(false);
         left.add(updateButton, BorderLayout.WEST);

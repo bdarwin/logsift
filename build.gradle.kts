@@ -293,8 +293,21 @@ val printTestClasspath by tasks.registering {
     doLast { println(sourceSets.test.get().runtimeClasspath.asPath) }
 }
 
+// What this build is, for updating itself: a release (a version tag), a snapshot (main), a beta
+// (a beta/ branch) or one built here; and its commit. Set from GitHub Actions' own variables.
+val buildKind = System.getenv("GITHUB_REF").let { ref ->
+    when {
+        System.getenv("GITHUB_ACTIONS") != "true" || ref == null -> "dev"
+        ref.startsWith("refs/tags/v") -> "release"
+        ref.startsWith("refs/heads/beta/") -> "beta"
+        ref == "refs/heads/main" -> "snapshot"
+        else -> "dev"
+    }
+}
+
 tasks.jar {
     manifest {
-        attributes("Implementation-Title" to "Logsift", "Implementation-Version" to project.version)
+        attributes("Implementation-Title" to "Logsift", "Implementation-Version" to project.version,
+            "Logsift-Build" to buildKind, "Logsift-Commit" to (System.getenv("GITHUB_SHA") ?: ""))
     }
 }

@@ -51,6 +51,20 @@ final class HelpSupport {
     }
 
     /** Opens a web page; if there is no browser, copies the address and says so. */
+    /** Shows a file in the Finder, Explorer or the file manager (its folder, where that's all there is). */
+    static void reveal(Component parent, java.nio.file.Path file) {
+        try {
+            java.awt.Desktop d = java.awt.Desktop.getDesktop();
+            if (d.isSupported(java.awt.Desktop.Action.BROWSE_FILE_DIR)) {
+                d.browseFileDirectory(file.toFile());
+            } else {
+                d.open(file.getParent().toFile());
+            }
+        } catch (Exception | Error e) {
+            javax.swing.JOptionPane.showMessageDialog(parent, "It's in " + file.getParent());
+        }
+    }
+
     static void browse(Component parent, String url) {
         try {
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {

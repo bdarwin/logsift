@@ -97,7 +97,7 @@ The same error again counts once. Failures that aren't bugs, like a file that ca
 
 ## FAQ
 
-**Check for Updates fails behind a company proxy (PKIX, certificate).** Logsift trusts the certificates this computer trusts, and if the proxy's certificate still isn't trusted it checks without checking the certificate. Only the version number is read, and **Download** always opens GitHub's page for that version, so nothing else is taken from the proxy's answer.
+**Check for Updates fails behind a company proxy (PKIX, certificate).** Logsift trusts the certificates this computer trusts, and if the proxy's certificate still isn't trusted it checks without checking the certificate. Only the version number is read. **Update and Restart** never skips the check: it downloads only from GitHub with its certificate trusted, and checks the file against the release's checksums. If your proxy's certificate isn't trusted by this computer, the download fails safely; use **Open Its Page** and install by hand.
 
 **Does Logsift send my logs anywhere?** No. Its only network connections are the daily update check (turn it off with **Help → Check for Updates Automatically**) and the servers you choose: SSH servers, JMX ports and web addresses.
 

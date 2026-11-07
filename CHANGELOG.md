@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Logsift updates itself:** **Update and Restart** downloads the new version from GitHub, checks it against the release's SHA-256 checksums, and restarts with it; your files open again. **When I Quit** puts it in place the next time you quit. Updates come from releases or, if you choose in **Settings → General → Update to**, from snapshot builds (the latest of main, to try fixes before their release). On a Linux `.deb` install, or a folder you can't change, Logsift downloads and checks the file and shows it to you. Releases and snapshots now come with `SHA256SUMS.txt`.
+
 - **The assistant's audit:** 👍 and 👎 under each answer. 👎 asks what went wrong. **View → Assistant Audit** lists every question, a page at a time. Each shows what answering it took (the model's calls, each tool and the size of its answer, the tokens, the time and the cost), what looks wrong or wasted, and your verdict. Flags cover errors, failed tools, the same call made twice, big tool answers, many tokens, slow answers and broken line links. It exports a Markdown report, and coding agents read it over MCP (`assistant_audit`, `assistant_audit_question`). It reads the kept chats, so it costs no tokens. Its limits are in **Settings → Assistant → Audit**.
 
 - **Show GC Charts works however the assistant named the log:** when the assistant read a GC log by a service's name from Log Locations (`orders/gc.log`) or a `~/…` path, no heap chart was drawn under its step and **Show GC Charts** did nothing. The chat now finds the file as the assistant's tools did.

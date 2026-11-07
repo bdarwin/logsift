@@ -560,7 +560,21 @@ final class SettingsDialog extends JDialog {
         JCheckBox updates = check("Check for new versions once a day", PREFS.getBoolean("updates.auto", true),
                 frame::setAutoUpdates);
         add(p, l, f, "", updates);
-        note(p, l, f, "Asks GitHub for the latest version number only; nothing about you or your logs is sent.");
+        JComboBox<String> channel = new JComboBox<>(new String[] {"Releases", "Snapshot builds (the latest of main)"});
+        channel.setName("updateChannel");
+        channel.setSelectedIndex(MainFrame.updateChannel() == logsift.core.SelfUpdate.Channel.SNAPSHOTS ? 1 : 0);
+        channel.addActionListener(e -> frame.setUpdateChannel(channel.getSelectedIndex() == 1
+                ? logsift.core.SelfUpdate.Channel.SNAPSHOTS : logsift.core.SelfUpdate.Channel.RELEASES));
+        updateChannelBox = channel;
+        add(p, l, f, "Update to", channel);
+        logsift.core.SelfUpdate.Build build = MainFrame.build();
+        note(p, l, f, "Asks GitHub for the latest version (or snapshot's commit) only; nothing about you or your logs "
+                + "is sent. Snapshot builds are made from each change, to try fixes before their release. "
+                + "Update and Restart downloads from GitHub, checks the file against the release's checksums, and "
+                + "restarts with it. This is " + (build.kind().equals("snapshot") ? "the snapshot build "
+                + build.shortCommit() + " (" + build.version() + ")" : build.kind().equals("release")
+                ? "Logsift " + build.version() : "Logsift " + build.version() + ", built here: it doesn't update itself")
+                + ".");
 
         GridBagConstraints end = new GridBagConstraints();
         end.gridx = 0;
@@ -568,6 +582,12 @@ final class SettingsDialog extends JDialog {
         end.weighty = 1;
         p.add(new JLabel(), end);
         return p;
+    }
+
+    private JComboBox<String> updateChannelBox;
+
+    JComboBox<String> updateChannelForTest() {
+        return updateChannelBox;
     }
 
     private static void heading(JPanel p, String text, GridBagConstraints l, GridBagConstraints f, boolean gap) {

@@ -21,7 +21,28 @@ description: Every Logsift setting with its default, log formats, source folders
 | **Check files for changes** | Twice a second | Less often uses less power with many open files, or files on network drives |
 | **Two files dropped** | Ask each time | Two files dropped on the window: ask, compare them, or open each in its own tab |
 | **At start: Reopen the files that were open last time** | on | Reopens the last session when Logsift starts without a file |
-| **Check for new versions once a day** | on | Asks GitHub for the latest version number only; nothing about you or your logs is sent. A button appears in the status bar when a new version is out |
+| **Check for new versions once a day** | on | Asks GitHub for the latest version number only (or the latest snapshot's commit); nothing about you or your logs is sent. A button appears in the status bar when a new version is out |
+| **Update to** | what this Logsift is | *Releases*, or *Snapshot builds*: the latest of main, built from each change, to try fixes before they're released. A snapshot build follows snapshots until you choose releases |
+
+### Updating
+
+Click the status bar's button (or **Help → Check for Updates…**), then **Update and Restart**:
+
+1. Logsift downloads the file for your computer, from GitHub only, with GitHub's certificate checked.
+2. It checks the file against the release's SHA-256 checksums (`SHA256SUMS.txt`). A file that doesn't match isn't used.
+3. It makes the new version ready beside the app; the running one isn't touched.
+4. It restarts with the new version, and the files you had open open again. **When I Quit** puts the new version in place the next time you quit, instead.
+
+How the new version goes in depends on how Logsift was installed:
+
+| Installed from | What happens |
+|---|---|
+| macOS `.dmg` | The new Logsift.app replaces the old one |
+| Windows `.msi` | The new installer runs, without questions |
+| Windows `.zip`, Linux `.tar.gz`, the zip for any Java 21 | The new folder replaces the old one |
+| Linux `.deb`, or a folder you can't change | Logsift downloads and checks the file, and shows it to you to install (`sudo apt install ./Logsift-….deb`) |
+
+Self-update starts with 1.4.1: versions before it have no checksums to check against, so install 1.4.1 (or a snapshot build) by hand once. A Logsift you built yourself, or a beta, doesn't update itself. What the update did is written to `update.log` in Logsift's folder (`~/.logsift/updates`).
 
 ## Log formats
 

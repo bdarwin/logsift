@@ -2156,20 +2156,44 @@ class VisualTest {
         });
         assertTrue(HelpSupport.bugReportUrl("t", "x").contains("version="), "bug form is filled in");
 
-        // a newer release on the (local, fake) update server shows a button in the toolbar
+        // a newer release on the (local, fake) GitHub shows a button in the status bar; clicked, Logsift
+        // downloads it, checks it against the release's sums, makes it ready beside the app, and puts
+        // it in place once it has quit
+        Path appDir = Files.createDirectories(dir.resolve("update-test/Logsift"));
+        Files.writeString(appDir.resolve("Logsift.exe"), "old");
+        var out = new java.io.ByteArrayOutputStream();
+        try (var z = new java.util.zip.ZipOutputStream(out)) {
+            z.putNextEntry(new java.util.zip.ZipEntry("Logsift/Logsift.exe"));
+            z.write("new".getBytes(StandardCharsets.UTF_8));
+            z.closeEntry();
+        }
+        byte[] zipped = out.toByteArray();
+        String sum = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(zipped));
+        java.util.Map<String, byte[]> served = new java.util.HashMap<>();
+        served.put("/repos/bdarwin/logsift/releases/latest",
+                "{\"tag_name\":\"v9.9.0\",\"html_url\":\"https://example.invalid/r\"}".getBytes(StandardCharsets.UTF_8));
+        served.put("/bdarwin/logsift/releases/download/v9.9.0/Logsift-9.9.0-windows-x64.zip", zipped);
+        served.put("/bdarwin/logsift/releases/download/v9.9.0/SHA256SUMS.txt",
+                (sum + "  Logsift-9.9.0-windows-x64.zip\n").getBytes(StandardCharsets.UTF_8));
         com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
                 new java.net.InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/latest", ex -> {
-            byte[] b = "{\"tag_name\":\"v9.9.0\",\"html_url\":\"https://example.invalid/r\"}"
-                    .getBytes(StandardCharsets.UTF_8);
-            ex.sendResponseHeaders(200, b.length);
-            ex.getResponseBody().write(b);
+        server.createContext("/", ex -> {
+            byte[] body = served.get(ex.getRequestURI().getPath());
+            ex.sendResponseHeaders(body == null ? 404 : 200, body == null ? -1 : body.length);
+            if (body != null) {
+                ex.getResponseBody().write(body);
+            }
             ex.close();
         });
         server.start();
-        System.setProperty("logsift.updateUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/latest");
+        System.setProperty("logsift.updateBase", "http://127.0.0.1:" + server.getAddress().getPort());
         System.setProperty("logsift.version", "1.1.0");
+        System.setProperty("logsift.build", "release");
+        System.setProperty("logsift.commit", "");
+        List<List<String>> asked = new ArrayList<>();
+        MainFrame.keepRunningForTest = true;
         try {
+            AppState.prefs().remove("updates.channel");
             onEdt(() -> {
                 frame.checkForUpdates(false);
                 return null;
@@ -2178,15 +2202,74 @@ class VisualTest {
                     "update button");
             settle();
             shot("41-update-available");
+            MainFrame.answerUpdateForTest = choices -> {
+                asked.add(choices);
+                return choices.contains(MainFrame.UPDATE_RESTART) ? MainFrame.UPDATE_RESTART : MainFrame.RESTART_LATER;
+            };
+            logsift.core.SelfUpdate.Install installed = new logsift.core.SelfUpdate.Install(
+                    logsift.core.SelfUpdate.Kind.FOLDER, appDir, appDir.resolve("Logsift.exe"), "windows-x64", "zip");
+            onEdt(() -> {
+                frame.offerUpdate(logsift.core.SelfUpdate.check(logsift.core.SelfUpdate.Channel.RELEASES,
+                        MainFrame.build()).orElseThrow(), installed);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(frame::updateScriptForTest) != null;
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "the update made ready: " + frame.updateAskedForTest());
+            assertEquals(List.of(List.of(MainFrame.UPDATE_RESTART, MainFrame.UPDATE_PAGE, MainFrame.UPDATE_LATER),
+                    List.of(MainFrame.RESTART_NOW, MainFrame.RESTART_LATER)), asked);
+            assertEquals("new", Files.readString(dir.resolve("update-test/Logsift.new/Logsift.exe")), "checked, ready");
+            assertEquals("old", Files.readString(appDir.resolve("Logsift.exe")), "the running one untouched");
+            String script = Files.readString(onEdt(frame::updateScriptForTest));
+            assertTrue(script.contains("move \"%NEW%\" \"%APP%\"") && !script.contains("start \"\""),
+                    "put in place when Logsift quits, not started again: " + script);
+            // built here: it doesn't update itself, it shows the page
+            System.setProperty("logsift.build", "dev");
+            asked.clear();
+            onEdt(() -> {
+                frame.offerUpdate(new logsift.core.SelfUpdate.Available("v9.9.0", "9.9.0", "", null), installed);
+                return null;
+            });
+            assertEquals(List.of(List.of(MainFrame.UPDATE_PAGE, MainFrame.UPDATE_LATER)), asked);
+            assertTrue(onEdt(frame::updateAskedForTest).contains("doesn't update itself"));
+            // Settings → General: releases, or snapshot builds
+            SettingsDialog before = SettingsDialog.lastForTest();
+            javax.swing.SwingUtilities.invokeLater(() -> frame.showSettings(null)); // a modal dialog: not waited for
+            waitFor(() -> SettingsDialog.lastForTest() != before && SettingsDialog.lastForTest() != null
+                    && SettingsDialog.lastForTest().isShowing(), 10_000, "Settings");
+            SettingsDialog general = SettingsDialog.lastForTest();
+            javax.swing.JComboBox<String> channelBox = onEdt(general::updateChannelForTest);
+            assertEquals(0, onEdt(channelBox::getSelectedIndex), "a release follows releases");
+            onEdt(() -> {
+                channelBox.setSelectedIndex(1);
+                return null;
+            });
+            assertEquals(logsift.core.SelfUpdate.Channel.SNAPSHOTS, MainFrame.updateChannel());
+            onEdt(() -> {
+                channelBox.setSelectedIndex(0);
+                general.dispose();
+                return null;
+            });
+            assertEquals(logsift.core.SelfUpdate.Channel.RELEASES, MainFrame.updateChannel());
         } finally {
+            MainFrame.answerUpdateForTest = null;
+            MainFrame.keepRunningForTest = false;
             server.stop(0);
-            System.setProperty("logsift.updateUrl", "none");
+            System.clearProperty("logsift.updateBase");
             System.clearProperty("logsift.version");
+            System.clearProperty("logsift.build");
+            System.clearProperty("logsift.commit");
             onEdt(() -> {
                 frame.hideUpdateForTest(); // not in the screenshots that follow
                 return null;
             });
-            AppState.prefs().remove("updates.latest");
+            AppState.prefs().remove("updates.known");
+            AppState.prefs().remove("updates.channel");
+            AppState.prefs().remove("updates.lastCheck");
         }
 
         // an unexpected error: a window with the details, Logsift keeps running
