@@ -693,11 +693,13 @@ public final class SelfUpdate {
                 .append(restart ? ", and starts.\r\n" : ".\r\n")
                 .append("set \"LOG=").append(log).append("\"\r\n")
                 .append("echo %DATE% %TIME% updating >> \"%LOG%\"\r\n")
+                // Windows' own programs by their paths: another find (Git's) may come first on the PATH
+                .append("set \"SYS=%SystemRoot%\\System32\"\r\n")
                 .append(":wait\r\n")
-                .append("tasklist /FI \"PID eq ").append(pid).append("\" 2>nul | find \"").append(pid)
-                .append("\" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n");
+                .append("\"%SYS%\\tasklist.exe\" /FI \"PID eq ").append(pid).append("\" /FO CSV /NH 2>nul | \"%SYS%\\findstr.exe\" /C:\"\\\"")
+                .append(pid).append("\\\"\" >nul && (\"%SYS%\\PING.EXE\" -n 2 127.0.0.1 >nul & goto wait)\r\n");
         if (i.kind() == Kind.WINDOWS_MSI) {
-            b.append("msiexec /i \"").append(ready).append("\" /passive /norestart >> \"%LOG%\" 2>&1\r\n")
+            b.append("\"%SYS%\\msiexec.exe\" /i \"").append(ready).append("\" /passive /norestart >> \"%LOG%\" 2>&1\r\n")
                     .append("echo msiexec %ERRORLEVEL% >> \"%LOG%\"\r\n");
         } else {
             b.append("set \"APP=").append(app).append("\"\r\n")
@@ -710,7 +712,7 @@ public final class SelfUpdate {
                     .append("move \"%APP%\" \"%APP%.old\" >nul 2>&1 && goto moved\r\n")
                     .append("set /a N+=1\r\n")
                     .append("if %N% GEQ 20 (echo could not move the app >> \"%LOG%\" & exit /b 1)\r\n")
-                    .append("ping -n 2 127.0.0.1 >nul\r\n")
+                    .append("\"%SYS%\\PING.EXE\" -n 2 127.0.0.1 >nul\r\n")
                     .append("goto move\r\n")
                     .append(":moved\r\n")
                     .append("move \"%NEW%\" \"%APP%\" >nul 2>&1 && (rmdir /s /q \"%APP%.old\" & echo done >> \"%LOG%\") "
@@ -728,7 +730,9 @@ public final class SelfUpdate {
         ProcessBuilder pb = script.getFileName().toString().endsWith(".cmd")
                 ? new ProcessBuilder("cmd", "/c", "start", "", "/min", "cmd", "/c", script.toString())
                 : new ProcessBuilder("nohup", "/bin/sh", script.toString());
-        pb.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(out.toFile()));
+        // Windows: start opens its own window and returns; nothing of it is kept open here
+        pb.redirectErrorStream(true).redirectOutput(script.getFileName().toString().endsWith(".cmd")
+                ? ProcessBuilder.Redirect.DISCARD : ProcessBuilder.Redirect.appendTo(out.toFile()));
         Process p = pb.start();
         p.getOutputStream().close(); // nothing to read: it doesn't wait for input
     }

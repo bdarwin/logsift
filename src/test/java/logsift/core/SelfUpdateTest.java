@@ -375,17 +375,21 @@ class SelfUpdateTest {
         SelfUpdate.Install i = new SelfUpdate.Install(SelfUpdate.Kind.MAC_APP, app,
                 app.resolve("Contents/MacOS/Logsift"), "macos-arm64", "dmg");
         String s = SelfUpdate.posixScript(i, Path.of(app + ".new"), 42, true, Path.of("/tmp/u.log"));
-        assertTrue(s.contains("APP='/Users/o'\\''neil/Apps/Logsift.app'"), s);
+        String quoted = "'" + app.toString().replace("'", "'\\''") + "'"; // separators as this system writes them
+        assertTrue(quoted.contains("o'\\''neil"), quoted);
+        assertTrue(s.contains("APP=" + quoted + "\n"), s);
         assertTrue(s.contains("while kill -0 42"), s);
-        assertTrue(s.endsWith("open '/Users/o'\\''neil/Apps/Logsift.app'\n"), "starts it again: " + s);
+        assertTrue(s.endsWith("open " + quoted + "\n"), "starts it again: " + s);
         assertFalse(SelfUpdate.posixScript(i, Path.of(app + ".new"), 42, false, Path.of("/tmp/u.log")).contains("open "),
                 "when Logsift quits: not started again");
         SelfUpdate.Install w = new SelfUpdate.Install(SelfUpdate.Kind.WINDOWS_MSI, Path.of("C:/Users/me/AppData/Local/Logsift"),
                 Path.of("C:/Users/me/AppData/Local/Logsift/Logsift.exe"), "windows-x64", "msi");
         String c = SelfUpdate.windowsScript(w, Path.of("C:/Users/me/.logsift/updates/Logsift-1.4.1-windows-x64.msi"), 42,
                 true, Path.of("C:/u.log"));
-        assertTrue(c.contains("msiexec /i \"") && c.contains("/passive"), c);
+        assertTrue(c.contains("msiexec.exe\" /i \"") && c.contains("/passive"), c);
         assertTrue(c.contains("PID eq 42"), c);
+        assertTrue(c.contains("\"%SYS%\\findstr.exe\"") && !c.contains("| find "),
+                "Windows' own programs, not another find on the PATH: " + c);
     }
 
     @Test
