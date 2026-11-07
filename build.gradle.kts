@@ -255,6 +255,44 @@ val genLog by tasks.registering(JavaExec::class) {
     args = listOfNotNull(out, size, follow?.let { "--follow=$it" })
 }
 
+// Test data to try Logsift by hand, in test-data/ (git ignores it; nothing is checked in):
+//   ./gradlew testData                         logs, CSVs, crashes, GC logs, thread and heap dumps
+//   ./gradlew testData -PbigMb=20,200,1024     the sizes of the big logs (MB)
+//   ./gradlew testData -Pquick                 without running JVMs (no heap dumps or live GC logs)
+//   ./gradlew testData -Pfresh                 write everything again
+//   ./gradlew testData -PtestDataDir=/some/dir
+val testDataDir = (project.findProperty("testDataDir") ?: layout.projectDirectory.dir("test-data").asFile.absolutePath).toString()
+val testData by tasks.registering(JavaExec::class) {
+    description = "Writes logs, CSVs, crash dumps, GC logs, thread and heap dumps into test-data/."
+    group = "application"
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass = "logsift.tools.TestData"
+    args = listOfNotNull(testDataDir, "--big=" + (project.findProperty("bigMb") ?: "20,200"),
+        if (project.hasProperty("quick")) "--quick" else null,
+        if (project.hasProperty("fresh")) "--fresh" else null)
+}
+
+// ./gradlew run -PtestSettings --args=test-data/logs/orders-service.log  runs Logsift away from your
+// own settings, recent files and ~/.logsift (they go to build/try-home), and checks for no updates
+tasks.named<JavaExec>("run") {
+    if (project.hasProperty("testSettings")) {
+        systemProperty("logsift.prefs", "/logsift-test/try")
+        systemProperty("logsift.home", layout.buildDirectory.dir("try-home").get().asFile.absolutePath)
+        systemProperty("logsift.updateUrl", "none")
+    }
+}
+
+// JVMs to attach to (deadlocks, a busy thread, leaks, JMX on 127.0.0.1:9010); Enter stops them:
+//   ./gradlew testJvms --console=plain   (-PjmxPort=9011 for another port)
+val testJvms by tasks.registering(JavaExec::class) {
+    description = "Starts test JVMs to attach Logsift to, until Enter."
+    group = "application"
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass = "logsift.tools.TestJvms"
+    standardInput = System.`in`
+    args = listOf(testDataDir, (project.findProperty("jmxPort") ?: "9010").toString())
+}
+
 // Stress test with very large logs (writes many GB; not part of the normal tests):
 //   ./gradlew stress -PstressGb=10 -PstressDir=/some/disk
 val stress by tasks.registering(JavaExec::class) {

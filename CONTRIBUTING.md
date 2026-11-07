@@ -16,6 +16,26 @@ You need JDK 21 or newer.
 ./gradlew visualTest -PsizeMb=200         # drives the real window; screenshots go to build/screenshots
 ```
 
+### Test data to try by hand
+
+Test data isn't checked in. This writes it all into `test-data/`, which git ignores:
+
+```bash
+./gradlew testData                        # logs, CSVs, crash reports and dumps, GC logs, thread and heap dumps
+./gradlew testData -PbigMb=20,200,1024    # sizes of the big logs, in MB (default 20,200)
+./gradlew testData -Pquick                # skip what runs a JVM (heap dumps, live GC logs, live thread dump)
+./gradlew testData -Pfresh                # write everything again (otherwise only what's missing)
+./gradlew testJvms --console=plain        # JVMs to attach to: deadlocks, leaks, JMX on 127.0.0.1:9010; Enter stops them
+```
+
+`test-data/README.md` lists what's in each folder. Open the data with `-PtestSettings`, so your
+own settings, recent files and `~/.logsift` stay out of it (that Logsift keeps its own in
+`build/try-home`):
+
+```bash
+./gradlew run -PtestSettings --args="test-data/logs/orders-service.log"
+```
+
 ## How the code is organized
 
 - `logsift.core`: indexing, search, filters, formats, tail and remote logs. It has no UI code and is tested against simple reference code.

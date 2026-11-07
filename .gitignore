@@ -1,5 +1,7 @@
 .gradle/
 build/
+# made by ./gradlew testData
+/test-data/
 *.log
 .idea/
 *.iml
