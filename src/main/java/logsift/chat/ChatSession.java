@@ -42,6 +42,8 @@ public final class ChatSession implements AutoCloseable {
     private ChatMessage answer;
     private String answerMessage;
     private long turnStarted;
+    private long question;
+    private volatile boolean keepSent = true;
     private long lastSaved;
     private boolean busy;
     private boolean titled;
@@ -78,6 +80,14 @@ public final class ChatSession implements AutoCloseable {
 
     public ChatInfo chat() {
         return store.chat(chat.id()) instanceof ChatInfo c ? (chat = c) : chat;
+    }
+
+    /**
+     * Whether the audit keeps what goes with each question (the time, the log looked at) and the
+     * instructions (Settings → Assistant → Audit); its counts and the person's verdicts are kept either way.
+     */
+    public void keepSent(boolean keep) {
+        keepSent = keep;
     }
 
     public synchronized boolean isBusy() {
@@ -131,6 +141,9 @@ public final class ChatSession implements AutoCloseable {
         }
         view.busy(true);
         ChatMessage q = store.append(ChatMessage.user(chat.id(), question, ChatHandles.record(logs)));
+        synchronized (this) {
+            this.question = q.seq();
+        }
         view.changed(q, true);
         if (!titled) {
             titled = true;
@@ -138,14 +151,37 @@ public final class ChatSession implements AutoCloseable {
             store.rename(chat.id(), t);
             view.titled(t);
         }
+        boolean audited = false;
         try {
             c = conversation();
+            audit(q.seq(), context);
+            audited = true;
             c.send(context == null || context.isBlank() ? question : context + "\n\n" + question);
         } catch (Exception e) {
+            if (!audited) {
+                audit(q.seq(), context);
+            }
             fail(CopilotEngine.why(e));
             finish(false);
             throw e;
         }
+    }
+
+    /** Keeps what went with the question at {@code seq}, as Settings → Assistant → Audit says. */
+    private void audit(long seq, String context) {
+        boolean keep = keepSent;
+        try {
+            store.turnAsked(chat.id(), seq, keep ? (context == null ? "" : context) : null, keep ? sentInstructions() : null);
+        } catch (RuntimeException e) {
+            // the audit can't stop a question
+        }
+    }
+
+    /** The instructions the assistant has: Logsift's, or with what was said before when it was started again. */
+    private String told;
+
+    private synchronized String sentInstructions() {
+        return told != null ? told : instructions;
     }
 
     /** A first name for a chat: its first question, short. */
@@ -169,7 +205,11 @@ public final class ChatSession implements AutoCloseable {
                 throw e;
             }
             // the assistant no longer has it: a new conversation, told what was said
-            c = engine.open(new ChatEngine.Setup(model, effort, instructions + recap(), tools, null), this::on);
+            String again = instructions + recap();
+            c = engine.open(new ChatEngine.Setup(model, effort, again, tools, null), this::on);
+            synchronized (this) {
+                told = again;
+            }
             ChatMessage n = store.append(ChatMessage.note(chat.id(),
                     engine.name() + " no longer had this chat, so it was started again with what was said before."));
             view.changed(n, true);
@@ -308,11 +348,13 @@ public final class ChatSession implements AutoCloseable {
         ChatEngine.Conversation c;
         ChatMessage m;
         List<ChatEvent.Usage> used;
+        long asked;
         synchronized (this) {
             if (!busy) {
                 return;
             }
             busy = false;
+            asked = question;
             c = conversation;
             m = answer;
             used = new ArrayList<>(pendingUsage);
@@ -332,6 +374,17 @@ public final class ChatSession implements AutoCloseable {
             m = m.withMillis(System.currentTimeMillis() - turnStarted);
             store.replace(m);
             view.changed(m, false);
+        }
+        if (asked > 0) {
+            long cached = 0;
+            for (ChatEvent.Usage u : used) {
+                cached += u.cached();
+            }
+            try {
+                store.turnAnswered(chat.id(), asked, used.size(), cached);
+            } catch (RuntimeException e) {
+                // the audit can't stop an answer
+            }
         }
         keepSession(c);
         view.busy(false);

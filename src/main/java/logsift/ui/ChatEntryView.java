@@ -89,6 +89,7 @@ final class ChatEntryView extends JPanel {
             build();
         } else {
             header.setText(headerText());
+            verdictRow();
             if (!render.isRunning()) {
                 render.start(); // words stream in faster than they need showing
             }
@@ -125,6 +126,8 @@ final class ChatEntryView extends JPanel {
                 header.setIcon(Icons.of("sparkles", ChatColors.accent(), 12));
                 add(header, BorderLayout.NORTH);
                 add(body, BorderLayout.CENTER);
+                verdict = null;
+                verdictRow();
                 renderNow();
             }
             case TOOL -> buildTool();
@@ -144,6 +147,75 @@ final class ChatEntryView extends JPanel {
                 add(l, BorderLayout.CENTER);
             }
         }
+    }
+
+    // ---------------------------------------------------------------- the person's verdict
+
+    static final String GOOD_TIP = "A good answer (kept in the audit)";
+    static final String BAD_TIP = "A bad answer: say what went wrong (kept in the audit)";
+
+    private JPanel verdict;
+    private JButton good;
+    private JButton bad;
+    private int judged;
+
+    /** Under a finished answer: good or bad, for the audit. */
+    private void verdictRow() {
+        if (verdict != null || m.kind() != ChatMessage.Kind.ASSISTANT || m.millis() == 0 || !actions.judges()) {
+            return;
+        }
+        verdict = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        verdict.setOpaque(false);
+        verdict.setName("verdict");
+        good = verdictButton("thumbs-up", GOOD_TIP, 1);
+        good.setName("verdictGood");
+        bad = verdictButton("thumbs-down", BAD_TIP, -1);
+        bad.setName("verdictBad");
+        verdict.add(good);
+        verdict.add(bad);
+        add(verdict, BorderLayout.SOUTH);
+        judged = actions.verdict(m);
+        showVerdict();
+        revalidate();
+    }
+
+    private JButton verdictButton(String icon, String tip, int v) {
+        JButton b = new JButton();
+        b.putClientProperty("JButton.buttonType", "toolBarButton");
+        b.setFocusable(false);
+        b.setToolTipText(tip);
+        b.putClientProperty("logsift.icon", icon);
+        b.addActionListener(e -> {
+            judged = actions.judge(m, judged == v ? 0 : v, b);
+            showVerdict();
+        });
+        return b;
+    }
+
+    private void showVerdict() {
+        for (JButton b : new JButton[] {good, bad}) {
+            boolean on = (b == good && judged > 0) || (b == bad && judged < 0);
+            Color c = !on ? Theme.dimmedForeground() : b == good ? ChatColors.ok() : Theme.errorMark();
+            b.setIcon(Icons.of((String) b.getClientProperty("logsift.icon"), c, 13));
+            b.setSelected(on);
+        }
+    }
+
+    /** Shows the verdict as kept now. */
+    void refreshVerdict() {
+        if (verdict != null) {
+            judged = actions.verdict(m);
+            showVerdict();
+        }
+    }
+
+    /** For tests: the verdict shown (1, -1, 0), or null when there's no row. */
+    Integer verdictForTest() {
+        return verdict == null ? null : judged;
+    }
+
+    JButton verdictButtonForTest(boolean isGood) {
+        return isGood ? good : bad;
     }
 
     private void renderNow() {
@@ -204,7 +276,7 @@ final class ChatEntryView extends JPanel {
     /** "claude-haiku-5.5" as people write it, when the window has no better name. */
     static java.util.function.Function<String, String> modelNames = id -> id;
 
-    private static String modelName(String id) {
+    static String modelName(String id) {
         String n = modelNames.apply(id);
         return n == null || n.equals(id) ? logsift.chat.ChatCost.name(id) : n;
     }

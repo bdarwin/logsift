@@ -118,7 +118,7 @@ final class Cli {
     }
 
     static int main(String[] args, InputStream in, PrintStream out, PrintStream err, Path logsiftHome, Path cwd) {
-        return main(args, in, out, err, logsiftHome, cwd, LogTools.all());
+        return main(args, in, out, err, logsiftHome, cwd, McpMain.tools(logsiftHome));
     }
 
     // ---------------------------------------------------------------- run

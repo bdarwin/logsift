@@ -92,7 +92,18 @@ public final class LogsiftApp {
             try {
                 SingleInstance si = SingleInstance.listen(AppState.home(),
                         paths -> SwingUtilities.invokeLater(() -> open(paths)),
-                        (cmd, reply) -> SwingUtilities.invokeLater(() -> runTool(cmd, reply)));
+                        (cmd, reply) -> {
+                            if (!cmd.isEmpty() && cmd.get(0).equals("audit")) {
+                                // an agent reading the assistant's audit: answered quietly, the window stays as it is
+                                Thread t = new Thread(() -> reply.accept(logsift.chat.AuditTools.run(
+                                        logsift.chat.ChatService.get().home(), logsift.chat.ChatService.get().store(), cmd)),
+                                        "logsift-audit-answer");
+                                t.setDaemon(true);
+                                t.start();
+                                return;
+                            }
+                            SwingUtilities.invokeLater(() -> runTool(cmd, reply));
+                        });
                 Runtime.getRuntime().addShutdownHook(new Thread(si::close));
             } catch (IOException e) {
                 // can't listen: still works, just as separate windows

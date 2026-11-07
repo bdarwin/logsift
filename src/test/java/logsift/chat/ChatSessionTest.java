@@ -212,6 +212,35 @@ class ChatSessionTest {
         assertEquals("busy", seen.get(0));
         assertEquals("idle", seen.get(seen.size() - 1));
         assertTrue(Files.readString(dir.resolve("audit.log")).contains("read_lines"), "audited like MCP calls");
+        // the assistant's audit: what went with the question, and what answering it took
+        ChatStore.TurnInfo turn = store.turn(chat.id(), all.get(0).seq());
+        assertEquals("Looking at log:1 (app.log), line 2 chosen.", turn.sent());
+        assertEquals(engine.opened.get(0).instructions(), turn.instructions());
+        assertEquals(2, turn.calls(), "the model was called twice");
+        assertEquals(3500, turn.cached());
+        ChatAudit.Turn t = ChatAudit.turn(store, chat.id(), all.get(0).seq(), ChatAudit.Settings.DEFAULT);
+        assertEquals(1, t.toolCalls());
+        assertEquals(java.util.Set.of(), t.flags(), "nothing wrong");
+    }
+
+    @Test
+    void theAuditCanKeepOnlyItsCounts() throws Exception {
+        Scripted engine = new Scripted();
+        engine.script = t -> {
+            t.l().on(new ChatEvent.Text("m1", "Fine."));
+            t.l().on(new ChatEvent.Usage("cheap", 900, 5, 0, 1e6, 100));
+            t.l().on(new ChatEvent.Idle(false));
+        };
+        ChatInfo chat = store.create("New chat", "cheap", null);
+        try (ChatSession s = session(engine, chat)) {
+            s.keepSent(false);
+            s.ask("Anything wrong?", "[Now] Friday.");
+            assertTrue(idle.await(10, TimeUnit.SECONDS));
+        }
+        ChatStore.TurnInfo turn = store.turn(chat.id(), 1);
+        assertEquals(null, turn.sent(), "Settings → Assistant → Audit: not kept");
+        assertEquals(null, turn.instructions());
+        assertEquals(1, turn.calls());
     }
 
     @Test

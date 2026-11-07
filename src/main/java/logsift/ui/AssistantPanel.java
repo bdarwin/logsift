@@ -72,6 +72,8 @@ final class AssistantPanel extends JPanel {
         center.add(spending());
         center.add(Box.createVerticalStrut(12));
         center.add(told());
+        center.add(Box.createVerticalStrut(12));
+        center.add(audit());
         add(new JScrollPane(center, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER) {
             {
                 setBorder(BorderFactory.createEmptyBorder());
@@ -260,6 +262,7 @@ final class AssistantPanel extends JPanel {
         textSize.setValue(o.textSize());
         askFiles.setSelected(o.askFiles());
         own.setText(o.own());
+        loadAudit();
         loading = false;
         showParts();
     }
@@ -414,6 +417,102 @@ final class AssistantPanel extends JPanel {
         public boolean getScrollableTracksViewportHeight() {
             return false;
         }
+    }
+
+    // ---------------------------------------------------------------- the audit
+
+    private final JCheckBox keepSent = new JCheckBox("Keep what went with each question, and the instructions it had");
+    private final javax.swing.JSpinner bigResult = spinner(20, 1, 10_000, 5);
+    private final javax.swing.JSpinner costly = spinner(100_000, 1_000, 50_000_000, 10_000);
+    private final javax.swing.JSpinner slow = spinner(120, 5, 3_600, 10);
+    private final javax.swing.JSpinner manyTools = spinner(12, 1, 500, 1);
+
+    private static javax.swing.JSpinner spinner(int v, int min, int max, int step) {
+        javax.swing.JSpinner s = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(v, min, max, step));
+        s.setMaximumSize(s.getPreferredSize());
+        return s;
+    }
+
+    /** What the audit (View → Assistant Audit) keeps, and what it flags. */
+    private JPanel audit() {
+        JPanel p = section("Audit");
+        p.add(wrapped("View → Assistant Audit lists every question with what answering it took: the model's calls, "
+                + "each tool and the size of its answer, the tokens, the time and the cost. It flags what looks wrong or "
+                + "wasted, and keeps your verdict on each answer (the buttons under it). It reads the chats as they are "
+                + "kept: it costs no tokens.", false));
+        p.add(Box.createVerticalStrut(6));
+        keepSent.setName("auditKeepSent");
+        keepSent.setToolTipText("The time and the log you were looking at, sent before each question; the instructions "
+                + "are kept once, however many questions went with them");
+        keepSent.setAlignmentX(LEFT_ALIGNMENT);
+        p.add(keepSent);
+        p.add(Box.createVerticalStrut(4));
+        JLabel flag = new JLabel("Flag a question when:");
+        flag.setAlignmentX(LEFT_ALIGNMENT);
+        flag.setBorder(BorderFactory.createEmptyBorder(0, 4, 2, 0));
+        p.add(flag);
+        bigResult.setName("auditBigResult");
+        costly.setName("auditCostly");
+        slow.setName("auditSlow");
+        manyTools.setName("auditManyTools");
+        p.add(limit("a tool answers with more than", bigResult, "KB (the model reads all of it)"));
+        p.add(limit("it takes more than", costly, "tokens"));
+        p.add(limit("it takes longer than", slow, "seconds"));
+        p.add(limit("it calls more than", manyTools, "tools"));
+        JLabel always = new JLabel("<html>Always flagged: an error, no answer, a tool that failed, the same call made "
+                + "again, a line link that can't open, and an answer you rated bad.</html>");
+        always.setForeground(Theme.dimmedForeground());
+        always.setAlignmentX(LEFT_ALIGNMENT);
+        always.setBorder(BorderFactory.createEmptyBorder(4, 4, 0, 0));
+        p.add(always);
+        keepSent.addActionListener(e -> saveAudit());
+        for (javax.swing.JSpinner s : List.of(bigResult, costly, slow, manyTools)) {
+            s.addChangeListener(e -> saveAudit());
+        }
+        return p;
+    }
+
+    private static JPanel limit(String before, javax.swing.JSpinner s, String after) {
+        JPanel row = new JPanel();
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setOpaque(false);
+        row.setBorder(BorderFactory.createEmptyBorder(2, 16, 2, 0));
+        row.add(new JLabel(before));
+        row.add(Box.createHorizontalStrut(6));
+        row.add(s);
+        row.add(Box.createHorizontalStrut(6));
+        JLabel a = new JLabel(after);
+        a.setForeground(Theme.dimmedForeground());
+        row.add(a);
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+        return row;
+    }
+
+    private void loadAudit() {
+        logsift.chat.ChatAudit.Settings a = service.audit();
+        keepSent.setSelected(a.keepSent());
+        bigResult.setValue(a.bigResultKb());
+        costly.setValue(a.costlyTokens());
+        slow.setValue(a.slowSeconds());
+        manyTools.setValue(a.manyTools());
+    }
+
+    private void saveAudit() {
+        if (loading) {
+            return;
+        }
+        service.saveAudit(new logsift.chat.ChatAudit.Settings(keepSent.isSelected(), (Integer) bigResult.getValue(),
+                (Integer) costly.getValue(), (Integer) slow.getValue(), (Integer) manyTools.getValue()));
+        ChatAuditWindow.refreshOpen();
+    }
+
+    JCheckBox keepSentForTest() {
+        return keepSent;
+    }
+
+    javax.swing.JSpinner bigResultForTest() {
+        return bigResult;
     }
 
     private static JPanel section(String title) {

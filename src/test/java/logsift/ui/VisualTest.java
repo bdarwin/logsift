@@ -2964,6 +2964,86 @@ class VisualTest {
         assertEquals("Why did checkout fail at 10:42?", onEdt(chat::titleForTest));
         settle();
         shot("130a-assistant");
+        // under the answer: good or bad, for the audit; a bad one asks what went wrong
+        assertEquals(Integer.valueOf(0), onEdt(answer::verdictForTest));
+        ChatPanel.askNoteForTest = was -> "It should say when it reconnected";
+        try {
+            onEdt(() -> {
+                answer.verdictButtonForTest(false).doClick();
+                return null;
+            });
+        } finally {
+            ChatPanel.askNoteForTest = null;
+        }
+        assertEquals(Integer.valueOf(-1), onEdt(answer::verdictForTest));
+        long asked1 = store.questionOf(answer.message().chat(), answer.message().seq());
+        assertEquals(-1, store.turn(answer.message().chat(), asked1).rating());
+        assertEquals("It should say when it reconnected", store.turn(answer.message().chat(), asked1).note());
+        assertTrue(store.turn(answer.message().chat(), asked1).sent().contains("checkout.log"), "what went with it");
+        // the audit: the question, what answering it took, the verdict
+        ChatAuditWindow audit = onEdt(() -> {
+            chat.openAudit();
+            return ChatAuditWindow.openForTest();
+        });
+        try {
+            onEdt(() -> {
+                audit.periodForTest().setSelectedItem(ChatAuditWindow.Period.WEEK);
+                audit.showForTest().setSelectedItem(ChatAuditWindow.Show.ALL);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> !audit.loadingForTest() && audit.tableForTest().getRowCount() == 1
+                            && audit.shownForTest() != null
+                            && audit.detailsForTest().getText().contains("read_lines"));
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "the audit");
+            javax.swing.JTable rows = onEdt(audit::tableForTest);
+            assertEquals("Why did checkout fail at 10:42?", onEdt(() -> rows.getValueAt(0, 1)));
+            assertEquals("Bad", onEdt(() -> rows.getValueAt(0, 9)));
+            assertEquals(1L, onEdt(() -> rows.getValueAt(0, 7)), "one tool");
+            assertEquals("It should say when it reconnected", onEdt(() -> audit.noteForTest().getText()));
+            assertTrue(onEdt(() -> audit.summaryForTest().getText()).startsWith("1 question · 7.3k tokens · 1 flagged"),
+                    onEdt(() -> audit.summaryForTest().getText()));
+            String said = onEdt(() -> audit.detailsForTest().getText());
+            assertTrue(said.contains("Rated bad") && said.contains("checkout.log"), "flagged, and what went with it");
+            onEdt(() -> {
+                audit.setSize(1100, 720);
+                audit.validate();
+                return null;
+            });
+            settle();
+            shotOf(onEdt(audit::getRootPane), "131f-assistant-audit");
+            // a good verdict in the audit: the chat's answer shows it too
+            onEdt(() -> {
+                audit.goodForTest().doClick();
+                return null;
+            });
+            assertEquals(Integer.valueOf(1), onEdt(answer::verdictForTest));
+            assertEquals(1, store.turn(answer.message().chat(), asked1).rating());
+            onEdt(() -> {
+                audit.showForTest().setSelectedItem(ChatAuditWindow.Show.FLAGGED);
+                return null;
+            });
+            waitFor(() -> {
+                try {
+                    return onEdt(() -> !audit.loadingForTest() && audit.tableForTest().getRowCount() == 0);
+                } catch (Exception e) {
+                    return false;
+                }
+            }, 20_000, "nothing flagged now");
+            onEdt(() -> {
+                audit.showForTest().setSelectedItem(ChatAuditWindow.Show.ALL);
+                return null;
+            });
+        } finally {
+            onEdt(() -> {
+                audit.dispose();
+                return null;
+            });
+        }
         // a line link shows those lines in the log
         onEdt(() -> {
             tab.showLines(0, 0);
@@ -3914,6 +3994,26 @@ class VisualTest {
                 return null;
             });
             assertEquals(boxAt14, onEdt(() -> chat.inputForTest().getFont().getSize2D()), 0.01);
+            // the audit: what it keeps and flags
+            logsift.chat.ChatAudit.Settings auditWas = svc.audit();
+            assertEquals(logsift.chat.ChatAudit.Settings.DEFAULT, auditWas);
+            assertTrue(onEdt(() -> ap.keepSentForTest().isSelected()));
+            assertEquals(20, onEdt(() -> ap.bigResultForTest().getValue()));
+            onEdt(() -> {
+                ap.keepSentForTest().doClick();
+                ap.bigResultForTest().setValue(50);
+                return null;
+            });
+            assertFalse(svc.audit().keepSent());
+            assertEquals(50, svc.audit().bigResultKb());
+            assertEquals(svc.audit(), logsift.chat.ChatAudit.Settings.load(svc.home()), "kept");
+            svc.saveAudit(auditWas);
+            onEdt(() -> {
+                ap.keepSentForTest().setSelected(true);
+                ap.bigResultForTest().setValue(20);
+                return null;
+            });
+            assertEquals(auditWas, svc.audit());
             assertTrue(onEdt(ap::totalForTest).matches("All that's on: ≈ [0-9.]+k? tokens.*"), onEdt(ap::totalForTest));
             onEdt(() -> {
                 ap.partForTest("plans").doClick();

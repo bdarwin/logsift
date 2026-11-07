@@ -84,6 +84,10 @@ final class ChatPanel extends JPanel {
 
         void closeChat();
 
+        /** Shows the assistant (its tab, its window) and brings it forward. */
+        default void showChat() {
+        }
+
         /** Where the chat is: a tab of its own, beside the logs, or its own window. */
         default logsift.chat.ChatInstructions.Where where() {
             return logsift.chat.ChatInstructions.Where.SIDE;
@@ -191,6 +195,22 @@ final class ChatPanel extends JPanel {
             @Override
             public JComponent inline(ChatMessage tool) {
                 return inlineFor(tool);
+            }
+
+            @Override
+            public boolean judges() {
+                return true;
+            }
+
+            @Override
+            public int verdict(ChatMessage answer) {
+                long q = store.questionOf(answer.chat(), answer.seq());
+                return q == 0 ? 0 : store.turn(answer.chat(), q).rating();
+            }
+
+            @Override
+            public int judge(ChatMessage answer, int verdict, java.awt.Component from) {
+                return ChatPanel.this.judge(answer, verdict, from);
             }
         });
         transcript.onEndChanged(atEnd -> newer.setVisible(!atEnd));
@@ -413,6 +433,8 @@ final class ChatPanel extends JPanel {
             m.show(move, move.getWidth() - m.getPreferredSize().width, move.getHeight());
         });
         buttons.add(move);
+        buttons.add(toolButton("clipboard-list", "Audit: every question, what it took and what looks wrong",
+                e -> openAudit()));
         buttons.add(toolButton("settings", "Settings → Assistant: where it opens, and what it's told", e -> host.openSettings()));
         buttons.add(toolButton("x", "Close (" + (MainFrame.isMac() ? "⌘I" : "Ctrl+I") + ")", e -> host.closeChat()));
         placed();
@@ -1250,6 +1272,57 @@ final class ChatPanel extends JPanel {
         refreshCredits(null);
     }
 
+    /** What the person is asked when they say an answer was bad. */
+    static final String WHAT_WENT_WRONG = "What went wrong? (optional: kept in the audit, to find what to change)";
+
+    /** For tests: what the person writes when asked what went wrong (null: they cancel). */
+    static java.util.function.Function<String, String> askNoteForTest;
+
+    /** Keeps the person's verdict on an answer; for a bad one, what went wrong. Gives the verdict now kept. */
+    int judge(ChatMessage answer, int verdict, java.awt.Component from) {
+        long q = store.questionOf(answer.chat(), answer.seq());
+        if (q == 0) {
+            return 0;
+        }
+        logsift.chat.ChatStore.TurnInfo was = store.turn(answer.chat(), q);
+        String note = was.note();
+        if (verdict < 0) {
+            String said = askNoteForTest != null ? askNoteForTest.apply(note)
+                    : (String) javax.swing.JOptionPane.showInputDialog(from == null ? this : from, WHAT_WENT_WRONG,
+                    "A Bad Answer", javax.swing.JOptionPane.PLAIN_MESSAGE, null, null, note);
+            if (said == null) {
+                return was.rating(); // cancelled: as it was
+            }
+            note = said;
+        }
+        store.rate(answer.chat(), q, verdict, note);
+        auditChanged();
+        return verdict;
+    }
+
+    /** Opens the audit's window (one for the app). */
+    void openAudit() {
+        if (!auditListening) {
+            auditListening = true;
+            ChatAuditWindow.VERDICTS.add(id -> {
+                if (chat != null && chat.id().equals(id)) {
+                    transcript.verdictsChanged();
+                }
+            });
+        }
+        ChatAuditWindow.open(this, store, (chatId, seq) -> {
+            host.showChat();
+            openChat(chatId, seq);
+        }, host::openSettings);
+    }
+
+    private boolean auditListening;
+
+    /** The audit's window, when open, shows the change. */
+    private void auditChanged() {
+        ChatAuditWindow.refreshOpen();
+    }
+
     private void showHistory() {
         if (roomy()) {
             PREFS.putBoolean("sidebar", !sidebarBox.isVisible());
@@ -1316,6 +1389,7 @@ final class ChatPanel extends JPanel {
                     host.workspace()), logsift.chat.ChatInstructions.text(service.options(), host.catalog()), m.id(), (String) effort.getSelectedItem(),
                     view());
         }
+        session.keepSent(service.audit().keepSent());
         showCard("chat");
         input.setText("");
         dropLines = false;

@@ -32,18 +32,51 @@ public final class ChatStore implements AutoCloseable {
     record MessageRow(String chat, Long seq, Long time, String kind, String text, String model, String tool, String args,
                       Boolean ok, Long tokens_in, Long tokens_out, Double nano_aiu, Long millis) {}
 
+    /**
+     * A question's audit: what went to the model with it, how often the model was called, and what
+     * the person thought of the answer. Keyed by the question's place in its chat.
+     */
+    record TurnRow(String chat, Long seq, Long time, String sent, String prompt, Long calls, Long cached,
+                   Long rating, String note) {}
+
+    /** Instructions an assistant was given, kept once however many questions went with them. */
+    record PromptRow(String id, String text, Long time) {}
+
     private final Quack db;
     private final Path file;
     private final Journal<ChatRow> chats;
     private final Journal<MessageRow> messages;
+    private final Journal<TurnRow> turns;
+    private final Journal<PromptRow> prompts;
+    private final boolean readOnly;
+    /** Whether the file has the audit's tables (made by Logsift 1.4.1 on): read only, it may not. */
+    private final boolean hasTurns;
 
     private ChatStore(Quack db, Path file) {
+        this(db, file, false);
+    }
+
+    /** Read only: no journals (they may make their tables); only what the audit reads. */
+    private ChatStore(Quack db, Path file, boolean readOnly) {
         this.db = db;
         this.file = file;
+        this.readOnly = readOnly;
+        if (readOnly) {
+            chats = null;
+            messages = null;
+            turns = null;
+            prompts = null;
+            hasTurns = db.query("SELECT count(*) FROM information_schema.tables WHERE table_name = 'turn'")
+                    .scalar(Long.class) > 0;
+            return;
+        }
+        hasTurns = true;
         // the tables made by Logsift before the journals have these columns in this order: they open as they are
         chats = Journal.builder(db, "chat", ColumnarLayout.ofRecord(ChatRow.class)).index("updated", "id").open();
         messages = Journal.builder(db, "message", ColumnarLayout.ofRecord(MessageRow.class))
                 .keyColumns("chat", "seq").sequence("seq").within("chat").newestBy("time").searchable("text").open();
+        turns = Journal.builder(db, "turn", ColumnarLayout.ofRecord(TurnRow.class)).keyColumns("chat", "seq").open();
+        prompts = Journal.builder(db, "prompt", ColumnarLayout.ofRecord(PromptRow.class)).open();
     }
 
     /**
@@ -54,6 +87,19 @@ public final class ChatStore implements AutoCloseable {
         Files.createDirectories(dir);
         Path f = dir.resolve("chats.duckdb");
         return new ChatStore(Quack.open(f.toString()), f);
+    }
+
+    /**
+     * Opens the chats in {@code dir} to read only (an agent reading the audit, Logsift not
+     * running), or null when there are none yet. Logsift running has them:
+     * {@link io.quackjvm.core.DatabaseInUse}.
+     */
+    public static ChatStore openReadOnly(Path dir) {
+        Path f = dir.resolve("chats.duckdb");
+        if (!Files.isRegularFile(f)) {
+            return null;
+        }
+        return new ChatStore(Quack.builder(f.toString()).readOnly(true).open(), f, true);
     }
 
     /** Only in memory: for tests, or when the file can't be had. */
@@ -92,6 +138,7 @@ public final class ChatStore implements AutoCloseable {
 
     /** Removes a chat and its entries (only ever when the person asks). */
     public synchronized void delete(String id) {
+        turns.deleteWhere("chat = ?", id);
         messages.deleteWhere("chat = ?", id);
         chats.delete(id);
     }
@@ -214,6 +261,180 @@ public final class ChatStore implements AutoCloseable {
                     dbl(p.get(i, "nano_aiu")), num(p.get(i, "millis"))));
         }
         return out;
+    }
+
+    // ---------------------------------------------------------------- the audit
+
+    /**
+     * What one question went with, for the audit.
+     *
+     * @param sent         what went before the question (the time now, the log looked at), or null
+     * @param instructions the instructions the assistant had, or null
+     * @param calls        how many times the model was called to answer it
+     * @param cached       of the tokens read, how many came from the cache
+     * @param rating       the person's verdict: 1 good, -1 bad, 0 none
+     * @param note         what they wrote about it, or ""
+     */
+    public record TurnInfo(String sent, String instructions, long calls, long cached, int rating, String note) {
+        public static final TurnInfo NONE = new TurnInfo(null, null, 0, 0, 0, "");
+    }
+
+    /** A question was asked: what went with it is kept (null: nothing kept, only its counts later). */
+    public synchronized void turnAsked(String chat, long seq, String sent, String instructions) {
+        String prompt = null;
+        if (instructions != null && !instructions.isEmpty()) {
+            prompt = promptId(instructions);
+            if (prompts.get(prompt).isEmpty()) {
+                prompts.append(new PromptRow(prompt, instructions, System.currentTimeMillis()));
+            }
+        }
+        turns.append(new TurnRow(chat, seq, System.currentTimeMillis(), sent, prompt, 0L, 0L, 0L, ""));
+    }
+
+    /** The answer is done: how many times the model was called, and how much of what it read was cached. */
+    public synchronized void turnAnswered(String chat, long seq, long calls, long cached) {
+        if (!turns.update(PageKey.of(chat, seq), Map.of("calls", calls, "cached", cached))) {
+            turns.append(new TurnRow(chat, seq, System.currentTimeMillis(), null, null, calls, cached, 0L, ""));
+        }
+    }
+
+    /** The person's verdict on an answer (to the question at {@code seq}) and what they wrote. */
+    public synchronized void rate(String chat, long seq, int rating, String note) {
+        long r = Integer.signum(rating);
+        String n = note == null ? "" : note.strip();
+        if (!turns.update(PageKey.of(chat, seq), Map.of("rating", r, "note", n))) {
+            turns.append(new TurnRow(chat, seq, System.currentTimeMillis(), null, null, 0L, 0L, r, n));
+        }
+    }
+
+    /** The question an entry answers (the last one asked before it, or it), or 0. */
+    public synchronized long questionOf(String chat, long seq) {
+        Long q = db.query("SELECT max(seq) FROM message WHERE chat = ? AND seq <= ? AND kind = 'USER'", chat, seq)
+                .scalar(Long.class);
+        return q == null ? 0 : q;
+    }
+
+    /** What the question at {@code seq} went with; {@link TurnInfo#NONE} when nothing was kept. */
+    public synchronized TurnInfo turn(String chat, long seq) {
+        if (!hasTurns) {
+            return TurnInfo.NONE;
+        }
+        TurnInfo[] out = {TurnInfo.NONE};
+        db.query("""
+                SELECT t.sent, p.text AS instructions, coalesce(t.calls, 0) AS calls, coalesce(t.cached, 0) AS cached,
+                       coalesce(t.rating, 0) AS rating, coalesce(t.note, '') AS note
+                FROM turn t LEFT JOIN prompt p ON p.id = t.prompt WHERE t.chat = ? AND t.seq = ?""", chat, seq)
+                .forEachRow(r -> out[0] = new TurnInfo(r.getString("sent"), r.getString("instructions"),
+                        r.getLong("calls"), r.getLong("cached"), (int) r.getLong("rating"), r.getString("note")));
+        return out[0];
+    }
+
+    /** Every question's counts and verdict since {@code since} (ms), by chat, then question (what was sent: {@link #turn}). */
+    public synchronized Map<String, Map<Long, TurnInfo>> turns(long since) {
+        Map<String, Map<Long, TurnInfo>> out = new java.util.HashMap<>();
+        if (!hasTurns) {
+            return out;
+        }
+        db.query("SELECT chat, seq, coalesce(calls, 0) AS calls, coalesce(cached, 0) AS cached, "
+                + "coalesce(rating, 0) AS rating, coalesce(note, '') AS note FROM turn WHERE time >= ?", since)
+                .forEachRow(r -> out.computeIfAbsent(r.getString("chat"), k -> new java.util.HashMap<>())
+                        .put(r.getLong("seq"), new TurnInfo(null, null, r.getLong("calls"), r.getLong("cached"),
+                                (int) r.getLong("rating"), r.getString("note"))));
+        return out;
+    }
+
+    /** An entry as the audit lists it: a tool's answer by its size only (the words are read when it's opened). */
+    public record Brief(String chat, String title, long seq, long time, ChatMessage.Kind kind, String text,
+                        String model, String tool, String args, Boolean ok, long chars, long tokensIn, long tokensOut,
+                        double nanoAiu, long millis) {}
+
+    /**
+     * A page of the questions asked since {@code since} (ms), newest first: {@code n} of them, the
+     * newest or (with {@code after}, the last one shown) the ones before it; each with all that
+     * answering it took, by chat and then in order, tools' answers by size.
+     */
+    public synchronized List<Brief> questions(long since, Brief after, int n) {
+        Pages pages = Pages.of(db, "SELECT chat, seq, time FROM message WHERE kind = 'USER' AND time >= ?", since)
+                .orderBy("time", "chat", "seq").size(Math.max(1, n));
+        Page p = after == null ? pages.last() : pages.before(PageKey.of(after.time(), after.chat(), after.seq()));
+        if (p.size() == 0) {
+            return List.of();
+        }
+        StringBuilder in = new StringBuilder();
+        List<Object> params = new ArrayList<>();
+        for (int i = 0; i < p.size(); i++) {
+            in.append(i == 0 ? "?" : ", ?");
+            params.add(p.get(i, "chat") + ":" + num(p.get(i, "seq")));
+        }
+        List<Brief> out = new ArrayList<>();
+        db.query("""
+                WITH q AS (SELECT chat, seq, lead(seq) OVER (PARTITION BY chat ORDER BY seq) AS nxt
+                           FROM message WHERE kind = 'USER')
+                SELECT m.chat, c.title, m.seq, m.time, m.kind,
+                       CASE WHEN m.kind = 'TOOL' THEN NULL ELSE m.text END AS text,
+                       m.model, m.tool, m.args, m.ok, length(coalesce(m.text, '')) AS chars,
+                       coalesce(m.tokens_in, 0) AS tokens_in, coalesce(m.tokens_out, 0) AS tokens_out,
+                       coalesce(m.nano_aiu, 0) AS nano_aiu, coalesce(m.millis, 0) AS millis
+                FROM q JOIN message m ON m.chat = q.chat AND m.seq >= q.seq AND (q.nxt IS NULL OR m.seq < q.nxt)
+                       JOIN chat c ON c.id = m.chat
+                WHERE q.chat || ':' || q.seq IN (""" + in + ") ORDER BY m.chat, m.seq", params.toArray())
+                .forEachRow(r -> out.add(new Brief(r.getString("chat"), r.getString("title"), r.getLong("seq"),
+                        r.getLong("time"), ChatMessage.Kind.valueOf(r.getString("kind")), r.getString("text"),
+                        r.getString("model"), r.getString("tool"), r.getString("args"), (Boolean) r.get("ok"),
+                        r.getLong("chars"), r.getLong("tokens_in"), r.getLong("tokens_out"), r.getDouble("nano_aiu"),
+                        r.getLong("millis"))));
+        return out;
+    }
+
+    /**
+     * All the questions since {@code since} (ms): how many, and the tokens and cost of their answers.
+     *
+     * @param questions how many were asked
+     * @param tokens    the tokens read and written
+     * @param nanoAiu   what they cost
+     */
+    public record Totals(long questions, long tokens, double nanoAiu) {}
+
+    public synchronized Totals totals(long since) {
+        long[] q = new long[2];
+        double[] c = new double[1];
+        db.query("""
+                SELECT count(*) FILTER (WHERE kind = 'USER') AS q,
+                       coalesce(sum(tokens_in + tokens_out) FILTER (WHERE kind = 'ASSISTANT'), 0) AS t,
+                       coalesce(sum(nano_aiu) FILTER (WHERE kind = 'ASSISTANT'), 0) AS c
+                FROM message WHERE time >= ?""", since).forEachRow(r -> {
+                    q[0] = r.getLong("q");
+                    q[1] = r.getLong("t");
+                    c[0] = r.getDouble("c");
+                });
+        return new Totals(q[0], q[1], c[0]);
+    }
+
+    /** The entries from {@code from} up to (not counting) {@code to} (0: the end), in order, whole. */
+    public synchronized List<ChatMessage> between(String chat, long from, long to) {
+        List<ChatMessage> out = new ArrayList<>();
+        Page p;
+        Pages all = Pages.of(db, "SELECT * FROM message WHERE chat = ? AND seq >= ? AND (? = 0 OR seq < ?)",
+                chat, from, to, to).orderBy("seq").size(500);
+        p = all.first();
+        while (p != null && p.size() > 0) {
+            out.addAll(messages(p));
+            if (p.size() < 500) {
+                break;
+            }
+            p = all.after(PageKey.of(num(p.get(p.size() - 1, "seq"))));
+        }
+        return out;
+    }
+
+    static String promptId(String text) {
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(h, 0, 16);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     // ---------------------------------------------------------------- search and usage

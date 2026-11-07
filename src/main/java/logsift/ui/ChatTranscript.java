@@ -41,6 +41,21 @@ final class ChatTranscript extends JPanel implements Scrollable {
         default javax.swing.JComponent inline(ChatMessage tool) {
             return null;
         }
+
+        /** The person's verdict on this answer: 1 good, -1 bad, 0 none (or no audit to keep it). */
+        default int verdict(ChatMessage answer) {
+            return 0;
+        }
+
+        /** Whether answers can be rated here. */
+        default boolean judges() {
+            return false;
+        }
+
+        /** The person rated the answer (0: took it back); a bad one may ask what went wrong. Gives the verdict kept. */
+        default int judge(ChatMessage answer, int verdict, java.awt.Component from) {
+            return verdict;
+        }
     }
 
     private final ChatStore store;
@@ -55,6 +70,13 @@ final class ChatTranscript extends JPanel implements Scrollable {
     /** Moving the view itself (opening a chat, adding a page): the scrollbar's moves then aren't the person's. */
     private int quiet;
     private Consumer<Boolean> onEndChanged = b -> {};
+
+    /** The verdicts were changed elsewhere (the audit's window): each answer shows its own again. */
+    void verdictsChanged() {
+        for (ChatEntryView v : views) {
+            v.refreshVerdict();
+        }
+    }
 
     ChatTranscript(ChatStore store, Actions actions) {
         super(new Stack());

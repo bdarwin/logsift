@@ -84,7 +84,7 @@ public final class McpMain {
         Path home = home();
         try (Workspace w = new Workspace(options)) {
             w.setCatalog(() -> logsift.agent.LogCatalog.load(home, cwd, logFiles));
-            new McpServer(LogTools.all(), w, logsift.core.Version.current(), protocol)
+            new McpServer(tools(home), w, logsift.core.Version.current(), protocol)
                     .serve(new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8)));
         }
         System.exit(0);
@@ -107,6 +107,13 @@ public final class McpMain {
             }
         }
         return out;
+    }
+
+    /** Logsift's tools for agents: the logs', and the assistant's audit (read from {@code home}). */
+    public static List<logsift.agent.Tool> tools(Path home) {
+        List<logsift.agent.Tool> all = new ArrayList<>(LogTools.all());
+        all.addAll(logsift.chat.AuditTools.all(logsift.chat.AuditTools.fromHome(home)));
+        return List.copyOf(all);
     }
 
     /** Logsift's own folder (settings, the audit log). */

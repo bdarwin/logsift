@@ -167,6 +167,25 @@ public final class ChatService {
         }
     }
 
+    private ChatAudit.Settings audit;
+
+    /** What the audit keeps and flags (Settings → Assistant → Audit). */
+    public synchronized ChatAudit.Settings audit() {
+        if (audit == null) {
+            audit = ChatAudit.Settings.load(home);
+        }
+        return audit;
+    }
+
+    public synchronized void saveAudit(ChatAudit.Settings s) {
+        audit = s;
+        try {
+            s.save(home);
+        } catch (java.io.IOException e) {
+            // kept for this run
+        }
+    }
+
     public synchronized ChatSettings settings() {
         return settings;
     }

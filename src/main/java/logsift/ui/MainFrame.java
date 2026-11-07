@@ -3098,6 +3098,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    /** The assistant's audit: every question asked, what it took, and what looks wrong. */
+    void openAudit() {
+        if (chatPanel == null) {
+            chatPanel = new ChatPanel(chatHost(), logsift.chat.ChatService.get());
+        }
+        chatPanel.openAudit();
+    }
+
     /** Shows the assistant where it opens (made the first time). */
     ChatPanel showChat() {
         return showChat(true);
@@ -3381,6 +3389,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     /** What the window tells and lets the assistant do. */
     private ChatPanel.Host chatHost() {
         return new ChatPanel.Host() {
+            @Override
+            public void showChat() {
+                MainFrame.this.showChat();
+            }
+
             @Override
             public List<ChatPanel.OpenLog> openLogs() {
                 List<ChatPanel.OpenLog> out = new ArrayList<>();
@@ -3707,6 +3720,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         JMenu view = menu("View");
         view.add(check("Assistant (Beta)", "sparkles", KeyStroke.getKeyStroke(KeyEvent.VK_I, MENU),
                 this::chatShown, e -> toggleChat()));
+        view.add(item("Assistant Audit", "clipboard-list", null, e -> openAudit()));
         view.addSeparator();
         view.add(check("Follow (Tail)", "arrow-down-to-line", KeyStroke.getKeyStroke(KeyEvent.VK_T, MENU),
                 () -> currentTab() != null && currentTab().mainView().isFollow(),

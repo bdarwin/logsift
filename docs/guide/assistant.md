@@ -95,6 +95,58 @@ In its tab the chats are at the left. Beside the logs, **Chats** (the clock butt
 
 ![Search across every chat](../screenshots/assistant-search.png)
 
+## The audit: what goes wrong, and what's wasted
+
+Under each answer, 👍 and 👎 say whether it was good. 👎 asks what went wrong; what you write is kept with the question.
+
+**View → Assistant Audit** (or the clipboard button in the assistant's header) lists every question you asked, newest first, a page at a time. For each one it shows:
+
+- the model;
+- the tokens read and written;
+- what it cost;
+- how long it took;
+- how many tools it called;
+- what was flagged;
+- your verdict.
+
+Choose a question to see what answering it took:
+
+- what went with it (the time, and the log and lines you were looking at);
+- each model call;
+- each tool, with its arguments, the size of its answer and how long it took, and the start of that answer;
+- the answer itself.
+
+**Instructions…** shows what the assistant was told before the question. **Open in Chat** opens the question in its chat. **Good**, **Bad** and **Note** set your verdict there too.
+
+A question is flagged when:
+
+| Flag | What it means |
+|---|---|
+| **Error** | The answer stopped with an error. |
+| **No answer** | The model was called but wrote nothing. |
+| **Tool failed** | A tool refused or failed, often because of a wrong argument the model guessed. |
+| **Same call again** | A tool was called twice with the same arguments, so its answer was read twice. |
+| **Big tool answer** | A tool answered with more than the size set (20 KB at first). The model read all of it. |
+| **Many tools** | More tool calls than the number set (12). |
+| **Many tokens** | More tokens than the number set (100,000). |
+| **Slow** | It took longer than the time set (2 minutes). |
+| **Broken line link** | The answer cites a line its link can't open. |
+| **Rated bad** | You marked the answer 👎. |
+
+The list can show all questions, flagged ones, those rated bad or good, or those not rated, from today back to all time.
+
+**Export…** saves the questions listed as a Markdown report. **Report with Details** also adds:
+
+- the start of each tool's answer;
+- what went with each question;
+- the instructions.
+
+You can read the report yourself, or give it to a coding agent to find what to change. A coding agent connected to Logsift over MCP can read the audit itself, with **assistant_audit** and **assistant_audit_question** (see [What the agent can ask](agents.md#what-the-agent-can-ask)).
+
+The audit reads the chats as they are kept, so it costs no tokens. **Settings → Assistant → Audit** sets the limits above. It also sets whether what went with each question and the instructions are kept. Each set of instructions is kept once, however many questions used it.
+
+![The assistant's audit: each question, what it took, and your verdict](../screenshots/assistant-audit.png)
+
 ## What it's told
 
 Before the first question of each chat, the assistant reads Logsift's instructions, and what you choose in **Settings → Assistant**:

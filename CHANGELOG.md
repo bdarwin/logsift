@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The assistant's audit:** 👍 and 👎 under each answer. 👎 asks what went wrong. **View → Assistant Audit** lists every question, a page at a time. Each shows what answering it took (the model's calls, each tool and the size of its answer, the tokens, the time and the cost), what looks wrong or wasted, and your verdict. Flags cover errors, failed tools, the same call made twice, big tool answers, many tokens, slow answers and broken line links. It exports a Markdown report, and coding agents read it over MCP (`assistant_audit`, `assistant_audit_question`). It reads the kept chats, so it costs no tokens. Its limits are in **Settings → Assistant → Audit**.
+
 - **Show GC Charts works however the assistant named the log:** when the assistant read a GC log by a service's name from Log Locations (`orders/gc.log`) or a `~/…` path, no heap chart was drawn under its step and **Show GC Charts** did nothing. The chat now finds the file as the assistant's tools did.
 - **The assistant's text is bigger, and its size is yours:** it was the size of the menus (13 points), and **Bigger Font** only changed the logs. The assistant now has a text size of its own, 14 points at first: **⌘+** / **⌘-** (Ctrl+= / Ctrl+-) while you're in it, in a tab, at the side or in its own window, or **Settings → Assistant → Text size**. Answers, questions, tables, its chats and skills all follow, and it's kept.
 
