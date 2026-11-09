@@ -36,15 +36,16 @@ own settings, recent files and `~/.logsift` stay out of it (that Logsift keeps i
 ./gradlew run -PtestSettings --args="test-data/logs/orders-service.log"
 ```
 
-### The tour video
+### The videos
 
 ```bash
-./gradlew visualTest --tests logsift.ui.TourRecording -Pdemo=build/tour   # needs ffmpeg; writes build/tour/logsift-tour.mp4
+./gradlew visualTest --tests logsift.ui.TourRecording -Pdemo=build/tour            # the features: build/tour/logsift-tour.mp4
+./gradlew visualTest --tests logsift.ui.AssistantRecording -Pdemo=build/assistant  # the assistant: build/assistant/logsift-assistant.mp4
 ```
 
-It asks Claude Code (Haiku) one real question, on the Claude account signed in on this computer
-(under a cent); add `-PtourNoAssistant` to leave that out. `logsift.ui.DemoRecording` records the
-find bar the same way.
+Both need ffmpeg. The assistant's video asks Claude Code (Haiku) four real questions, on the
+Claude account signed in on this computer (a few cents at most). `logsift.ui.DemoRecording`
+records the find bar the same way.
 
 ## How the code is organized
 

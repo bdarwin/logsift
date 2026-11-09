@@ -226,8 +226,6 @@ val visualTest by tasks.registering(Test::class) {
     systemProperty("logsift.screenshots", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
     // -Pdemo=/some/dir records a video of the find bar into that folder (DemoRecording)
     project.findProperty("demo")?.let { systemProperty("logsift.demo", it.toString()) }
-    // -PtourNoAssistant: the tour video without its question to the assistant (no AI cost)
-    if (project.hasProperty("tourNoAssistant")) systemProperty("tour.noAssistant", "true")
     // keep tests away from the user's own settings, recent files and ~/.logsift
     systemProperty("logsift.prefs", "/logsift-test/ui")
     systemProperty("logsift.updateUrl", "none")
