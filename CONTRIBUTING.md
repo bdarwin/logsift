@@ -36,6 +36,16 @@ own settings, recent files and `~/.logsift` stay out of it (that Logsift keeps i
 ./gradlew run -PtestSettings --args="test-data/logs/orders-service.log"
 ```
 
+### The tour video
+
+```bash
+./gradlew visualTest --tests logsift.ui.TourRecording -Pdemo=build/tour   # needs ffmpeg; writes build/tour/logsift-tour.mp4
+```
+
+It asks Claude Code (Haiku) one real question, on the Claude account signed in on this computer
+(under a cent); add `-PtourNoAssistant` to leave that out. `logsift.ui.DemoRecording` records the
+find bar the same way.
+
 ## How the code is organized
 
 - `logsift.core`: indexing, search, filters, formats, tail and remote logs. It has no UI code and is tested against simple reference code.
