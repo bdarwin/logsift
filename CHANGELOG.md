@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The assistant and coding agents read heap dumps:** a new tool, `analyze_heap_dump`, explains an `.hprof` file as the Heap Dump tab does: what fills the memory in sentences, the chain of references that keeps it alive, memory that isn't strongly reachable or is wasted on copies and empty collections, and the biggest classes. A big dump is read in the background, and the agent asks again. In the chat, **Open Heap Dump** under its step shows the dump in its tab. Logsift still never takes a heap dump.
 - **.NET logs:** Serilog (`[ERR]`), NLog (`time|LEVEL|logger|message`), log4net and ASP.NET Core's console (`fail: Category[event]`) are read as columns, and their own level words count in **Levels**, Insights, top messages and for coding agents. .NET exceptions are grouped by their innermost `--->` exception, where it was thrown in your code (`PriceCalculator.Discount(PriceCalculator.cs:88)`), with async and lambda frames named as their method; a click opens the `.cs` file, found by the path it was built in. Insights knows .NET problems: out of memory, an exhausted SQL connection pool, command and HttpClient timeouts, a starved thread pool, disposed objects, EF Core concurrency clashes.
 - **Levels in your own formats:** a level column written as a list of choices (`INFO|ERROR`) now filters right; before, the level filter checked only the first choice.
 - **Coding agents' exceptions:** frames read `at com.acme.Order.total(…)` instead of `at at com.acme…`.

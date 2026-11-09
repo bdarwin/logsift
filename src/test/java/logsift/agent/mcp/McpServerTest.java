@@ -256,7 +256,7 @@ class McpServerTest {
         assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines",
                 "top_messages", "metrics", "query", "query_examples", "pivot", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
                 "merge_logs", "analyze_profile", "compare_files", "compare_folders", "compare_logs", "analyze_crash",
-                "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram"),
+                "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram", "analyze_heap_dump"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
             Map<String, Object> d = map(t);
@@ -355,6 +355,26 @@ class McpServerTest {
         Answer top = ok("top_messages", "log", f.toString(), "level", "ERROR");
         assertTrue(top.text().contains("6 × "), top.text());
         assertFalse(top.text().contains("placed in"), "only the errors: " + top.text());
+    }
+
+    @Test
+    void explainsAHeapDump() throws Exception {
+        // a program whose session cache leaks, dumped by its own JVM
+        Path hprof = logs.resolve("shop.hprof");
+        logsift.heap.LeakApp.run(hprof, logs.resolve("shop-histogram.txt"));
+        Answer a = ok("analyze_heap_dump", "path", hprof.toString(), "classes", 5);
+        String t = a.text();
+        assertTrue(t.startsWith("shop.hprof: "), t);
+        assertTrue(t.contains("in use (strongly reachable)"), t);
+        assertTrue(t.contains("1. One HashMap (20,000 entries) in static LeakApp.CACHE holds"), t);
+        assertTrue(t.contains("Mostly 20,000 × LeakApp.Session"), t);
+        assertTrue(t.contains("Kept alive in static LeakApp.CACHE"), t);
+        assertTrue(t.contains("empty or mostly empty collections") || t.contains("copies of the same strings"), t);
+        assertEquals(5, t.lines().filter(l -> l.startsWith("- ")).count(), "the 5 biggest classes: " + t);
+        assertTrue(call("analyze_heap_dump", "path", logs.resolve("shop-histogram.txt").toString()).error(),
+                "not a heap dump");
+        assertTrue(call("analyze_heap_dump", "path", dir.resolve("elsewhere.hprof").toString()).error(),
+                "outside the folders it may read");
     }
 
     @Test

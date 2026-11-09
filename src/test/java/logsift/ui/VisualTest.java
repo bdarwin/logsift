@@ -2859,6 +2859,25 @@ class VisualTest {
                 @Override
                 public void send(String text) {
                     asked.add(text);
+                    java.util.regex.Matcher heap = java.util.regex.Pattern.compile("please explain heap (\\S+)").matcher(text);
+                    if (heap.find()) {
+                        String path = heap.group(1);
+                        new Thread(() -> {
+                            try {
+                                l.on(new logsift.chat.ChatEvent.ToolStarted("h1", "analyze_heap_dump", "{\"path\": " + jsonString(path) + "}"));
+                                var t = setup.tools().stream().filter(x -> x.name().equals("analyze_heap_dump")).findFirst().orElseThrow();
+                                var r = t.handler().call("h1", Map.of("path", path));
+                                results.add(r.text());
+                                l.on(new logsift.chat.ChatEvent.ToolFinished("h1", !r.failed()));
+                                l.on(new logsift.chat.ChatEvent.Text("h2", "The session cache keeps every session."));
+                                l.on(new logsift.chat.ChatEvent.Idle(false));
+                            } catch (Exception e) {
+                                l.on(new logsift.chat.ChatEvent.Failed(e.toString()));
+                                l.on(new logsift.chat.ChatEvent.Idle(false));
+                            }
+                        }).start();
+                        return;
+                    }
                     java.util.regex.Matcher gc = java.util.regex.Pattern.compile("please chart gc (\\S+)").matcher(text);
                     if (gc.find()) {
                         String path = gc.group(1);
@@ -3371,6 +3390,46 @@ class VisualTest {
                     frame.closeTab(i);
                 }
             }
+            return null;
+        });
+        // a heap dump explained by the assistant's tool; Open Heap Dump shows it in its tab
+        Path chatHprof = dir.resolve("chat-shop.hprof");
+        if (!Files.exists(chatHprof)) {
+            logsift.heap.LeakApp.run(chatHprof, dir.resolve("chat-shop-histogram.txt"));
+        }
+        frame.chatWorkspaceForTest().know(chatHprof);
+        int resultsBefore = engine.results.size();
+        onEdt(() -> {
+            chat.inputForTest().setText("please explain heap " + chatHprof);
+            chat.sendForTest();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !chat.busyForTest() && chat.transcriptForTest().viewsForTest().stream()
+                        .anyMatch(v -> "analyze_heap_dump".equals(v.message().tool()))) && engine.results.size() > resultsBefore;
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the heap dump explained");
+        String heapAnswer = engine.results.get(engine.results.size() - 1);
+        assertTrue(heapAnswer.contains("in static LeakApp.CACHE holds"), heapAnswer);
+        ChatEntryView heapStep = onEdt(() -> chat.transcriptForTest().viewsForTest().stream()
+                .filter(v -> "analyze_heap_dump".equals(v.message().tool())).findFirst().orElseThrow());
+        assertTrue(onEdt(heapStep::toolActions).contains(ChatEntryView.OPEN_HEAP), onEdt(heapStep::toolActions).toString());
+        onEdt(() -> {
+            chat.toolActionForTest(heapStep.message(), ChatEntryView.OPEN_HEAP);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentHeapDumpTab() != null && frame.currentHeapDumpTab().isLoadedForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the heap dump in its tab");
+        onEdt(() -> {
+            frame.closeTab(frame.tabsForTest().indexOfComponent(frame.currentHeapDumpTab()));
             return null;
         });
         // the log named as the tools take it, by a service's name in Log Locations ("orders/orders-gc.log"):

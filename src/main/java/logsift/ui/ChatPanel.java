@@ -74,6 +74,10 @@ final class ChatPanel extends JPanel {
         default void gcCharts(String handle, String file) {
         }
 
+        /** A heap dump the assistant explained, in a Heap Dump tab. */
+        default void openHeapDump(java.nio.file.Path file) {
+        }
+
         void find(String handle, String text);
 
         void query(String handle, String sql);
@@ -1821,6 +1825,7 @@ final class ChatPanel extends JPanel {
             case ChatEntryView.FIND_IN_LOG -> host.find(h, String.valueOf(a.get("query")));
             case ChatEntryView.OPEN_QUERY -> host.query(h, String.valueOf(a.get("sql")));
             case ChatEntryView.SHOW_GC -> host.gcCharts(h, logFile(tool, h));
+            case ChatEntryView.OPEN_HEAP -> host.openHeapDump(logsift.agent.Workspace.path(String.valueOf(a.get("path"))));
             case ChatEntryView.COPY -> java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
                     .setContents(new java.awt.datatransfer.StringSelection(tool.text() == null ? "" : tool.text()), null);
             default -> {

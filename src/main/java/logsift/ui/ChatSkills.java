@@ -56,9 +56,10 @@ final class ChatSkills extends JPanel {
             new Skill("Compare", "Two logs (a bad run and a good one), two files or two folders, side by side.",
                     "What's different between today's run and yesterday's?",
                     List.of("compare_logs", "compare_files", "compare_folders")),
-            new Skill("JVMs", "Thread dumps, GC logs and profiles explained.",
+            new Skill("JVMs", "Thread dumps, GC logs, heap dumps and profiles explained.",
                     "Explain this thread dump",
-                    List.of("list_jvms", "thread_dump", "heap_histogram", "analyze_threads", "analyze_gc", "analyze_profile")),
+                    List.of("list_jvms", "thread_dump", "heap_histogram", "analyze_threads", "analyze_gc", "analyze_heap_dump",
+                            "analyze_profile")),
             new Skill("Crashes", "Windows crash dumps and JVM crash files: why it crashed, its threads and modules.",
                     "Why did it crash?", List.of("analyze_crash", "crash_threads", "crash_modules")));
 

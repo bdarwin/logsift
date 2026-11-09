@@ -3646,6 +3646,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
 
             @Override
+            public void openHeapDump(Path file) {
+                logsFront();
+                openFiles(List.of(file));
+            }
+
+            @Override
             public void gcCharts(String handle, String file) {
                 logsFront();
                 if (file != null) {

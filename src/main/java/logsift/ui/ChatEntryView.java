@@ -426,6 +426,8 @@ final class ChatEntryView extends JPanel {
             l.add(OPEN_QUERY);
         } else if ("analyze_gc".equals(m.tool()) && a.get("log") != null) {
             l.add(SHOW_GC);
+        } else if ("analyze_heap_dump".equals(m.tool()) && a.get("path") != null) {
+            l.add(OPEN_HEAP);
         }
         l.add(COPY);
         return l;
@@ -435,6 +437,7 @@ final class ChatEntryView extends JPanel {
     static final String FIND_IN_LOG = "Find in the log";
     static final String OPEN_QUERY = "Open in Query";
     static final String SHOW_GC = "Show GC Charts";
+    static final String OPEN_HEAP = "Open Heap Dump";
     static final String COPY = "Copy";
 
     Map<String, Object> args() {

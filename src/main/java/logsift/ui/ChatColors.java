@@ -48,7 +48,7 @@ final class ChatColors {
             case "follow_request", "merge_logs", "compare_logs", "compare_files", "compare_folders" -> new Look("route", Theme.pick(new Color(0xDB2777), new Color(0xF472B6)));
             case "analyze_profile" -> new Look("flame", Theme.pick(new Color(0xE8590C), new Color(0xFF8A4C)));
             case "list_jvms", "thread_dump", "analyze_threads" -> new Look("cpu", Theme.pick(new Color(0x4F46E5), new Color(0x818CF8)));
-            case "heap_histogram" -> new Look("memory-stick", Theme.pick(new Color(0x4F46E5), new Color(0x818CF8)));
+            case "heap_histogram", "analyze_heap_dump" -> new Look("memory-stick", Theme.pick(new Color(0x4F46E5), new Color(0x818CF8)));
             default -> new Look("wrench", Theme.dimmedForeground());
         };
     }
