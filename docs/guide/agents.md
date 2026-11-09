@@ -276,4 +276,4 @@ The answers themselves are never kept.
 
 The commands for the skill (`run`, `tools`, `prompt`, `skill`) are under [When MCP servers are blocked](#when-mcp-servers-are-blocked-the-skill).
 
-*GitHub Copilot is a trademark of GitHub, Inc. Logsift is not affiliated with or endorsed by GitHub.*
+*GitHub Copilot is a trademark of GitHub, Inc. Claude and Claude Code are trademarks of Anthropic, PBC. Logsift is not affiliated with or endorsed by GitHub or Anthropic.*

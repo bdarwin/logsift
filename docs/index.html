@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Logsift: find out what your app did, from its logs to its threads</title>
-<meta name="description" content="Logsift is a free, open-source desktop app for finding out what your app did, from its logs to its threads. Open multi-GB logs instantly, tail live, filter, follow a request across logs and zips, group exceptions; read thread dumps and profile running JVMs. Windows, macOS and Linux.">
-<meta name="keywords" content="log viewer, large log files, log file viewer, tail, log analyzer, log analysis, thread dump analyzer, java profiler, jvm, request tracing, exceptions, windows, macos, linux, open source, free, sftp, json logs">
+<meta name="description" content="Logsift is a free, open-source desktop app for finding out what your app did, from its logs to its threads, with AI: ask GitHub Copilot or Claude Code about your logs. Open multi-GB logs instantly, tail live, filter, follow a request across logs and zips, group exceptions; read thread dumps, GC logs, heap and crash dumps and profile running JVMs. Windows, macOS and Linux.">
+<meta name="keywords" content="log viewer, ai log analysis, ai assistant, github copilot, claude code, mcp server, large log files, log file viewer, tail, log analyzer, log analysis, thread dump analyzer, gc log analyzer, heap dump analyzer, crash dump analyzer, java profiler, jvm, request tracing, exceptions, windows, macos, linux, open source, free, sftp, json logs">
 <link rel="canonical" href="https://bdarwin.github.io/logsift/">
 <meta property="og:title" content="Logsift: find out what your app did, from its logs to its threads">
-<meta property="og:description" content="Find out what your app did, from its logs to its threads: multi-GB logs, live tail, filters, requests, exceptions, thread dumps and JVM profiles. Free and open source for Windows, macOS and Linux.">
+<meta property="og:description" content="Find out what your app did, from its logs to its threads, and ask AI about it: multi-GB logs, live tail, filters, requests, exceptions, thread dumps, GC logs, heap and crash dumps, JVM profiles, and GitHub Copilot or Claude Code reading them with you. Free and open source for Windows, macOS and Linux.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://bdarwin.github.io/logsift/">
 <meta property="og:image" content="https://bdarwin.github.io/logsift/screenshots/filters.png">
@@ -19,7 +19,7 @@
  "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},
  "license":"https://opensource.org/licenses/MIT",
  "downloadUrl":"https://github.com/bdarwin/logsift/releases/latest",
- "description":"Find out what your app did, from its logs to its threads: very large logs, live tail, filters, request tracing, exceptions, thread dumps, JVM profiling and SSH remote logs."}
+ "description":"Find out what your app did, from its logs to its threads: very large logs, live tail, filters, request tracing, exceptions, thread dumps, GC logs, heap and crash dumps, JVM profiling and SSH remote logs, with an AI assistant (GitHub Copilot or Claude Code) and an MCP server for coding agents."}
 </script>
 <style>
   :root { --bg:#ffffff; --fg:#1f2328; --muted:#59636e; --accent:#1d4ed8; --card:#f6f8fa; --border:#d1d9e0; }
@@ -50,7 +50,7 @@
 <body>
 <main>
   <h1>Logsift</h1>
-  <p class="lead">Find out what your app did, from its logs to its threads. Logsift opens gigabytes of logs instantly, tails them live and points out errors, bursts and restarts. Follow one request through every log, see exceptions grouped by cause, and go deeper: it explains Java and Python thread dumps and profiles running JVMs. Windows, macOS and Linux.</p>
+  <p class="lead">Find out what your app did, from its logs to its threads. Logsift opens gigabytes of logs instantly, tails them live and points out errors, bursts and restarts. Follow one request through every log, see exceptions grouped by cause, and go deeper: it explains Java and Python thread dumps and profiles running JVMs. And ask AI about it: GitHub Copilot or Claude Code reads your logs with Logsift's own tools and answers with lines you can click. Windows, macOS and Linux.</p>
   <div class="buttons">
     <a class="btn primary" href="https://github.com/bdarwin/logsift/releases/latest">Download</a>
     <a class="btn" href="guide/">User guide</a>
@@ -58,8 +58,18 @@
   </div>
   <img src="screenshots/filters.png" alt="Logsift showing a 200 MB log with four combined filters, a timeline and a highlight bar" width="1400" height="828">
 
+  <h2>Ask AI about your logs</h2>
+  <p class="lead">Ask in Logsift's window, <i>why did checkout fail at 10:42?</i>, and GitHub Copilot or Claude Code answers with Logsift's own tools: it searches the logs you have open and your services' logs, groups exceptions, reads thread dumps, GC logs and crash dumps, and cites lines you click to see. It asks before it reads a file you haven't opened or takes a thread dump, secrets are masked, and each answer shows its model and cost. Rate answers, and the audit shows which questions went wrong or cost the most. Your coding agent can ask Logsift too, over MCP.</p>
+  <div class="gallery">
+    <figure><img src="screenshots/assistant.png" alt="The assistant beside a log: the question, the lines Logsift read for it, and the answer with links to them" loading="lazy" width="1400" height="828"><figcaption>The assistant beside a log, citing the lines it read</figcaption></figure>
+    <figure><img src="screenshots/assistant-asks-thread-dump.png" alt="The assistant asking before it takes a thread dump" loading="lazy" width="1400" height="828"><figcaption>It asks before it reaches a running JVM</figcaption></figure>
+    <figure><img src="screenshots/assistant-audit.png" alt="The assistant audit: each question with its tokens, cost, time and what went wrong" loading="lazy" width="1100" height="688"><figcaption>The audit: what went wrong, and what cost the most</figcaption></figure>
+  </div>
+  <p><a href="guide/assistant.html">The assistant</a> · <a href="guide/agents.html">Coding agents (MCP)</a></p>
+
   <h2>Features</h2>
   <ul class="features">
+    <li><b>AI assistant (beta)</b>GitHub Copilot or Claude Code answers questions about your logs with Logsift's tools, with clickable lines, costs and an audit; coding agents can ask over MCP.</li>
     <li><b>Huge files, instantly</b>A 1 GB log shows its first lines in 0.12 s and is fully indexed in 0.26 s.</li>
     <li><b>Live tail</b>Follow growing logs through rotation and truncation, or reload by hand.</li>
     <li><b>Find All</b>Run several searches at once, each in its own color, and search within the results.</li>
@@ -78,6 +88,10 @@
     <li><b>A log knows its JVM</b>Logsift names the JVM writing a log, with its threads, profile and heap a click away. A line's thread opens its stack; a thread shows its lines.</li>
     <li><b>Profiling and memory</b>Flame graphs of CPU, allocations, memory leaks, locks, native memory and slow method calls; compare runs; what fills the heap and what grows.</li>
     <li><b>Heap dumps, explained</b>Open a .hprof and read what fills the memory in plain sentences, the chain of references that keeps any object alive, the memory spent on copies of strings and empty collections, a map of the whole heap, and its threads. Compare two dumps to see what grew. An OutOfMemoryError in a log opens its dump. Dumps of tens of GB open with 2 GB of memory, their index on disk.</li>
+    <li><b>Query with SQL</b>Ask a log or a CSV anything SQL can, in milliseconds over millions of lines; double-click a result to see its line.</li>
+    <li><b>Compare CSVs by key</b>Two exports of a table in any order: what was added, removed and changed, value by value.</li>
+    <li><b>GC logs, explained</b>Java 8 to 25, every collector: time stood still, the longest pauses and why, a growing heap, and what to try.</li>
+    <li><b>Crash dumps, explained</b>Windows .dmp files and Java hs_err reports in plain words: what crashed, the code to blame, every thread's stack.</li>
   </ul>
 
   <h2>Screenshots</h2>

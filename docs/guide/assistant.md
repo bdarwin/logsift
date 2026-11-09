@@ -8,7 +8,7 @@ description: Ask GitHub Copilot or Claude Code about your logs beside them, in L
 
 **The assistant is in beta**, marked **BETA** beside the chat's name: it's new, and what works and what doesn't helps shape it. Tell us with **Help → Report a Bug or Suggest a Feature…**.
 
-Logsift opens the assistant when it starts, in a tab of its own. **View → Assistant (Beta)** (Ctrl+I, ⌘I on macOS), or **Ask** in the status bar, brings it to the front; pressing it again goes back to the log. Ask anything about what's open, or about your services' logs: *why did checkout fail at 10:42?*, *errors by hour and what changed*, *compare this log with yesterday's*. GitHub Copilot answers with Logsift's own tools, the ones [coding agents](agents.md) use, on the logs the window has open, so nothing is read twice and line numbers are the ones you see.
+Logsift opens the assistant when it starts, in a tab of its own. **View → Assistant (Beta)** (Ctrl+I, ⌘I on macOS), or **Ask** in the status bar, brings it to the front; pressing it again goes back to the log. Ask anything about what's open, or about your services' logs: *why did checkout fail at 10:42?*, *errors by hour and what changed*, *compare this log with yesterday's*. GitHub Copilot or Claude Code answers with Logsift's own tools, the ones [coding agents](agents.md) use, on the logs the window has open, so nothing is read twice and line numbers are the ones you see.
 
 ![The assistant beside a log: the question, the lines Logsift read for it, and the answer with links to them](../screenshots/assistant.png)
 
@@ -167,4 +167,4 @@ Each part shows about how many tokens it is, and **Show…** shows its words; **
 
 The assistant has **only Logsift's tools**: it reads logs, tables, dumps and profiles, within the [folders agents may read](agents.md#what-it-cant-do), and Logsift masks secrets in what it sees, as set in **Settings → Agents**. It can't run commands, change files or browse the web. Each tool call is written to the agents' audit log (`~/.logsift/agent.log`). Copilot runs as you, from its own folder (`~/.copilot`) where your sign-in is, so its sessions for these chats are kept there too, beside your terminal ones.
 
-*GitHub Copilot is a trademark of GitHub, Inc. Logsift is not affiliated with or endorsed by GitHub.*
+*GitHub Copilot is a trademark of GitHub, Inc. Claude and Claude Code are trademarks of Anthropic, PBC. Logsift is not affiliated with or endorsed by GitHub or Anthropic.*

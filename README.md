@@ -7,7 +7,11 @@
 
 **Find out what your app did, from its logs to its threads.** Logsift opens gigabytes of logs instantly, tails them live and points out errors, bursts and restarts. Follow one request through every log, even inside zips; see exceptions grouped by cause; chart how long things take. Then go deeper: it explains Java and Python thread dumps, and attaches to running JVMs to profile them and look at their heap, on your computer or on a server. Windows, macOS and Linux.
 
+**Ask AI about it.** GitHub Copilot or Claude Code answers in Logsift's window, reading your logs, thread dumps, GC logs and crash dumps with Logsift's own tools: *why did checkout fail at 10:42?* It cites lines you can click, asks before it reads anything you haven't opened, and shows what each answer cost. Or ask from your coding agent (Copilot, Claude Code or any agent that supports MCP), and Logsift does the reading on your computer, with secrets masked.
+
 ![Logsift with four filters combined as (A OR B) AND NOT C, the timeline on top and the highlight bar on the right](docs/screenshots/filters.png)
+
+![The assistant beside a log: the question, the lines Logsift read for it, and the answer with links to them](docs/screenshots/assistant.png)
 
 **[User guide](https://bdarwin.github.io/logsift/guide/)**: what each view shows, what its colours and numbers mean, and what to do about them (also **Help → Documentation** in the app).
 
@@ -38,8 +42,8 @@
 - **Heap dumps, explained.** Open a `.hprof` file and Logsift says what fills the memory in plain sentences ("one HashMap in static SessionCache.CACHE holds 1.2 GB: mostly 20,000 sessions"), and for any object, the chain of references that keeps it alive. Dumps of tens of GB open with the app's usual 2 GB of memory: a 12 GB dump with 223 million objects in about 2½ minutes.
 - **GC logs, explained.** Open a Java GC log (Java 8 to 25; G1, Parallel, Serial, CMS, ZGC, Shenandoah) and Logsift says how much of the time the program stood still, what the longest pauses were and why, whether the memory left after GC keeps growing, and what went wrong (full collections, evacuation failures, allocation stalls, System.gc() calls), each with what to try; with charts of the heap, pauses, allocation and time in GC.
 - **Crash dumps, explained.** Open a Windows dump (`.dmp`, `.mdmp`, full or mini, of any program) or a Java `hs_err_pid` file, and Logsift says what happened in plain words ("Access violation: reading address 0x18, a null pointer, in OrdersService!Order::total"), the code to blame, what to try, and every thread's stack, with threads that share a stack together. Stacks are rebuilt from the dump itself, with names from your PDB files and, if you let it, Windows' own from Microsoft. For a JVM crash it explains how it happened (native library, JNI, Unsafe, the garbage collector, the JIT compiler, out of memory) and which other threads and libraries may have caused it.
-- **Ask the assistant about your logs.** A chat with GitHub Copilot in its own tab (or beside the log, Ctrl+I): it reads the open logs and your services' logs with Logsift's tools, knows where they are and what time it is (*what went wrong in login this morning?*), cites lines you click to see, shows each answer's model and cost, and keeps every chat, searchable. Settings → Assistant shows what it's told. See the [Assistant](https://bdarwin.github.io/logsift/guide/assistant.html).
-- **Ask from your coding agent.** GitHub Copilot (and other agents that support MCP) can call Logsift: ask in the chat why a log is full of timeouts, and Logsift reads it on your computer and answers with the findings and line numbers; crash dumps too. Read-only, with secrets masked. See [Coding agents](#coding-agents-github-copilot).
+- **Ask the assistant about your logs (beta).** A chat with GitHub Copilot or Claude Code, in its own tab, beside the log or in a window of its own (Ctrl+I): it reads the open logs and your services' logs with Logsift's tools, knows where they are and what time it is (*what went wrong in login this morning?*), cites lines you click to see, draws GC charts, and asks before taking a thread dump or reading a file you haven't opened. Each answer shows its model and cost; every chat is kept and searchable. Rate answers 👍/👎, and **View → Assistant Audit** shows which questions went wrong or cost the most, and why. Settings → Assistant shows what it's told. See the [Assistant](https://bdarwin.github.io/logsift/guide/assistant.html).
+- **Ask from your coding agent.** GitHub Copilot, Claude Code and other agents that support MCP (or skills, where MCP is blocked) can call Logsift: ask in the chat why a log is full of timeouts, and Logsift reads it on your computer and answers with the findings and line numbers; crash dumps too. Read-only, with secrets masked. See [Coding agents](#coding-agents-github-copilot-claude-code-and-others).
 - **Profiling and memory.** Flame graphs of a JVM's CPU, wall-clock time, allocations, live objects (memory leaks), locks, native memory and native leaks, calls of a method and slow calls, or hardware events, with async-profiler or the JVM's own Flight Recorder. Compare runs, see who calls a method, and find which classes fill the heap and keep growing.
 - **Also:** bookmarks, alerts on new matching lines, export, sessions and recent files, many text encodings (UTF-8, UTF-16, Windows code pages, Shift_JIS, GB18030 and more), and light and dark mode.
 
@@ -83,9 +87,9 @@ Builds of the latest code are on the [snapshot release](https://github.com/bdarw
 
 - **Help → Documentation** opens the [user guide](https://bdarwin.github.io/logsift/guide/) (its pages are in [docs/guide](docs/guide/index.md)). The GC tab's **What do these mean?** opens its [GC page](https://bdarwin.github.io/logsift/guide/gc.html).
 - **Help → Keyboard Shortcuts** (Ctrl+/ or ⌘/) lists every shortcut. **Help → Report a Bug** opens a GitHub issue with your version and system filled in.
-- **Updates:** once a day Logsift asks GitHub for the latest release number, and a button appears in the status bar when a newer version is out. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
+- **Updates:** once a day Logsift asks GitHub for the latest release, and a button appears in the status bar when a newer version is out: **Update and Restart** downloads it, checks it against the release's checksums and installs it. **Settings → General → Update to** chooses releases or snapshot builds. That request carries nothing about you or your logs; turn it off with **Help → Check for Updates Automatically**.
 - **Errors:** if something unexpected happens, a window shows the details with **Copy Details** and **Report on GitHub** (for the first error of a session; later ones count in the status bar, *⚠ 2 errors*, and Help → Show Errors… lists them). Errors are also written to `~/.logsift/errors.log` (Help → Open Error Log).
-- Logsift never sends your logs anywhere. Its only other network connections are to servers you choose: SSH servers, JMX ports, and web addresses you open. If you connect a [coding agent](#coding-agents-github-copilot), what Logsift answers it goes on to the agent's AI provider: the agent sends it, not Logsift.
+- Logsift never sends your logs anywhere by itself. Its only other network connections are to servers you choose: SSH servers, JMX ports, and web addresses you open. When you ask the assistant, what Logsift's tools read for your question goes to the AI provider you chose (GitHub for Copilot, Anthropic for Claude Code), under your agreement with them, with secrets masked; nothing goes until you ask. If you connect a [coding agent](#coding-agents-github-copilot-claude-code-and-others), what Logsift answers it goes on to the agent's AI provider: the agent sends it, not Logsift.
 
 ## Screenshots
 
@@ -420,7 +424,7 @@ The tab starts with the numbers that matter (the share of the time stopped for G
 
 Then: **Heap** (in use before and after each collection, with the heap size and full collections marked), **Pauses** (each pause by kind over time, on a log scale, and how many took how long), **Allocation & GC Time** (allocated per second and the share of time stopped, per stretch of time), **By Kind** (pauses by kind and cause: how many, in all, average, longest) and **All Collections** (every collection, pause and stall, sortable). Drag across a chart to zoom in on that time (all charts follow), double-click to see it all; click a point or double-click a row to see its line in the log.
 
-## Coding agents (GitHub Copilot)
+## Coding agents (GitHub Copilot, Claude Code and others)
 
 Ask your coding agent about your logs and it asks Logsift: *"why is orders.log full of timeouts?"*, *"what is stuck in this thread dump?"*, *"is this service's GC healthy?"*. Logsift reads the files on your computer, fast on gigabytes, and answers the agent with short summaries and line numbers, never whole files; the agent can then search and read the lines around what it found. It works with GitHub Copilot in VS Code, Visual Studio and JetBrains IDEs, Copilot CLI, and any other agent that supports MCP (the Model Context Protocol).
 
@@ -447,7 +451,7 @@ Then choose **Agent** mode in Copilot Chat. `logsift-mcp` comes with Logsift: ne
 
 From a terminal: `logsift-mcp --help`. `--root FOLDER` (repeatable) limits reading to those folders; `--mask-emails`, `--mask-ips` and `--mask REGEX` mask more; `--no-mask` masks nothing.
 
-*GitHub Copilot is a trademark of GitHub, Inc. Logsift is not affiliated with or endorsed by GitHub.*
+*GitHub Copilot is a trademark of GitHub, Inc. Claude and Claude Code are trademarks of Anthropic, PBC. Logsift is not affiliated with or endorsed by GitHub or Anthropic.*
 
 ## Settings
 
