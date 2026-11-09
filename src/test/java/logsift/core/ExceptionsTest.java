@@ -149,6 +149,92 @@ class ExceptionsTest {
         assertEquals(List.of(), mail.wrappers());
     }
 
+    private static final List<String> DOTNET = List.of(
+            "2026-10-21 10:02:14.456 +00:00 [ERR] Failed to place order 1002",
+            "System.InvalidOperationException: Could not place order 1002",
+            " ---> System.NullReferenceException: Object reference not set to an instance of an object.",
+            "   at Acme.Shop.PriceCalculator.Discount(Order order) in C:\\src\\Shop\\PriceCalculator.cs:line 88",
+            "   at Acme.Shop.OrderService.<PlaceAsync>d__4.MoveNext() in /src/Shop/OrderService.cs:line 139",
+            "--- End of stack trace from previous location ---",
+            "   at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()",
+            "   --- End of inner exception stack trace ---",
+            "   at Acme.Shop.OrderService.Place(Order order) in C:\\src\\Shop\\OrderService.cs:line 142",
+            "   at Microsoft.AspNetCore.Mvc.Infrastructure.ActionMethodExecutor.Execute(ObjectMethodExecutor executor, Object controller, Object[] arguments)",
+            "   at Acme.Shop.OrdersController.<>c__DisplayClass3_0.<Create>b__0(OrderDto dto)");
+
+    @Test
+    void parsesADotNetChain() {
+        List<Exceptions.Thrown> chain = Exceptions.parse(DOTNET);
+        assertEquals(List.of("System.InvalidOperationException", "System.NullReferenceException"),
+                chain.stream().map(Exceptions.Thrown::type).toList(), "the outer one first, the inner one (the root cause) last");
+        Exceptions.Thrown root = chain.get(1);
+        assertEquals("Object reference not set to an instance of an object.", root.message());
+        assertEquals(3, root.frames().size(), "the inner exception's frames, up to its end marker");
+        Exceptions.Frame where = root.where();
+        assertEquals("Acme.Shop.PriceCalculator", where.cls());
+        assertEquals("Discount", where.method());
+        assertEquals("C:\\src\\Shop\\PriceCalculator.cs", where.file(), "the path where it was built");
+        assertEquals(88, where.line());
+        assertEquals("PriceCalculator.Discount(PriceCalculator.cs:88)", where.shortText());
+        Exceptions.Frame async = root.frames().get(1);
+        assertEquals("Acme.Shop.OrderService", async.cls(), "an async method's state machine is named as the method");
+        assertEquals("PlaceAsync", async.method());
+        assertFalse(root.frames().get(2).own(), "System is .NET's own code");
+        Exceptions.Thrown outer = chain.get(0);
+        assertEquals("Could not place order 1002", outer.message());
+        assertEquals(3, outer.frames().size());
+        assertFalse(outer.frames().get(1).own(), "Microsoft is the framework's");
+        assertEquals("Acme.Shop.OrdersController", outer.frames().get(2).cls(), "a lambda's closure class is dropped");
+        assertEquals("Create", outer.frames().get(2).method());
+        assertEquals(-1, outer.frames().get(2).line(), "no symbols: no file and line");
+    }
+
+    @Test
+    void dotNetFramesAreNotJavaOnesAndBack() {
+        assertEquals("PriceCalculator.Discount(PriceCalculator.cs:88)", Exceptions.frameOf(DOTNET.get(3)).shortText());
+        Exceptions.Frame java = Exceptions.frameOf("\tat jdk.internal.misc.Unsafe.park(Native Method)");
+        assertEquals("jdk.internal.misc.Unsafe", java.cls());
+        assertEquals("park", java.method());
+        // a Java chain with native and unknown frames is still read as Java
+        List<Exceptions.Thrown> chain = Exceptions.parse(List.of("java.lang.IllegalStateException: x",
+                "\tat com.acme.A.b(A.java:3)", "\tat jdk.internal.misc.Unsafe.park(Native Method)",
+                "\tat com.acme.C.d(Unknown Source)"));
+        assertEquals(1, chain.size());
+        assertEquals(3, chain.get(0).frames().size());
+        assertEquals("A.java", chain.get(0).frames().get(0).file());
+    }
+
+    @Test
+    void aDotNetExceptionNamedInTheLogLine() {
+        List<Exceptions.Thrown> chain = Exceptions.parse(List.of(
+                "2026-10-21 10:02:14.4567|ERROR|Acme.Shop.Api|Failed System.TimeoutException: The operation has timed out.",
+                "   at Acme.Shop.Api.Call() in /src/Api.cs:line 12"));
+        assertEquals(1, chain.size());
+        assertEquals("System.TimeoutException", chain.get(0).type());
+        assertEquals("The operation has timed out.", chain.get(0).message());
+        assertEquals(12, chain.get(0).where().line());
+    }
+
+    @Test
+    void groupsDotNetExceptionsByRootCause() {
+        List<String> log = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            String order = "100" + 2 * i;
+            log.addAll(DOTNET.stream().map(l -> l.replace("1002", order)).toList());
+            for (int k = 0; k < 10; k++) {
+                log.add("2026-10-21 10:02:15.000 +00:00 [INF] Order 1003 placed in 40 ms");
+            }
+        }
+        Exceptions.Result r = analyze(log);
+        assertEquals(3, r.exceptions());
+        assertEquals(1, r.groups().size(), "the same root cause from the same place");
+        Exceptions.Group g = r.groups().get(0);
+        assertEquals("System.NullReferenceException", g.root().type());
+        assertEquals(List.of("InvalidOperationException"), g.wrappers());
+        assertEquals(0, g.firstLine());
+        assertEquals(List.of(0L, 21L, 42L), java.util.Arrays.stream(g.keptLines()).boxed().toList());
+    }
+
     @Test
     void entriesCloseTogetherAreCountedApart() {
         List<String> log = List.of(

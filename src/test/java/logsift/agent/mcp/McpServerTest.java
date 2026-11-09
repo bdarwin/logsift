@@ -299,6 +299,7 @@ class McpServerTest {
         assertTrue(ex.text().startsWith("9 exceptions in 1 group"), ex.text());
         assertTrue(ex.text().contains("java.lang.NullPointerException: discount is null"), ex.text());
         assertTrue(ex.text().contains("PriceCalculator.discount(PriceCalculator.java:42)   ← own code"), ex.text());
+        assertFalse(ex.text().contains("at at "), "a frame's own \"at\" isn't doubled: " + ex.text());
 
         Answer s = ok("search", "log", "log:1", "query", "Database connection lost", "limit", 5);
         assertTrue(s.text().startsWith("90 lines match “Database connection lost”:"), s.text());
@@ -322,6 +323,38 @@ class McpServerTest {
         assertTrue(m.text().contains("Database connection lost after # ms: 90 values"), m.text());
 
         assertTrue(ok("list_open").text().startsWith("log:1  " + f), "open logs listed");
+    }
+
+    @Test
+    void explainsADotNetLog() throws Exception {
+        // a Serilog file: its own level spellings, and .NET exceptions with inner ones
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 60; i++) {
+            sb.append(String.format("2026-10-21 10:%02d:00.000 +00:00 [INF] Acme.Shop.OrdersController: Order %d placed in 40 ms%n",
+                    i, 1000 + i));
+            if (i % 10 == 3) {
+                sb.append(String.format("2026-10-21 10:%02d:30.000 +00:00 [ERR] Acme.Shop.OrdersController: Failed to place order %d%n",
+                        i, 1000 + i))
+                        .append("System.InvalidOperationException: Could not place order ").append(1000 + i).append('\n')
+                        .append(" ---> System.NullReferenceException: Object reference not set to an instance of an object.\n")
+                        .append("   at Acme.Shop.PriceCalculator.Discount(Order order) in C:\\src\\Shop\\PriceCalculator.cs:line 88\n")
+                        .append("   --- End of inner exception stack trace ---\n")
+                        .append("   at Acme.Shop.OrderService.Place(Order order) in C:\\src\\Shop\\OrderService.cs:line 142\n");
+            }
+        }
+        Path f = logs.resolve("shop-api.log");
+        Files.writeString(f, sb);
+        Answer open = ok("open_log", "path", f.toString());
+        assertTrue(open.text().contains("Serilog"), open.text());
+        Answer ex = ok("exceptions", "log", f.toString());
+        assertTrue(ex.text().startsWith("6 exceptions in 1 group"), ex.text());
+        assertTrue(ex.text().contains("System.NullReferenceException: Object reference not set"), ex.text());
+        assertTrue(ex.text().contains("\n   at Acme.Shop.PriceCalculator.Discount(Order order) in C:\\src\\Shop\\PriceCalculator.cs:line 88   ← own code"),
+                ex.text());
+        assertFalse(ex.text().contains("at at "), ex.text());
+        Answer top = ok("top_messages", "log", f.toString(), "level", "ERROR");
+        assertTrue(top.text().contains("6 × "), top.text());
+        assertFalse(top.text().contains("placed in"), "only the errors: " + top.text());
     }
 
     @Test

@@ -45,7 +45,8 @@ public final class EntryFormat {
             new EntryFormat("JSON lines ({…})", "{"),
             new EntryFormat("level first (ERROR …)", null,
                     "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "FATAL", "SEVERE", "NOTICE",
-                    "[ERROR", "[WARN", "[INFO", "[DEBUG", "[TRACE", "[FATAL"));
+                    "[ERROR", "[WARN", "[INFO", "[DEBUG", "[TRACE", "[FATAL",
+                    "info:", "warn:", "fail:", "crit:", "dbug:", "trce:"));
 
     private EntryFormat(LogFormat lines) {
         this.name = "lines in the format " + lines.name();

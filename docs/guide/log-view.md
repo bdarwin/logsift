@@ -88,7 +88,7 @@ Right: *MATCHING ONLY*, the line number (*Ln 1,234*), the current line's time, *
 
 ## Columns
 
-**Columns** (View → Columns, Ctrl+Shift+K) shows lines as columns: Time, Level, Thread, Logger, Message, or whatever the format has (host, process, status, …). Stack traces show under the message. A table (a CSV or TSV file) opens with Columns on. Turning them off in a table is remembered for tables, apart from logs. A title longer than its column is cut with "…": hover it, or widen the column, to read all of it.
+**Columns** (View → Columns, Ctrl+Shift+K) shows lines as columns: Time, Level, Thread, Logger, Message, or whatever the format has (host, process, status, …). Logsift knows logback and log4j, Spring Boot, Python logging, .NET's Serilog (`[ERR]`), NLog (`time|LEVEL|logger|message`), log4net and ASP.NET Core's console (`fail: Category[event]`, the message on the next line), syslog, web access logs and JSON lines; levels written their own way (`ERR`, `WRN`, `fail`, `crit`) count as errors and warnings in **Levels** and everywhere else. Stack traces show under the message. A table (a CSV or TSV file) opens with Columns on. Turning them off in a table is remembered for tables, apart from logs. A title longer than its column is cut with "…": hover it, or widen the column, to read all of it.
 
 ![Parsed columns with top messages below](../screenshots/columns-and-messages.png)
 

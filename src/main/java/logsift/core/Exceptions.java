@@ -16,7 +16,8 @@ import java.util.regex.Pattern;
 
 /**
  * Exceptions in a log, grouped by what went wrong: the root cause (the innermost
- * {@code Caused by:} in Java, the first exception of a chained Python traceback) and where it
+ * {@code Caused by:} in Java, the innermost {@code --->} inner exception in .NET, the first
+ * exception of a chained Python traceback) and where it
  * was thrown in the program's own code (framework and library frames are skipped). Five hundred
  * {@code NullPointerException}s from one place are one group; the same exception from two
  * places are two.
@@ -26,7 +27,8 @@ public final class Exceptions {
 
     /**
      * A line of a stack. Java: {@code cls}, {@code method}, {@code file} and {@code line} from
-     * {@code at com.acme.Order.total(Order.java:42)}; Python: {@code file}, {@code line} and
+     * {@code at com.acme.Order.total(Order.java:42)}; .NET the same from {@code at Acme.Order.Total()
+     * in C:\src\Order.cs:line 42} (the file with its path); Python: {@code file}, {@code line} and
      * {@code method} from {@code File "/app/orders.py", line 42, in total} ({@code cls} null).
      * {@code own}: the program's code, not a framework's or the language's.
      */
@@ -35,7 +37,8 @@ public final class Exceptions {
         public String shortText() {
             if (cls != null) {
                 String simple = cls.substring(cls.lastIndexOf('.') + 1);
-                return simple + "." + method + "(" + (file == null ? "?" : file + (line > 0 ? ":" + line : "")) + ")";
+                String name = file == null ? null : file.substring(Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')) + 1);
+                return simple + "." + method + "(" + (name == null ? "?" : name + (line > 0 ? ":" + line : "")) + ")";
             }
             String name = file == null ? "?" : file.substring(Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')) + 1);
             return name + (line > 0 ? ":" + line : "") + (method == null ? "" : " in " + method);
@@ -118,6 +121,25 @@ public final class Exceptions {
     private static final Pattern PY_FRAME = Pattern.compile("^\\s*File \"([^\"]+)\", line (\\d+)(?:, in (.+))?");
     private static final Pattern PY_EXCEPTION = Pattern.compile("^([A-Za-z_][\\w.]*)(?::\\s?(.*))?$");
     private static final String PY_START = "Traceback (most recent call last):";
+    /**
+     * A .NET frame: {@code at Acme.Shop.Order.Total(Coupon c) in C:\src\Order.cs:line 42}
+     * (the file and line only when the program has its symbols).
+     */
+    private static final Pattern DOTNET_FRAME = Pattern.compile(
+            "^\\s*at\\s+([^\\s(]+)\\.([^.\\s(]+)\\(([^)]*)\\)(?:\\s+in\\s+(.+?):line\\s+(\\d+))?\\s*$");
+    /** A .NET exception: {@code System.InvalidOperationException: message}, or an inner one after {@code --->}. */
+    private static final Pattern DOTNET_HEADER = Pattern.compile(
+            "^\\s*(?:--->\\s*)?(?:\\(Inner Exception #\\d+\\)\\s*)?((?:[A-Za-z_][\\w`]*\\.)+[A-Za-z_][\\w`]*)(?::\\s?(.*))?$");
+    /** Where a .NET exception is logged inside a line: "Failed System.NullReferenceException: …". */
+    private static final Pattern DOTNET_INLINE = Pattern.compile(
+            "((?:[A-Za-z_][\\w`]*\\.)+[A-Za-z_][\\w`]*(?:Exception|Error))(?::\\s?(.*))?");
+    /** .NET itself and common libraries (not where the program went wrong). */
+    private static final String[] DOTNET_FRAMEWORKS = {"System.", "Microsoft.", "Windows.", "Interop.",
+        "Newtonsoft.", "Npgsql.", "Dapper.", "Serilog.", "NLog.", "log4net.", "Polly.", "MediatR.", "AutoMapper.",
+        "StackExchange.", "Grpc.", "Google.", "Amazon.", "Azure.", "Castle.", "Autofac.", "MySqlConnector.",
+        "MySql.", "Oracle.", "Hangfire.", "MassTransit.", "RabbitMQ.", "Confluent.", "Swashbuckle.",
+        "FluentValidation.", "Pomelo.", "Xunit.", "xunit.", "NUnit.", "Moq.", "Quartz.", "Refit.", "RestSharp.",
+        "Elastic.", "MongoDB.", "Npgsql", "lambda_method", "DynamicClass", "Castle.Proxies."};
 
     /** Frameworks, libraries and the language itself (not where the program went wrong). */
     private static final String[] JAVA_FRAMEWORKS = {"java.", "javax.", "jdk.", "sun.", "com.sun.", "jakarta.",
@@ -139,6 +161,10 @@ public final class Exceptions {
         if (line == null) {
             return null;
         }
+        Matcher d = DOTNET_FRAME.matcher(line);
+        if (d.matches() && isDotNetFrame(d)) {
+            return dotNetFrame(line.strip(), d);
+        }
         Matcher f = JAVA_FRAME.matcher(line);
         if (f.find()) {
             return javaFrame(line.strip(), f);
@@ -154,7 +180,10 @@ public final class Exceptions {
     /** Groups exceptions in a log entry's lines (its head line first). Empty if it has none. */
     public static List<Thrown> parse(List<String> lines) {
         List<Thrown> py = parsePython(lines);
-        return py.isEmpty() ? parseJava(lines) : py;
+        if (!py.isEmpty()) {
+            return py;
+        }
+        return isDotNet(lines) ? parseDotNet(lines) : parseJava(lines);
     }
 
     static List<Thrown> parseJava(List<String> lines) {
@@ -322,6 +351,147 @@ public final class Exceptions {
         }
         Collections.reverse(found); // the outermost first, the root cause last
         return found;
+    }
+
+    /** Whether these lines hold a .NET exception (its frames, an inner exception or its markers). */
+    static boolean isDotNet(List<String> lines) {
+        for (String l : lines) {
+            String t = l.strip();
+            if (t.startsWith("---> ") || t.startsWith("--- End of inner exception stack trace")
+                    || t.startsWith("--- End of stack trace from previous location")) {
+                return true;
+            }
+            Matcher d = DOTNET_FRAME.matcher(l);
+            if (d.matches() && isDotNetFrame(d)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a frame that looks like .NET's is one: with a file and line, no arguments, or
+     * arguments with names ({@code Order order}); Java's are {@code (Order.java:42)}.
+     */
+    private static boolean isDotNetFrame(Matcher d) {
+        if (d.group(4) != null) {
+            return true;
+        }
+        String args = d.group(3).strip();
+        if (args.isEmpty()) {
+            return true;
+        }
+        if (args.equals("Native Method") || args.equals("Unknown Source") || args.contains(":")
+                || args.matches("[\\w$]+\\.(?:java|kt|scala|groovy|clj)")) {
+            return false;
+        }
+        return args.matches("[\\w.`<>\\[\\],&*]+ [\\w@]+(?:, [\\w.`<>\\[\\],&*]+ [\\w@]+)*");
+    }
+
+    private static Frame dotNetFrame(String text, Matcher d) {
+        String cls = d.group(1);
+        String method = d.group(2);
+        // compiler-made names: async state machines, lambdas and their closures
+        Matcher async = Pattern.compile("^(.*)\\.<([^>]+)>d__\\d+$").matcher(cls);
+        if (async.matches() && method.equals("MoveNext")) {
+            cls = async.group(1);
+            method = async.group(2);
+        }
+        Matcher lambda = Pattern.compile("^<([^>]+)>b__[\\w]+$").matcher(method);
+        if (lambda.matches()) {
+            method = lambda.group(1);
+        }
+        cls = cls.replaceAll("\\.<>c(?:__DisplayClass[\\w]+)?$", "");
+        String file = d.group(4); // the path where it was built: it helps find the source here
+        int line = d.group(5) == null ? -1 : Integer.parseInt(d.group(5));
+        return new Frame(text, cls, method, file, line, isOwnDotNet(cls));
+    }
+
+    static boolean isOwnDotNet(String cls) {
+        for (String p : DOTNET_FRAMEWORKS) {
+            if (cls.startsWith(p)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A .NET exception as {@code Exception.ToString()} writes it: the outer exception, each inner
+     * one after {@code --->}, then the innermost one's frames, {@code --- End of inner exception
+     * stack trace ---}, the next one's frames, and so on out to the outer one's.
+     */
+    static List<Thrown> parseDotNet(List<String> lines) {
+        List<String[]> headers = new ArrayList<>(); // type, message: outermost first
+        List<List<Frame>> blocks = new ArrayList<>(); // frames: innermost first
+        List<Frame> frames = null;
+        boolean inlineOnly = false; // the only exception so far was named inside a log line
+        for (String l : lines) {
+            String t = l.strip();
+            Matcher d = DOTNET_FRAME.matcher(l);
+            if (d.matches() && isDotNetFrame(d)) {
+                if (headers.isEmpty()) {
+                    headers.add(new String[] {"Exception", ""});
+                }
+                if (frames == null) {
+                    frames = new ArrayList<>();
+                    blocks.add(frames);
+                }
+                frames.add(dotNetFrame(t, d));
+                continue;
+            }
+            if (t.startsWith("--- End of inner exception stack trace")) {
+                frames = null; // the next block is the next exception out
+                continue;
+            }
+            if (t.startsWith("--- End of stack trace from previous location") || t.startsWith("--- End of stack trace")) {
+                continue; // the same exception, thrown again from an await
+            }
+            if (!blocks.isEmpty()) {
+                if (t.isEmpty()) {
+                    continue;
+                }
+                break; // after the stack: something else
+            }
+            boolean inner = t.startsWith("--->");
+            Matcher h = DOTNET_HEADER.matcher(l);
+            boolean header = h.matches() && isTypeName(h.group(1)) && (inner || h.group(2) != null || t.equals(h.group(1)));
+            if (inner && header) {
+                headers.add(new String[] {h.group(1), h.group(2) == null ? "" : h.group(2).strip()});
+            } else if (header && (headers.isEmpty() || inlineOnly)) {
+                headers.clear(); // the exception's own line beats one named inside the log line
+                headers.add(new String[] {h.group(1), h.group(2) == null ? "" : h.group(2).strip()});
+                inlineOnly = false;
+            } else if (headers.isEmpty()) {
+                Matcher in = DOTNET_INLINE.matcher(l);
+                String[] best = null;
+                while (in.find()) {
+                    best = new String[] {in.group(1), in.group(2) == null ? "" : in.group(2).strip()};
+                }
+                if (best != null) {
+                    headers.add(best);
+                    inlineOnly = true;
+                }
+            } else if (!t.isEmpty() && !inlineOnly) {
+                String[] last = headers.get(headers.size() - 1);
+                last[1] = last[1].isEmpty() ? t : last[1] + "\n" + t; // a message over several lines
+            }
+        }
+        // frame blocks belong to the exceptions from the innermost out
+        List<Thrown> chain = new ArrayList<>();
+        for (int k = 0; k < headers.size(); k++) {
+            int block = headers.size() - 1 - k;
+            List<Frame> f = block < blocks.size() ? blocks.get(block) : List.of();
+            chain.add(new Thrown(headers.get(k)[0], headers.get(k)[1], f));
+        }
+        chain.removeIf(th -> th.frames.isEmpty());
+        return chain;
+    }
+
+    /** A .NET exception type's name: dotted, its last part capitalized. */
+    private static boolean isTypeName(String s) {
+        int dot = s.lastIndexOf('.');
+        return dot > 0 && dot < s.length() - 1 && Character.isUpperCase(s.charAt(dot + 1));
     }
 
     static boolean isOwnPython(String file) {

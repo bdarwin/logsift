@@ -109,6 +109,12 @@ public final class TestData {
         text(logs.resolve("app.json.log"), jsonLog(new Random(3), 2000), StandardCharsets.UTF_8);
         text(logs.resolve("access.log"), accessLog(new Random(4), 3000), StandardCharsets.UTF_8);
         text(logs.resolve("python-worker.log"), pythonLog(), StandardCharsets.UTF_8);
+        text(logs.resolve("python-api.log"), pythonApi(), StandardCharsets.UTF_8);
+        Path dotnet = folder("logs/dotnet");
+        text(dotnet.resolve("shop-api-serilog.log"), serilog(), StandardCharsets.UTF_8);
+        text(dotnet.resolve("orders-nlog.log"), nlog(), StandardCharsets.UTF_8);
+        text(dotnet.resolve("billing-log4net.log"), log4net(), StandardCharsets.UTF_8);
+        text(dotnet.resolve("aspnet-console.log"), aspNetConsole(), StandardCharsets.UTF_8);
         text(logs.resolve("long-lines.log"), longLines(new Random(5)), StandardCharsets.UTF_8);
         // rotated: the newest is app.log, then app.log.1, then an old one zipped
         Path rotated = folder("logs/rotated");
@@ -168,6 +174,133 @@ public final class TestData {
                         .append("  File \"/app/orders/tasks.py\", line 41, in sync\n    total = order.total()\n")
                         .append("  File \"/app/orders/models.py\", line 88, in total\n    return sum(l.price for l in self.lines)\n")
                         .append("TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * A Python web app (Django style) whose checkout fails with a chained traceback: a KeyError
+     * while handling a missing coupon, and a database timeout now and then.
+     */
+    public static String pythonApi() {
+        StringBuilder sb = new StringBuilder();
+        Random r = new Random(11);
+        for (int i = 0; i < 1200; i++) {
+            String t = String.format(Locale.ROOT, "2026-10-21 10:%02d:%02d,%03d", i / 20 % 60, i * 3 % 60, i * 7 % 1000);
+            if (i % 40 == 17) {
+                sb.append(t).append(" - shop.checkout - ERROR - Checkout failed for cart ").append(4000 + i).append('\n')
+                        .append("Traceback (most recent call last):\n")
+                        .append("  File \"/app/shop/pricing.py\", line 31, in discount\n    return COUPONS[code].percent\n")
+                        .append("KeyError: 'SPRING26'\n\n")
+                        .append("During handling of the above exception, another exception occurred:\n\n")
+                        .append("Traceback (most recent call last):\n")
+                        .append("  File \"/app/shop/views.py\", line 88, in checkout\n    total = pricing.total(cart)\n")
+                        .append("  File \"/app/shop/pricing.py\", line 44, in total\n    return subtotal - discount(cart.coupon)\n")
+                        .append("  File \"/app/shop/pricing.py\", line 33, in discount\n    raise PricingError(f\"unknown coupon {code}\")\n")
+                        .append("shop.pricing.PricingError: unknown coupon SPRING26\n");
+            } else if (i % 150 == 61) {
+                sb.append(t).append(" - django.db.backends - ERROR - (0.000) timeout\n")
+                        .append("Traceback (most recent call last):\n")
+                        .append("  File \"/usr/lib/python3.12/site-packages/django/db/backends/utils.py\", line 105, in _execute\n")
+                        .append("    return self.cursor.execute(sql, params)\n")
+                        .append("  File \"/app/shop/models.py\", line 120, in reserve\n    Stock.objects.select_for_update().get(sku=sku)\n")
+                        .append("psycopg.errors.QueryCanceled: canceling statement due to statement timeout\n");
+            } else {
+                sb.append(t).append(" - shop.views - INFO - GET /cart/").append(4000 + i).append(" 200 in ")
+                        .append(20 + r.nextInt(300)).append(" ms\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    /** A .NET exception as Exception.ToString() writes it: an outer one and its inner cause. */
+    private static String dotNetException(int order) {
+        return "System.InvalidOperationException: Could not place order " + order + "\n"
+                + " ---> System.NullReferenceException: Object reference not set to an instance of an object.\n"
+                + "   at Acme.Shop.PriceCalculator.Discount(Order order) in C:\\src\\Shop\\PriceCalculator.cs:line 88\n"
+                + "   at Acme.Shop.PriceCalculator.Total(Order order) in C:\\src\\Shop\\PriceCalculator.cs:line 42\n"
+                + "   at Acme.Shop.OrderService.<PlaceAsync>d__7.MoveNext() in C:\\src\\Shop\\OrderService.cs:line 139\n"
+                + "   --- End of inner exception stack trace ---\n"
+                + "   at Acme.Shop.OrderService.PlaceAsync(Order order) in C:\\src\\Shop\\OrderService.cs:line 142\n"
+                + "   at Acme.Shop.Controllers.OrdersController.Create(OrderDto dto) in C:\\src\\Shop\\Controllers\\OrdersController.cs:line 57\n"
+                + "   at Microsoft.AspNetCore.Mvc.Infrastructure.ActionMethodExecutor.TaskOfIActionResultExecutor.Execute(ActionContext context)\n";
+    }
+
+    private static String sqlPoolException() {
+        return "System.InvalidOperationException: Timeout expired.  The timeout period elapsed prior to obtaining a connection from the pool."
+                + "  This may have occurred because all pooled connections were in use and max pool size was reached.\n"
+                + "   at Microsoft.Data.SqlClient.ConnectionPool.DbConnectionPool.TryGetConnection(DbConnection owningObject)\n"
+                + "   at Microsoft.Data.SqlClient.SqlConnection.OpenAsync(CancellationToken cancellationToken)\n"
+                + "   at Acme.Shop.Data.StockRepository.ReserveAsync(String sku) in C:\\src\\Shop\\Data\\StockRepository.cs:line 31\n";
+    }
+
+    /** An ASP.NET Core API's Serilog file: orders, a NullReferenceException inside an InvalidOperationException, an exhausted pool. */
+    public static String serilog() {
+        StringBuilder sb = new StringBuilder();
+        Random r = new Random(12);
+        for (int i = 0; i < 3000; i++) {
+            String t = String.format(Locale.ROOT, "2026-10-21 10:%02d:%02d.%03d +00:00", i / 50 % 60, i * 7 % 60, i * 13 % 1000);
+            if (i > 900 && i % 45 == 7) {
+                sb.append(t).append(" [ERR] Acme.Shop.Controllers.OrdersController: Failed to place order ").append(5000 + i)
+                        .append(" RequestId: 0HN7").append(Integer.toString(i, 36).toUpperCase(Locale.ROOT)).append(":00000001\n")
+                        .append(dotNetException(5000 + i));
+            } else if (i % 230 == 99) {
+                sb.append(t).append(" [ERR] Acme.Shop.Data.StockRepository: Could not reserve stock\n").append(sqlPoolException());
+            } else if (i % 97 == 5) {
+                sb.append(t).append(" [WRN] Microsoft.AspNetCore.Server.Kestrel: Heartbeat took longer than \"00:00:01\" at \"10/21/2026 10:0")
+                        .append(i % 10).append(":00 +00:00\".\n");
+            } else {
+                sb.append(t).append(" [INF] Acme.Shop.Controllers.OrdersController: Order ").append(5000 + i)
+                        .append(" placed in ").append(15 + r.nextInt(250)).append(" ms RequestId: 0HN7")
+                        .append(Integer.toString(i, 36).toUpperCase(Locale.ROOT)).append(":00000001\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    /** NLog's default layout: time|LEVEL|logger|message, the exception after the message. */
+    public static String nlog() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 1500; i++) {
+            String t = String.format(Locale.ROOT, "2026-10-21 11:%02d:%02d.%04d", i / 25 % 60, i * 11 % 60, i * 37 % 10000);
+            if (i % 60 == 21) {
+                sb.append(t).append("|ERROR|Acme.Orders.Worker|Order sync failed ").append(dotNetException(7000 + i));
+            } else {
+                sb.append(t).append(i % 9 == 0 ? "|DEBUG|" : "|INFO|").append("Acme.Orders.Worker|Synced ")
+                        .append(i % 40).append(" orders\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    /** log4net's usual layout: time [thread] level logger [context] - message. */
+    public static String log4net() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 1500; i++) {
+            String t = String.format(Locale.ROOT, "2026-10-21 12:%02d:%02d,%03d", i / 25 % 60, i * 11 % 60, i * 37 % 1000);
+            boolean bad = i % 75 == 30;
+            sb.append(t).append(" [").append(i % 8 + 1).append("] ").append(bad ? "ERROR" : i % 13 == 0 ? "WARN " : "INFO ")
+                    .append(" Acme.Billing.InvoiceJob [(null)] - ")
+                    .append(bad ? "Invoice run failed\n" + sqlPoolException() : "Invoice " + (9000 + i) + " sent\n");
+        }
+        return sb.toString();
+    }
+
+    /** ASP.NET Core's console logger: "level: category[event]", the message on the next line. */
+    public static String aspNetConsole() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("info: Microsoft.Hosting.Lifetime[14]\n      Now listening on: http://localhost:5000\n");
+        sb.append("info: Microsoft.Hosting.Lifetime[0]\n      Application started. Press Ctrl+C to shut down.\n");
+        for (int i = 0; i < 600; i++) {
+            if (i % 50 == 20) {
+                sb.append("fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]\n")
+                        .append("      An unhandled exception has occurred while executing the request.\n")
+                        .append("      ").append(dotNetException(8000 + i).replace("\n   ", "\n         ").replace("\n ---> ", "\n       ---> "));
+            } else if (i % 7 == 3) {
+                sb.append("warn: Acme.Shop.Cache[2001]\n      Cache miss for product ").append(300 + i).append('\n');
+            } else {
+                sb.append("info: Acme.Shop.Controllers.OrdersController[0]\n      Order ").append(8000 + i).append(" placed\n");
             }
         }
         return sb.toString();
@@ -402,7 +535,8 @@ public final class TestData {
 
                 | Folder | What's in it |
                 |---|---|
-                | logs/ | orders-service.log, %s, windows-crlf.log, windows-utf16.log, windows-1252.log, app.json.log, access.log, python-worker.log, long-lines.log, rotated/ (app.log, app.log.1, app.log.2.gz) |
+                | logs/ | orders-service.log, %s, windows-crlf.log, windows-utf16.log, windows-1252.log, app.json.log, access.log, python-worker.log (Celery), python-api.log (chained tracebacks), long-lines.log, rotated/ (app.log, app.log.1, app.log.2.gz) |
+                | logs/dotnet/ | shop-api-serilog.log, orders-nlog.log, billing-log4net.log, aspnet-console.log: .NET layouts with inner exceptions and an exhausted connection pool |
                 | csv/ | sales.csv (pivot), orders-monday.csv + orders-tuesday.csv (compare by id), wide-2000.csv, wide-6000-5000-comma-crlf.csv, big-1m-rows.csv |
                 | crashes/ | hs_err_*.log from Linux, macOS and Windows; orders-service.dmp (a Windows crash dump) |
                 | gc/ | GC logs of Java 8 to 25 (G1, CMS, Parallel, Serial, ZGC, Shenandoah)%s |

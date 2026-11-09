@@ -17,7 +17,8 @@ import java.util.Set;
  * Finds the source file of a stack frame in the user's source folders: {@code
  * com.acme.shop.PriceCalculator (PriceCalculator.java:88)} is {@code
  * …/com/acme/shop/PriceCalculator.java}, and {@code File "/app/orders/payment.py"} (a path on
- * the server) is the {@code orders/payment.py} in a source folder. The folders are looked
+ * the server) is the {@code orders/payment.py} in a source folder, as {@code in C:\src\Shop\Order.cs}
+ * (.NET) is the {@code Shop/Order.cs}. The folders are looked
  * through once and remembered until they change.
  */
 public final class SourceFinder {
@@ -54,6 +55,12 @@ public final class SourceFinder {
     /** The source file of a frame, or null if none of the folders has it. */
     public synchronized Path find(Exceptions.Frame f) {
         index();
+        if (f.file() != null && (f.file().contains("/") || f.file().contains("\\"))) {
+            Path p = findByPath(f.file()); // a path where it was built (.NET, Python)
+            if (p != null || f.cls() == null) {
+                return p;
+            }
+        }
         if (f.cls() != null) {
             return findJava(f);
         }
@@ -73,7 +80,7 @@ public final class SourceFinder {
         if (f.file() != null && f.file().contains(".")) {
             names.add(f.file());
         }
-        for (String ext : new String[] {".java", ".kt", ".scala", ".groovy"}) {
+        for (String ext : new String[] {".java", ".kt", ".scala", ".groovy", ".cs"}) {
             names.add(simple + ext);
         }
         String dir = pkg.replace('.', '/');

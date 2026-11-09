@@ -86,6 +86,13 @@ For files over 512 MB, the never-ended and spike findings are worked out when yo
 | Python ran out of memory | red | Process data in chunks |
 | Endless recursion (RecursionError) | red | The repeating frames are the cycle |
 | The database could not be reached (Python) | red | Check the database at that time |
+| The .NET process ran out of memory | red | Compare two `dotnet-gcdump` dumps a while apart; check the container's limit and GC settings |
+| The database connection pool ran out (.NET) | red | Dispose every connection and DbContext; look for slow queries; raise `Max Pool Size` last |
+| Database commands timed out (.NET) | red | Check the query's plan and blocking; raise `CommandTimeout` only for queries slow on purpose |
+| Calls to another service timed out (HttpClient) | red | Check that service; set a fitting timeout and retries with backoff |
+| The thread pool was starved (Kestrel heartbeat late) | red | Replace `.Result` and `.Wait()` with `await`; `dotnet-counters` shows the queue |
+| Something was used after it was disposed | red | Create a scope for background work instead of keeping a scoped service |
+| Edits clashed with someone else's (EF Core concurrency) | amber | Reload and retry, or tell the user |
 
 ## Messages (top messages)
 

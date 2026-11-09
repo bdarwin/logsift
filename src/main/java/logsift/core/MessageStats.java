@@ -454,6 +454,28 @@ public final class MessageStats {
                 return l.equals("WARNING") ? "WARN" : l.equals("SEVERE") || l.equals("CRITICAL") ? "ERROR" : l;
             }
         }
+        // levels spelled their own way: [ERR] and [Warning] (Serilog), fail: (ASP.NET Core)
+        // (a template starts after the time: "ERR] …" once its "[" went with it)
+        int w = 0;
+        while (w < head.length() && Character.isLetter(head.charAt(w))) {
+            w++;
+        }
+        if (w >= 3 && w < head.length() && (head.charAt(w) == ']' || head.charAt(w) == ':')
+                && Levels.normalize(head.substring(0, w)) != null) {
+            return Levels.normalize(head.substring(0, w));
+        }
+        for (int open = head.indexOf('['); open >= 0; open = head.indexOf('[', open + 1)) {
+            int close = head.indexOf(']', open);
+            if (close < 0) {
+                break;
+            }
+            if (close - open - 1 >= 3 && close - open - 1 <= 11) {
+                String n = Levels.normalize(head.substring(open + 1, close));
+                if (n != null) {
+                    return n;
+                }
+            }
+        }
         return "";
     }
 

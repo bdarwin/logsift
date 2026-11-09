@@ -24,7 +24,7 @@
 - **Timeline and highlight bar.** See error bursts at a glance and drag over a time range to zoom in.
 - **Columns.** Time, level, thread, logger and message are parsed automatically. JSON logs and CSV files work too, with a pretty-printed details view.
 - **Your own log formats.** Drop a log file and Logsift works out its layout, or paste your log4j, logback, java.util.logging or Python logging setup (even a whole `logback.xml` or `log4j2.xml`: each layout in it becomes a format). A live preview shows how lines split into columns.
-- **Exceptions by root cause.** Java stack traces and Python tracebacks grouped by what went wrong and where in your own code: "60 × NullPointerException at PriceCalculator.discount", with the stack, what wrapped it, and each time it happened.
+- **Exceptions by root cause.** Java stack traces, .NET exceptions (with their inner ones) and Python tracebacks grouped by what went wrong and where in your own code: "60 × NullPointerException at PriceCalculator.discount", with the stack, what wrapped it, and each time it happened.
 - **Metrics from the messages and columns.** How long things that start and end took ("Started job sync-7" … "Finished job sync-7"), the ones that never ended, the numbers messages report (`placed in 345 ms`, `queue size=42`) and columns of numbers (`duration_ms` in a CSV) as charts over time, with the slowest lines a click away.
 - **Follow a request.** Right-click a line with a trace or request ID (or select any text) → **Follow**: the request's lines in order, across threads, open logs or a whole folder (zips too), with the time between them and the longest wait marked.
 - **Tree of loggers.** Loggers (or threads, components, hosts) as a package tree beside the log, with line counts. Uncheck a branch to hide its lines, double-click one to see only it.
@@ -197,7 +197,7 @@ Logsift detects how a log's text is encoded: UTF-8 (with or without a byte order
 
 ## Columns and levels
 
-The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. Logsift recognizes common layouts by itself: logback and log4j patterns, Spring Boot's default layout (with its process id), Python logging, syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
+The **Columns** button (or View → Columns, Ctrl+Shift+K) shows lines as columns: **Time, Level, Thread, Logger, Message**, with the level colored and stack traces under the message. Logsift recognizes common layouts by itself: logback and log4j patterns, Spring Boot's default layout (with its process id), Python logging, .NET's Serilog, NLog, log4net and ASP.NET Core console layouts (with their own level words, `[ERR]` or `fail:`), syslog (host, process, pid), web server access logs (client, user, request, status, size), "time level message", and merged logs (a Source column). Drag a header edge to resize a column.
 
 - **Count values:** right-click a column header (Thread, Logger, Host, Status…) → *Count Values* lists every value with its number of lines. Double-click one to show only its lines, or *Hide* it.
 - **Hide columns:** right-click a column header → *Hide … Column*, or tick columns on and off in the same menu. The header shows **N columns hidden**; click it to see which, and **Show All Columns** brings them back. Hidden columns are remembered for each format.

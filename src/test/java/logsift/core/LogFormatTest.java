@@ -2,6 +2,7 @@ package logsift.core;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,6 +50,54 @@ class LogFormatTest {
         f = detect("<node2> 2026-10-21 10:02:13 INFO [main] c.a.X - merged line");
         assertEquals("node2", f.split("<node2> 2026-10-21 10:02:13 INFO [main] c.a.X - merged line", null)[0]);
         assertNull(detect("just some text without structure"));
+    }
+
+    @Test
+    void detectsDotNetLayouts() {
+        LogFormat f = detect("2026-10-21 10:02:14.456 +00:00 [ERR] Acme.Shop.OrderService: Failed to place order 1002");
+        assertEquals("Serilog (time [LVL] message)", f.name());
+        String line = "2026-10-21 10:02:14.456 +00:00 [ERR] Acme.Shop.OrderService: Failed to place order 1002";
+        assertEquals("2026-10-21 10:02:14.456 +00:00", f.value(line, "time"));
+        assertEquals("ERR", f.value(line, "level"));
+        assertEquals("Acme.Shop.OrderService", f.value(line, "logger"));
+        assertEquals("Failed to place order 1002", f.value(line, "message"));
+        String plain = "2026-10-21 10:02:13 +00:00 [INF] Order 1001 placed in 45 ms";
+        assertNull(f.value(plain, "logger"), "no source context: the first word is the message's");
+        assertEquals("Order 1001 placed in 45 ms", f.value(plain, "message"));
+        // its levels are found through their own spellings
+        java.util.regex.Pattern errors = java.util.regex.Pattern.compile(Levels.lineRegex(f, List.of("ERROR")));
+        assertTrue(errors.matcher(line).find());
+        assertFalse(errors.matcher(plain).find());
+
+        f = detect("2026-10-21 10:02:14.4567|ERROR|Acme.Shop.OrderService|Failed");
+        assertEquals("NLog (time|LEVEL|logger|message)", f.name());
+        assertEquals("Acme.Shop.OrderService", f.value("2026-10-21 10:02:14.4567|ERROR|Acme.Shop.OrderService|Failed", "logger"));
+
+        f = detect("2026-10-21 10:02:14,456 [7] ERROR Acme.Shop.OrderService [(null)] - Failed");
+        assertEquals("log4net (time [thread] level logger [context] - message)", f.name());
+        assertEquals("7", f.value("2026-10-21 10:02:14,456 [7] ERROR Acme.Shop.OrderService [(null)] - Failed", "thread"));
+
+        f = detect("fail: Acme.Shop.OrderService[1001]");
+        assertEquals("ASP.NET Core console (level: category[event] message)", f.name());
+        assertEquals("1001", f.value("fail: Acme.Shop.OrderService[1001]", "event"));
+        errors = java.util.regex.Pattern.compile(Levels.lineRegex(f, List.of("ERROR")));
+        assertTrue(errors.matcher("fail: Acme.Shop.OrderService[1001]").find(), "fail is an error");
+        assertFalse(errors.matcher("info: Acme.Shop.OrderService[0]").find());
+        assertNull(Levels.lineRegex(detect("2026-10-21 10:02:13.123 ERROR [w] c.a.S - x"), List.of("ERROR")),
+                "the usual words are searched for as before");
+    }
+
+    @Test
+    void aspNetCoreConsoleLinesStartEntries() {
+        List<String> log = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            log.add("info: Acme.Shop.OrdersController[0]");
+            log.add("      Order " + i + " placed");
+        }
+        EntryFormat e = EntryFormat.detect(log);
+        assertTrue(e.startsEntry("fail: Acme.Shop.OrderService[1001]"));
+        assertFalse(e.startsEntry("      Order 1 placed"));
+        assertFalse(e.startsEntry("information about it"), "only the level word with its colon");
     }
 
     @Test

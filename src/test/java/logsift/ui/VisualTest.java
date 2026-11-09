@@ -6039,6 +6039,71 @@ class VisualTest {
     }
 
     @Test
+    @Order(42)
+    void dotNetLogs() throws Exception {
+        // an ASP.NET Core API's Serilog file: [ERR] levels, inner exceptions, a pool that ran out
+        Path log = dir.resolve("shop-api-serilog.log");
+        Files.writeString(log, logsift.tools.TestData.serilog());
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.openFiles(List.of(log));
+            return null;
+        });
+        LogTab tab = waitForTab("shop-api-serilog.log");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null && !tab.document().isIndexing()
+                        && tab.exceptionsPanel().result() != null && tab.insightsPanel().report() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the format, the exceptions and Insights");
+        assertEquals("Serilog (time [LVL] message)", onEdt(() -> tab.logFormat().name()));
+        // errors only: Serilog's [ERR] lines, with their stacks
+        long t0 = System.nanoTime();
+        onEdt(() -> {
+            tab.filterPanel().setLevels("E");
+            tab.setMatchingOnly(true);
+            return null;
+        });
+        FilterResult r = waitForFilters(tab, t0);
+        long expected = 0;
+        boolean in = false;
+        for (String line : Files.readAllLines(log)) {
+            if (line.startsWith("2026-")) {
+                in = line.contains(" [ERR] ");
+            }
+            if (in) {
+                expected++;
+            }
+        }
+        assertTrue(expected > 100, "errors in the sample: " + expected);
+        assertEquals(expected, r.count(), "[ERR] entries with their stack traces");
+        // exceptions by their inner cause, in the program's own code
+        logsift.core.Exceptions.Result ex = onEdt(() -> tab.exceptionsPanel().result());
+        logsift.core.Exceptions.Group npe = ex.groups().get(0);
+        assertEquals("System.NullReferenceException", npe.root().type());
+        assertEquals("PriceCalculator.Discount(PriceCalculator.cs:88)", npe.root().where().shortText());
+        assertEquals(List.of("InvalidOperationException"), npe.wrappers());
+        // what's known about .NET problems
+        List<String> known = onEdt(() -> tab.insightsPanel().report().findings().stream()
+                .filter(f -> f.kind() == logsift.core.Insights.Kind.KNOWN).map(f -> f.known().id()).sorted().toList());
+        assertEquals(List.of("dotnet-sql-pool", "dotnet-threadpool-starvation"), known);
+        onEdt(() -> {
+            tab.showExceptionsTab();
+            tab.exceptionsPanel().tableForTest().setRowSelectionInterval(0, 0);
+            return null;
+        });
+        settle();
+        shot("78b-dotnet-exceptions");
+        onEdt(() -> {
+            tab.filterPanel().setLevels("E", "W", "I", "D", "T");
+            tab.setMatchingOnly(false);
+            return null;
+        });
+    }
+
+    @Test
     @Order(43)
     void durationsAndNumbers() throws Exception {
         // a shop: orders placed (slow for two minutes), sync jobs on a pool (one hangs), queue sizes

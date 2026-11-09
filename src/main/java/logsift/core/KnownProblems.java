@@ -150,6 +150,46 @@ public final class KnownProblems {
                             + "memory than its limit. The JVM's heap plus everything off heap must fit the limit.",
                     "Compare the container's memory limit with -Xmx plus metaspace, threads and direct memory "
                             + "(JVM → Profile → Native memory); or use -XX:MaxRAMPercentage."),
+            // ---- .NET
+            sig("dotnet-oom", true, "The .NET process ran out of memory", "System\\.OutOfMemoryException|OutOfMemoryException:",
+                    "The process could not get memory for a new object: something keeps objects alive (a growing cache, "
+                            + "list or static collection), very large arrays or strings, or a container memory limit.",
+                    "Take two dumps a while apart (dotnet-gcdump collect, or dotnet-dump) and compare which types "
+                            + "grow. Check the container's memory limit and the GC settings (Server GC, GCHeapHardLimit)."),
+            sig("dotnet-sql-pool", true, "The database connection pool ran out (.NET)",
+                    "The timeout period elapsed prior to obtaining a connection from the pool",
+                    "Every connection in the pool was in use for the whole wait: connections not disposed (missing "
+                            + "using / await using), slow queries holding them, or more parallel work than Max Pool Size.",
+                    "Make sure each SqlConnection or DbContext is disposed. Look for slow queries at the same time. "
+                            + "Raise Max Pool Size in the connection string only after that."),
+            sig("dotnet-sql-timeout", true, "Database commands timed out (.NET)",
+                    "Execution Timeout Expired|The wait operation timed out|SqlException.*[Tt]imeout",
+                    "A command ran longer than its CommandTimeout (30 s by default): a slow query, a missing index, "
+                            + "or locks held by other work.",
+                    "Find the query (the stack shows the caller) and check its plan. Look for blocking at the same "
+                            + "time. Raise CommandTimeout only for queries that are slow on purpose."),
+            sig("dotnet-http-timeout", true, "Calls to another service timed out (HttpClient)",
+                    "configured HttpClient\\.Timeout|TaskCanceledException: The request was canceled",
+                    "An HTTP call took longer than HttpClient.Timeout (100 s by default), or was cancelled.",
+                    "Check the other service at the same time. Set a timeout that fits the call, and retries with "
+                            + "backoff (Polly / Microsoft.Extensions.Http.Resilience) for calls that are safe to repeat."),
+            sig("dotnet-threadpool-starvation", true, "The thread pool was starved (Kestrel heartbeat late)",
+                    "Heartbeat took longer than",
+                    "Kestrel's once-a-second heartbeat ran late: the thread pool had no free thread, usually because "
+                            + "code blocks on async work (.Result, .Wait(), Task.Run(...).Result) or does long synchronous I/O.",
+                    "Look for .Result and .Wait() on tasks in request code and make them await. dotnet-counters "
+                            + "shows the thread pool's queue length and thread count while it happens."),
+            sig("dotnet-disposed", true, "Something was used after it was disposed",
+                    "ObjectDisposedException: Cannot access a disposed",
+                    "An object (often a DbContext or HttpClient handler) was used after its scope ended: kept in a "
+                            + "singleton, captured by background work, or used after the request finished.",
+                    "Create a scope for background work (IServiceScopeFactory) instead of keeping a scoped service, "
+                            + "and await work before the request ends."),
+            sig("dotnet-concurrency", false, "Edits clashed with someone else's (EF Core concurrency)",
+                    "DbUpdateConcurrencyException",
+                    "A row changed (or was deleted) between reading and saving it, so EF Core refused to overwrite it.",
+                    "Expected when two users edit the same thing: reload and retry, or tell the user. Often, it's a "
+                            + "sign of the same request saving twice."),
             // ---- Python
             sig("gunicorn-timeout", true, "Web workers were killed for taking too long",
                     "WORKER TIMEOUT|Worker \\(pid:\\S+\\) was sent SIGKILL|Worker exiting \\(pid",

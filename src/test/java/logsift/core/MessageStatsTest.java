@@ -71,4 +71,16 @@ class MessageStatsTest {
             }
         }
     }
+
+    @Test
+    void levelsSpelledTheDotNetWay() {
+        assertEquals("ERROR", MessageStats.levelOf("<*> +<*> [ERR] Acme.Shop.Api: Failed to place order <*>"));
+        assertEquals("WARN", MessageStats.levelOf("<*> [Warning] slow"));
+        assertEquals("INFO", MessageStats.levelOf("<*> +<*> [INF] Order <*> placed"));
+        assertEquals("ERROR", MessageStats.levelOf("fail: Acme.Shop.OrderService[<*>]"));
+        assertEquals("ERROR", MessageStats.levelOf("ERR] Acme.Shop.Api: Failed"), "a template of a line, cut after its time");
+        assertEquals("", MessageStats.levelOf("Order: <*> placed"), "a word that is no level");
+        assertEquals("", MessageStats.levelOf("<*> [main] started"), "a thread's name is not a level");
+        assertEquals("", MessageStats.levelOf("Time: <*> ms"));
+    }
 }

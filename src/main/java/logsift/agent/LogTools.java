@@ -384,7 +384,7 @@ public final class LogTools {
                             b.append("   … ").append(root.frames().size() - frames).append(" more frames\n");
                             break;
                         }
-                        b.append("   at ").append(cut(f.text().strip(), 300)).append(f.own() ? "   ← own code" : "")
+                        b.append("   at ").append(cut(f.text().strip().replaceFirst("^at\\s+", ""), 300)).append(f.own() ? "   ← own code" : "")
                                 .append('\n');
                     }
                 }

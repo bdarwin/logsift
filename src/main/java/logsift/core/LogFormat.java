@@ -24,7 +24,7 @@ public final class LogFormat {
     private volatile List<String> headerNames;           // the header's names, once split
     private volatile java.util.Map<String, Integer> columnIndex; // a column's place, by name
 
-    static final String TS = "\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?";
+    static final String TS = "\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?: ?(?:Z|[+-]\\d{2}:?\\d{2}))?";
     static final String LEVEL = "TRACE|DEBUG|INFO|NOTICE|WARN(?:ING)?|ERROR|SEVERE|FATAL|CRITICAL";
     /** Lines of merged logs start with a source label. */
     static final String SOURCE = "(?:<(?<source>[^>\\s]{1,40})> )?";
@@ -39,6 +39,14 @@ public final class LogFormat {
                     "^" + SOURCE + "(?<time>" + TS + ")\\s+(?<level>" + LEVEL + ")\\s+(?<pid>\\d+)\\s+---\\s+(?:\\[(?<app>[^\\]]*)\\]\\s+)?\\[\\s*(?<thread>[^\\]]*?)\\]\\s+(?:\\[(?<correlation>[^\\]]*)\\]\\s+)?(?<logger>\\S+)\\s+:\\s(?<message>.*)$"),
             new LogFormat("Python (time - logger - level - message)",
                     "^" + SOURCE + "(?<time>" + TS + ")\\s+-\\s+(?<logger>\\S+)\\s+-\\s+(?<level>" + LEVEL + ")\\s+-\\s(?<message>.*)$"),
+            spelled("Serilog (time [LVL] message)",
+                    "^" + SOURCE + "(?<time>" + TS + ")\\s+\\[(?<level>VRB|DBG|INF|WRN|ERR|FTL|Verbose|Debug|Information|Warning|Error|Fatal)\\]\\s(?:(?<logger>[A-Za-z_]\\w*(?:\\.\\w+)+):\\s)?(?<message>.*)$"),
+            spelled("NLog (time|LEVEL|logger|message)",
+                    "^" + SOURCE + "(?<time>" + TS + ")\\|(?<level>[A-Za-z]+)\\|(?<logger>[^|]+)\\|(?<message>.*)$"),
+            new LogFormat("log4net (time [thread] level logger [context] - message)",
+                    "^" + SOURCE + "(?<time>" + TS + ")\\s+\\[(?<thread>[^\\]]*)\\]\\s+(?<level>" + LEVEL + ")\\s+(?<logger>\\S+)\\s+\\[[^\\]]*\\]\\s+-\\s(?<message>.*)$"),
+            spelled("ASP.NET Core console (level: category[event] message)",
+                    "^" + SOURCE + "(?:\\[?(?<time>" + TS + ")\\]?\\s+)?(?<level>trce|dbug|info|warn|fail|crit):\\s(?<logger>[^\\[\\s]+)\\[(?<event>\\d+)\\]\\s?(?<message>.*)$"),
             new LogFormat("syslog (time host process[pid]: message)",
                     "^" + SOURCE + "(?<time>[A-Z][a-z]{2}\\s+\\d{1,2}\\s\\d{2}:\\d{2}:\\d{2})\\s+(?<host>\\S+)\\s+(?<process>[^:\\[\\s]+)(?:\\[(?<pid>\\d+)\\])?:\\s(?<message>.*)$"),
             new LogFormat("access log (client - user [time] \"request\" status size)",
@@ -54,6 +62,24 @@ public final class LogFormat {
      */
     public LogFormat(String name, String regex) {
         this(name, regex, false, null);
+    }
+
+    /** A built-in layout whose levels are written its own way ({@code ERR}, {@code fail}): see {@link #spelledLevels()}. */
+    private static LogFormat spelled(String name, String regex) {
+        LogFormat f = new LogFormat(name, regex);
+        f.spelledLevels = true;
+        return f;
+    }
+
+    private boolean spelledLevels;
+
+    /**
+     * Whether lines are found by level through the level column and its spellings
+     * ({@link Levels}): the user's own formats, and built-in ones whose levels aren't the
+     * usual words (Serilog's {@code [ERR]}, ASP.NET Core's {@code fail:}).
+     */
+    public boolean spelledLevels() {
+        return custom || spelledLevels;
     }
 
     /** A format made by the user; {@code timePattern} (or null) says how its time column is written. */

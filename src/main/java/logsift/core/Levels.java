@@ -31,12 +31,12 @@ public final class Levels {
     }
 
     private static final Map<String, List<String>> SPELLINGS = Map.of(
-            ERROR, List.of("ERROR", "ERR", "E", "FATAL", "FTL", "F", "SEVERE", "CRITICAL", "CRIT", "ALERT",
+            ERROR, List.of("ERROR", "ERR", "E", "FATAL", "FTL", "F", "SEVERE", "CRITICAL", "CRIT", "FAIL", "ALERT",
                     "EMERGENCY", "EMERG"),
             WARN, List.of("WARNING", "WARN", "WRN", "W"),
-            INFO, List.of("INFO", "INF", "I", "NOTICE", "N"),
-            DEBUG, List.of("DEBUG", "DBG", "D", "FINE", "CONFIG", "VERBOSE", "V"),
-            TRACE, List.of("TRACE", "TRC", "T", "FINER", "FINEST"));
+            INFO, List.of("INFO", "INF", "I", "INFORMATION", "NOTICE", "N"),
+            DEBUG, List.of("DEBUG", "DBG", "DBUG", "D", "FINE", "CONFIG", "VERBOSE", "V"),
+            TRACE, List.of("TRACE", "TRC", "TRCE", "VRB", "T", "FINER", "FINEST"));
 
     /** ERROR, WARN, INFO, DEBUG or TRACE for a level as written (any case), or null. */
     public static String normalize(String level) {
@@ -54,11 +54,11 @@ public final class Levels {
 
     /**
      * A regex for lines of the format whose level is one of {@code levels} (ERROR, WARN...), or
-     * null if the format isn't the user's own or has no level column (then levels are found by
-     * their usual words).
+     * null if the format doesn't spell levels its own way (see {@link LogFormat#spelledLevels()})
+     * or has no level column (then levels are found by their usual words).
      */
     public static String lineRegex(LogFormat format, Collection<String> levels) {
-        if (format == null || !format.isCustom() || !format.columns().contains("level")) {
+        if (format == null || !format.spelledLevels() || !format.columns().contains("level")) {
             return null;
         }
         String p = format.regex();
@@ -73,9 +73,35 @@ public final class Levels {
         if (words.isEmpty()) {
             return "\\A\\z."; // nothing
         }
-        // the level must start with one of the spellings, and the word end there
+        // the level must start with one of the spellings, and the word end there; the group's own
+        // pattern goes in a group of its own, so the check covers each of its choices (INF|ERR)
         String look = "(?=(?i:" + String.join("|", words) + ")(?![A-Za-z]))";
         int in = at + "(?<level>".length();
-        return p.substring(0, in) + look + p.substring(in);
+        int close = closingParen(p, at);
+        if (close < 0) {
+            return p.substring(0, in) + look + p.substring(in);
+        }
+        return p.substring(0, in) + look + "(?:" + p.substring(in, close) + ")" + p.substring(close);
+    }
+
+    /** Where the group opened at {@code open} ends (skipping escapes and [classes]), or -1. */
+    static int closingParen(String regex, int open) {
+        int depth = 0;
+        boolean inClass = false;
+        for (int i = open; i < regex.length(); i++) {
+            char c = regex.charAt(i);
+            if (c == '\\') {
+                i++;
+            } else if (inClass) {
+                inClass = c != ']';
+            } else if (c == '[') {
+                inClass = true;
+            } else if (c == '(') {
+                depth++;
+            } else if (c == ')' && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
     }
 }

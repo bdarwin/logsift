@@ -38,6 +38,20 @@ class KnownProblemsTest {
     }
 
     @Test
+    void recognizesDotNetProblems() {
+        List<MessageStats.Template> ts = List.of(
+                t("[<*>] [WRN] Microsoft.AspNetCore.Server.Kestrel: Heartbeat took longer than \"<*>\" at \"<*>\".", 4, 10),
+                t("<*>|ERROR|Acme.Shop.Db|Timeout expired.  The timeout period elapsed prior to obtaining a connection from the pool.", 7, 30));
+        Exceptions.Thrown deadlock = new Exceptions.Thrown("Microsoft.Data.SqlClient.SqlException",
+                "Transaction (Process ID 61) was deadlocked on lock resources with another process and has been chosen as the deadlock victim. Rerun the transaction.",
+                List.of(new Exceptions.Frame("at x", "Acme.Shop.Repo", "Save", "Repo.cs", 9, true)));
+        Exceptions.Result ex = new Exceptions.Result(List.of(new Exceptions.Group("k",
+                new Exceptions.Occurrence(80, List.of(deadlock)), 1, 80, 80, new long[] {80}, 1, List.of(), 1)), 1, false);
+        List<String> ids = KnownProblems.find(ts, ex).stream().map(m -> m.signature().id()).sorted().toList();
+        assertEquals(List.of("db-deadlock", "dotnet-sql-pool", "dotnet-threadpool-starvation"), ids);
+    }
+
+    @Test
     void everySignatureExplainsItself() {
         java.util.Set<String> ids = new java.util.HashSet<>();
         for (KnownProblems.Signature s : KnownProblems.ALL) {

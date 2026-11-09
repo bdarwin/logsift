@@ -39,4 +39,20 @@ class SourceFinderTest {
         assertNull(f.find(Exceptions.frameOf("  File \"/usr/lib/python3.12/site-packages/requests/api.py\", line 1")));
         assertNull(Exceptions.frameOf("just a line"));
     }
+
+    @Test
+    void findsDotNetByThePathItWasBuiltIn(@TempDir Path dir) throws Exception {
+        Path calc = touch(dir.resolve("shop/Shop/PriceCalculator.cs"));
+        touch(dir.resolve("shop/Shop.Tests/PriceCalculator.cs")); // same name, a test project
+        touch(dir.resolve("shop/Shop/obj/Debug/PriceCalculator.cs")); // build output: skipped
+        Path mailer = touch(dir.resolve("shop/Shop/Mail/Mailer.cs"));
+        SourceFinder f = new SourceFinder(List.of(dir.resolve("shop")));
+        assertEquals(calc, f.find(Exceptions.frameOf(
+                "   at Acme.Shop.PriceCalculator.Discount(Order order) in C:\\src\\Shop\\PriceCalculator.cs:line 88")),
+                "the most folders in common with where it was built");
+        assertEquals(calc, f.find(Exceptions.frameOf(
+                "   at Acme.Shop.PriceCalculator.Discount(Order order) in /home/build/Shop/PriceCalculator.cs:line 88")));
+        assertEquals(mailer, f.find(Exceptions.frameOf("   at Acme.Shop.Mail.Mailer.Send(String to)")),
+                "without symbols: the class's file, when there is one");
+    }
 }
