@@ -247,6 +247,74 @@ abstract class Recording {
     /** The video file's name in {@link #out}. */
     abstract String videoName();
 
+    /** Opens Logsift's window at the size the videos are made at, columns and the timeline on. */
+    void openWindow() throws Exception {
+        System.setProperty("logsift.noJvmBar", "true");
+        var prefs = AppState.prefs();
+        prefs.putBoolean("columns", true);
+        prefs.putBoolean("wrap", false);
+        prefs.putBoolean("valuesTree", false);
+        prefs.putBoolean("timeline", true);
+        onEdt(() -> {
+            Theme.apply(false);
+            frame = new MainFrame();
+            frame.setSize(1440, 880);
+            frame.setLocation(40, 40);
+            frame.setVisible(true);
+            return null;
+        });
+        Thread.sleep(800);
+        root = onEdt(frame::getRootPane);
+        w = onEdt(root::getWidth) & ~1;
+        h = onEdt(root::getHeight) & ~1;
+    }
+
+    /** Opens a file and waits for its tab, indexed. */
+    LogTab open(Path file) throws Exception {
+        onEdt(() -> {
+            frame.openFiles(List.of(file));
+            return null;
+        });
+        LogTab tab = waitForTab(file.getFileName().toString());
+        waitUntil(() -> !tab.document().isIndexing(), 120_000);
+        return tab;
+    }
+
+    /** Types into a text field or area as a person would. */
+    void typeInto(javax.swing.text.JTextComponent c, String text, int msPerChar) throws Exception {
+        for (int i = 1; i <= text.length(); i++) {
+            String s = text.substring(0, i);
+            onEdt(() -> {
+                c.setText(s);
+                return null;
+            });
+            hold(msPerChar);
+        }
+    }
+
+    /** Scrolls smoothly to this value in about this many milliseconds. */
+    void scrollTo(javax.swing.JScrollBar bar, int to, int ms) throws Exception {
+        int from = onEdt(bar::getValue);
+        int n = Math.max(1, ms * FPS / 1000);
+        for (int i = 1; i <= n; i++) {
+            double t = (double) i / n;
+            double e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            int v = (int) Math.round(from + (to - from) * e);
+            onEdt(() -> {
+                bar.setValue(v);
+                return null;
+            });
+            frame();
+        }
+    }
+
+    /** A free port on this computer. */
+    static int freePort() throws Exception {
+        try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
+            return s.getLocalPort();
+        }
+    }
+
     void startVideo() throws Exception {
         ffmpeg = new ProcessBuilder("ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24",
                 "-s", (w * SCALE) + "x" + (h * SCALE), "-r", String.valueOf(FPS), "-i", "-",
@@ -302,8 +370,9 @@ abstract class Recording {
             // popup menus in their own windows
             Point r = root.getLocationOnScreen();
             for (Window win : Window.getWindows()) {
+                // popups, and the window's own dialogs (Attach to a JVM), where they are on screen
                 if (win != frame && win.isShowing() && win instanceof RootPaneContainer rpc
-                        && !(win instanceof java.awt.Dialog) && !(win instanceof java.awt.Frame)) {
+                        && !(win instanceof java.awt.Frame) && (!(win instanceof java.awt.Dialog) || win.getOwner() == frame)) {
                     JComponent c = rpc.getRootPane();
                     Point s = c.getLocationOnScreen();
                     Graphics2D g2 = (Graphics2D) g.create();
