@@ -281,4 +281,10 @@ final class CompareTab extends JPanel {
             return this;
         }
     }
+
+    /** Ctrl+F: to "search messages", its text selected to type over. */
+    void focusFind() {
+        search.requestFocusInWindow();
+        search.selectAll();
+    }
 }

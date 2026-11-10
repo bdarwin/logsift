@@ -37,11 +37,30 @@ public final class TableDiff {
      *             rows are lined up in file order
      * @param ignored pairs not compared
      * @param options when values are equal
+     * @param rows which rows are compared (all of them must pass); empty: every row
      */
-    public record Spec(ColumnMap columns, List<Integer> keys, Set<Integer> ignored, DiffOptions options) {
+    public record Spec(ColumnMap columns, List<Integer> keys, Set<Integer> ignored, DiffOptions options,
+                       List<RowFilter> rows) {
         public Spec {
             keys = List.copyOf(keys);
             ignored = Set.copyOf(ignored);
+            rows = List.copyOf(rows);
+        }
+
+        public Spec(ColumnMap columns, List<Integer> keys, Set<Integer> ignored, DiffOptions options) {
+            this(columns, keys, ignored, options, List.of());
+        }
+
+        /** Whether a row of one side passes the row filters ({@code left}: its fields are the left file's). */
+        boolean keeps(String[] fields, boolean left) {
+            for (RowFilter f : rows) {
+                ColumnMap.Pair p = columns.pairs().get(f.pair());
+                int i = left ? p.left() : p.right();
+                if (!f.matches(i < fields.length ? fields[i] : null)) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         /** The pairs whose values are compared: not keys, not ignored. */
@@ -59,6 +78,7 @@ public final class TableDiff {
     /** One file's rows as read: where each is and its hashes. */
     private static final class Side {
         CsvFile.RowIndex index;
+        final BitSet filled = new BitSet(); // the columns with a value in some row
         long[] k1 = new long[1024];
         long[] k2 = new long[1024];
         long[] content = new long[1024];
@@ -138,9 +158,12 @@ public final class TableDiff {
         int[] cmpL = Arrays.stream(cmp).map(k -> pairs.get(k).left()).toArray();
         int[] cmpR = Arrays.stream(cmp).map(k -> pairs.get(k).right()).toArray();
         DiffOptions o = spec.options();
-        Side l = read(left, keyL, cmpL, o, f -> p.accept(f * 0.45), stop);
-        Side r = read(right, keyR, cmpR, o, f -> p.accept(0.45 + f * 0.45), stop);
+        java.util.function.Predicate<String[]> keepL = spec.rows().isEmpty() ? null : v -> spec.keeps(v, true);
+        java.util.function.Predicate<String[]> keepR = spec.rows().isEmpty() ? null : v -> spec.keeps(v, false);
+        Side l = read(left, keepL, keyL, cmpL, o, f -> p.accept(f * 0.45), stop);
+        Side r = read(right, keepR, keyR, cmpR, o, f -> p.accept(0.45 + f * 0.45), stop);
         TableDiffResult.Builder b = new TableDiffResult.Builder(left, right, l.index, r.index, spec, cmp);
+        b.filled(l.filled, r.filled);
         Comparer c = new Comparer(left, right, l.index, r.index, cmpL, cmpR, o, stop);
         if (!spec.keys().isEmpty()) {
             keyed(l, r, b, c, p, stop);
@@ -153,10 +176,15 @@ public final class TableDiff {
         return b.build((System.nanoTime() - t0) / 1_000_000);
     }
 
-    private static Side read(CsvFile f, int[] key, int[] cmp, DiffOptions o, DoubleConsumer progress,
-                             BooleanSupplier stop) throws IOException {
+    private static Side read(CsvFile f, java.util.function.Predicate<String[]> keep, int[] key, int[] cmp,
+                             DiffOptions o, DoubleConsumer progress, BooleanSupplier stop) throws IOException {
         Side s = new Side();
-        s.index = f.scan((row, v) -> {
+        s.index = f.scan(keep, (row, v) -> {
+            for (int i = 0; i < v.length; i++) {
+                if (v[i] != null && !v[i].isBlank() && !s.filled.get(i)) {
+                    s.filled.set(i);
+                }
+            }
             long a = Hashes.SEED1;
             long b = Hashes.SEED2;
             for (int k : key) {

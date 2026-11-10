@@ -383,7 +383,8 @@ public final class Sql implements AutoCloseable {
             throws SQLException {
         FileTable.Builder b = FileTables.builder(doc.path().toAbsolutePath().normalize(), TableQuery.columns(fields),
                 new Lines(doc, CsvRows.reader(doc, format)), TableQuery.parser(format, fields)).name(name)
-                .version(TableQuery.VERSION + "|" + fields.kinds() + "|" + String.join("\u0001", format.columns()));
+                .version(TableQuery.VERSION + "|" + fields.kinds() + "|" + String.join("\u0001", format.columns())
+                        + (format.rowsKey().isEmpty() ? "" : "|rows " + format.rowsKey()));
         return register(new LogTable(name, format, tableColumns(fields.titles()), fields, open(b)));
     }
 

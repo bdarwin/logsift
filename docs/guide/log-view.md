@@ -119,6 +119,14 @@ A `.csv` or `.tsv` file is read as a table: the header row names the columns, an
 
 A quoted value may hold line breaks (`"line one` on one line, `line two"` on the next): the row is still one row, its cells shown on its first line and the lines it goes on over shown as they are, and Profile, Pivot, Values, Metrics, filters on a column and Query count it once. Rows of any length are read whole, so a table with thousands of columns has all of them, however long its rows (a line on screen shows the first 64 KB of a line; a table's cells come from the whole row).
 
+**Exports with a title, totals or empty columns.** A downloaded report often doesn't start with its header: a title (*Monthly sales report*), a note (*Exported:,2026-05-01*) or a row of separators comes first. Logsift takes the first line that reads as a header (names, as many as the rows have values) within the first 20 lines; the lines above it show grayed and aren't rows. Right-click a row for:
+
+- **Use This Row as Header**, when Logsift took the wrong line: its values name the columns, and the lines above it aren't rows. (One of the first 2,000 lines.)
+- **Ignore This Row**, for a totals or summary line, or anything else that isn't a row of the table: it shows grayed and is left out of filters on a column, Profile, Pivot, Metrics, Query, [Compare](diff.md) and merged CSV files. **Don't Ignore This Row** takes it back.
+- **Reset Header and Ignored Rows** goes back to what Logsift found.
+
+These are kept for the file. **Empty columns** (no value in any row: the extra separators some exports add at the end of each line) are hidden; the header's *2 columns hidden ▾* lists them, marked *(empty)*, to show them again. Tables over 512 MB aren't read for empty columns.
+
 The header and the rows needn't have the same number of fields. Names can have spaces and values can be empty. A header can name a column that no row fills, such as an empty last column some exports add: it's still a column, and it stays empty. A separator at the end of the header names nothing, so it adds no column. When rows have a value past the header's last name, that value gets its own column, called *column 5* for example. All of this works in Profile, Pivot, Values and Query.
 
 - In the Columns view the header row isn't shown as a row: its names are the column titles. Line numbers are those of the file, so the first row is line 2. The titles are the header's names as written (*order_id*, *timestamp*), in the tree, the filters and their chips too. Logsift still knows which column holds the time, level, thread, logger or message (*timestamp*, *severity*, *msg*…): hover such a title to see it. This is also true of a header longer than a line is shown (64 KB, thousands of columns): its names are all column titles. The plain view shows the header line as it is.

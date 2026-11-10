@@ -69,6 +69,22 @@ class CompareToolsTest {
     }
 
     @Test
+    void tablesComparedOnlyWhereRowsMeetConditions() throws Exception {
+        Path a = files.resolve("orders-old.csv");
+        Path b = files.resolve("orders-new.csv");
+        Files.writeString(a, "id,region,amount\n1,EU,10\n2,US,20\n3,EU,30\n");
+        Files.writeString(b, "id,region,amount\n1,EU,11\n2,US,99\n3,EU,30\n");
+        String t = run(CompareTools.COMPARE_FILES, "left", a.toString(), "right", b.toString(), "keys", "id",
+                "where", "region = EU and amount > 5");
+        assertTrue(t.contains("Added: 0   Removed: 0   Changed: 1   Same: 1"), t);
+        assertTrue(t.contains("Only rows where region = EU and amount > 5: 1 left rows and 1 right rows left out"), t);
+        assertFalse(t.contains("99"), "the US row isn't compared: " + t);
+        Tool.Failure f = assertThrows(Tool.Failure.class, () -> run(CompareTools.COMPARE_FILES, "left", a.toString(),
+                "right", b.toString(), "where", "colour = red"));
+        assertTrue(f.getMessage().startsWith("No column colour in both files"), f.getMessage());
+    }
+
+    @Test
     void textsLineByLineWithTimesMasked() throws Exception {
         Path a = files.resolve("run1.log");
         Path b = files.resolve("run2.log");

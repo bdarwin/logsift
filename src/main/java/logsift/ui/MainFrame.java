@@ -4229,6 +4229,14 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Opens the current log's find bar (Ctrl+F); text selected in the log becomes the search. */
     void openFind() {
+        if (tabs.getSelectedComponent() instanceof FileCompareTab c) {
+            c.focusFind(); // a comparison: its own search
+            return;
+        }
+        if (tabs.getSelectedComponent() instanceof CompareTab c) {
+            c.focusFind();
+            return;
+        }
         if (tabs.getSelectedComponent() instanceof FolderSearchTab f) {
             f.focusFind();
             return;
@@ -4247,6 +4255,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** F3: the find bar's next match, or else the selected Find All's next hit. */
     private void findNext(boolean forward) {
+        if (tabs.getSelectedComponent() instanceof FileCompareTab c) {
+            if (!c.findNext(forward)) {
+                Toolkit.getDefaultToolkit().beep();
+            }
+            return;
+        }
         LogTab t = currentTab();
         if (t == null) {
             return;

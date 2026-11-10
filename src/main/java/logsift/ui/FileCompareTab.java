@@ -616,6 +616,28 @@ final class FileCompareTab extends JPanel {
                 : status.getText();
     }
 
+    /**
+     * Ctrl+F: the comparison's own search (a table's "search in results", a text comparison's
+     * find, a folder comparison's "find a name"); false when nothing is compared yet.
+     */
+    boolean focusFind() {
+        if (csv != null) {
+            csv.focusFind();
+        } else if (text != null) {
+            text.focusFind();
+        } else if (folder != null) {
+            folder.focusFind();
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    /** F3: the text comparison's next (or previous) match; false if there is none to go to. */
+    boolean findNext(boolean forward) {
+        return text != null && text.findNext(forward);
+    }
+
     /** The comparison shown, or null before the first one. */
     CsvCompareTab csv() {
         return csv;

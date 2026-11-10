@@ -29,6 +29,12 @@ public final class Formats {
      */
     public static Detected detect(List<String> sample, List<CustomFormat> custom, String fileName,
                                   String chosen, int year) {
+        return detect(sample, custom, fileName, chosen, year, CsvLayout.NONE);
+    }
+
+    /** Like {@link #detect(List, List, String, String, int)}, a table read with its header and ignored rows as chosen. */
+    public static Detected detect(List<String> sample, List<CustomFormat> custom, String fileName,
+                                  String chosen, int year, CsvLayout layout) {
         List<LogFormat> mine = new ArrayList<>();
         LogFormat forFile = null;
         for (CustomFormat c : custom) {
@@ -47,16 +53,16 @@ public final class Formats {
         boolean csvName = isCsvName(fileName);
         if (PLAIN.equals(chosen)) {
             return new Detected(entries, null, TimeFormat.detect(sample, year));
-        } else if (chosen != null && find(chosen, mine, sample) != null) {
-            columns = find(chosen, mine, sample);
+        } else if (chosen != null && find(chosen, mine, sample, layout) != null) {
+            columns = find(chosen, mine, sample, layout);
         } else if (forFile != null) {
             columns = forFile;
-        } else if (csvName && (columns = LogFormat.detectCsv(sample, true)) != null) {
+        } else if (csvName && (columns = LogFormat.detectCsv(sample, true, layout)) != null) {
             // a table: its header and rows say so
         } else {
             columns = LogFormat.detect(sample, mine);
             if (columns == null) {
-                columns = LogFormat.detectCsv(sample, false);
+                columns = LogFormat.detectCsv(sample, false, layout);
             }
         }
         if (columns != null && columns.isCsv()) {
@@ -81,7 +87,7 @@ public final class Formats {
     }
 
     /** A format by name: one of the user's, a built-in layout, or JSON lines. */
-    private static LogFormat find(String name, List<LogFormat> mine, List<String> sample) {
+    private static LogFormat find(String name, List<LogFormat> mine, List<String> sample, CsvLayout layout) {
         for (LogFormat f : mine) {
             if (f.name().equals(name)) {
                 return f;
@@ -93,7 +99,7 @@ public final class Formats {
             }
         }
         if (LogFormat.CSV.equals(name)) {
-            return LogFormat.detectCsv(sample, true);
+            return LogFormat.detectCsv(sample, true, layout);
         }
         LogFormat json = LogFormat.detectJson(sample);
         return json != null && json.name().equals(name) ? json : null;

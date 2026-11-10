@@ -2,6 +2,7 @@ package logsift.core.diff;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -344,5 +345,95 @@ class TableDiffTest {
         assertThrows(CancellationException.class, () -> TableDiff.compare(a, b,
                 new TableDiff.Spec(m, List.of(0), Set.of(), DiffOptions.DEFAULT), null, () -> ++calls[0] > 3));
         assertTrue(calls[0] > 3);
+    }
+
+    @Test
+    void comparesOnlyTheRowsThatMeetTheConditions() throws IOException {
+        CsvFile a = csv("a.csv", "id,region,amount\n1,EU,10\n2,US,20\n3,EU,30\n4,US,40\n");
+        CsvFile b = csv("b.csv", "id,region,amount\n1,EU,11\n2,US,99\n4,US,40\n5,EU,50\n");
+        ColumnMap m = ColumnMap.byName(a.header(), b.header());
+        int region = m.pairNamed("region");
+        TableDiffResult r = TableDiff.compare(a, b, new TableDiff.Spec(m, List.of(m.pairNamed("id")), Set.of(),
+                DiffOptions.DEFAULT, List.of(new RowFilter(region, RowFilter.Op.EQUALS, "eu"))), null, null);
+        // only EU: 1 changed, 5 added (after 1, the row before it on the right), 3 removed; no US rows at all
+        assertEquals(List.of("CHANGED:1", "ADDED:5", "REMOVED:3"), items(r));
+        assertEquals(2, r.leftRows());
+        assertEquals(2, r.leftLeftOut());
+        assertEquals(2, r.rightLeftOut());
+        assertEquals("region = eu", r.rowsCompared());
+        assertTrue(r.notes().stream().anyMatch(n -> n.startsWith("Only rows where region = eu: 2 left rows and 2 right")),
+                r.notes().toString());
+        assertTrue(r.summary().contains("Only rows where region = eu"), r.summary());
+        assertEquals("11", r.rightValue(0, m.pairNamed("amount")), "values read again are the rows kept");
+
+        // numbers, and two conditions together
+        TableDiffResult big = TableDiff.compare(a, b, new TableDiff.Spec(m, List.of(m.pairNamed("id")), Set.of(),
+                DiffOptions.DEFAULT, List.of(RowFilter.parse("amount > 15", m), RowFilter.parse("region != EU", m))),
+                null, null);
+        assertEquals(List.of("CHANGED:2", "SAME:4"), items(big));
+    }
+
+    @Test
+    void conditionsAreReadAsWritten() throws IOException {
+        CsvFile a = csv("a.csv", "id,Region,note\n1,EU,x\n");
+        ColumnMap m = ColumnMap.byName(a.header(), a.header());
+        RowFilter f = RowFilter.parse("region = \"EU West\"", m);
+        assertEquals(new RowFilter(m.pairNamed("Region"), RowFilter.Op.EQUALS, "EU West"), f);
+        assertEquals(RowFilter.Op.NOT_CONTAINS, RowFilter.parse("note doesn't contain late", m).op());
+        assertEquals(RowFilter.Op.CONTAINS, RowFilter.parse("note contains late", m).op());
+        assertEquals(RowFilter.Op.EMPTY, RowFilter.parse("note is empty", m).op());
+        assertEquals(RowFilter.Op.NOT_EMPTY, RowFilter.parse("note isn't empty", m).op());
+        assertEquals(RowFilter.Op.NOT_EQUALS, RowFilter.parse("id != 3", m).op());
+        assertEquals(RowFilter.Op.LESS, RowFilter.parse("id < 3", m).op());
+        assertEquals("Region = EU West", f.describe(m));
+        assertThrows(IllegalArgumentException.class, () -> RowFilter.parse("nope = 1", m));
+        assertThrows(IllegalArgumentException.class, () -> RowFilter.parse("id >= 1", m));
+        assertThrows(IllegalArgumentException.class, () -> RowFilter.parse("id > many", m));
+        assertThrows(IllegalArgumentException.class, () -> RowFilter.parse("just words", m));
+        assertTrue(f.matches(" eu west "));
+        assertTrue(new RowFilter(0, RowFilter.Op.MORE, "1 KB").matches("2048"), "units count as for filters");
+        assertTrue(new RowFilter(0, RowFilter.Op.EMPTY, "").matches(null), "a short row's missing field is empty");
+    }
+
+    @Test
+    void emptyColumnsAreKnown() throws IOException {
+        // an export with a separator too many, and a column only one file has (empty there)
+        CsvFile a = csv("a.csv", "id,amount,,\n1,10,,\n2,20,,\n");
+        CsvFile b = csv("b.csv", "id,amount,,,extra\n1,10,,,\n2,21,,,\n");
+        ColumnMap m = ColumnMap.byName(a.header(), b.header());
+        TableDiffResult r = diff(a, b, DiffOptions.DEFAULT, "id");
+        assertEquals(List.of("SAME:1", "CHANGED:2"), items(r));
+        assertTrue(r.notes().stream().noneMatch(n -> n.contains("extra")), "empty there: not worth a note " + r.notes());
+        assertFalse(r.isEmpty(m.pairNamed("amount")));
+        int emptyPairs = 0;
+        for (int p = 0; p < m.pairs().size(); p++) {
+            if (r.isEmpty(p)) {
+                emptyPairs++;
+            }
+        }
+        assertTrue(emptyPairs >= 1, "the unnamed empty columns are empty");
+    }
+
+    @Test
+    void aTitleAboveTheHeaderAndRowsIgnoredInTheTab() throws IOException {
+        Path p = dir.resolve("export.csv");
+        Files.writeString(p, "Orders export,,\nid,status,amount\nTotal,,30\n1,paid,10\n2,open,20\n");
+        CsvFile plain = CsvFile.open(p, null);
+        open.add(plain);
+        assertEquals(List.of("id", "status", "amount"), plain.header(), "the title isn't the header");
+        assertEquals(1, plain.headerLine());
+        assertEquals(3, plain.scan(null, null, null).size(), "the totals row counts until ignored");
+        try {
+            logsift.core.CsvLayout ignore = logsift.core.CsvLayout.NONE.withIgnored("Total,,30", true);
+            logsift.core.CsvLayout.setStore(f -> f.equals(p.toAbsolutePath().normalize()) ? ignore
+                    : logsift.core.CsvLayout.NONE);
+            CsvFile chosen = CsvFile.open(p, null);
+            open.add(chosen);
+            CsvFile.RowIndex idx = chosen.scan(null, null, null);
+            assertEquals(2, idx.size());
+            assertEquals(3, idx.line(0), "the first row is on line 4");
+        } finally {
+            logsift.core.CsvLayout.setStore(null);
+        }
     }
 }

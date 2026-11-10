@@ -42,7 +42,9 @@ import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
@@ -168,6 +170,10 @@ final class TextCompareTab extends JPanel {
     private final JPanel body = new JPanel(new BodyLayout());
     private boolean drawerOpen;
     private int current = -1; // the change selected (index into the result's blocks)
+    private final JTextField find = new JTextField(14);
+    private final JLabel findCount = new JLabel(" ");
+    private int found = -1; // the result row of the match shown, or -1
+    private int foundCount; // rows with the text, on either side
 
     TextCompareTab(Doc left, Doc right, Host host) {
         super(new BorderLayout());
@@ -255,6 +261,47 @@ final class TextCompareTab extends JPanel {
         bar.add(prev);
         bar.add(next);
         bar.add(CsvCompareTab.fixedWidth(position, 22));
+        bar.add(Box.createHorizontalStrut(8));
+        find.putClientProperty("JTextField.placeholderText", "find");
+        find.putClientProperty("JTextField.showClearButton", true);
+        find.setToolTipText("Find text in either file (Ctrl+F); Enter or F3 for the next, Shift+Enter or Shift+F3 for"
+                + " the previous");
+        find.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                findChanged();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                findChanged();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                findChanged();
+            }
+        });
+        find.addActionListener(e -> findNext(true));
+        find.getInputMap().put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER,
+                java.awt.event.InputEvent.SHIFT_DOWN_MASK), "findPrevious");
+        find.getActionMap().put("findPrevious", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                findNext(false);
+            }
+        });
+        find.getInputMap().put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0), "findDone");
+        find.getActionMap().put("findDone", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                find.setText("");
+                panes[1].requestFocusInWindow();
+            }
+        });
+        findCount.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+        bar.add(find);
+        bar.add(CsvCompareTab.fixedWidth(findCount, 12));
         bar.add(Box.createHorizontalStrut(8));
         JButton ignore = new JButton("Ignore ▾");
         ignore.setToolTipText("What doesn't count as a difference: spaces, case");
@@ -494,6 +541,7 @@ final class TextCompareTab extends JPanel {
     /** Compares the texts again (the options or a side changed). */
     private void recompare() {
         result = TextDiff.compare(docs[0].lines, docs[1].lines, options);
+        found = -1; // rows moved: the next find starts from the selection
         unfolded.clear();
         rebuild();
         if (current < 0 || current >= result.blocks().size() || !result.blocks().get(current).isChange()) {
@@ -741,6 +789,141 @@ final class TextCompareTab extends JPanel {
         scrolls[1].getVerticalScrollBar().setValue(y);
         updatePosition();
         gutter.repaint();
+    }
+
+    // ---------------------------------------------------------------- find
+
+    JTextField findFieldForTest() {
+        return find;
+    }
+
+    String findCountForTest() {
+        return findCount.getText();
+    }
+
+    /** The first selected row's line on each side (0-based; -1: none). */
+    int[] selectedLinesForTest() {
+        int r = panes[1].selection()[0];
+        return r < 0 ? new int[] {-1, -1} : new int[] {panes[0].rows().line(r), panes[1].rows().line(r)};
+    }
+
+    /** Ctrl+F: to the find field, its text selected to type over. */
+    void focusFind() {
+        find.requestFocusInWindow();
+        find.selectAll();
+    }
+
+    /** The text typed changed: its matches are marked, and the first one from the selection shown. */
+    private void findChanged() {
+        String q = find.getText();
+        for (DiffPane p : panes) {
+            p.setFind(q);
+        }
+        found = -1;
+        foundCount = 0;
+        if (q.isEmpty() || result == null) {
+            findCount.setText(" ");
+            return;
+        }
+        for (TextDiff.Row r : result.rows()) {
+            if (rowHas(r, q)) {
+                foundCount++;
+            }
+        }
+        if (foundCount == 0) {
+            findCount.setText("no matches");
+            return;
+        }
+        // from the row selected (or the top)
+        int[] sel = panes[1].selection();
+        int from = sel[0] >= 0 && sel[0] < shown.length ? shown[sel[0]] : -1;
+        found = from < 0 ? -1 : from - 1;
+        findNext(true);
+    }
+
+    /** Enter / F3: the next (or previous) row with the text, on either side; false if there is none. */
+    boolean findNext(boolean forward) {
+        String q = find.getText();
+        if (q.isEmpty() || result == null || result.rows().isEmpty()) {
+            if (q.isEmpty()) {
+                focusFind();
+            }
+            return false;
+        }
+        List<TextDiff.Row> rows = result.rows();
+        int n = rows.size();
+        int start = found >= 0 ? found : forward ? -1 : n;
+        for (int i = 1; i <= n; i++) {
+            int r = Math.floorMod(start + (forward ? i : -i), n);
+            if (rowHas(rows.get(r), q)) {
+                showFound(r);
+                return true;
+            }
+        }
+        findCount.setText("no matches");
+        return false;
+    }
+
+    private boolean rowHas(TextDiff.Row r, String q) {
+        return r.left() >= 0 && contains(docs[0].lines.get(r.left()), q)
+                || r.right() >= 0 && contains(docs[1].lines.get(r.right()), q);
+    }
+
+    /** Whether {@code text} contains {@code q}, in any case. */
+    static boolean contains(String text, String q) {
+        int n = q.length();
+        for (int i = 0; i + n <= text.length(); i++) {
+            if (text.regionMatches(true, i, q, 0, n)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Selects and scrolls to result row {@code r} (opening the folds if it is folded away). */
+    private void showFound(int r) {
+        int row = shownRowOf(r);
+        if (row < 0) {
+            fold = false;
+            foldButton.setSelected(false);
+            rebuild();
+            row = shownRowOf(r);
+        }
+        if (row < 0) {
+            return;
+        }
+        found = r;
+        for (DiffPane p : panes) {
+            p.select(row, row);
+        }
+        int rh = panes[1].rowHeight();
+        int view = scrolls[1].getViewport().getHeight();
+        JScrollBar bar = scrolls[1].getVerticalScrollBar();
+        int y = row * rh;
+        if (y < bar.getValue() || y + rh > bar.getValue() + view) {
+            bar.setValue(Math.max(0, y - view / 3));
+        }
+        int b = result.rows().get(r).block();
+        current = result.blocks().get(b).isChange() ? b : -1;
+        updatePosition();
+        gutter.repaint();
+        int at = 0;
+        for (int i = 0; i <= r; i++) {
+            if (rowHas(result.rows().get(i), find.getText())) {
+                at++;
+            }
+        }
+        findCount.setText(String.format(Locale.ROOT, "%,d of %,d", at, foundCount));
+    }
+
+    /** The shown row of result row {@code r}, or -1 (folded away). */
+    private int shownRowOf(int r) {
+        for (int i = 0; i < shown.length; i++) {
+            if (shown[i] == r) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private void selected(int side) {

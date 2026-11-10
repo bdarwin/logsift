@@ -840,6 +840,16 @@ public final class LogView extends JPanel {
         return hbar.isVisible();
     }
 
+    /** How far the view scrolls sideways (the content's width) and where the last column starts, in pixels. */
+    int[] horizontalExtentForTest() {
+        return new int[] {hbar.getMaximum(), columns == null ? 0 : columns.messageX(charWidth), charWidth};
+    }
+
+    /** Scrolls sideways to the end, as a drag of the scroll bar would. */
+    void scrollToRightEndForTest() {
+        hbar.setValue(hbar.getMaximum());
+    }
+
     /** Number of display rows the given row takes (1 without wrap). For tests. */
     int segmentsForTest(int row) {
         return segCount(row);
@@ -2178,12 +2188,18 @@ public final class LogView extends JPanel {
             Color[] lineFg = new Color[lineCount];
             Color[] lineBg = new Color[lineCount];
             int[][] matches = new int[lineCount][]; // per line: {start, end, highlight index}...
+            ColumnLayout layout = columns;
+            int lastX = layout == null ? 0 : layout.messageX(charWidth) / Math.max(1, charWidth);
             for (int k = 0; k < lineCount; k++) {
                 Line l = shownLines[k];
-                newMaxCols = Math.max(newMaxCols, l.text.length());
+                // how far the line reaches: in columns, the last column's text starts after the others
+                int from = layout != null && !(l.cells == null && layout.leftOfAll()) ? lastX : 0;
+                newMaxCols = Math.max(newMaxCols, from + l.text.length());
                 Color lf = fg;
                 Color lb = null;
-                boolean dim = source.dimmed(l.row);
+                // a line above a table's header, or a row ignored by hand: not one of its rows
+                boolean dim = source.dimmed(l.row) || layout != null && l.cells == null && !l.pending
+                        && layout.format().isSkipped(l.raw);
                 int hit = dim ? -1 : ruleOf(l.raw, rm);
                 if (hit >= 0) {
                     HighlightRule rule = rules.get(hit);
@@ -2328,8 +2344,11 @@ public final class LogView extends JPanel {
                 gt.dispose();
             }
             paintWaiting(g, w, h, gutter);
-            if (columns != null) {
-                newMaxCols = Math.max(newMaxCols, columns.fixedWidth(charWidth) / charWidth + 200);
+            if (layout != null) {
+                // the last column's title, at least, can be scrolled to (not 200 empty characters past it)
+                int last = layout.messageColumn();
+                int title = last < 0 ? 0 : layout.title(last).length();
+                newMaxCols = Math.max(newMaxCols, lastX + Math.max(title, 12) + 2);
             }
             if (newMaxCols != maxColumns && !wrap) {
                 maxColumns = newMaxCols;
@@ -2682,6 +2701,7 @@ public final class LogView extends JPanel {
                 public void mouseDragged(MouseEvent e) {
                     if (dragging >= 0 && columns != null) {
                         columns.setWidth(dragging, Math.max(charWidth * 3, dragWidth + e.getX() - dragX), charWidth);
+                        maxColumns = 0; // the last column moved: measured again as it is drawn
                         repaint();
                         changed();
                     }

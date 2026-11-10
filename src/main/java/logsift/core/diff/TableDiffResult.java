@@ -35,6 +35,8 @@ public final class TableDiffResult {
     private final int[] changedRows;  // per compared column
     private final int duplicateKeys;
     private final long millis;
+    private final java.util.BitSet leftFilled;
+    private final java.util.BitSet rightFilled;
 
     private TableDiffResult(Builder b, long millis) {
         this.left = b.left;
@@ -58,6 +60,8 @@ public final class TableDiffResult {
         }
         this.duplicateKeys = b.duplicateKeys;
         this.millis = millis;
+        this.leftFilled = b.leftFilled;
+        this.rightFilled = b.rightFilled;
     }
 
     /** Collects items in order (for {@link TableDiff}). */
@@ -76,6 +80,13 @@ public final class TableDiffResult {
         int size;
         int changeCount;
         int duplicateKeys;
+        java.util.BitSet leftFilled;
+        java.util.BitSet rightFilled;
+
+        void filled(java.util.BitSet left, java.util.BitSet right) {
+            leftFilled = left;
+            rightFilled = right;
+        }
 
         Builder(CsvFile left, CsvFile right, CsvFile.RowIndex li, CsvFile.RowIndex ri, TableDiff.Spec spec,
                 int[] compared) {
@@ -175,6 +186,33 @@ public final class TableDiffResult {
 
     public int rightRows() {
         return rightIndex.size();
+    }
+
+    /**
+     * Whether a pair's column has no value in any row compared, in either file (an empty column
+     * an export adds): the table needn't show it.
+     */
+    public boolean isEmpty(int pair) {
+        if (leftFilled == null || rightFilled == null) {
+            return false;
+        }
+        ColumnMap.Pair p = columns().pairs().get(pair);
+        return !leftFilled.get(p.left()) && !rightFilled.get(p.right());
+    }
+
+    /** Rows of the left file the row filters left out (not compared). */
+    public int leftLeftOut() {
+        return leftIndex.left();
+    }
+
+    /** Rows of the right file the row filters left out. */
+    public int rightLeftOut() {
+        return rightIndex.left();
+    }
+
+    /** The row filters in words ("region = EU and amount > 100"), or "" when every row is compared. */
+    public String rowsCompared() {
+        return spec.rows().isEmpty() ? "" : RowFilter.describe(spec.rows(), columns());
     }
 
     /** How many items have this status. */
@@ -374,16 +412,25 @@ public final class TableDiffResult {
     public List<String> notes() {
         List<String> out = new ArrayList<>();
         ColumnMap m = columns();
+        // a column only one file has, and empty there, is nothing to say (an export's extra separator)
         for (int i : m.leftOnly()) {
-            out.add("Column " + m.leftNames().get(i) + " only in the left file (" + left.name() + ")");
+            if (leftFilled == null || leftFilled.get(i)) {
+                out.add("Column " + m.leftNames().get(i) + " only in the left file (" + left.name() + ")");
+            }
         }
         for (int i : m.rightOnly()) {
-            out.add("Column " + m.rightNames().get(i) + " only in the right file (" + right.name() + ")");
+            if (rightFilled == null || rightFilled.get(i)) {
+                out.add("Column " + m.rightNames().get(i) + " only in the right file (" + right.name() + ")");
+            }
         }
         for (int i : spec.ignored()) {
             if (i < m.pairs().size()) {
                 out.add("Column " + m.name(i) + " not compared (ignored)");
             }
+        }
+        if (!spec.rows().isEmpty()) {
+            out.add(String.format(Locale.ROOT, "Only rows where %s: %,d left rows and %,d right rows left out",
+                    rowsCompared(), leftLeftOut(), rightLeftOut()));
         }
         return out;
     }
@@ -405,6 +452,7 @@ public final class TableDiffResult {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format(Locale.ROOT, "Compared %s (%,d rows) with %s (%,d rows), %s.%n", left.name(),
                 leftRows(), right.name(), rightRows(), matchedBy()));
+
         sb.append(String.format(Locale.ROOT, "Added: %,d   Removed: %,d   Changed: %,d   Same: %,d   Key repeats: %,d%n",
                 count(DiffStatus.ADDED), count(DiffStatus.REMOVED), count(DiffStatus.CHANGED), count(DiffStatus.SAME),
                 duplicateKeys));

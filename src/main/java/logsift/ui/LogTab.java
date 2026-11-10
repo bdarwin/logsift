@@ -677,7 +677,11 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                 filtersChanged();
             }
         }
+        if (emptyColumns.stream().anyMatch(c -> lf == null || !lf.columns().contains(c))) {
+            emptyColumns = java.util.Set.of(); // another table: found again below
+        }
         applyColumns();
+        findEmptyColumns(lf, gen);
         updateProfileTab();
         filterPanel.columnsChanged();
         if (filterPanel.filters().stream().anyMatch(d -> d.column != null)) {
@@ -1951,7 +1955,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     queryCsvFor = null;
                     queryTable = null;
                 }
-                if (f != null && f.isCsv()) {
+                if (f != null && f.isCsv() && !f.skipsRows()) {
                     if (queryCsvFor != f) {
                         sql.csv("t", doc.path(), f.delimiter(), f.titles(), doc.charset());
                         queryCsvFor = f;
@@ -1959,7 +1963,14 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     return null;
                 }
                 if (queryTable == null || queryTable.format() != f) {
-                    queryTable = sql.log("log", doc, f, timeFormat, entryFormat);
+                    if (f != null && f.isCsv()) {
+                        // rows ignored, or a title above the header: read as Logsift reads the table
+                        logsift.core.Pivot.Fields fields = logsift.core.Pivot.fields(f, doc.lineCount(),
+                                logsift.core.CsvRows.reader(doc, f), java.time.Year.now().getValue());
+                        queryTable = sql.table("t", doc, f, fields);
+                    } else {
+                        queryTable = sql.log("log", doc, f, timeFormat, entryFormat);
+                    }
                 }
                 return queryTable.update(stop::get, progress) ? null : "Stopped.";
             }
@@ -2914,6 +2925,81 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         }
     }
 
+    /**
+     * A table's row: use it as the header, or ignore it (a title, a blank row of separators, a
+     * totals row), or take that back. Kept for the file; everything that reads the table uses it.
+     */
+    private void tableRowItems(JPopupMenu menu, long line) {
+        logsift.core.LogFormat f = logFormat;
+        if (f == null || !f.isCsv() || line < 0) {
+            return;
+        }
+        logsift.core.CsvRows rows = logsift.core.CsvRows.of(doc, f);
+        if (rows != null && rows.continuesIfKnown(line)) {
+            return; // a line inside a value: its row starts above
+        }
+        String row = rows != null ? rows.rowIfKnown(line) : doc.line(line);
+        if (row == null) {
+            return;
+        }
+        logsift.core.CsvLayout layout = logsift.core.CsvLayout.of(path);
+        menu.addSeparator();
+        if (f.isHeader(row)) {
+            JMenuItem h = new JMenuItem("This Row Is the Header");
+            h.setEnabled(false);
+            menu.add(h);
+        } else if (layout.ignores(row)) {
+            JMenuItem back = new JMenuItem("Don't Ignore This Row");
+            back.setToolTipText("Count it as a row of the table again");
+            back.addActionListener(e -> setCsvLayout(layout.withIgnored(row, false)));
+            menu.add(back);
+        } else {
+            JMenuItem header = new JMenuItem("Use This Row as Header", Icons.of("rows-3"));
+            header.setToolTipText("Its values name the columns; the lines above it aren't rows (a title, a note)");
+            boolean near = line < logsift.core.LogAnalysis.sampleLines();
+            header.setEnabled(near);
+            if (!near) {
+                header.setToolTipText("Only one of the first " + String.format("%,d", logsift.core.LogAnalysis.sampleLines())
+                        + " lines can be the header");
+            }
+            header.addActionListener(e -> setCsvLayout(layout.withHeaderLine(line)));
+            menu.add(header);
+            if (!f.isSkipped(row)) {
+                JMenuItem ignore = new JMenuItem("Ignore This Row", Icons.of("eye-off"));
+                ignore.setToolTipText("Not a row of the table (a totals or summary line): left out of filters, Pivot,"
+                        + " Query, Profile and Compare");
+                ignore.setEnabled(layout.ignored().length < logsift.core.CsvLayout.MAX_IGNORED);
+                ignore.addActionListener(e -> setCsvLayout(layout.withIgnored(row, true)));
+                menu.add(ignore);
+            }
+        }
+        if (layout.isSet()) {
+            JMenuItem reset = new JMenuItem("Reset Header and Ignored Rows");
+            reset.setToolTipText("The header found as at first, every row a row");
+            reset.addActionListener(e -> setCsvLayout(logsift.core.CsvLayout.NONE));
+            menu.add(reset);
+        }
+    }
+
+    /** The table items a right-click on {@code line} offers, enabled ones only. */
+    List<String> tableRowItemsForTest(long line) {
+        JPopupMenu m = new JPopupMenu();
+        tableRowItems(m, line);
+        List<String> out = new ArrayList<>();
+        for (java.awt.Component c : m.getComponents()) {
+            if (c instanceof JMenuItem i && i.isEnabled()) {
+                out.add(i.getText());
+            }
+        }
+        return out;
+    }
+
+    /** Keeps the table's header and ignored rows for the file, and reads it again with them. */
+    void setCsvLayout(logsift.core.CsvLayout layout) {
+        AppState.setCsvLayout(path, layout);
+        redetect();
+    }
+
     private void extendPopup(LogView view, JPopupMenu menu) {
         menu.addSeparator();
         if (view == main) {
@@ -2937,6 +3023,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
                     : "Bookmark This Line");
             bm.addActionListener(e -> toggleBookmark());
             menu.add(bm);
+            tableRowItems(menu, cur);
             logsift.core.Exceptions.Frame frame = cur < 0 ? null : logsift.core.Exceptions.frameOf(doc.line(cur));
             if (frame != null && frame.file() != null) {
                 JMenuItem src = new JMenuItem("Open " + frame.shortText() + " in Editor", Icons.of("code"));
@@ -3605,7 +3692,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
             noColumns.setVisible(missing);
             revalidate();
         }
-        java.util.Set<String> hide = f == null ? java.util.Set.of() : hiddenColumns();
+        java.util.Set<String> hide = f == null ? java.util.Set.of() : hiddenNow();
         ColumnLayout layout = columnsWanted && f != null ? new ColumnLayout(f, sourceLabels != null, hide) : null;
         if (layout != null) {
             layout.copyWidths(main.columns());
@@ -3655,13 +3742,13 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         JMenuItem label = new JMenuItem("Columns");
         label.setEnabled(false);
         m.add(label);
-        java.util.Set<String> hidden = hiddenColumns();
+        java.util.Set<String> hidden = hiddenNow();
         for (String c : layout.format().columns()) {
             if (c.equals("message") || (c.equals("source") && sourceLabels == null && !layout.format().isCsv())) {
                 continue;
             }
             javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(
-                    columnName(c), !hidden.contains(c));
+                    columnName(c) + (emptyColumns.contains(c) ? " (empty)" : ""), !hidden.contains(c));
             item.addActionListener(a -> setColumnHidden(c, !item.isSelected()));
             m.add(item);
         }
@@ -3671,6 +3758,7 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         all.setEnabled(!hidden.isEmpty());
         all.addActionListener(a -> {
             AppState.prefs().remove(hiddenKey());
+            shownEmpty.addAll(emptyColumns);
             applyColumns();
         });
         m.add(all);
@@ -3695,7 +3783,82 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
         return out;
     }
 
+    /**
+     * The columns hidden now: those hidden by hand, and those with no value in any row (unless
+     * shown again).
+     */
+    java.util.Set<String> hiddenNow() {
+        java.util.Set<String> h = hiddenColumns();
+        for (String c : emptyColumns) {
+            if (!shownEmpty.contains(c)) {
+                h.add(c);
+            }
+        }
+        return h;
+    }
+
+    /** A table's columns with no value in any row (found in the background), hidden unless shown again. */
+    private volatile java.util.Set<String> emptyColumns = java.util.Set.of();
+    private final java.util.Set<String> shownEmpty = new java.util.HashSet<>();
+
+    /** Reads tables for their empty columns (each waits for its file to be indexed). */
+    private static final java.util.concurrent.ExecutorService EMPTY =
+            java.util.concurrent.Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "logsift-empty-columns");
+                t.setDaemon(true);
+                t.setPriority(Thread.MIN_PRIORITY);
+                return t;
+            });
+
+    /** Tables up to this size are read for their empty columns. */
+    private static final long EMPTY_SCAN_BYTES = 512L << 20;
+
+    /** Finds a table's empty columns in the background, then hides them. */
+    private void findEmptyColumns(logsift.core.LogFormat f, int gen) {
+        if (f == null || !f.isCsv()) {
+            emptyColumns = java.util.Set.of();
+            return;
+        }
+        EMPTY.execute(() -> {
+            try {
+                while (doc.isIndexing() && !closed && doc.generation() == gen) {
+                    Thread.sleep(100);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (closed || doc.generation() != gen || doc.fileSize() > EMPTY_SCAN_BYTES) {
+                return;
+            }
+            List<String> empty = logsift.core.EmptyColumns.find(f, logsift.core.CsvRows.reader(doc, f), doc.lineCount(),
+                    () -> closed || doc.generation() != gen || logFormat != f);
+            if (empty == null) {
+                return;
+            }
+            SwingUtilities.invokeLater(() -> {
+                if (logFormat == f && !closed) {
+                    emptyColumns = java.util.Set.copyOf(empty);
+                    if (!empty.isEmpty()) {
+                        applyColumns();
+                    }
+                }
+            });
+        });
+    }
+
+    java.util.Set<String> emptyColumnsForTest() {
+        return emptyColumns;
+    }
+
     void setColumnHidden(String column, boolean hide) {
+        if (emptyColumns.contains(column)) {
+            if (hide) {
+                shownEmpty.remove(column);
+            } else {
+                shownEmpty.add(column);
+            }
+        }
         java.util.Set<String> h = hiddenColumns();
         if (hide) {
             h.add(column);

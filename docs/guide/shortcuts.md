@@ -41,6 +41,8 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | In Find results: fold or open a search | Click its header, or Enter / ← / → |
 | In Find results: go to the line | Click, double-click, or Enter |
 | In Folder search: search / stop | Enter / Esc |
+| In a comparison: its search (a table's *search in results*, a text's *find*, a folder's *find a name*) | Ctrl+F |
+| In a text comparison: next / previous match | Enter / Shift+Enter in *find*, or F3 / Shift+F3 |
 
 ## Moving around
 

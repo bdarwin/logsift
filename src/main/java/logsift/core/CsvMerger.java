@@ -78,7 +78,7 @@ public final class CsvMerger implements AutoCloseable {
         List<String> sample = sample(p);
         int year = java.time.Year.now().getValue();
         Formats.Detected d = Formats.detect(sample, List.of(), p.getFileName() == null ? "" : p.getFileName().toString(),
-                null, year);
+                null, year, CsvLayout.of(p));
         if (d.times() == null && d.columns() != null && d.columns().isCsv() && sample.size() > 1) {
             // a file of a row or two: too few lines to be sure of its times, so its rows count thrice
             List<String> more = new ArrayList<>(sample);
@@ -289,6 +289,7 @@ public final class CsvMerger implements AutoCloseable {
         private final int[] target;      // the file's column i goes to merged column target[i]
         private final int width;         // merged columns
         private final TimeFormat times;
+        private final LogFormat format;
         private final ByteBuffer block = ByteBuffer.allocate(BLOCK);
         private long position;
         private long consumed;
@@ -303,6 +304,7 @@ public final class CsvMerger implements AutoCloseable {
             LogFormat f = d.columns();
             this.label = s.label();
             this.delimiter = f.delimiter();
+            this.format = f;
             this.times = d.times();
             List<String> names = f.headerNames();
             List<String> keys = plan.columns().stream().map(CsvMerger::key).toList();
@@ -383,8 +385,12 @@ public final class CsvMerger implements AutoCloseable {
                     continue;
                 }
                 if (!headerSkipped) {
-                    headerSkipped = true;
+                    // lines above the header (a title, a note) aren't rows either
+                    headerSkipped = format.isHeader(record.replace("\r", ""));
                     continue;
+                }
+                if (format.isSkipped(record)) {
+                    continue; // ignored by hand
                 }
                 return row(record);
             }

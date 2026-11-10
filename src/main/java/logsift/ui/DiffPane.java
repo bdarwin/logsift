@@ -60,6 +60,7 @@ final class DiffPane extends JComponent implements Scrollable {
     private Runnable onSelect = () -> { };
     private int maxChars = 80;
     private int maxLine = 1; // the largest line number, for the gutter's width
+    private String find = ""; // text found (any case) is marked
 
     DiffPane(Rows rows) {
         this.rows = rows;
@@ -125,6 +126,12 @@ final class DiffPane extends JComponent implements Scrollable {
             selection[1] = -1;
         }
         revalidate();
+        repaint();
+    }
+
+    /** Marks where {@code text} is (in any case); empty marks nothing. */
+    void setFind(String text) {
+        find = text == null ? "" : text;
         repaint();
     }
 
@@ -272,6 +279,18 @@ final class DiffPane extends JComponent implements Scrollable {
                         int xa = x0 + width(fm, text, 0, a, cw);
                         int xb = x0 + width(fm, text, 0, b, cw);
                         g.fillRoundRect(xa - 1, y + 1, Math.max(3, xb - xa + 2), rh - 2, 4, 4);
+                    }
+                }
+                if (!find.isEmpty()) {
+                    g.setColor(Theme.pick(new Color(0xFDE047), new Color(0x8A6D00)));
+                    int n = find.length();
+                    for (int i = 0; i + n <= text.length(); i++) {
+                        if (text.regionMatches(true, i, find, 0, n)) {
+                            int xa = x0 + width(fm, text, 0, i, cw);
+                            int xb = x0 + width(fm, text, 0, i + n, cw);
+                            g.fillRoundRect(xa - 1, y + 1, Math.max(3, xb - xa + 2), rh - 2, 4, 4);
+                            i += n - 1;
+                        }
                     }
                 }
                 g.setColor(Theme.foreground());

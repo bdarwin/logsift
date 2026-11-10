@@ -21,6 +21,10 @@ public final class LogFormat {
     private final char delimiter;           // CSV: the separator; 0 otherwise
     private final String header;            // CSV: the header row (not a row of values)
     private final int rowFields;            // CSV: how many fields rows usually have
+    private final long[] skipped;           // CSV: hashes (CsvLayout.hash) of rows that aren't rows, sorted
+    private final long headerLine;          // CSV: the header's line in the file
+    /** No rows skipped (first: the built-in layouts below are made with it). */
+    private static final long[] NO_HASHES = new long[0];
     private volatile List<String> headerNames;           // the header's names, once split
     private volatile java.util.Map<String, Integer> columnIndex; // a column's place, by name
 
@@ -93,6 +97,8 @@ public final class LogFormat {
         this.delimiter = 0;
         this.header = null;
         this.rowFields = 0;
+        this.skipped = NO_HASHES;
+        this.headerLine = -1;
         if (columns.isEmpty()) {
             throw new IllegalArgumentException("The pattern needs at least one column, like {level}");
         }
@@ -108,10 +114,13 @@ public final class LogFormat {
         this.delimiter = 0;
         this.header = null;
         this.rowFields = 0;
+        this.skipped = NO_HASHES;
+        this.headerLine = -1;
     }
 
     /** CSV: columns named by the header row. */
-    private LogFormat(List<String> columns, char delimiter, String header, int rowFields) {
+    private LogFormat(List<String> columns, char delimiter, String header, int rowFields, long[] skipped,
+                      long headerLine) {
         this.name = CSV;
         this.pattern = null;
         this.columns = List.copyOf(columns);
@@ -121,6 +130,46 @@ public final class LogFormat {
         this.delimiter = delimiter;
         this.header = header;
         this.rowFields = rowFields;
+        this.skipped = skipped;
+        this.headerLine = headerLine;
+    }
+
+    /**
+     * CSV: whether a line (or a whole row) isn't one of the table's rows though it looks like one:
+     * a line above the header (a title, a blank row of separators), or a row ignored by hand.
+     */
+    public boolean isSkipped(String line) {
+        return skipped.length > 0 && line != null && java.util.Arrays.binarySearch(skipped, CsvLayout.hash(line)) >= 0;
+    }
+
+    /** CSV: whether some rows aren't rows ({@link #isSkipped}). */
+    public boolean skipsRows() {
+        return skipped.length > 0;
+    }
+
+    /** CSV: the header row's text (null for other formats). */
+    public String headerText() {
+        return header;
+    }
+
+    /** CSV: the header's line in the file (0-based), or -1 for other formats. */
+    public long headerLine() {
+        return headerLine;
+    }
+
+    /**
+     * What, besides its columns, makes this table read differently from another of the same
+     * file (for caches): the rows that aren't rows. "" when none are.
+     */
+    public String rowsKey() {
+        if (skipped.length == 0) {
+            return "";
+        }
+        long h = 17;
+        for (long x : skipped) {
+            h = h * 31 + x;
+        }
+        return Long.toHexString(h);
     }
 
     /** CSV: whether a line is the header row (which names the columns, and has no values). */
@@ -231,8 +280,97 @@ public final class LogFormat {
      * of names, and the other formats having found nothing.
      */
     public static LogFormat detectCsv(List<String> sample, boolean named) {
+        return detectCsv(sample, named, CsvLayout.NONE);
+    }
+
+    /** How many lines may come before a table's header (a title, a note, blank rows). */
+    static final int MAX_PREAMBLE = 20;
+
+    /**
+     * Like {@link #detectCsv(List, boolean)}, with the header and the rows ignored as chosen by
+     * hand ({@code layout}; its header line counts from the sample's first line). A named file
+     * whose first line doesn't read as a header (a title, a row of empty names, a note of two
+     * fields over a table of ten) has its header found further down: the lines above it aren't
+     * rows.
+     */
+    public static LogFormat detectCsv(List<String> sample, boolean named, CsvLayout layout) {
+        CsvLayout l = layout == null ? CsvLayout.NONE : layout;
+        LogFormat f = null;
+        int at = -1;
+        if (l.headerLine() >= 0 && l.headerLine() < sample.size() && sample.get((int) l.headerLine()) != null
+                && !sample.get((int) l.headerLine()).isBlank()) {
+            at = (int) l.headerLine();
+            f = detectCsvAt(sample, at, true);
+        }
+        if (f == null) {
+            at = firstNonBlank(sample, 0);
+            f = at < 0 ? null : detectCsvAt(sample, at, named);
+            if (named && (f == null || f.poorHeader())) {
+                // a title or note above the table: the first line after it that reads as a header
+                int from = at;
+                for (int k = 0; k < MAX_PREAMBLE && from >= 0; k++) {
+                    from = firstNonBlank(sample, from + 1);
+                    LogFormat g = from < 0 ? null : detectCsvAt(sample, from, true);
+                    if (g != null && !g.poorHeader() && g.namesLookLikeNames()) {
+                        f = g;
+                        at = from;
+                        break;
+                    }
+                }
+            }
+        }
+        if (f == null) {
+            return null;
+        }
+        // the lines above the header, and the rows ignored by hand, aren't rows
+        java.util.Set<Long> skip = new java.util.TreeSet<>();
+        for (int i = 0; i < at; i++) {
+            String s = sample.get(i);
+            if (s != null && !s.isBlank()) {
+                skip.add(CsvLayout.hash(s));
+            }
+        }
+        for (long h : l.ignored()) {
+            skip.add(h);
+        }
+        skip.remove(CsvLayout.hash(f.header));
+        long[] hashes = skip.stream().mapToLong(Long::longValue).toArray();
+        return new LogFormat(f.columns, f.delimiter, f.header, f.rowFields, hashes, at);
+    }
+
+    private static int firstNonBlank(List<String> sample, int from) {
+        for (int i = Math.max(0, from); i < sample.size(); i++) {
+            if (sample.get(i) != null && !sample.get(i).isBlank()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Whether the header found doesn't look like one: most of its names empty (a row of
+     * separators), or far fewer fields than the rows have (a note like "Exported:,2026-05-01").
+     */
+    private boolean poorHeader() {
+        List<String> names = Csv.split(header, delimiter, null);
+        long named = names.stream().filter(n -> !n.isBlank()).count();
+        return named * 2 < Math.max(names.size(), 2) || names.size() * 2 <= rowFields;
+    }
+
+    /** Whether the header's names are names, not values (a row of a table taken for its header). */
+    private boolean namesLookLikeNames() {
+        for (String n : Csv.split(header, delimiter, null)) {
+            if (!n.isBlank() && !n.strip().matches("[\\p{L}_@#][\\p{L}\\p{N} _.@#/()%-]{0,60}")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** CSV with its header at line {@code at} of the sample (the lines after it are the rows). */
+    private static LogFormat detectCsvAt(List<String> sample, int at, boolean named) {
         List<String> lines = new ArrayList<>();
-        for (String s : sample) {
+        for (String s : sample.subList(at, sample.size())) {
             if (s != null && !s.isBlank()) {
                 lines.add(lines.isEmpty() && s.startsWith("\uFEFF") ? s.substring(1) : s);
             }
@@ -308,7 +446,7 @@ public final class LogFormat {
         while (names.size() < bestWidth) {
             names.add(""); // values past the header's last name: "column 5"
         }
-        return new LogFormat(columnNames(names), best, header, Math.min(names.size(), bestRowFields));
+        return new LogFormat(columnNames(names), best, header, Math.min(names.size(), bestRowFields), NO_HASHES, at);
     }
 
     /**
@@ -501,7 +639,7 @@ public final class LogFormat {
             return splitJson(line, starts);
         }
         if (delimiter != 0) {
-            if (isHeader(line)) {
+            if (isHeader(line) || isSkipped(line)) {
                 return null;
             }
             return csvRow(Csv.split(line, delimiter, starts), starts);
@@ -536,7 +674,7 @@ public final class LogFormat {
         if (delimiter == 0 || jsonKeys != null) {
             return split(line, null) != null;
         }
-        if (isHeader(line)) {
+        if (isHeader(line) || isSkipped(line)) {
             return false;
         }
         int n = columns.size();
@@ -556,7 +694,7 @@ public final class LogFormat {
         if (delimiter == 0 || jsonKeys != null) {
             return split(line, null);
         }
-        if (isHeader(line)) {
+        if (isHeader(line) || isSkipped(line)) {
             return null;
         }
         int n = columns.size();

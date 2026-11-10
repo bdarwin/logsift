@@ -6163,6 +6163,242 @@ class VisualTest {
     }
 
     @Test
+    @Order(42)
+    void tablesAsExportsComeOut() throws Exception {
+        // a downloaded report: a title and a row of separators above the header, a totals row under it,
+        // two empty columns at the end
+        Path csv = dir.resolve("monthly-sales.csv");
+        StringBuilder b = new StringBuilder("Monthly sales report,,,,,\n,,,,,\nregion,product,amount,qty,,\n"
+                + "Total,,8200,40,,\n");
+        for (int i = 1; i <= 40; i++) {
+            b.append(i % 2 == 0 ? "EU" : "US").append(",Widget ").append(i % 5).append(',').append(i * 10)
+                    .append(",1,,\n");
+        }
+        Files.writeString(csv, b.toString());
+        onEdt(() -> {
+            frame.setColumns(true);
+            frame.openFiles(List.of(csv));
+            return null;
+        });
+        LogTab tab = waitForTab("monthly-sales.csv");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != null && !tab.document().isIndexing()
+                        && !tab.emptyColumnsForTest().isEmpty());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the table and its empty columns");
+        logsift.core.LogFormat f = onEdt(tab::logFormat);
+        assertEquals(2, f.headerLine(), "the header is under the title");
+        assertEquals(List.of("region", "product", "amount", "qty", "", ""), f.headerNames());
+        assertEquals(java.util.Set.of("column 5", "column 6"), onEdt(tab::emptyColumnsForTest));
+        assertEquals(List.of("column 5", "column 6"), onEdt(() -> tab.mainView().columns().hidden()),
+                "empty columns are hidden");
+        assertEquals(List.of("Use This Row as Header", "Ignore This Row"), onEdt(() -> tab.tableRowItemsForTest(3)));
+        // amount > 100: the totals row counts until it is ignored
+        long t0 = System.nanoTime();
+        onEdt(() -> {
+            tab.filterByColumn("amount", logsift.core.ColumnFilter.Op.MORE, "100", FilterDef.Action.SHOW);
+            return null;
+        });
+        assertEquals(31, waitForFilters(tab, t0).matchCount());
+        onEdt(() -> {
+            tab.setCsvLayout(logsift.core.CsvLayout.of(csv).withIgnored("Total,,8200,40,,", true));
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.logFormat() != f && tab.logFormat().skipsRows());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the table read again");
+        assertTrue(onEdt(() -> tab.logFormat().isSkipped("Total,,8200,40,,")));
+        assertEquals(30, waitForFilters(tab, System.nanoTime()).matchCount(), "the totals row isn't a row now");
+        assertEquals(List.of("Don't Ignore This Row", "Reset Header and Ignored Rows"),
+                onEdt(() -> tab.tableRowItemsForTest(3)));
+        onEdt(() -> {
+            tab.setMatchingOnly(false);
+            return null;
+        });
+        settle();
+        shot("78c-csv-export-title-totals");
+        // and Compare reads it the same way
+        logsift.core.diff.CsvFile cf = logsift.core.diff.CsvFile.open(csv, null);
+        try {
+            assertEquals(List.of("region", "product", "amount", "qty", "", ""), cf.header());
+            assertEquals(40, cf.scan(null, null, null).size());
+        } finally {
+            cf.close();
+        }
+        onEdt(() -> {
+            tab.setCsvLayout(logsift.core.CsvLayout.NONE);
+            return null;
+        });
+
+        // a wide table: scrolled to the far right, the last columns are on screen, not empty space past them
+        Path wide = dir.resolve("wide-short-values.csv");
+        StringBuilder w = new StringBuilder();
+        for (int c = 0; c < 300; c++) {
+            w.append(c == 0 ? "" : ",").append("m").append(c);
+        }
+        w.append('\n');
+        for (int r = 0; r < 50; r++) {
+            for (int c = 0; c < 300; c++) {
+                w.append(c == 0 ? "" : ",").append((r * c) % 97);
+            }
+            w.append('\n');
+        }
+        Files.writeString(wide, w.toString());
+        onEdt(() -> {
+            frame.openFiles(List.of(wide));
+            return null;
+        });
+        LogTab wt = waitForTab("wide-short-values.csv");
+        waitFor(() -> {
+            try {
+                return onEdt(() -> wt.logFormat() != null && wt.mainView().columns() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the wide table");
+        settle();
+        onEdt(() -> {
+            wt.mainView().scrollToRightEndForTest();
+            return null;
+        });
+        settle();
+        int[] ext = onEdt(() -> wt.mainView().horizontalExtentForTest());
+        assertTrue(ext[1] > 0 && ext[0] - ext[1] < 40 * ext[2],
+                "the scroll ends just past the last column: width " + ext[0] + ", last column at " + ext[1]);
+        shot("78d-csv-wide-scrolled-to-the-end");
+    }
+
+    @Test
+    @Order(42)
+    void findsInComparisonsAndComparesSubsets() throws Exception {
+        Path box = Files.createDirectories(dir.resolve("compare-subsets"));
+        Path left = box.resolve("stock-monday.csv");
+        Path right = box.resolve("stock-tuesday.csv");
+        StringBuilder a = new StringBuilder("sku,region,stock\n");
+        StringBuilder c = new StringBuilder("sku,region,stock\n");
+        for (int i = 1; i <= 60; i++) {
+            String region = i % 3 == 0 ? "EU" : "US";
+            a.append(String.format("S-%03d,%s,%d%n", i, region, i));
+            c.append(String.format("S-%03d,%s,%d%n", i, region, i % 4 == 0 ? i + 1 : i));
+        }
+        Files.writeString(left, a);
+        Files.writeString(right, c);
+        onEdt(() -> {
+            frame.compareFiles(left, right);
+            return null;
+        });
+        CsvCompareTab tab = waitForCompare(null);
+        // Ctrl+F: to the comparison's search
+        onEdt(() -> {
+            frame.toFront();
+            frame.requestFocus();
+            return null;
+        });
+        settle();
+        onEdt(() -> {
+            frame.openFind();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tab.searchForTest().isFocusOwner() || frame.getMostRecentFocusOwner() == tab.searchForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "the search in results focused");
+        useSuggestedKey(tab);
+        assertEquals(15, onEdt(tab::result).count(logsift.core.diff.DiffStatus.CHANGED));
+        // only EU rows: a right-click's "Compare Only Rows with region = EU", as a condition
+        logsift.core.diff.TableDiffResult all = onEdt(tab::result);
+        onEdt(() -> {
+            tab.addRowCondition(new CsvCompareTab.RowCondition("region", logsift.core.diff.RowFilter.Op.EQUALS, "EU"));
+            return null;
+        });
+        waitForNewResult(tab, all, "comparing the EU rows");
+        logsift.core.diff.TableDiffResult eu = onEdt(tab::result);
+        assertEquals("region = EU", eu.rowsCompared());
+        assertEquals(20, eu.leftRows());
+        assertEquals(40, eu.leftLeftOut());
+        assertEquals(5, eu.count(logsift.core.diff.DiffStatus.CHANGED), "every 12th sku: EU and changed");
+        assertTrue(onEdt(tab::notesForTest).contains("Only rows where region = EU: 40 left rows and 40 right rows left out"),
+                onEdt(tab::notesForTest));
+        settle();
+        shot("106x-csv-compare-only-some-rows");
+        onEdt(() -> {
+            tab.rowConditionsForTest().clear();
+            return null;
+        });
+
+        // two texts: Ctrl+F finds in either file, Enter goes on to the next
+        Path l1 = box.resolve("job-1.log");
+        Path l2 = box.resolve("job-2.log");
+        List<String> x = new ArrayList<>();
+        List<String> y = new ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            x.add("INFO step " + i + " done");
+            y.add(i == 120 ? "ERROR step 120 failed: timeout" : "INFO step " + i + " done");
+        }
+        Files.write(l1, x);
+        Files.write(l2, y);
+        FileCompareTab ct = onEdt(() -> frame.openCompare(l1, l2));
+        waitFor(() -> {
+            try {
+                return onEdt(() -> ct.text() != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the text comparison");
+        TextCompareTab tt = onEdt(ct::text);
+        onEdt(() -> {
+            frame.openFind();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> tt.findFieldForTest().isFocusOwner()
+                        || frame.getMostRecentFocusOwner() == tt.findFieldForTest());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "the find field focused");
+        onEdt(() -> {
+            tt.findFieldForTest().setText("TIMEOUT");
+            return null;
+        });
+        assertEquals("1 of 1", onEdt(tt::findCountForTest));
+        assertEquals(120, onEdt(tt::selectedLinesForTest)[1], "the line with it, selected");
+        onEdt(() -> {
+            tt.findFieldForTest().setText("step 19");
+            return null;
+        });
+        // step 19 and step 190 to 199; from the line selected (120) on
+        assertEquals("2 of 11", onEdt(tt::findCountForTest));
+        assertEquals(190, onEdt(tt::selectedLinesForTest)[0]);
+        assertTrue(onEdt(() -> tt.findNext(true)));
+        assertEquals("3 of 11", onEdt(tt::findCountForTest));
+        assertTrue(onEdt(() -> tt.findNext(false)));
+        assertTrue(onEdt(() -> tt.findNext(false)));
+        assertEquals("1 of 11", onEdt(tt::findCountForTest));
+        assertEquals(19, onEdt(tt::selectedLinesForTest)[0]);
+        assertTrue(onEdt(() -> tt.findNext(false)), "round to the last");
+        assertEquals("11 of 11", onEdt(tt::findCountForTest));
+        settle();
+        shot("107x-text-compare-find");
+        onEdt(() -> {
+            tt.findFieldForTest().setText("no such text");
+            return null;
+        });
+        assertEquals("no matches", onEdt(tt::findCountForTest));
+    }
+
+    @Test
     @Order(43)
     void durationsAndNumbers() throws Exception {
         // a shop: orders placed (slow for two minutes), sync jobs on a pool (one hangs), queue sizes

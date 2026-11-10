@@ -101,7 +101,8 @@ public final class PivotCache implements AutoCloseable {
             t = FileTables.builder(abs, columns(format), feed, parser(format, feed)).name(TABLE).cacheDir(dir)
                     .roomLimit(limitBytes).lazyColumns(true).maxNewColumnsPerQuery(Integer.MAX_VALUE)
                     .version(VERSION + "|" + read + "|" + (int) format.delimiter() + "|"
-                            + String.join("\u0001", format.columns()))
+                            + String.join("\u0001", format.columns())
+                            + (format.rowsKey().isEmpty() ? "" : "|rows " + format.rowsKey()))
                     .open();
         } catch (RuntimeException e) {
             throw new IOException("The Pivot cache couldn't be opened: " + e.getMessage(), e);

@@ -730,4 +730,10 @@ final class FolderCompareTab extends JPanel {
     String showTextForTest(int i) {
         return SHOW[i] + "  " + countText(i);
     }
+
+    /** Ctrl+F: to "find a name", its text selected to type over. */
+    void focusFind() {
+        search.requestFocusInWindow();
+        search.selectAll();
+    }
 }

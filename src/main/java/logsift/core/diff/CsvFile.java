@@ -56,10 +56,11 @@ public final class CsvFile implements Closeable {
     private final List<String> header;
     private final long headerEnd; // where the first row can start
     private final long headerLine;
+    private final LogFormat format;
     private final FileChannel channel;
 
     private CsvFile(Path path, Path read, boolean copy, String name, Charset charset, char delimiter,
-                    List<String> header, long headerEnd, long headerLine) throws IOException {
+                    List<String> header, long headerEnd, long headerLine, LogFormat format) throws IOException {
         this.path = path;
         this.read = read;
         this.copy = copy;
@@ -69,6 +70,7 @@ public final class CsvFile implements Closeable {
         this.header = List.copyOf(header);
         this.headerEnd = headerEnd;
         this.headerLine = headerLine;
+        this.format = format;
         this.channel = FileChannel.open(read, StandardOpenOption.READ);
     }
 
@@ -103,7 +105,8 @@ public final class CsvFile implements Closeable {
             }
             boolean named = Formats.isCsvName(label) || Formats.isCsvName(path.getFileName() == null ? ""
                     : path.getFileName().toString());
-            LogFormat f = LogFormat.detectCsv(sample, named);
+            // the header and the rows ignored as chosen for the file (in its tab)
+            LogFormat f = LogFormat.detectCsv(sample, named, logsift.core.CsvLayout.of(path));
             if (f == null || !f.isCsv()) {
                 throw new NotCsvException(label + " doesn't look like a CSV file: no header row with columns"
                         + " separated by commas, semicolons, tabs or bars");
@@ -111,7 +114,7 @@ public final class CsvFile implements Closeable {
             char d = f.delimiter();
             // the header: the first record that isn't blank (after a byte order mark)
             long[] where = new long[2]; // where the header ends: offset, line
-            List<String> names = readHeader(read, cs, d, where);
+            List<String> names = readHeader(read, cs, d, Math.max(0, f.headerLine()), where);
             if (names == null) {
                 throw new NotCsvException(label + " is empty");
             }
@@ -119,7 +122,7 @@ public final class CsvFile implements Closeable {
             if (hdr == null || hdr.size() != names.size()) {
                 hdr = names.stream().map(String::strip).toList();
             }
-            return new CsvFile(path, read, copy, label, cs, d, hdr, where[0], where[1]);
+            return new CsvFile(path, read, copy, label, cs, d, hdr, where[0], where[1], f);
         } catch (IOException | RuntimeException e) {
             if (copy) {
                 Files.deleteIfExists(read);
@@ -145,15 +148,20 @@ public final class CsvFile implements Closeable {
         return out;
     }
 
-    /** The header's fields, and where it ends (offset, line) in {@code where}; null if no record. */
-    private static List<String> readHeader(Path read, Charset cs, char d, long[] where) throws IOException {
+    /**
+     * The header's fields: the first record that isn't blank from line {@code from} on (a title
+     * above a table isn't its header), and where it ends (offset, line) in {@code where}; null if
+     * no record.
+     */
+    private static List<String> readHeader(Path read, Charset cs, char d, long from, long[] where) throws IOException {
         java.util.concurrent.atomic.AtomicReference<List<String>> got = new java.util.concurrent.atomic.AtomicReference<>();
         try (FileChannel ch = FileChannel.open(read, StandardOpenOption.READ)) {
+            long fromLine = from;
             Scanner s = new Scanner(ch, d, 0, 0, null, null) {
                 @Override
                 boolean record(long offset, int length, long line, byte[] buf, int from) {
                     String text = new String(buf, from, length, cs);
-                    if (text.isBlank()) {
+                    if (text.isBlank() || line < fromLine) {
                         return true;
                     }
                     got.set(Csv.split(text, d, null));
@@ -213,6 +221,15 @@ public final class CsvFile implements Closeable {
      * @throws CancellationException when {@code cancelled} says so
      */
     public RowIndex scan(RowVisitor visitor, DoubleConsumer progress, BooleanSupplier cancelled) throws IOException {
+        return scan(null, visitor, progress, cancelled);
+    }
+
+    /**
+     * Like {@link #scan(RowVisitor, DoubleConsumer, BooleanSupplier)}, only with the rows whose
+     * fields {@code keep} (or null: all) passes; the others are counted in {@link RowIndex#left()}.
+     */
+    public RowIndex scan(java.util.function.Predicate<String[]> keep, RowVisitor visitor, DoubleConsumer progress,
+                         BooleanSupplier cancelled) throws IOException {
         RowIndex idx = new RowIndex();
         int width = header.size();
         long total = Math.max(1, channel.size());
@@ -222,9 +239,17 @@ public final class CsvFile implements Closeable {
                 if (length == 0 || isBlank(buf, from, length)) {
                     return true;
                 }
+                if (format.skipsRows() && format.isSkipped(new String(buf, from, length, charset))) {
+                    return true; // ignored by hand (or above the header)
+                }
+                String[] v = keep != null || visitor != null ? fields(new String(buf, from, length, charset), width) : null;
+                if (keep != null && !keep.test(v)) {
+                    idx.leftOut++;
+                    return true;
+                }
                 int row = idx.add(offset, length, line);
                 if (visitor != null) {
-                    return visitor.row(row, fields(new String(buf, from, length, charset), width));
+                    return visitor.row(row, v);
                 }
                 return true;
             }
@@ -299,6 +324,12 @@ public final class CsvFile implements Closeable {
         int[] length = new int[1024];
         long[] line = new long[1024];
         int size;
+        int leftOut;
+
+        /** Rows a row filter left out (not in the index). */
+        public int left() {
+            return leftOut;
+        }
 
         int add(long off, int len, long ln) {
             if (size == offset.length) {

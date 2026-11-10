@@ -46,8 +46,13 @@ A key is what makes a row the same row in both files: an order number, a user ID
 
 Columns are matched **by name**, whatever their case or the spaces around them (*Price* and *price *). A column only one file has is said once above the table (*Column region only in the right file*), not as a change on every row.
 
+- **Empty columns:** a column with no value in any row of either file (the extra separators some exports add at the end of each line) isn't shown in the table, and a column only one file has isn't mentioned if it's empty there. **Columns ▾ → Show Empty Columns** shows them.
 - **Leave a column out:** on the keys' row, under the right file, **Not compared:** lists the columns left out of the comparison. **Choose ▾** next to it opens the same kind of list, with a filter: tick the columns to leave out, for example a *last updated* column that always differs. ✕ on one compares it again. It compares again when the list closes. A column left out doesn't make a row changed; it is still shown at the end of the table, in gray, as *(not compared)*.
 - **Columns ▾** (above the table) only changes what the table **shows**: untick a column to hide it (it is still compared), **Show All Columns** to bring them back. **Pair Columns by Hand…** compares a column with one of another name (*cost* in the left file with *price* in the right).
+
+## Only some rows
+
+**Rows:** (under the keys) compares only the rows that meet conditions, in both files: the rows of one region, one status, amounts over 100. Other rows are left out of the comparison as if they weren't there, so they aren't added, removed or changed. **Add Condition ▾** picks a column (one in both files), how to test it (**=**, **≠**, **contains**, **doesn't contain**, **>**, **<**, **is empty**, **isn't empty**) and the value; text compares in any case, and numbers compare as numbers (*1 KB*, *250 ms* too). Right-click a value in the table for **Compare Only Rows with region = EU** or **Leave Out Rows with region = EU**. Several conditions must all be met. ✕ on one compares all rows again. Above the table, a gray line says how many rows of each file were left out; it's in the summary too. The conditions stay when you choose other files that have those columns.
 
 ## Options
 
@@ -88,7 +93,7 @@ Next to the scroll bar, a **strip of marks** shows where the differences are amo
 
 - A **changed value** shows as <span style="color:#B91C1C"><s>old</s></span> → <span style="color:#15803D">**new**</span>: the old value struck through in red, the new one in bold green, on a light amber cell (in dark mode lighter red <span class="sw" style="background:#F87171"></span>, green <span class="sw" style="background:#4ADE80"></span> and a dark amber cell). Hover a value for both in full. A line break in a value shows as ⏎.
 - **Added** rows are on a light green background with green values, **removed** rows on a light red one with red values, **key repeats** rows on a light purple one.
-- **search in results** keeps the rows with that text in a value (any case).
+- **search in results** keeps the rows with that text in a value (any case). **Ctrl+F** (⌘F) goes there.
 - **Selecting**, as in a spreadsheet: click a cell; drag, or Shift-click, for a range; Ctrl-click (⌘-click on macOS) to add cells. Click a **Status** or **Line** cell to select whole rows (side by side: on both sides), or a **column's title** for the whole column (Shift-click a second title for the columns between). Selected cells keep their colours under a tint of the accent colour, and the column titles of the selection turn the accent colour. **Ctrl+C** (⌘C) copies the selection as tab-separated text, ready to paste in a spreadsheet: a changed value as *old → new*, whole columns with their titles. Right-click → **Copy with Column Titles** adds the titles for any selection; Ctrl+A selects everything.
 - **▲ ▼** (Shift+F7 / F7) go to the previous and next difference; it says *difference 3 of 120*.
 - **Double-click** a row to open its line in the right file (the left one for a removed row). Right-click for either file.
@@ -108,6 +113,7 @@ Next to the scroll bar, a **strip of marks** shows where the differences are amo
 - Values are compared as text unless both are numbers; dates are text (*2026-01-02* and *02/01/2026* differ).
 - Without a key, rows changed in place are paired in order within a run of changes; if many rows moved, choose a key.
 - Changing a file while it is compared isn't noticed: compare again.
+- A file whose table starts under a title, or has rows you ignored in its tab, is compared the same way: see [CSV files](log-view.md#csv-files).
 
 ## Text and logs
 
@@ -115,6 +121,7 @@ Files that aren't CSV or TSV (logs, code, configs) are compared line by line, si
 
 ![Two runs of a job compared with times masked: a changed host, a line added, one gone, a step that failed; unchanged stretches folded](../screenshots/text-compare.png)
 
+- **find** (**Ctrl+F**, ⌘F) finds text in either file, in any case: each place it is shows in yellow, Enter (or F3) goes to the next line with it from the one selected, Shift+Enter (Shift+F3) to the one before, and it says *2 of 11*. Folded lines open when a match is in them. Esc clears it.
 - Lines that match are on one row; a line only one file has faces an empty, hatched row. Changed blocks are **blue**, lines added **green**, lines removed **gray**, and the words that differ within a line are marked stronger.
 - **▲ ▼** (Shift+F7 / F7) go from change to change: *change 2 of 4*. The strip by the scroll bar marks every change; click it to go there.
 - **Ignore ▾**: spaces at the ends of lines, or all spaces, and case. **Mask ▾**: times and dates, numbers, or IDs (UUIDs, long hex, IDs with digits) count as equal, so two runs of the same job line up and only what really changed shows. Masked parts aren't marked as changed words.

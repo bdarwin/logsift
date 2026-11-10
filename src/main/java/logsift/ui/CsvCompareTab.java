@@ -66,6 +66,7 @@ import logsift.core.diff.CsvFile;
 import logsift.core.diff.DiffOptions;
 import logsift.core.diff.DiffStatus;
 import logsift.core.diff.KeySuggester;
+import logsift.core.diff.RowFilter;
 import logsift.core.diff.TableDiff;
 import logsift.core.diff.TableDiffExport;
 import logsift.core.diff.TableDiffResult;
@@ -145,8 +146,14 @@ final class CsvCompareTab extends JPanel {
     private final JPanel keyChips = new JPanel(new WrapLayout(FlowLayout.LEFT, 4, 2));
     // columns left out of the comparison
     private final JPanel ignoreChips = new JPanel(new WrapLayout(FlowLayout.LEFT, 4, 2));
+    // which rows are compared: conditions on columns (by name, so they stay when files change)
+    private final JPanel rowChips = new JPanel(new WrapLayout(FlowLayout.LEFT, 4, 2));
+    private final List<RowCondition> rowConditions = new ArrayList<>();
+    private JButton addConditionButton;
     // columns not shown in the table (by name; they are still compared)
     private final Set<String> hiddenColumns = new HashSet<>();
+    // columns empty in every row of both files: left out of the table unless asked for
+    private boolean showEmpty;
     // the view: one table, or the two files side by side
     private final javax.swing.JToggleButton unifiedButton = new javax.swing.JToggleButton("Unified");
     private final javax.swing.JToggleButton sideButton = new javax.swing.JToggleButton("Side by Side");
@@ -191,6 +198,13 @@ final class CsvCompareTab extends JPanel {
     private int columnFilter = -1;
     private AtomicBoolean searching;
     private final Timer searchTimer = new Timer(300, e -> refilter());
+
+    /** A condition rows must meet to be compared, on a column by its name. */
+    record RowCondition(String column, RowFilter.Op op, String text) {
+        String describe() {
+            return op.takesText() ? column + " " + op.label + " " + text : column + " " + op.label;
+        }
+    }
 
     /** A compared column and how many rows changed in it (pair -1: all columns). */
     private record ColumnCount(int pair, String name, int rows) {
@@ -246,6 +260,9 @@ final class CsvCompareTab extends JPanel {
         pick.add(ignoreChips);
         pick.setAlignmentX(LEFT_ALIGNMENT);
         top.add(pick);
+        rowChips.setAlignmentX(LEFT_ALIGNMENT);
+        top.add(rowChips);
+        showRowConditions();
 
         JPanel options = new JPanel(new WrapLayout(FlowLayout.LEFT, 6, 2));
         options.setAlignmentX(LEFT_ALIGNMENT);
@@ -1275,6 +1292,116 @@ final class CsvCompareTab extends JPanel {
         ignoreChips.repaint();
     }
 
+    /** "Rows:" the conditions rows must meet to be compared, each with ✕, and Add Condition ▾. */
+    private void showRowConditions() {
+        rowChips.removeAll();
+        JLabel l = new JLabel("Rows:");
+        l.setFont(l.getFont().deriveFont(Font.BOLD));
+        l.setToolTipText("<html>Compare only the rows that meet these conditions, in both files (region = EU, amount &gt; 100).<br>"
+                + "Other rows are left out, as if they weren't there. Right-click a value in the table for one.</html>");
+        rowChips.add(l);
+        for (RowCondition c : rowConditions) {
+            boolean there = map == null || map.pairNamed(c.column()) >= 0;
+            JButton chip = new JButton(c.describe() + (there ? "" : " (not in both files)") + "  ✕");
+            chip.putClientProperty("JButton.buttonType", "roundRect");
+            chip.setToolTipText(there ? "Compare all rows again, not only these" : "Not used: the column isn't in both files");
+            chip.addActionListener(e -> {
+                rowConditions.remove(c);
+                showRowConditions();
+                runCompare();
+            });
+            rowChips.add(chip);
+        }
+        if (rowConditions.isEmpty()) {
+            JLabel all = new JLabel("all");
+            all.setForeground(Theme.uiColor("Label.disabledForeground", Color.GRAY));
+            all.setToolTipText(l.getToolTipText());
+            rowChips.add(all);
+        }
+        JButton add = new JButton("Add Condition ▾", Icons.of("filter"));
+        add.setToolTipText("Compare only rows that meet a condition, such as region = EU (in both files)");
+        add.addActionListener(e -> conditionPicker(add));
+        addConditionButton = add;
+        rowChips.add(add);
+        rowChips.revalidate();
+        rowChips.repaint();
+    }
+
+    /** Adds a condition on rows (if it isn't there already) and compares again. */
+    void addRowCondition(RowCondition c) {
+        if (!rowConditions.contains(c)) {
+            rowConditions.add(c);
+            showRowConditions();
+            runCompare();
+        }
+    }
+
+    /** Add Condition ▾: a column of both files, how to test it, and the text. */
+    private void conditionPicker(JButton from) {
+        if (map == null || map.pairs().isEmpty()) {
+            return;
+        }
+        JPopupMenu m = new JPopupMenu();
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
+        JComboBox<String> column = new JComboBox<>();
+        for (int i = 0; i < map.pairs().size(); i++) {
+            column.addItem(map.name(i));
+        }
+        JComboBox<RowFilter.Op> op = new JComboBox<>(RowFilter.Op.values());
+        JTextField text = new JTextField(14);
+        text.putClientProperty("JTextField.placeholderText", "value");
+        op.addActionListener(e -> text.setEnabled(((RowFilter.Op) op.getSelectedItem()).takesText()));
+        JButton add = new JButton("Add");
+        add.putClientProperty("JButton.buttonType", "default");
+        JLabel why = new JLabel(" ");
+        why.setForeground(Theme.errorMark());
+        Runnable go = () -> {
+            RowFilter.Op o = (RowFilter.Op) op.getSelectedItem();
+            String t = text.getText().strip();
+            try {
+                new RowFilter(column.getSelectedIndex(), o, t); // checks a number is one
+            } catch (IllegalArgumentException ex) {
+                why.setText(ex.getMessage());
+                return;
+            }
+            m.setVisible(false);
+            addRowCondition(new RowCondition((String) column.getSelectedItem(), o, o.takesText() ? t : ""));
+        };
+        add.addActionListener(e -> go.run());
+        text.addActionListener(e -> go.run());
+        p.add(column);
+        p.add(op);
+        p.add(text);
+        p.add(add);
+        JPanel box = new JPanel(new BorderLayout());
+        box.add(p, BorderLayout.CENTER);
+        why.setBorder(BorderFactory.createEmptyBorder(0, 8, 4, 8));
+        box.add(why, BorderLayout.SOUTH);
+        m.add(box);
+        m.show(from, 0, from.getHeight());
+        SwingUtilities.invokeLater(text::requestFocusInWindow);
+    }
+
+    /** The conditions as row filters of this comparison's columns (ones not in both files are left out). */
+    private List<RowFilter> rowFilters() {
+        List<RowFilter> out = new ArrayList<>();
+        for (RowCondition c : rowConditions) {
+            int pair = map.pairNamed(c.column());
+            if (pair >= 0) {
+                try {
+                    out.add(new RowFilter(pair, c.op(), c.text()));
+                } catch (IllegalArgumentException e) {
+                    // can't be: checked when added
+                }
+            }
+        }
+        return out;
+    }
+
+    List<RowCondition> rowConditionsForTest() {
+        return rowConditions;
+    }
+
     private void ignoreColumn(int leftColumn) {
         if (!keys.contains(leftColumn) && ignored.add(leftColumn)) {
             showIgnored();
@@ -1321,6 +1448,22 @@ final class CsvCompareTab extends JPanel {
             refreshColumns();
         });
         m.add(all);
+        int empty = 0;
+        for (int c : cols) {
+            if (r.isEmpty(c)) {
+                empty++;
+            }
+        }
+        if (empty > 0) {
+            javax.swing.JCheckBoxMenuItem se = new javax.swing.JCheckBoxMenuItem(String.format(Locale.ROOT,
+                    "Show Empty Columns (%,d)", empty), showEmpty);
+            se.setToolTipText("Columns with no value in any row of either file (an export's extra separators)");
+            se.addActionListener(e -> {
+                showEmpty = se.isSelected();
+                refreshColumns();
+            });
+            m.add(se);
+        }
         JMenuItem pair = new JMenuItem("Pair Columns by Hand…");
         pair.setToolTipText("Compare a column with one of another name (cost in the left file with price in the right)");
         pair.addActionListener(e -> columnsDialog());
@@ -1665,7 +1808,8 @@ final class CsvCompareTab extends JPanel {
                 ign.add(p);
             }
         }
-        TableDiff.Spec spec = new TableDiff.Spec(map, keyPairs, ign, options());
+        TableDiff.Spec spec = new TableDiff.Spec(map, keyPairs, ign, options(), rowFilters());
+        showRowConditions(); // a column may have come or gone with the files
         CsvFile a = files[0];
         CsvFile b = files[1];
         int gen = ++generation;
@@ -1751,6 +1895,20 @@ final class CsvCompareTab extends JPanel {
             case 6 -> EnumSet.allOf(DiffStatus.class);
             default -> EnumSet.complementOf(EnumSet.of(DiffStatus.SAME));
         };
+    }
+
+    String notesForTest() {
+        return notes.getText();
+    }
+
+    JTextField searchForTest() {
+        return search;
+    }
+
+    /** Ctrl+F: to "search in results", its text selected to type over. */
+    void focusFind() {
+        search.requestFocusInWindow();
+        search.selectAll();
     }
 
     private void refilter() {
@@ -2016,6 +2174,24 @@ final class CsvCompareTab extends JPanel {
             it.addActionListener(a -> openRow(row, side));
             m.add(it);
         }
+        int pair = col < 0 ? -1 : table == this.table ? (col >= 2 ? model.pair(col) : -1) : sideModels[view].pair(col);
+        if (pair >= 0) {
+            String v = view == 0 || r.rightRow(item) < 0 ? r.leftValue(item, pair) : r.rightValue(item, pair);
+            String name = r.columns().name(pair);
+            String shown = v == null || v.isBlank() ? null : v.strip();
+            String quoted = shown == null ? null : shown.length() > 40 ? shown.substring(0, 40) + "…" : shown;
+            m.addSeparator();
+            JMenuItem only = new JMenuItem(shown == null ? "Compare Only Rows with " + name + " Empty"
+                    : "Compare Only Rows with " + name + " = " + quoted, Icons.of("filter"));
+            only.addActionListener(a -> addRowCondition(shown == null
+                    ? new RowCondition(name, RowFilter.Op.EMPTY, "") : new RowCondition(name, RowFilter.Op.EQUALS, shown)));
+            m.add(only);
+            JMenuItem out = new JMenuItem(shown == null ? "Leave Out Rows with " + name + " Empty"
+                    : "Leave Out Rows with " + name + " = " + quoted);
+            out.addActionListener(a -> addRowCondition(shown == null
+                    ? new RowCondition(name, RowFilter.Op.NOT_EMPTY, "") : new RowCondition(name, RowFilter.Op.NOT_EQUALS, shown)));
+            m.add(out);
+        }
         m.show(table, e.getX(), e.getY());
     }
 
@@ -2181,7 +2357,7 @@ final class CsvCompareTab extends JPanel {
             List<Integer> p = new ArrayList<>(r.spec().keys());
             keyCount = p.size();
             for (int c : r.compared()) {
-                if (!hiddenColumns.contains(r.columns().name(c))) {
+                if (!hiddenColumns.contains(r.columns().name(c)) && (showEmpty || !r.isEmpty(c))) {
                     p.add(c);
                 }
             }
@@ -2190,7 +2366,7 @@ final class CsvCompareTab extends JPanel {
             List<Integer> out = new ArrayList<>(r.spec().ignored());
             out.sort(null);
             for (int c : out) {
-                if (!hiddenColumns.contains(r.columns().name(c))) {
+                if (!hiddenColumns.contains(r.columns().name(c)) && (showEmpty || !r.isEmpty(c))) {
                     p.add(c);
                     notCompared.add(c);
                 }

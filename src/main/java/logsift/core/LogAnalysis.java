@@ -25,6 +25,11 @@ public final class LogAnalysis implements AutoCloseable {
     /** Lines read to work out the format. */
     static final int SAMPLE_LINES = 2000;
 
+    /** How many first lines the format is worked out from (a table's header is among them). */
+    public static int sampleLines() {
+        return SAMPLE_LINES;
+    }
+
     /**
      * Works out how entries start, the columns and the timestamps from the first lines.
      *
@@ -46,7 +51,7 @@ public final class LogAnalysis implements AutoCloseable {
         } catch (IOException e) {
             // keep this year
         }
-        return Formats.detect(Arrays.asList(sample), custom, fileName, chosen, year);
+        return Formats.detect(Arrays.asList(sample), custom, fileName, chosen, year, CsvLayout.of(doc.path()));
     }
 
     /** The most text read to work out the format (a wide table's rows are long). */

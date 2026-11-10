@@ -103,6 +103,9 @@ public final class CompareTools {
                             false)
                     .bool("ignore_case", "Upper and lower case count as equal (default false).")
                     .string("tolerance", "Tables: numbers this close are equal, like 0.01 or 1% (default: exact).", false)
+                    .string("where", "Tables: compare only the rows (of both files) that pass, conditions joined with"
+                            + " ' and ': region = EU, status != done, note contains late, amount > 100, note is empty"
+                            + " (default: every row).", false)
                     .bool("as_text", "Compare CSV files line by line instead of as tables (default false).")
                     .bool("ignore_spaces", "Text: spaces don't count (default false).")
                     .bool("mask_times", "Text: dates and times count as equal (default false).")
@@ -185,8 +188,21 @@ public final class CompareTools {
                     throw new Tool.Failure("tolerance must be a number like 0.01 or 1%, not " + t);
                 }
             }
-            TableDiffResult res = TableDiff.compare(l, r, new TableDiff.Spec(map, keys, java.util.Set.of(), o), null,
-                    INTERRUPTED);
+            List<logsift.core.diff.RowFilter> where = new ArrayList<>();
+            if (a.has("where")) {
+                for (String c : a.string("where").split("(?i)\\s+and\\s+")) {
+                    if (c.isBlank()) {
+                        continue;
+                    }
+                    try {
+                        where.add(logsift.core.diff.RowFilter.parse(c, map));
+                    } catch (IllegalArgumentException e) {
+                        throw new Tool.Failure(e.getMessage() + ".");
+                    }
+                }
+            }
+            TableDiffResult res = TableDiff.compare(l, r, new TableDiff.Spec(map, keys, java.util.Set.of(), o, where),
+                    null, INTERRUPTED);
             StringBuilder b = new StringBuilder();
             b.append("Tables: ").append(res.summary().strip()).append('\n');
             b.append("Rows matched ").append(res.matchedBy()).append(" (").append(why).append(").\n");

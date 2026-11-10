@@ -29,6 +29,37 @@ final class AppState {
         return Preferences.userRoot().node(System.getProperty("logsift.prefs", "/logsift/ui"));
     }
 
+    static {
+        // a table's header and ignored rows, as chosen in its tab: everything that reads it uses them
+        logsift.core.CsvLayout.setStore(AppState::csvLayout);
+    }
+
+    private static String csvLayoutKey(Path file) {
+        return "csvLayout." + Integer.toHexString(file.toAbsolutePath().normalize().toString().hashCode());
+    }
+
+    /** The header and ignored rows chosen for a table, or none. */
+    static logsift.core.CsvLayout csvLayout(Path file) {
+        try {
+            return logsift.core.CsvLayout.decode(prefs().get(csvLayoutKey(file), ""));
+        } catch (RuntimeException e) {
+            return logsift.core.CsvLayout.NONE;
+        }
+    }
+
+    /** Keeps the header and ignored rows chosen for a table (none: forgets them). */
+    static void setCsvLayout(Path file, logsift.core.CsvLayout layout) {
+        try {
+            if (layout == null || !layout.isSet()) {
+                prefs().remove(csvLayoutKey(file));
+            } else {
+                prefs().put(csvLayoutKey(file), layout.encode());
+            }
+        } catch (RuntimeException e) {
+            // kept next time if it can be
+        }
+    }
+
     /** The folder for Logsift's files ({@code ~/.logsift}). */
     static Path home() {
         String h = System.getProperty("logsift.home");

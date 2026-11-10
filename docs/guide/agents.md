@@ -193,7 +193,7 @@ The file is plain JSON, if you prefer to write it by hand:
 | **follow_request** | One request, trace or order id through a log, several logs or a service's folders: its lines in time order, the threads, the errors, the longest wait |
 | **merge_logs** | Several logs merged by time into one (a temporary copy, never next to your files), to search and query together |
 | **analyze_profile** | A profile (a `.jfr` recording or collapsed stacks): the hottest methods, your own code's share, the hottest stacks |
-| **compare_files** | Two files (paths, open logs or web addresses): CSV/TSV as tables matched by a key (added, removed and changed rows, old → new), anything else line by line (times, numbers or IDs masked if asked) |
+| **compare_files** | Two files (paths, open logs or web addresses): CSV/TSV as tables matched by a key (added, removed and changed rows, old → new), only the rows `where` says if asked (`region = EU and amount > 100`), anything else line by line (times, numbers or IDs masked if asked) |
 | **compare_folders** | Two folders or zips, file by file: the same, different, only on one side |
 | **compare_logs** | A bad run against a good one, by kinds of message: new, gone, much more or less often |
 | **analyze_crash** | Explains a crash file: a Windows dump (`.dmp`, `.mdmp`) or a Java `hs_err_pid` file. What happened, the code to blame, the crashed thread's stack, what other threads and libraries may have caused it, and what to try |
