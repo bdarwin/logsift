@@ -396,6 +396,8 @@ jobs:
       - name: Checksums
         run: |
           cd dist
+          # what this build is, for Logsift to read without GitHub's API (which answers a network 60 times an hour)
+          printf 'commit=%s\ndate=%s\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > BUILD.txt
           sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
@@ -455,6 +457,7 @@ jobs:
           | \`Logsift-snapshot-linux-x64.tar.gz\` / \`-linux-arm64.tar.gz\` | Other Linux: unpack, run \`Logsift/bin/Logsift\` |
           | \`Logsift-snapshot-any-java21.zip\` | Any OS with Java 21+ installed: run \`bin/logsift\` |
           | \`SHA256SUMS.txt\` | The files' SHA-256 checksums (Logsift checks its updates against them) |
+          | \`BUILD.txt\` | The commit and time this build was made from (Logsift reads it to see if there's a newer one) |
 
           The native builds include their own Java runtime. They are not code-signed:
           - macOS: if it says the app is damaged or can't be opened, run \`xattr -dr com.apple.quarantine /Applications/Logsift.app\`.

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Check for Updates at the office:** the new self-update didn't use the proxy this computer is set to use, so behind an office proxy it couldn't reach GitHub. It does now, from the moment Logsift starts. It also no longer asks GitHub's API, which answers only 60 checks an hour from one network (an office's is shared by everyone): it reads the latest release from GitHub's page and a snapshot's commit from a small `BUILD.txt` beside it. When GitHub or a proxy refuses, it says why (the hourly limit and when to try again, or a proxy that wants a sign-in), instead of *GitHub answered 403*.
 - **The assistant in dark mode:** switched to dark mode while the assistant was open, its chat stayed white, with your questions in dark text on a dark box and its tables' headers light. It now turns dark (or light) all through: the chat, answers, chats, skills, audit and its colors, and the rest of the window's hand-picked colors too.
 - **Ask the Assistant on the start page:** with nothing open, the start page has **Ask the Assistant…** (⌘I, Ctrl+I) at its top.
 - **The assistant shows that it's working:** while it answers, a turning ring below the chat says what it's doing and for how long (*Thinking…*, *Search “timeout” in log:1…*, *Writing the answer…*); before, nothing moved until its first words.

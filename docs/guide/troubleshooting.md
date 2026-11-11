@@ -99,6 +99,8 @@ The same error again counts once. Failures that aren't bugs, like a file that ca
 
 **Check for Updates fails behind a company proxy (PKIX, certificate).** Logsift trusts the certificates this computer trusts, and if the proxy's certificate still isn't trusted it checks without checking the certificate. Only the version number is read. **Update and Restart** never skips the check: it downloads only from GitHub with its certificate trusted, and checks the file against the release's checksums. If your proxy's certificate isn't trusted by this computer, the download fails safely; use **Open Its Page** and install by hand.
 
+**Check for Updates fails at the office.** Logsift uses the proxy this computer is set to use. If the proxy asks for a sign-in, Logsift says so (407): ask your IT team, or download from the [releases page](https://github.com/bdarwin/logsift/releases). Logsift reads the latest release from GitHub's web pages, not its API, because the API answers only 60 checks an hour from one network, and everyone at an office usually shares one. If the API's limit is reached anyway (an older snapshot build), Logsift says when to try again.
+
 **Does Logsift send my logs anywhere?** No. Its only network connections are the daily update check (turn it off with **Help → Check for Updates Automatically**) and the servers you choose: SSH servers, JMX ports and web addresses.
 
 **How big a file can it open?** Logs of 10 GB and more open in seconds. The index costs about 12 MB per 100 million lines, and a single line over 256 MB is only searched in its first 256 MB.

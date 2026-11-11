@@ -177,6 +177,19 @@ public final class SelfUpdate {
         return b == null ? API : b + "/repos/bdarwin/logsift";
     }
 
+    /** The repository's web pages (not its API). */
+    static String web() {
+        String b = base();
+        return b == null ? "https://github.com/bdarwin/logsift" : b + "/bdarwin/logsift";
+    }
+
+    static {
+        // an office's proxy, as this computer has it set (the app sets it first thing, before anything connects)
+        if (System.getProperty("java.net.useSystemProxies") == null) {
+            System.setProperty("java.net.useSystemProxies", "true");
+        }
+    }
+
     static String download() {
         String b = base();
         return b == null ? DOWNLOAD : b + "/bdarwin/logsift/releases/download/";
@@ -190,9 +203,21 @@ public final class SelfUpdate {
     /** What's newer than {@code b} on {@code channel}, if anything. */
     public static Optional<Available> check(Channel channel, Build b) throws IOException {
         allowed();
+        // GitHub's web pages and downloads first: its API answers a network only 60 times an hour,
+        // and at an office everyone shares one network
         if (channel == Channel.SNAPSHOTS) {
-            String json = peek(api() + "/releases/tags/" + SNAPSHOT);
+            String build = peek(download() + SNAPSHOT + "/" + BUILD);
+            if (build != null) {
+                return snapshot(build(build, "commit"), build(build, "date"), b);
+            }
+            String json = peek(api() + "/releases/tags/" + SNAPSHOT); // a snapshot built before BUILD.txt
             return json == null ? Optional.empty() : snapshot(json, b);
+        }
+        String latest = latestTag();
+        if (latest != null) {
+            String v = latest.startsWith("v") ? latest.substring(1) : latest;
+            return UpdateChecker.isPlainVersion(v) && Version.isNewer(v, b.version())
+                    ? Optional.of(new Available("v" + v, v, "", null)) : Optional.empty();
         }
         String json = peek(api() + "/releases/latest");
         if (json == null) {
@@ -211,11 +236,88 @@ public final class SelfUpdate {
 
     /** The snapshot release's answer: newer when it was built from another commit than this one. */
     static Optional<Available> snapshot(String json, Build b) {
-        String commit = field(json, "target_commitish");
+        return snapshot(field(json, "target_commitish"), field(json, "published_at"), b);
+    }
+
+    private static Optional<Available> snapshot(String commit, String date, Build b) {
         if (commit == null || !commit.matches("[0-9a-f]{7,40}") || commit.equalsIgnoreCase(b.commit())) {
             return Optional.empty();
         }
-        return Optional.of(new Available(SNAPSHOT, "", commit, instant(field(json, "published_at"))));
+        return Optional.of(new Available(SNAPSHOT, "", commit, instant(date)));
+    }
+
+    /** The file beside each build saying what it was built from: "commit=…" and "date=…" lines. */
+    static final String BUILD = "BUILD.txt";
+
+    private static String build(String text, String key) {
+        for (String line : text.split("\\R")) {
+            if (line.startsWith(key + "=")) {
+                return line.substring(key.length() + 1).strip();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The latest release's tag, from where GitHub's page for it leads ({@code /releases/latest} to
+     * {@code /releases/tag/v1.4.1}); null when it doesn't say.
+     */
+    static String latestTag() throws IOException {
+        String to;
+        try {
+            to = leadsTo(web() + "/releases/latest", false);
+        } catch (IOException e) {
+            if (!Tls.isTrustProblem(e)) {
+                throw e;
+            }
+            to = leadsTo(web() + "/releases/latest", true);
+        }
+        int at = to == null ? -1 : to.indexOf("/releases/tag/");
+        if (at < 0) {
+            return null;
+        }
+        String tag = to.substring(at + "/releases/tag/".length()).replaceAll("[?#].*$", "");
+        return tag.matches("v?[0-9][0-9A-Za-z.+-]*") ? tag : null;
+    }
+
+    private static String leadsTo(String url, boolean anyCertificate) throws IOException {
+        URI u = URI.create(url);
+        check(u);
+        HttpURLConnection c = connect(u, anyCertificate);
+        try {
+            int code = c.getResponseCode();
+            if (code >= 300 && code < 400) {
+                String l = c.getHeaderField("Location");
+                return l == null ? null : u.resolve(l).toString();
+            }
+            if (code == 200 || code == 404) {
+                return null;
+            }
+            throw refused(c, code);
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    /** What GitHub's (or a proxy's) refusal means, in words. */
+    static IOException refused(HttpURLConnection c, int code) {
+        if (code == 407) {
+            return new IOException("Your network's proxy asks for a sign-in (407). Logsift uses the proxy this "
+                    + "computer is set to use; ask your IT team for the proxy, or download from the releases page");
+        }
+        if ((code == 403 || code == 429) && "0".equals(c.getHeaderField("X-RateLimit-Remaining"))) {
+            String when = "";
+            try {
+                long reset = Long.parseLong(c.getHeaderField("X-RateLimit-Reset").strip());
+                when = " after " + java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+                        .format(Instant.ofEpochSecond(reset).atZone(java.time.ZoneId.systemDefault()));
+            } catch (RuntimeException e) {
+                // no time given
+            }
+            return new IOException("GitHub answers only 60 checks an hour from one network, and yours (an office "
+                    + "shares one) has had them. Try again" + (when.isEmpty() ? " in an hour" : when));
+        }
+        return new IOException("GitHub answered " + code);
     }
 
     private static Instant instant(String s) {
@@ -471,7 +573,7 @@ public final class SelfUpdate {
                 return null;
             }
             if (code != 200) {
-                throw new IOException("GitHub answered " + code);
+                throw refused(c, code);
             }
             try (InputStream in = c.getInputStream()) {
                 return new String(in.readNBytes(max), StandardCharsets.UTF_8);
@@ -494,16 +596,7 @@ public final class SelfUpdate {
         for (int hops = 0; hops < 6; hops++) {
             URI u = URI.create(at);
             check(u);
-            HttpURLConnection c = (HttpURLConnection) u.toURL().openConnection();
-            if (c instanceof javax.net.ssl.HttpsURLConnection https) {
-                Tls.apply(https, anyCertificate);
-            }
-            c.setInstanceFollowRedirects(false);
-            c.setConnectTimeout(10_000);
-            c.setReadTimeout(30_000);
-            c.setRequestProperty("User-Agent", "Logsift/" + Version.current());
-            c.setRequestProperty("Accept", at.contains("api.github.com") || at.contains("/repos/")
-                    ? "application/vnd.github+json" : "application/octet-stream");
+            HttpURLConnection c = connect(u, anyCertificate);
             int code = c.getResponseCode();
             if (code >= 300 && code < 400 && c.getHeaderField("Location") != null) {
                 at = u.resolve(c.getHeaderField("Location")).toString();
@@ -513,6 +606,22 @@ public final class SelfUpdate {
             return c;
         }
         throw new IOException("Too many redirects from " + url);
+    }
+
+    /** A connection that doesn't follow redirects (they're checked: GitHub's own hosts only). */
+    private static HttpURLConnection connect(URI u, boolean anyCertificate) throws IOException {
+        HttpURLConnection c = (HttpURLConnection) u.toURL().openConnection();
+        if (c instanceof javax.net.ssl.HttpsURLConnection https) {
+            Tls.apply(https, anyCertificate);
+        }
+        c.setInstanceFollowRedirects(false);
+        c.setConnectTimeout(10_000);
+        c.setReadTimeout(30_000);
+        c.setRequestProperty("User-Agent", "Logsift/" + Version.current());
+        String at = u.toString();
+        c.setRequestProperty("Accept", at.contains("api.github.com") || at.contains("/repos/")
+                ? "application/vnd.github+json" : at.endsWith("/releases/latest") ? "text/html" : "application/octet-stream");
+        return c;
     }
 
     /** Only GitHub's own hosts, over HTTPS (a test's own server, when it says so). */

@@ -41,6 +41,10 @@ class SelfUpdateTest {
     /** What the test's GitHub serves, by path. */
     private final Map<String, byte[]> files = new ConcurrentHashMap<>();
     private final Map<String, String> redirects = new ConcurrentHashMap<>();
+    /** Paths answered with a refusal: its status, and headers. */
+    private final Map<String, Map.Entry<Integer, Map<String, String>>> refusals = new ConcurrentHashMap<>();
+    /** What was asked, in order. */
+    private final java.util.List<String> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
     private String was;
 
     @BeforeEach
@@ -48,7 +52,12 @@ class SelfUpdateTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", x -> {
             String p = x.getRequestURI().getPath();
-            if (redirects.containsKey(p)) {
+            asked.add(p);
+            if (refusals.containsKey(p)) {
+                var r = refusals.get(p);
+                r.getValue().forEach((k, v) -> x.getResponseHeaders().add(k, v));
+                x.sendResponseHeaders(r.getKey(), -1);
+            } else if (redirects.containsKey(p)) {
                 x.getResponseHeaders().add("Location", redirects.get(p));
                 x.sendResponseHeaders(302, -1);
             } else if (files.containsKey(p)) {
@@ -99,6 +108,54 @@ class SelfUpdateTest {
                 new SelfUpdate.Build("1.4.1", "release", "")), "the same: nothing newer");
         files.put(REPO + "/releases/latest", "{\"tag_name\": \"v1.4.1; rm -rf /\"}".getBytes(StandardCharsets.UTF_8));
         assertEquals(Optional.empty(), SelfUpdate.check(SelfUpdate.Channel.RELEASES, b), "only a plain version");
+    }
+
+    @Test
+    void theLatestReleaseIsReadFromItsPageNotTheApi() throws Exception {
+        // GitHub's /releases/latest leads to the latest release's page: no API, no limit on how often
+        redirects.put("/bdarwin/logsift/releases/latest", "/bdarwin/logsift/releases/tag/v1.4.2");
+        SelfUpdate.Build b = new SelfUpdate.Build("1.4.0", "release", "aaa");
+        SelfUpdate.Available a = SelfUpdate.check(SelfUpdate.Channel.RELEASES, b).orElseThrow();
+        assertEquals("v1.4.2", a.tag());
+        assertEquals("https://github.com/bdarwin/logsift/releases/tag/v1.4.2", a.page());
+        assertFalse(asked.stream().anyMatch(p -> p.startsWith(REPO)), "the API wasn't asked: " + asked);
+        assertEquals(Optional.empty(), SelfUpdate.check(SelfUpdate.Channel.RELEASES,
+                new SelfUpdate.Build("1.4.2", "release", "")), "the same: nothing newer");
+        redirects.put("/bdarwin/logsift/releases/latest", "/bdarwin/logsift/releases/tag/v1.4.3;rm");
+        assertEquals(Optional.empty(), SelfUpdate.check(SelfUpdate.Channel.RELEASES, b), "only a plain version");
+    }
+
+    @Test
+    void aSnapshotIsReadFromTheFileBesideIt() throws Exception {
+        files.put(DL + "snapshot/BUILD.txt", "commit=61a7f1d0123456789abcdef0123456789abcdef0\r\ndate=2026-11-07T10:00:00Z\n"
+                .getBytes(StandardCharsets.UTF_8));
+        SelfUpdate.Build old = new SelfUpdate.Build("1.4.1", "snapshot", "3c4f2d3000000000000000000000000000000000");
+        SelfUpdate.Available a = SelfUpdate.check(SelfUpdate.Channel.SNAPSHOTS, old).orElseThrow();
+        assertEquals("61a7f1d0123456789abcdef0123456789abcdef0", a.commit());
+        assertEquals(Instant.parse("2026-11-07T10:00:00Z"), a.date());
+        assertFalse(asked.stream().anyMatch(p -> p.startsWith(REPO)), "the API wasn't asked: " + asked);
+        assertEquals(Optional.empty(), SelfUpdate.check(SelfUpdate.Channel.SNAPSHOTS,
+                new SelfUpdate.Build("1.4.1", "snapshot", "61a7f1d0123456789abcdef0123456789abcdef0")));
+    }
+
+    @Test
+    void whyGitHubRefusedIsSaid() {
+        // the API's hourly limit, reached by everyone at an office on one network
+        refusals.put(REPO + "/releases/tags/snapshot", Map.entry(403, Map.of("X-RateLimit-Remaining", "0",
+                "X-RateLimit-Reset", String.valueOf(Instant.parse("2026-11-11T15:30:00Z").getEpochSecond()))));
+        SelfUpdate.Build old = new SelfUpdate.Build("1.4.1", "snapshot", "3c4f2d3000000000000000000000000000000000");
+        java.io.IOException e = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> SelfUpdate.check(SelfUpdate.Channel.SNAPSHOTS, old));
+        String at = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+                .format(Instant.parse("2026-11-11T15:30:00Z").atZone(java.time.ZoneId.systemDefault()));
+        assertEquals("GitHub answers only 60 checks an hour from one network, and yours (an office shares one) has had "
+                + "them. Try again after " + at, e.getMessage());
+        // a proxy that wants a sign-in
+        refusals.put("/bdarwin/logsift/releases/latest", Map.entry(407, Map.of()));
+        e = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> SelfUpdate.check(SelfUpdate.Channel.RELEASES, old));
+        assertTrue(e.getMessage().startsWith("Your network's proxy asks for a sign-in (407)."), e.getMessage());
+        assertEquals("true", System.getProperty("java.net.useSystemProxies"), "the system's proxy is used");
     }
 
     @Test
