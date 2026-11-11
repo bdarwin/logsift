@@ -236,6 +236,10 @@ final class LogBar extends JPanel {
     /** Shows this log's view settings (after a menu, shortcut or new format changed them). */
     void syncView() {
         wrap.setSelected(tab.isWrap());
+        boolean table = tab.mainView().table();
+        wrap.setEnabled(!table);
+        wrap.setToolTipText(table ? "A table scrolls sideways: it doesn't wrap"
+                : "Wrap long lines (" + (MainFrame.isMac() ? "⌥Z" : "Alt+Z") + ")");
         columns.setSelected(tab.isColumnsWanted());
         tree.setSelected(tab.isTreeWanted());
         tree.setEnabled(tab.hasTree());

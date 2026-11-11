@@ -6288,6 +6288,10 @@ class VisualTest {
             return null;
         });
         settle();
+        // the hidden columns' chip is above the line numbers, left of the titles: it covers none
+        int[] chip = onEdt(() -> tab.mainView().hiddenChipForTest());
+        assertTrue(chip[1] > 0 && chip[0] + chip[1] <= chip[2] - 4,
+                "chip at " + chip[0] + "+" + chip[1] + ", titles from " + chip[2]);
         shot("78c-csv-export-title-totals");
         // and Compare reads it the same way
         logsift.core.diff.CsvFile cf = logsift.core.diff.CsvFile.open(csv, null);
@@ -6338,6 +6342,28 @@ class VisualTest {
         assertTrue(ext[1] > 0 && ext[0] - ext[1] < 40 * ext[2],
                 "the scroll ends just past the last column: width " + ext[0] + ", last column at " + ext[1]);
         shot("78d-csv-wide-scrolled-to-the-end");
+        // with Wrap Lines on (it's the window's, for logs), a table still scrolls sideways to its end
+        onEdt(() -> {
+            frame.setWrap(true);
+            return null;
+        });
+        settle();
+        try {
+            assertTrue(onEdt(() -> wt.mainView().isWrap()), "wrap is still chosen, for the logs");
+            assertTrue(onEdt(() -> wt.mainView().horizontalScrollbarVisibleForTest()), "the table scrolls sideways");
+            onEdt(() -> {
+                wt.mainView().scrollToRightEndForTest();
+                return null;
+            });
+            int[] wrapped = onEdt(() -> wt.mainView().horizontalExtentForTest());
+            assertTrue(wrapped[1] > 0 && wrapped[0] > wrapped[1], "the last column can be reached: width "
+                    + wrapped[0] + ", last column at " + wrapped[1]);
+        } finally {
+            onEdt(() -> {
+                frame.setWrap(false);
+                return null;
+            });
+        }
     }
 
     @Test

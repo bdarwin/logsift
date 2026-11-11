@@ -290,6 +290,7 @@ public final class LogView extends JPanel {
             }
         });
         hbar.setUnitIncrement(24);
+        styleBars();
         installMouse();
         installKeys();
         canvas.setFocusable(true);
@@ -411,8 +412,42 @@ public final class LogView extends JPanel {
         return font.getSize2D();
     }
 
+    /** Whether wrap is chosen (a table doesn't wrap all the same: see {@link #table()}). */
+    /**
+     * Scroll bars that are easy to see and grab, however wide the table or long the log: wider
+     * than the look's, with a darker thumb (in light and dark mode) that is never a sliver.
+     */
+    private void styleBars() {
+        String thumb = Theme.isDark() ? "#62666d" : "#a3a7ad";
+        String hover = Theme.isDark() ? "#7b8088" : "#878b92";
+        String style = "width: 13; minimumThumbSize: 40,40; thumbInsets: 2,2,2,2; thumbArc: 999; thumb: " + thumb
+                + "; hoverThumbColor: " + hover + "; pressedThumbColor: " + hover;
+        hbar.putClientProperty("FlatLaf.style", style);
+        vbar.putClientProperty("FlatLaf.style", style);
+    }
+
+    /** Light or dark mode chosen: the scroll bars' thumbs in its shade. */
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (hbar != null) {
+            styleBars();
+        }
+    }
+
     public boolean isWrap() {
-        return wrap;
+        return wrapChosen;
+    }
+
+    /** Wrap as chosen, for logs and text: Wrap Lines is the window's, for every tab. */
+    private boolean wrapChosen;
+
+    /**
+     * Whether a table (CSV, TSV) is shown: it scrolls sideways and never wraps, or the columns
+     * past the window's edge couldn't be reached.
+     */
+    boolean table() {
+        return columns != null && columns.format().isCsv();
     }
 
     /**
@@ -421,6 +456,7 @@ public final class LogView extends JPanel {
      */
     void setColumns(ColumnLayout layout) {
         columns = layout;
+        setWrapNow(wrapChosen && !table());
         ruleHits.clear();
         headerRows = -1;
         topSeg = 0;
@@ -443,7 +479,8 @@ public final class LogView extends JPanel {
 
     /** Wraps long lines at the window edge instead of scrolling sideways. */
     public void setWrap(boolean on) {
-        setWrapNow(on);
+        wrapChosen = on;
+        setWrapNow(on && !table());
     }
 
     private void setWrapNow(boolean on) {
@@ -834,6 +871,12 @@ public final class LogView extends JPanel {
     int xForSegmentColumnForTest(int row, int seg, int col) {
         Line l = lineAt(row);
         return l.x(seg, col);
+    }
+
+    /** Where the hidden columns' chip is in the header, and the gutter's width. For tests. */
+    int[] hiddenChipForTest() {
+        java.awt.Rectangle r = header.hiddenChip();
+        return new int[] {r.x, r.width, gutterWidth()};
     }
 
     boolean horizontalScrollbarVisibleForTest() {
@@ -2756,20 +2799,17 @@ public final class LogView extends JPanel {
             return super.getToolTipText(e);
         }
 
-        /** The "2 hidden" chip at the right end of the header (empty when nothing is hidden). */
+        /**
+         * The hidden columns' chip (an eye crossed out and how many), above the line numbers where
+         * no title is, so it never covers one; empty when nothing is hidden.
+         */
         private java.awt.Rectangle hiddenChip() {
             if (columns == null || columns.hidden().isEmpty()) {
                 return new java.awt.Rectangle();
             }
             java.awt.FontMetrics fm = getFontMetrics(getFont());
-            int w = fm.stringWidth(chipText()) + 20;
-            int h = getHeight() - 6;
-            return new java.awt.Rectangle(getWidth() - w - 6, 3, w, h);
-        }
-
-        private String chipText() {
-            int n = columns.hidden().size();
-            return n + (n == 1 ? " column hidden ▾" : " columns hidden ▾");
+            int w = 6 + 12 + 3 + fm.stringWidth(String.valueOf(columns.hidden().size())) + 7;
+            return new java.awt.Rectangle(4, 3, Math.max(w, gutterWidth() - 12), getHeight() - 6);
         }
 
         /** Index of the column whose right edge is near x, or -1. */
@@ -2866,10 +2906,15 @@ public final class LogView extends JPanel {
                     java.awt.FontMetrics cf = g.getFontMetrics();
                     g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     g.setColor(Theme.gutterBackground());
-                    g.fillRect(chip.x - 8, 0, getWidth() - chip.x + 8, getHeight() - 1);
-                    g.setColor(Theme.uiColor("Component.accentColor", new Color(0x2563EB)));
+                    g.fillRect(0, 0, chip.x + chip.width + 2, getHeight() - 1);
+                    Color accent = Theme.uiColor("Component.accentColor", new Color(0x2563EB));
+                    g.setColor(accent);
                     g.drawRoundRect(chip.x, chip.y, chip.width - 1, chip.height - 1, chip.height, chip.height);
-                    g.drawString(chipText(), chip.x + 10, chip.y + (chip.height + cf.getAscent() - cf.getDescent()) / 2);
+                    String n = String.valueOf(columns.hidden().size());
+                    int inner = 12 + 3 + cf.stringWidth(n);
+                    int ix = chip.x + (chip.width - inner) / 2;
+                    Icons.of("eye-off", accent, 12).paintIcon(this, g, ix, chip.y + (chip.height - 12) / 2);
+                    g.drawString(n, ix + 15, chip.y + (chip.height + cf.getAscent() - cf.getDescent()) / 2);
                 }
             } finally {
                 g.dispose();

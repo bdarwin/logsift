@@ -70,7 +70,7 @@ Right: the count (*1,234 of 50,000 lines*), then:
 | Button | Does |
 |---|---|
 | **Format: …▾** | How the lines are read, for example *Format: CSV ▾* or *Format: logback / log4j ▾*. Click it to choose another format for this file (it is remembered), **Plain text**, **New Format from This Log…** or **Edit Log Formats…**. The same list is in **View → Log Format**. In a narrow window it shows just the name (*CSV ▾*); hover it for the whole name |
-| Wrap | Wrap long lines (Alt+Z, ⌥Z) |
+| Wrap | Wrap long lines (Alt+Z, ⌥Z). A table (CSV, TSV) never wraps: it scrolls sideways, to its last column |
 | Columns | Show lines as columns (Ctrl+Shift+K) |
 | Tree | The tree of loggers (Ctrl+Shift+B) |
 | Timeline | Show or hide the timeline |
@@ -94,7 +94,7 @@ Right: *MATCHING ONLY*, the line number (*Ln 1,234*), the current line's time, *
 
 - Drag a header edge to resize a column.
 - Right-click a header: **Count Values in …** (every value with its number of lines; double-click one, or **Show Only**, to see its rows, or **Hide** them), **Filter by …** (a filter that looks only in that column, see [Filters on a column](filters.md#filters-on-a-column)), **Profile of the Columns** (the [Profile](profile.md) tab), **Hide … Column**, tick columns on and off, **Show All Columns**.
-- Right-click a value: **Show Only Rows Where Host = web-1** or **Hide Rows Where Host = web-1**. *N columns hidden ▾* at the right of the header shows which; hidden columns are remembered for each format.
+- Right-click a value: **Show Only Rows Where Host = web-1** or **Hide Rows Where Host = web-1**. A crossed-out eye with a number, at the left of the header above the line numbers, says how many are hidden; click it to show which, and show them again; hidden columns are remembered for each format.
 - When Logsift doesn't know the layout, it says *"Logsift doesn't know this log's layout, so it can't show it as columns"* and offers **Define Its Format…** (see [Settings](settings.md#log-formats)).
 
 ## JSON logs
@@ -125,7 +125,7 @@ A quoted value may hold line breaks (`"line one` on one line, `line two"` on the
 - **Ignore This Row**, for a totals or summary line, or anything else that isn't a row of the table: it shows grayed and is left out of filters on a column, Profile, Pivot, Metrics, Query, [Compare](diff.md) and merged CSV files. **Don't Ignore This Row** takes it back.
 - **Reset Header and Ignored Rows** goes back to what Logsift found.
 
-These are kept for the file. **Empty columns** (no value in any row: the extra separators some exports add at the end of each line) are hidden; the header's *2 columns hidden ▾* lists them, marked *(empty)*, to show them again. Tables over 512 MB aren't read for empty columns.
+These are kept for the file. **Empty columns** (no value in any row: the extra separators some exports add at the end of each line) are hidden; the crossed-out eye at the left of the header lists them, marked *(empty)*, to show them again. Tables over 512 MB aren't read for empty columns.
 
 The header and the rows needn't have the same number of fields. Names can have spaces and values can be empty. A header can name a column that no row fills, such as an empty last column some exports add: it's still a column, and it stays empty. A separator at the end of the header names nothing, so it adds no column. When rows have a value past the header's last name, that value gets its own column, called *column 5* for example. All of this works in Profile, Pivot, Values and Query.
 
