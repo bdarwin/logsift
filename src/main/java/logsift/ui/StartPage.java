@@ -53,6 +53,9 @@ final class StartPage extends JPanel {
 
         /** A Compare tab: two files chosen side by side. */
         default void compareFiles() {}
+
+        /** The assistant (View → Assistant). */
+        default void askAssistant() {}
     }
 
     private final Host host;
@@ -79,8 +82,17 @@ final class StartPage extends JPanel {
         col.add(left(drop));
         col.add(Box.createVerticalStrut(18));
 
-        String m = MainFrame.isMac() ? "⌘" : "Ctrl+";
-        String sm = MainFrame.isMac() ? "⇧⌘" : "Ctrl+Shift+";
+        boolean mac = System.getProperty("os.name", "").toLowerCase().contains("mac"); // as MainFrame.isMac(), without the window
+        String m = mac ? "⌘" : "Ctrl+";
+        String sm = mac ? "⇧⌘" : "Ctrl+Shift+";
+        // the assistant first, across the width: asking is the quickest way in
+        JButton ask = action("sparkles", "Ask the Assistant…", m + "I",
+                "GitHub Copilot or Claude Code reads your logs, dumps and JVMs with you", host::askAssistant);
+        ask.setIcon(Icons.of("sparkles", ChatColors.accent(), 26));
+        ask.setPreferredSize(new Dimension(3 * 268 + 2 * 12, 64));
+        ask.setMaximumSize(ask.getPreferredSize());
+        col.add(left(ask));
+        col.add(Box.createVerticalStrut(12));
         JPanel grid = new JPanel(new GridLayout(0, 3, 12, 12));
         grid.setOpaque(false);
         grid.add(action("folder-open", "Open Log…", m + "O", "Files, zips, .gz", host::openLogs));

@@ -453,7 +453,7 @@ final class LogBar extends JPanel {
         boolean was = stale;
         stale = c != LogDocument.Change.NONE;
         if (stale) {
-            reload.setForeground(Theme.isDark() ? new Color(0xFFE7A3) : new Color(0x5C4300));
+            reload.setForeground(Theme.pick(new Color(0x5C4300), new Color(0xFFE7A3)));
             reload.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
             reload.setText(c == LogDocument.Change.GREW
                     ? "Reload (+" + MainFrame.humanBytes(doc.pendingBytes()) + ")" : "Reload (file replaced)");

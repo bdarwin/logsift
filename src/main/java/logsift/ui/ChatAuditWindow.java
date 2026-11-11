@@ -147,7 +147,23 @@ final class ChatAuditWindow extends JFrame {
     private final JTable table = new JTable(model);
     private final TableRowSorter<Turns> sorter = new TableRowSorter<>(model);
     private final JButton more = new JButton("Load more");
-    private final JEditorPane details = new JEditorPane();
+    /** The question's details, as shown (drawn again in light or dark mode's colors). */
+    private String detailsShown;
+    private final JEditorPane details = new JEditorPane() {
+        @Override
+        public void updateUI() {
+            super.updateUI();
+            String md = detailsShown;
+            if (md != null) {
+                SwingUtilities.invokeLater(() -> showDetails(md));
+            }
+        }
+    };
+
+    private void showDetails(String md) {
+        detailsShown = md;
+        details.setText(ChatMarkdown.page(md, details.getFont()));
+    }
     private final JButton good = new JButton("Good", Icons.of("thumbs-up"));
     private final JButton bad = new JButton("Bad", Icons.of("thumbs-down"));
     private final JTextField note = new JTextField();
@@ -569,7 +585,7 @@ final class ChatAuditWindow extends JFrame {
         shown = t;
         enableVerdict(t != null);
         if (t == null) {
-            details.setText(ChatMarkdown.page("*Choose a question to see what answering it took.*", details.getFont()));
+            showDetails("*Choose a question to see what answering it took.*");
             note.setText("");
             return;
         }
@@ -590,7 +606,7 @@ final class ChatAuditWindow extends JFrame {
             boolean hasInstructions = told;
             SwingUtilities.invokeLater(() -> {
                 if (shown == asked) {
-                    details.setText(ChatMarkdown.page(text, details.getFont()));
+                    showDetails(text);
                     details.setCaretPosition(0);
                     instructions.setEnabled(hasInstructions);
                 }

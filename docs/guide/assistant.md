@@ -8,7 +8,7 @@ description: Ask GitHub Copilot or Claude Code about your logs beside them, in L
 
 **The assistant is in beta**, marked **BETA** beside the chat's name: it's new, and what works and what doesn't helps shape it. Tell us with **Help → Report a Bug or Suggest a Feature…**.
 
-Logsift opens the assistant when it starts, in a tab of its own. **View → Assistant (Beta)** (Ctrl+I, ⌘I on macOS), or **Ask** in the status bar, brings it to the front; pressing it again goes back to the log. Ask anything about what's open, or about your services' logs: *why did checkout fail at 10:42?*, *errors by hour and what changed*, *compare this log with yesterday's*. GitHub Copilot or Claude Code answers with Logsift's own tools, the ones [coding agents](agents.md) use, on the logs the window has open, so nothing is read twice and line numbers are the ones you see.
+Logsift opens the assistant when it starts, in a tab of its own. **View → Assistant (Beta)** (Ctrl+I, ⌘I on macOS), **Ask** in the status bar, or **Ask the Assistant…** on the [start page](opening-logs.md#the-start-page) brings it to the front; pressing it again goes back to the log. Ask anything about what's open, or about your services' logs: *why did checkout fail at 10:42?*, *errors by hour and what changed*, *compare this log with yesterday's*. GitHub Copilot or Claude Code answers with Logsift's own tools, the ones [coding agents](agents.md) use, on the logs the window has open, so nothing is read twice and line numbers are the ones you see.
 
 ![The assistant beside a log: the question, the lines Logsift read for it, and the answer with links to them](../screenshots/assistant.png)
 
@@ -51,6 +51,7 @@ The **Skills** panel says what the assistant can do, by what it's for: find and 
 ## Asking
 
 - **Enter** asks; **Shift+Enter** starts a new line. While it answers, the button stops it.
+- While it answers, a turning ring below the chat says what it's doing and for how long: *Thinking…*, the step it runs (*Search “timeout” in log:1…*), *Writing the answer…*.
 - What you're looking at goes with the question: the log shown, the other logs open, and the lines you selected. The chips above the box say what; **×** leaves one out of the next question.
 - **Name a file with @.** Type `@` and pick from the logs open in the window, then the files you opened lately (`@payments.log`). The assistant is told which file that is, in one line, and reads it without asking.
 - **Right-click a line** (or selected lines) and choose **Ask the Assistant About This Line**: the question waits in the box, with the lines chosen, for you to change or send.

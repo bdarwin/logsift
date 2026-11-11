@@ -8,7 +8,7 @@ description: Opening files, folders, zips, .gz files, web addresses, WSL files, 
 
 ## The start page
 
-With nothing open, Logsift shows a start page. With logs open, **+** after the tabs shows it again.
+With nothing open, Logsift shows a start page. With logs open, **+** after the tabs shows it again. **Ask the Assistant…** at its top opens the [assistant](assistant.md), to ask GitHub Copilot or Claude Code where your logs are and what went wrong before you open anything.
 
 ![The start page with the ways to begin, and recent files](../screenshots/start-page.png)
 

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The assistant in dark mode:** switched to dark mode while the assistant was open, its chat stayed white, with your questions in dark text on a dark box and its tables' headers light. It now turns dark (or light) all through: the chat, answers, chats, skills, audit and its colors, and the rest of the window's hand-picked colors too.
+- **Ask the Assistant on the start page:** with nothing open, the start page has **Ask the Assistant…** (⌘I, Ctrl+I) at its top.
+- **The assistant shows that it's working:** while it answers, a turning ring below the chat says what it's doing and for how long (*Thinking…*, *Search “timeout” in log:1…*, *Writing the answer…*); before, nothing moved until its first words.
 - **Ctrl+F in comparisons:** it did nothing in a Compare tab. In a table comparison it now goes to *search in results*, in a folder comparison to *find a name*, and in Compare Logs by Message to its search. A text comparison has a **find** of its own: matches in either file in yellow, Enter or F3 for the next, Shift+Enter for the one before, *2 of 11*.
 - **Compare only some rows:** **Rows:** in a table comparison compares only the rows that meet conditions, in both files (*region = EU*, *amount > 100*, *note contains late*); right-click a value for **Compare Only Rows with …** or **Leave Out Rows with …**. The gray line above the table says how many rows were left out. Coding agents get the same with `where` on `compare_files`.
 - **Exports with a title, a totals row or empty columns:** a CSV file whose header isn't its first line (a title, a note, a row of separators above it) is read from its header; right-click a row for **Use This Row as Header** or **Ignore This Row** (a totals line), kept for the file and used by filters, Profile, Pivot, Query, Compare and merging. Columns with no value in any row are hidden in the table and in comparisons, and aren't reported as a column only one file has.

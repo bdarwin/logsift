@@ -140,6 +140,8 @@ final class ChatPanel extends JPanel {
     private final JComboBox<String> effort = new JComboBox<>();
     private final JPanel chips = new JPanel(new WrapLayout(FlowLayout.LEFT, 4, 2));
     private final JButton newer = new JButton("Newest ↓");
+    /** While it answers: a turning ring, what it's doing and for how long. */
+    private final ChatWorking working = new ChatWorking();
     private final CardLayout cards = new CardLayout();
     private final JPanel center = new JPanel(cards);
     private final JPanel message = new JPanel(new BorderLayout());
@@ -331,6 +333,7 @@ final class ChatPanel extends JPanel {
         newer.addActionListener(e -> transcript.jumpToEnd());
         layered.add(newer, javax.swing.JLayeredPane.PALETTE_LAYER);
         chatCard.add(layered, BorderLayout.CENTER);
+        chatCard.add(working, BorderLayout.SOUTH);
         center.add(chatCard, "chat");
         center.add(suggestionsCard(), "empty");
         center.add(message, "message");
@@ -1399,6 +1402,7 @@ final class ChatPanel extends JPanel {
         dropLines = false;
         busy = true; // until the session says otherwise
         updateSend();
+        working.start();
         ChatSession s = session;
         // the window's logs by handle, kept with the question: its answer's links open these files later on
         java.util.Map<String, String> asked = new java.util.LinkedHashMap<>();
@@ -1423,7 +1427,13 @@ final class ChatPanel extends JPanel {
         return new ChatSession.View() {
             @Override
             public void changed(ChatMessage m, boolean added) {
-                SwingUtilities.invokeLater(() -> transcript.changed(m, added));
+                SwingUtilities.invokeLater(() -> {
+                    transcript.changed(m, added);
+                    String now = busy ? doing(m) : null;
+                    if (now != null) {
+                        working.doing(now);
+                    }
+                });
             }
 
             @Override
@@ -1431,6 +1441,11 @@ final class ChatPanel extends JPanel {
                 SwingUtilities.invokeLater(() -> {
                     busy = b;
                     updateSend();
+                    if (b) {
+                        working.start();
+                    } else {
+                        working.stop();
+                    }
                     if (!b) {
                         chatsChanged(); // its cost and entries, at the left
                         refreshCredits(null);
@@ -1447,6 +1462,26 @@ final class ChatPanel extends JPanel {
                 });
             }
         };
+    }
+
+    /** What the assistant is doing, by what just changed in the chat (null: as it was). */
+    static String doing(ChatMessage m) {
+        return switch (m.kind()) {
+            case TOOL -> {
+                if (m.ok() != null) {
+                    yield ChatWorking.THINKING; // the tool answered: the model reads it
+                }
+                String s = ChatEntryView.toolSummary(m);
+                yield s.isEmpty() ? ChatWorking.THINKING : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+            }
+            case ASSISTANT -> m.text() == null || m.text().isEmpty() ? null : ChatWorking.WRITING;
+            case USER -> ChatWorking.THINKING;
+            default -> null;
+        };
+    }
+
+    String workingForTest() {
+        return working.textForTest();
     }
 
     /**
@@ -1847,6 +1882,7 @@ final class ChatPanel extends JPanel {
     void close() {
         service.removeEngineChanged(engineChanged);
         contextTimer.stop();
+        working.stop();
         closeSession();
     }
 

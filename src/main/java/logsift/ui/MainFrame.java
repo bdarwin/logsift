@@ -121,6 +121,11 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         public void compareFiles() {
             compareFilesDialog();
         }
+
+        @Override
+        public void askAssistant() {
+            showChat();
+        }
     };
     private final StartPage startPage = new StartPage(startHost);
     private String updateUrl = HelpSupport.REPO + "/releases/latest";
@@ -3810,7 +3815,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         int n = ErrorReporter.session().count();
         errorsButton.setVisible(n > 0);
         errorsButton.setText("⚠ " + SessionErrors.countText(n));
-        errorsButton.setForeground(Theme.isDark() ? new Color(0xF5C451) : new Color(0xB45309));
+        errorsButton.setForeground(Theme.pick(new Color(0xB45309), new Color(0xF5C451)));
     }
 
     JButton errorsButtonForTest() {

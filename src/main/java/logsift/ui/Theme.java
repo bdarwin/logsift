@@ -7,6 +7,7 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.util.Set;
+import java.util.function.Supplier;
 import javax.swing.UIManager;
 
 /** Colors and fonts for the log views, for light and dark mode. */
@@ -26,8 +27,52 @@ final class Theme {
         return FlatLaf.isLafDark();
     }
 
+    // ---------------------------------------------------------------- colors that follow the theme
+
+    /** Dark now, and how many times light and dark were switched: read when a color is painted. */
+    private static volatile boolean dark = FlatLaf.isLafDark();
+    private static volatile int switches;
+
+    static {
+        UIManager.addPropertyChangeListener(e -> {
+            if ("lookAndFeel".equals(e.getPropertyName())) {
+                dark = FlatLaf.isLafDark();
+                switches++;
+            }
+        });
+    }
+
+    /**
+     * A color that follows the theme: its value is read when it's painted, as a {@link
+     * java.awt.SystemColor}'s is. A label, border or icon given one stays right after a switch
+     * between light and dark, without being set again.
+     */
+    private static final class Live extends Color {
+        private final transient Supplier<Color> now;
+        /** The value, and the switch it was read after (high 32 bits). */
+        private transient volatile long seen;
+
+        Live(Supplier<Color> now) {
+            super(now.get().getRGB(), true);
+            this.now = now;
+            this.seen = ((long) switches << 32) | (now.get().getRGB() & 0xFFFFFFFFL);
+        }
+
+        @Override
+        public int getRGB() {
+            long s = seen;
+            int at = switches;
+            if ((int) (s >>> 32) != at) {
+                s = ((long) at << 32) | (now.get().getRGB() & 0xFFFFFFFFL);
+                seen = s;
+            }
+            return (int) s;
+        }
+    }
+
+    /** The light or the dark color, whichever the theme is (now and after a switch). */
     static Color pick(Color light, Color dark) {
-        return isDark() ? dark : light;
+        return new Live(() -> Theme.dark ? dark : light);
     }
 
     static Color background() {
@@ -81,11 +126,11 @@ final class Theme {
 
     /** Header rows of foldable groups (folder search files, Find results searches). */
     static Color groupHeaderForeground() {
-        return isDark() ? new Color(0x93C5FD) : new Color(0x1D4ED8);
+        return pick(new Color(0x1D4ED8), new Color(0x93C5FD));
     }
 
     static Color groupHeaderBackground() {
-        return isDark() ? new Color(0x2A2E35) : new Color(0xEEF2F7);
+        return pick(new Color(0xEEF2F7), new Color(0x2A2E35));
     }
 
     static Color matchLight() {
@@ -175,8 +220,11 @@ final class Theme {
         return out;
     }
 
+    /** The look's color for {@code key} (now and after a switch between light and dark). */
     static Color uiColor(String key, Color fallback) {
-        Color c = UIManager.getColor(key);
-        return c != null ? c : fallback;
+        return new Live(() -> {
+            Color c = UIManager.getColor(key);
+            return c != null ? c : fallback;
+        });
     }
 }

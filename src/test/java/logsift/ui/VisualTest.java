@@ -3,6 +3,7 @@ package logsift.ui;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -2780,6 +2781,8 @@ class VisualTest {
 
         /** Which assistant it plays. */
         volatile String name = "GitHub Copilot";
+        /** "please wait": a search that answers when the test lets it go. */
+        final java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
 
         @Override
         public String name() {
@@ -2870,6 +2873,22 @@ class VisualTest {
                                 results.add(r.text());
                                 l.on(new logsift.chat.ChatEvent.ToolFinished("h1", !r.failed()));
                                 l.on(new logsift.chat.ChatEvent.Text("h2", "The session cache keeps every session."));
+                                l.on(new logsift.chat.ChatEvent.Idle(false));
+                            } catch (Exception e) {
+                                l.on(new logsift.chat.ChatEvent.Failed(e.toString()));
+                                l.on(new logsift.chat.ChatEvent.Idle(false));
+                            }
+                        }).start();
+                        return;
+                    }
+                    if (text.contains("please wait")) {
+                        new Thread(() -> {
+                            try {
+                                l.on(new logsift.chat.ChatEvent.ToolStarted("w1", "search",
+                                        "{\"log\": \"log:1\", \"query\": \"timeout\"}"));
+                                go.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                                l.on(new logsift.chat.ChatEvent.ToolFinished("w1", true));
+                                l.on(new logsift.chat.ChatEvent.Text("w2", "No timeouts."));
                                 l.on(new logsift.chat.ChatEvent.Idle(false));
                             } catch (Exception e) {
                                 l.on(new logsift.chat.ChatEvent.Failed(e.toString()));
@@ -3066,6 +3085,26 @@ class VisualTest {
         assertEquals("Why did checkout fail at 10:42?", onEdt(chat::titleForTest));
         settle();
         shot("130a-assistant");
+        // dark mode while it's open: the whole assistant turns dark, its chats, skills and answers too
+        String lightPage = onEdt(answer::htmlForTest);
+        onEdt(() -> {
+            frame.toggleDark();
+            return null;
+        });
+        settle();
+        assertEquals(0x1E1F22, onEdt(() -> chat.transcriptForTest().getBackground().getRGB()) & 0xFFFFFF,
+                "the chat's background is the dark one");
+        String darkPage = onEdt(answer::htmlForTest);
+        assertNotEquals(lightPage, darkPage, "the answer drawn again in dark mode's colors");
+        String darkText = ChatMarkdown.hex(Theme.foreground());
+        assertTrue(darkPage.contains(darkText), "dark mode's text color " + darkText + ": " + darkPage);
+        shot("130a-assistant-dark");
+        onEdt(() -> {
+            frame.toggleDark();
+            return null;
+        });
+        settle();
+        assertEquals(lightPage, onEdt(answer::htmlForTest), "and light again");
         // under the answer: good or bad, for the audit; a bad one asks what went wrong
         assertEquals(Integer.valueOf(0), onEdt(answer::verdictForTest));
         ChatPanel.askNoteForTest = was -> "It should say when it reconnected";
@@ -3550,6 +3589,32 @@ class VisualTest {
         String usage = onEdt(chat::usageForTest);
         assertTrue(usage.contains("12 of 1,500 used") && usage.contains("This month") && usage.contains("Claude Haiku 5.5"),
                 usage);
+
+        // while it answers, a line below the chat turns and says what it's doing, and for how long
+        onEdt(() -> {
+            chat.inputForTest().setText("Any timeouts? please wait");
+            chat.sendForTest();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                String w = onEdt(chat::workingForTest);
+                return w != null && w.startsWith("Search “timeout” in log:1…");
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the search it runs");
+        assertTrue(onEdt(chat::busyForTest));
+        settle();
+        shot("130a-assistant-working");
+        engine.go.countDown();
+        waitFor(() -> {
+            try {
+                return onEdt(() -> !chat.busyForTest() && chat.workingForTest() == null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "the answer, and the line gone");
 
         // a long chat: it opens at its end and scrolls back a page at a time, both ways
         var longChat = store.create("A long investigation", "claude-haiku-5.5", null);
@@ -6740,7 +6805,7 @@ class VisualTest {
         try {
             settle();
             assertTrue(onEdt(() -> empty.startPageForTest().isShowing()), "the start page is shown");
-            assertEquals(List.of("Open Log…", "Open Folder…", "Open Remote…", "Open URL…", "Attach to a JVM…",
+            assertEquals(List.of("Ask the Assistant…", "Open Log…", "Open Folder…", "Open Remote…", "Open URL…", "Attach to a JVM…",
                     "Open Heap Dump…", "Open Thread Dump…", "Open Profile…", "Compare Files…"),
                     onEdt(() -> empty.startPageForTest().actionsForTest()));
             assertTrue(onEdt(() -> empty.startPageForTest().actionForTest("Open Log…").isShowing()));

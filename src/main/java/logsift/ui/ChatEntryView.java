@@ -81,6 +81,16 @@ final class ChatEntryView extends JPanel {
         }
     }
 
+    /** Light or dark mode chosen: the words are drawn again in its colors (they're in the page). */
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (render != null && rendered != null) {
+            rendered = null;
+            javax.swing.SwingUtilities.invokeLater(this::renderNow);
+        }
+    }
+
     /** The entry as it is now (more of an answer, a tool's result). */
     void update(ChatMessage now) {
         boolean kindChanged = now.kind() != m.kind();
@@ -455,7 +465,12 @@ final class ChatEntryView extends JPanel {
 
     /** The call in a few words: "search “timed out” in log:1". */
     String toolSummary() {
-        Map<String, Object> a = args();
+        return toolSummary(m);
+    }
+
+    /** A tool's call in a few words: "read lines 3–4 in log:1". */
+    static String toolSummary(ChatMessage m) {
+        Map<String, Object> a = args(m);
         String log = a.get("log") == null ? "" : " in " + a.get("log");
         String s = switch (m.tool() == null ? "" : m.tool()) {
             case "read_lines" -> "read lines " + num(a.get("from"))

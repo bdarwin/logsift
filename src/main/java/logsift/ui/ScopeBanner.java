@@ -42,7 +42,7 @@ final class ScopeBanner extends JPanel {
 
     @Override
     protected void paintComponent(java.awt.Graphics g) {
-        setBackground(Theme.isDark() ? new Color(0x1E2A3A) : new Color(0xEEF4FD));
+        setBackground(Theme.pick(new Color(0xEEF4FD), new Color(0x1E2A3A)));
         if (text != null) {
             text.setForeground(Theme.foreground());
             link.setForeground(Theme.uiColor("Component.accentColor", new Color(0x2563EB)));
