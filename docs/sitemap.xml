@@ -3,10 +3,10 @@ layout: null
 ---
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://bdarwin.github.io/logsift/</loc></url>
+  <url><loc>https://logsift.dev/</loc></url>
 {%- for p in site.pages %}
 {%- if p.url contains '/guide/' or p.url contains '/releases/' or p.url == '/how-it-works.html' %}
-  <url><loc>https://bdarwin.github.io/logsift{{ p.url }}</loc></url>
+  <url><loc>https://logsift.dev{{ p.url }}</loc></url>
 {%- endif %}
 {%- endfor %}
 </urlset>
