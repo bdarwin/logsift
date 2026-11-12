@@ -2273,6 +2273,52 @@ class VisualTest {
             AppState.prefs().remove("updates.lastCheck");
         }
 
+        // an office proxy that wants a name and password: a small form, the name remembered, the password not
+        javax.swing.JDialog signIn = onEdt(() -> {
+            javax.swing.JOptionPane op = new javax.swing.JOptionPane(
+                    new ProxySignIn.Form("proxy.example.com:8080", false, "ann"),
+                    javax.swing.JOptionPane.PLAIN_MESSAGE, javax.swing.JOptionPane.OK_CANCEL_OPTION);
+            javax.swing.JDialog d = op.createDialog(frame, ProxySignIn.TITLE);
+            d.setModal(false);
+            d.setVisible(true);
+            return d;
+        });
+        settle();
+        shotOf(signIn.getRootPane(), "41a-proxy-sign-in");
+        onEdt(() -> {
+            signIn.dispose();
+            return null;
+        });
+        String wasUser = AppState.prefs().get("proxy.user", null);
+        try {
+            logsift.core.Proxies.init();
+            AppState.prefs().put("proxy.user", "ann");
+            List<String> forms = new ArrayList<>();
+            ProxySignIn.answerForTest = f -> {
+                forms.add(f.user.getText());
+                f.password.setText("s3cret");
+                return true;
+            };
+            // Java asks (on its own thread) when a proxy says 407: the window's form answers
+            java.net.PasswordAuthentication a = java.util.concurrent.CompletableFuture.supplyAsync(() ->
+                    java.net.Authenticator.requestPasswordAuthentication(java.net.Authenticator.getDefault(),
+                            "proxy.visual.test", null, 3128, "http", "office", "basic", null,
+                            java.net.Authenticator.RequestorType.PROXY)).get(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(List.of("ann"), forms, "the name remembered from before");
+            assertEquals("ann", a.getUserName());
+            assertEquals("s3cret", new String(a.getPassword()));
+            assertEquals(null, AppState.prefs().get("proxy.password", null));
+            ProxySignIn.answerForTest = f -> false; // Cancel
+            assertEquals(null, ProxySignIn.ask(frame, "proxy.example.com:8080", true));
+        } finally {
+            ProxySignIn.answerForTest = null;
+            if (wasUser == null) {
+                AppState.prefs().remove("proxy.user");
+            } else {
+                AppState.prefs().put("proxy.user", wasUser);
+            }
+        }
+
         // an unexpected error: a window with the details, Logsift keeps running
         onEdt(() -> {
             ErrorReporter.report(new IllegalStateException("Something unexpected (test)"));

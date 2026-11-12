@@ -184,10 +184,7 @@ public final class SelfUpdate {
     }
 
     static {
-        // an office's proxy, as this computer has it set (the app sets it first thing, before anything connects)
-        if (System.getProperty("java.net.useSystemProxies") == null) {
-            System.setProperty("java.net.useSystemProxies", "true");
-        }
+        Proxies.init(); // an office's proxy (the app does it first thing, before anything connects)
     }
 
     static String download() {
@@ -203,6 +200,14 @@ public final class SelfUpdate {
     /** What's newer than {@code b} on {@code channel}, if anything. */
     public static Optional<Available> check(Channel channel, Build b) throws IOException {
         allowed();
+        try {
+            return checkNow(channel, b);
+        } catch (IOException e) {
+            throw Proxies.explain(e, URI.create(web()), "Logsift");
+        }
+    }
+
+    private static Optional<Available> checkNow(Channel channel, Build b) throws IOException {
         // GitHub's web pages and downloads first: its API answers a network only 60 times an hour,
         // and at an office everyone shares one network
         if (channel == Channel.SNAPSHOTS) {
@@ -299,11 +304,28 @@ public final class SelfUpdate {
         }
     }
 
+    /** A web page where a file was asked for: a proxy's "blocked" page, or a sign-in page. */
+    static boolean webPage(HttpURLConnection c) {
+        String t = c.getContentType();
+        return t != null && t.toLowerCase(Locale.ROOT).startsWith("text/html");
+    }
+
+    static IOException blocked(String file, String page) {
+        return new IOException("Your network sent a web page instead of " + file + " (an office proxy that blocks "
+                + "downloads, or wants you to sign in on a page, does this). Download it in your browser from " + page
+                + ", or ask your IT team to allow github.com.");
+    }
+
     /** What GitHub's (or a proxy's) refusal means, in words. */
     static IOException refused(HttpURLConnection c, int code) {
         if (code == 407) {
-            return new IOException("Your network's proxy asks for a sign-in (407). Logsift uses the proxy this "
-                    + "computer is set to use; ask your IT team for the proxy, or download from the releases page");
+            URI u;
+            try {
+                u = c.getURL().toURI();
+            } catch (java.net.URISyntaxException e) {
+                u = null;
+            }
+            return Proxies.signInNeeded(u == null ? null : Proxies.proxyFor(u), "it", null);
         }
         if ((code == 403 || code == 429) && "0".equals(c.getHeaderField("X-RateLimit-Remaining"))) {
             String when = "";
@@ -477,6 +499,23 @@ public final class SelfUpdate {
     public static Path download(Available a, Install i, Path dir, LongConsumer progress, Cancel cancel)
             throws IOException {
         allowed();
+        try {
+            return downloadNow(a, i, dir, progress, cancel);
+        } catch (java.io.InterruptedIOException e) {
+            throw e;
+        } catch (IOException e) {
+            if (Tls.isTrustProblem(e)) {
+                throw new IOException("Your network shows GitHub with a certificate neither Java nor this computer "
+                        + "trusts (an office proxy that looks inside secure connections does this), so " + a.title()
+                        + " can't be downloaded safely. Ask your IT team to add their certificate to this computer, "
+                        + "or download it from its page in your browser: " + a.page(), e);
+            }
+            throw Proxies.explain(e, URI.create(download()), a.title());
+        }
+    }
+
+    private static Path downloadNow(Available a, Install i, Path dir, LongConsumer progress, Cancel cancel)
+            throws IOException {
         String asset = i.asset(a);
         String sums = get(download() + a.tag() + "/" + SUMS, 1 << 20);
         if (sums == null) {
@@ -499,7 +538,10 @@ public final class SelfUpdate {
         HttpURLConnection c = open(download() + a.tag() + "/" + asset);
         try {
             if (c.getResponseCode() != 200) {
-                throw new IOException("GitHub answered " + c.getResponseCode() + " for " + asset);
+                throw refused(c, c.getResponseCode());
+            }
+            if (webPage(c)) {
+                throw blocked(asset, a.page());
             }
             long size = c.getContentLengthLong();
             progress.accept(-1 - Math.max(0, size));
@@ -574,6 +616,9 @@ public final class SelfUpdate {
             }
             if (code != 200) {
                 throw refused(c, code);
+            }
+            if (webPage(c)) {
+                throw blocked(URI.create(url).getPath().replaceAll(".*/", ""), web() + "/releases");
             }
             try (InputStream in = c.getInputStream()) {
                 return new String(in.readNBytes(max), StandardCharsets.UTF_8);

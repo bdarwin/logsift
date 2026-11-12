@@ -143,6 +143,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         setIconImages(logsift.tools.IconGenerator.windowIcons());
         setSize(PREFS.getInt("width", 1280), PREFS.getInt("height", 820));
         setLocationByPlatform(true);
+        // an office proxy that asks for a name and password: the person is asked (never for a check nobody asked for)
+        logsift.core.Proxies.signIn((proxy, again) -> ProxySignIn.ask(isShowing() ? this : null, proxy, again));
 
         tabs.putClientProperty("JTabbedPane.tabClosable", true);
         tabs.putClientProperty("JTabbedPane.tabCloseToolTipText", "Close");
@@ -349,7 +351,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             String error = null;
             boolean answered = false;
             try {
-                r = logsift.core.SelfUpdate.check(channel, b);
+                // a check nobody asked for never asks to sign in to a proxy
+                r = manual ? logsift.core.SelfUpdate.check(channel, b)
+                        : logsift.core.Proxies.quietly(() -> logsift.core.SelfUpdate.check(channel, b));
                 answered = true;
             } catch (java.io.IOException | RuntimeException e) {
                 error = e.getMessage();

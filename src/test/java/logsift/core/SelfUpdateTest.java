@@ -154,7 +154,8 @@ class SelfUpdateTest {
         refusals.put("/bdarwin/logsift/releases/latest", Map.entry(407, Map.of()));
         e = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
                 () -> SelfUpdate.check(SelfUpdate.Channel.RELEASES, old));
-        assertTrue(e.getMessage().startsWith("Your network's proxy asks for a sign-in (407)."), e.getMessage());
+        assertEquals("Your network's proxy asks for a sign-in. Choose Check for Updates in the Help menu to sign in, "
+                + "or download it from the releases page in your browser.", e.getMessage());
         assertEquals("true", System.getProperty("java.net.useSystemProxies"), "the system's proxy is used");
     }
 

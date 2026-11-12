@@ -22,10 +22,8 @@ public final class LogsiftApp {
     private static final List<Path> pending = new ArrayList<>(); // files that arrive before the window
 
     public static void main(String[] args) throws IOException {
-        // an office's proxy, as this computer has it set: before anything connects (updates, URLs, the assistant)
-        if (System.getProperty("java.net.useSystemProxies") == null) {
-            System.setProperty("java.net.useSystemProxies", "true");
-        }
+        // an office's proxy, and signing in to it: before anything connects (updates, URLs)
+        logsift.core.Proxies.init();
         logsift.core.Channel.apply(); // a beta keeps its own settings and window
         List<Path> files = new ArrayList<>();
         boolean stdin = false;
