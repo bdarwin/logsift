@@ -211,6 +211,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         Timer updates = new Timer(4000, e -> autoCheckForUpdates());
         updates.setRepeats(false);
         updates.start();
+        // left open for days: looked for again (the check itself waits until 6 hours have passed)
+        new Timer(30 * 60 * 1000, e -> autoCheckForUpdates()).start();
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosed(WindowEvent e) {
@@ -273,10 +275,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         if (known != null) {
             showUpdate(known); // known from an earlier check
         }
-        if (System.currentTimeMillis() - last > 24L * 3600 * 1000) {
+        if (System.currentTimeMillis() - last > UPDATE_EVERY_MS) {
             checkForUpdates(false);
         }
     }
+
+    /** How often Logsift looks for a newer one: at start, and while it stays open. */
+    static final long UPDATE_EVERY_MS = 6L * 3600 * 1000;
 
     /** What this Logsift is (a release, a snapshot, built here). */
     static logsift.core.SelfUpdate.Build build() {
@@ -293,8 +298,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         PREFS.put("updates.channel", c.key);
         PREFS.remove("updates.known");
         PREFS.putLong("updates.lastCheck", 0);
-        available = null;
-        updateButton.setVisible(false);
+        hideUpdate();
         if (PREFS.getBoolean("updates.auto", true)) {
             checkForUpdates(false);
         }
@@ -372,8 +376,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         if (r.isPresent()) {
             showUpdate(r.get());
         } else if (answered) {
-            available = null;
-            updateButton.setVisible(false);
+            hideUpdate();
         }
         if (!manual) {
             return;
@@ -401,6 +404,58 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         updateButton.setText(a.snapshot() ? "A newer snapshot build is available" : "Logsift " + a.version() + " is available");
         updateButton.setToolTipText("Update to " + a.title());
         updateButton.setVisible(true);
+        updateMenus(a);
+    }
+
+    /** No update waiting (any more). */
+    private void hideUpdate() {
+        available = null;
+        updateButton.setVisible(false);
+        updateMenus(null);
+    }
+
+    private JMenu helpMenu;
+    private JMenuItem checkUpdatesItem;
+    static final String CHECK_UPDATES = "Check for Updates…";
+
+    /** A waiting update: a dot on Help (its title on macOS's menu bar), and its item says what's new. */
+    private void updateMenus(logsift.core.SelfUpdate.Available a) {
+        if (helpMenu == null || checkUpdatesItem == null) {
+            return;
+        }
+        helpMenu.setText(a == null ? "Help" : "Help •");
+        helpMenu.setToolTipText(a == null ? null : "An update is ready: " + a.title());
+        checkUpdatesItem.setText(a == null ? CHECK_UPDATES
+                : "Update to " + (a.snapshot() ? "the Newer Snapshot Build" : "Logsift " + a.version()) + "…");
+        checkUpdatesItem.setIcon(a == null ? Icons.of("circle-arrow-down") : new UpdateDot());
+    }
+
+    /** The accent's dot beside the update's menu item. */
+    private static final class UpdateDot implements javax.swing.Icon {
+        @Override
+        public void paintIcon(java.awt.Component c, java.awt.Graphics g, int x, int y) {
+            java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            Color a = javax.swing.UIManager.getColor("Component.accentColor");
+            g2.setColor(a == null ? new Color(0x2563EB) : a);
+            g2.fillOval(x + 4, y + 4, 8, 8);
+            g2.dispose();
+        }
+
+        @Override
+        public int getIconWidth() {
+            return 16;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return 16;
+        }
+    }
+
+    /** For tests: the Help menu's title and its update item's text. */
+    String[] updateMenusForTest() {
+        return new String[] {helpMenu.getText(), checkUpdatesItem.getText()};
     }
 
     /** The status bar's button: what's new, and updating to it. */
@@ -566,7 +621,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     }
 
     void hideUpdateForTest() {
-        updateButton.setVisible(false);
+        hideUpdate();
     }
 
     String updateButtonTextForTest() {
@@ -3229,11 +3284,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         right.add(buttons, BorderLayout.WEST);
         ErrorReporter.session().addListener(() -> SwingUtilities.invokeLater(this::updateErrorsButton));
         updateErrorsButton();
-        updateButton.putClientProperty("JButton.buttonType", "borderless");
+        // a newer Logsift: a pill in the accent color that's hard to miss
+        updateButton.setName("updateButton");
+        updateButton.putClientProperty("JButton.buttonType", "roundRect");
+        updateButton.putClientProperty("FlatLaf.style", "borderWidth: 0; focusWidth: 0; innerFocusWidth: 0");
+        updateButton.setIcon(Icons.of("circle-arrow-down", Color.WHITE, 14));
         updateButton.setFont(updateButton.getFont().deriveFont(Font.BOLD));
-        updateButton.setForeground(new Color(0x2563EB));
+        updateButton.setBackground(Theme.uiColor("Component.accentColor", new Color(0x2563EB)));
+        updateButton.setForeground(Color.WHITE);
         updateButton.setFocusable(false);
-        updateButton.setMargin(new java.awt.Insets(0, 4, 0, 4));
+        updateButton.setMargin(new java.awt.Insets(1, 8, 1, 10));
         updateButton.setVisible(false);
         updateButton.addActionListener(e -> updateClicked());
         JPanel left = new JPanel(new BorderLayout(10, 0));
@@ -4076,6 +4136,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
         // ---- Help
         JMenu help = menu("Help");
+        helpMenu = help;
         help.add(item("Keyboard Shortcuts", "keyboard", KeyStroke.getKeyStroke(KeyEvent.VK_SLASH, MENU),
                 e -> HelpSupport.shortcutsDialog(this, getJMenuBar()).setVisible(true)));
         help.add(item("Documentation", "book-open", null, e -> HelpSupport.browse(this, HelpSupport.DOCS)));
@@ -4086,7 +4147,15 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         help.add(item("Use Logsift with Git…", "git-merge", null, e -> GitSetup.show(this)));
         help.add(item("Open Error Log", "file-warning", null, e -> openErrorLog()));
         help.addSeparator();
-        help.add(item("Check for Updates…", "circle-arrow-down", null, e -> checkForUpdates(true)));
+        checkUpdatesItem = item(CHECK_UPDATES, "circle-arrow-down", null, e -> {
+            if (available != null) {
+                offerUpdate(available); // what's waiting, straight away
+            } else {
+                checkForUpdates(true);
+            }
+        });
+        checkUpdatesItem.setName("checkUpdates");
+        help.add(checkUpdatesItem);
         autoUpdates.setSelected(PREFS.getBoolean("updates.auto", true));
         autoUpdates.addActionListener(e -> PREFS.putBoolean("updates.auto", autoUpdates.isSelected()));
         help.add(autoUpdates);

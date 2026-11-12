@@ -2203,6 +2203,12 @@ class VisualTest {
                     "update button");
             settle();
             shot("41-update-available");
+            // and the Help menu says so: a dot on it, and its item names what's waiting
+            assertArrayEquals(new String[] {"Help •", "Update to Logsift 9.9.0…"}, onEdt(frame::updateMenusForTest));
+            javax.swing.JButton pill = onEdt(() -> (javax.swing.JButton) findNamed(frame.getRootPane(), "updateButton"));
+            assertEquals(java.awt.Color.WHITE, onEdt(pill::getForeground), "white on the accent color");
+            assertTrue(onEdt(() -> pill.getIcon() != null), "with a download icon");
+            assertEquals(6L * 3600 * 1000, MainFrame.UPDATE_EVERY_MS, "looked for every 6 hours while open");
             MainFrame.answerUpdateForTest = choices -> {
                 asked.add(choices);
                 return choices.contains(MainFrame.UPDATE_RESTART) ? MainFrame.UPDATE_RESTART : MainFrame.RESTART_LATER;
@@ -2268,6 +2274,7 @@ class VisualTest {
                 frame.hideUpdateForTest(); // not in the screenshots that follow
                 return null;
             });
+            assertArrayEquals(new String[] {"Help", MainFrame.CHECK_UPDATES}, onEdt(frame::updateMenusForTest));
             AppState.prefs().remove("updates.known");
             AppState.prefs().remove("updates.channel");
             AppState.prefs().remove("updates.lastCheck");

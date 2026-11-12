@@ -21,7 +21,7 @@ description: Every Logsift setting with its default, log formats, source folders
 | **Check files for changes** | Twice a second | Less often uses less power with many open files, or files on network drives |
 | **Two files dropped** | Ask each time | Two files dropped on the window: ask, compare them, or open each in its own tab |
 | **At start: Reopen the files that were open last time** | on | Reopens the last session when Logsift starts without a file |
-| **Check for new versions once a day** | on | Asks GitHub for the latest version number only (or the latest snapshot's commit); nothing about you or your logs is sent. A button appears in the status bar when a new version is out |
+| **Check for new versions automatically** | on | At start and every 6 hours while Logsift stays open. Asks GitHub for the latest version number only (or the latest snapshot's commit); nothing about you or your logs is sent. When a new version is out, a blue **Logsift 1.4.1 is available** button appears at the left of the status bar, **Help** gets a dot (**Help •**), and its item becomes **Update to Logsift 1.4.1…** |
 | **Update to** | what this Logsift is | *Releases*, or *Snapshot builds*: the latest of main, built from each change, to try fixes before they're released. A snapshot build follows snapshots until you choose releases |
 
 ### Updating

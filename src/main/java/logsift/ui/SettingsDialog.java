@@ -557,7 +557,7 @@ final class SettingsDialog extends JDialog {
         add(p, l, f, "At start", session);
 
         heading(p, "Updates", l, f, true);
-        JCheckBox updates = check("Check for new versions once a day", PREFS.getBoolean("updates.auto", true),
+        JCheckBox updates = check("Check for new versions automatically", PREFS.getBoolean("updates.auto", true),
                 frame::setAutoUpdates);
         add(p, l, f, "", updates);
         JComboBox<String> channel = new JComboBox<>(new String[] {"Releases", "Snapshot builds (the latest of main)"});
