@@ -256,7 +256,8 @@ class McpServerTest {
         assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines",
                 "top_messages", "metrics", "query", "query_examples", "pivot", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
                 "merge_logs", "analyze_profile", "compare_files", "compare_folders", "compare_logs", "analyze_crash",
-                "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram", "analyze_heap_dump"),
+                "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram", "analyze_heap_dump",
+                "network_check"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
             Map<String, Object> d = map(t);

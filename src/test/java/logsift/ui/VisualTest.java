@@ -2326,6 +2326,74 @@ class VisualTest {
             }
         }
 
+        // Settings → Network: the proxy, automatic, manual (with hosts it's not for) or none, and a test
+        try {
+            logsift.core.Proxies.init();
+            SettingsDialog was = SettingsDialog.lastForTest();
+            javax.swing.SwingUtilities.invokeLater(() -> frame.showSettings(SettingsDialog.NETWORK));
+            waitFor(() -> SettingsDialog.lastForTest() != was && SettingsDialog.lastForTest() != null
+                    && SettingsDialog.lastForTest().isShowing(), 10_000, "Settings");
+            SettingsDialog net = SettingsDialog.lastForTest();
+            @SuppressWarnings("unchecked")
+            javax.swing.JComboBox<String> mode = (javax.swing.JComboBox<String>) onEdt(() ->
+                    findNamed(net.getContentPane(), "proxyMode"));
+            javax.swing.JTextField host = (javax.swing.JTextField) onEdt(() -> findNamed(net.getContentPane(), "proxyHost"));
+            javax.swing.JTextField port = (javax.swing.JTextField) onEdt(() -> findNamed(net.getContentPane(), "proxyPort"));
+            javax.swing.JTextField bypass = (javax.swing.JTextField) onEdt(() ->
+                    findNamed(net.getContentPane(), "proxyBypass"));
+            javax.swing.JButton test = (javax.swing.JButton) onEdt(() -> findNamed(net.getContentPane(), "proxyTest"));
+            javax.swing.JLabel result = onEdt(net::proxyResultForTest);
+            assertTrue(onEdt(mode::isShowing), "the Network tab is shown");
+            assertEquals(0, onEdt(mode::getSelectedIndex), "automatic at first");
+            assertFalse(onEdt(host::isEnabled), "a host only for a manual proxy");
+            assertTrue(onEdt(result::getText).startsWith("GitHub is reached "), onEdt(result::getText));
+            onEdt(() -> {
+                mode.setSelectedIndex(1);
+                host.setText("proxy.example.com");
+                return null;
+            });
+            assertTrue(onEdt(host::isEnabled) && onEdt(port::isEnabled) && onEdt(bypass::isEnabled));
+            assertEquals("Give the proxy's port, like 8080.", onEdt(result::getText), "half typed: said");
+            assertEquals(logsift.core.Proxies.Mode.AUTOMATIC, logsift.core.Proxies.setting().mode(), "and not used yet");
+            onEdt(() -> {
+                port.setText("8080");
+                bypass.setText("intranet.example.com, .corp");
+                return null;
+            });
+            assertEquals(new logsift.core.Proxies.Setting(logsift.core.Proxies.Mode.MANUAL, "proxy.example.com", 8080,
+                    "intranet.example.com, .corp"), logsift.core.Proxies.setting());
+            assertEquals("GitHub is reached through the proxy proxy.example.com:8080.", onEdt(result::getText));
+            assertEquals("MANUAL", AppState.prefs().get("proxy.mode", null), "remembered");
+            settle();
+            shotOf(net.getRootPane(), "41b-network-settings");
+            // Test Connection: here updates are off, and it says so (a test proxy's done in ProxySettingTest)
+            onEdt(() -> {
+                test.doClick();
+                return null;
+            });
+            waitFor(() -> net.lastReachForTest() != null, 10_000, "the test");
+            assertFalse(net.lastReachForTest().ok());
+            waitFor(test::isEnabled, 5_000, "the button again");
+            assertTrue(onEdt(result::getText).contains("update checks are turned off"), onEdt(result::getText));
+            onEdt(() -> {
+                mode.setSelectedIndex(2);
+                return null;
+            });
+            assertEquals(logsift.core.Proxies.Mode.NONE, logsift.core.Proxies.setting().mode());
+            assertFalse(onEdt(host::isEnabled), "none: nothing to type");
+            assertEquals("GitHub is reached directly.", onEdt(result::getText));
+            onEdt(() -> {
+                mode.setSelectedIndex(0);
+                net.dispose();
+                return null;
+            });
+        } finally {
+            logsift.core.Proxies.choose(logsift.core.Proxies.Setting.AUTOMATIC);
+            for (String k : List.of("proxy.mode", "proxy.host", "proxy.port", "proxy.bypass")) {
+                AppState.prefs().remove(k);
+            }
+        }
+
         // an unexpected error: a window with the details, Logsift keeps running
         onEdt(() -> {
             ErrorReporter.report(new IllegalStateException("Something unexpected (test)"));

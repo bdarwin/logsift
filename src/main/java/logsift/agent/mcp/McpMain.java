@@ -30,6 +30,8 @@ public final class McpMain {
 
     public static void main(String[] args) throws Exception {
         logsift.core.Channel.apply();
+        // an office's proxy, for logs from web addresses (nobody here to sign in: HTTPS_PROXY's name only)
+        logsift.core.Proxies.init();
         System.setProperty("java.awt.headless", "true");
         if (args.length == 1 && (args[0].equals("--version") || args[0].equals("-v"))) {
             System.out.println("logsift-mcp " + logsift.core.Version.current());

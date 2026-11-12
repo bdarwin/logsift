@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -204,6 +205,50 @@ public final class SelfUpdate {
             return checkNow(channel, b);
         } catch (IOException e) {
             throw Proxies.explain(e, URI.create(web()), "Logsift");
+        }
+    }
+
+    /** Whether GitHub could be reached, and how (directly or through which proxy), in words. */
+    public record Reach(boolean ok, String text) {
+    }
+
+    /**
+     * Reaches GitHub's releases page the way a check does, with the proxy setting in use (asking to
+     * sign in if the proxy wants it): Settings' Test Connection, and agents' network_check.
+     */
+    public static Reach testConnection() {
+        if (!enabled()) {
+            return new Reach(false, "This copy of Logsift doesn't connect to GitHub (update checks are turned off).");
+        }
+        URI u = URI.create(web() + "/releases/latest");
+        String host = u.getHost() + (u.getPort() > 0 ? ":" + u.getPort() : "");
+        try {
+            check(u);
+            String via = Proxies.how(u);
+            HttpURLConnection c = connect(u, false);
+            try {
+                int code = c.getResponseCode();
+                if (code < 400 || code == 404) {
+                    return new Reach(true, "Reached " + host + " " + via + ". Updates can be checked and downloaded.");
+                }
+                Proxy p = Proxies.proxyFor(u);
+                IOException r = refused(c, code);
+                if (p != null && code == 403 && webPage(c) && r.getMessage().startsWith("GitHub answered")) {
+                    return new Reach(false, "The proxy " + Proxies.name(p) + " may block " + host + ": it answered "
+                            + "with a page saying no (HTTP 403). Your IT team can allow it.");
+                }
+                return new Reach(false, r.getMessage() + " (" + via + ").");
+            } finally {
+                c.disconnect();
+            }
+        } catch (IOException e) {
+            if (Tls.isTrustProblem(e)) {
+                return new Reach(false, "Reached " + host + " " + Proxies.how(u) + ", but with a certificate neither Java "
+                        + "nor this computer trusts (an office proxy that looks inside secure connections does this). "
+                        + "Checks still work; updates have to be downloaded in your browser until your IT team adds "
+                        + "their certificate to this computer.");
+            }
+            return new Reach(false, Proxies.explain(e, u, "Logsift").getMessage());
         }
     }
 

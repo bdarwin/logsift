@@ -48,6 +48,7 @@ public final class LogTools {
         all.addAll(CrashTools.all());
         all.addAll(JvmTools.all());
         all.addAll(HeapTools.all());
+        all.addAll(NetworkTools.all());
         return List.copyOf(all);
     }
 

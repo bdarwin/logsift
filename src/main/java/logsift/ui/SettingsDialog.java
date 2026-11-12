@@ -35,6 +35,7 @@ final class SettingsDialog extends JDialog {
     static final String METRICS = "Metrics";
     static final String CRASH = "Crash Dumps";
     static final String ASSISTANT = "Assistant";
+    static final String NETWORK = "Network";
 
     private static final Preferences PREFS = AppState.prefs();
     private final MainFrame frame;
@@ -63,6 +64,7 @@ final class SettingsDialog extends JDialog {
                 () -> new LogLocationsDialog(this, null).setVisible(true), frame::assistantPlaced);
         tabs.addTab(ASSISTANT, assistant);
         tabs.addTab(CRASH, crashDumps());
+        tabs.addTab(NETWORK, network());
         JButton close = new JButton("Close");
         close.addActionListener(e -> dispose());
         getRootPane().setDefaultButton(close);
@@ -582,6 +584,170 @@ final class SettingsDialog extends JDialog {
         end.weighty = 1;
         p.add(new JLabel(), end);
         return p;
+    }
+
+    // ---------------------------------------------------------------- Network
+
+    static final String[] PROXY_MODES = {"Automatic: this computer's network settings", "Manual", "None: connect directly"};
+
+    /** The proxy for update checks and logs from web addresses, and a test of it. */
+    private JComponent network() {
+        JPanel p = new JPanel(new GridBagLayout());
+        p.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+        GridBagConstraints l = new GridBagConstraints();
+        l.gridx = 0;
+        l.anchor = GridBagConstraints.WEST;
+        l.insets = new Insets(5, 0, 5, 12);
+        GridBagConstraints f = new GridBagConstraints();
+        f.gridx = 1;
+        f.anchor = GridBagConstraints.WEST;
+        f.insets = new Insets(5, 0, 5, 0);
+        f.weightx = 1;
+
+        heading(p, "Proxy", l, f, false);
+        logsift.core.Proxies.Setting s = logsift.core.Proxies.setting();
+        // what was typed, even when not usable yet
+        java.util.prefs.Preferences prefs = PREFS;
+        String typedMode = prefs.get("proxy.mode", s.mode().name());
+        JComboBox<String> mode = new JComboBox<>(PROXY_MODES);
+        mode.setName("proxyMode");
+        int m = switch (typedMode) {
+            case "MANUAL" -> 1;
+            case "NONE" -> 2;
+            default -> 0;
+        };
+        mode.setSelectedIndex(m);
+        add(p, l, f, "Proxy", mode);
+
+        javax.swing.JTextField host = new javax.swing.JTextField(prefs.get("proxy.host", s.host()), 26);
+        host.setName("proxyHost");
+        host.putClientProperty("JTextField.placeholderText", "proxy.example.com");
+        int port0 = prefs.getInt("proxy.port", s.port());
+        javax.swing.JTextField port = new javax.swing.JTextField(port0 > 0 ? String.valueOf(port0) : "", 6);
+        port.setName("proxyPort");
+        port.putClientProperty("JTextField.placeholderText", "8080");
+        JPanel hostRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        hostRow.setOpaque(false);
+        hostRow.add(host);
+        hostRow.add(javax.swing.Box.createHorizontalStrut(10));
+        hostRow.add(new JLabel("Port"));
+        hostRow.add(javax.swing.Box.createHorizontalStrut(6));
+        hostRow.add(port);
+        add(p, l, f, "Host", hostRow);
+        javax.swing.JTextField bypass = new javax.swing.JTextField(prefs.get("proxy.bypass", s.bypass()), 40);
+        bypass.setName("proxyBypass");
+        bypass.putClientProperty("JTextField.placeholderText", "intranet.example.com, .corp, 10.1.2.3");
+        add(p, l, f, "Not for", bypass);
+
+        JButton test = new JButton("Test Connection");
+        test.setName("proxyTest");
+        JLabel result = new JLabel(" ");
+        result.setName("proxyResult");
+        JPanel testRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        testRow.setOpaque(false);
+        testRow.add(test);
+        testRow.add(javax.swing.Box.createHorizontalStrut(10));
+        testRow.add(result);
+        add(p, l, f, "", testRow);
+        proxyResult = result;
+
+        Runnable apply = () -> {
+            boolean manual = mode.getSelectedIndex() == 1;
+            host.setEnabled(manual);
+            port.setEnabled(manual);
+            bypass.setEnabled(manual);
+            int n;
+            try {
+                n = Integer.parseInt(port.getText().strip());
+            } catch (NumberFormatException e) {
+                n = 0;
+            }
+            logsift.core.Proxies.Setting c = new logsift.core.Proxies.Setting(
+                    logsift.core.Proxies.Mode.values()[mode.getSelectedIndex()], host.getText(), n, bypass.getText());
+            logsift.core.Proxies.choose(c);
+            String problem = c.problem();
+            result.setForeground(problem == null ? Theme.uiColor("Label.foreground", Color.BLACK)
+                    : Theme.uiColor("Component.error.focusedBorderColor", new Color(0xDC2626)));
+            result.setText(problem != null ? problem : now());
+        };
+        mode.addActionListener(e -> apply.run());
+        javax.swing.event.DocumentListener typed = new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                apply.run();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                apply.run();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                apply.run();
+            }
+        };
+        host.getDocument().addDocumentListener(typed);
+        port.getDocument().addDocumentListener(typed);
+        bypass.getDocument().addDocumentListener(typed);
+        apply.run();
+
+        test.addActionListener(e -> {
+            test.setEnabled(false);
+            result.setForeground(Theme.uiColor("Label.foreground", Color.BLACK));
+            result.setText("Reaching GitHub…");
+            new javax.swing.SwingWorker<logsift.core.SelfUpdate.Reach, Void>() {
+                @Override
+                protected logsift.core.SelfUpdate.Reach doInBackground() {
+                    return logsift.core.SelfUpdate.testConnection();
+                }
+
+                @Override
+                protected void done() {
+                    test.setEnabled(true);
+                    logsift.core.SelfUpdate.Reach r;
+                    try {
+                        r = get();
+                    } catch (Exception x) {
+                        r = new logsift.core.SelfUpdate.Reach(false, String.valueOf(x.getMessage()));
+                    }
+                    result.setForeground(r.ok() ? Theme.uiColor("Actions.Green", new Color(0x16A34A))
+                            : Theme.uiColor("Component.error.focusedBorderColor", new Color(0xDC2626)));
+                    result.setText("<html><div style='width:520px'>" + LogLocationsDialogLike.esc(r.text())
+                            + "</div></html>");
+                    lastReachForTest = r;
+                }
+            }.execute();
+        });
+
+        note(p, l, f, "<html><div style='width:560px'>Used for update checks and for logs opened from web addresses "
+                + "(agents' too). Automatic uses the proxy in this computer's network settings (a PAC file too), "
+                + "else HTTPS_PROXY. Manual: the proxy your IT team gives, and the hosts to reach without it. When "
+                + "the proxy asks for a name and password, Logsift asks you: the name is remembered, the password "
+                + "only until Logsift quits. Remote servers (SSH) are reached directly.</div></html>");
+
+        GridBagConstraints end = new GridBagConstraints();
+        end.gridx = 0;
+        end.gridy = GridBagConstraints.RELATIVE;
+        end.weighty = 1;
+        p.add(new JLabel(), end);
+        return p;
+    }
+
+    /** How GitHub is reached now, in words. */
+    private static String now() {
+        return "GitHub is reached " + logsift.core.Proxies.how(java.net.URI.create("https://github.com/")) + ".";
+    }
+
+    private JLabel proxyResult;
+    private volatile logsift.core.SelfUpdate.Reach lastReachForTest;
+
+    JLabel proxyResultForTest() {
+        return proxyResult;
+    }
+
+    logsift.core.SelfUpdate.Reach lastReachForTest() {
+        return lastReachForTest;
     }
 
     private JComboBox<String> updateChannelBox;

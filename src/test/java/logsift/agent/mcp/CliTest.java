@@ -77,6 +77,20 @@ class CliTest {
     }
 
     @Test
+    void saysHowTheInternetIsReached() throws Exception {
+        Result r = cli("", "run", "network_check", "url=https://logs.example.com/app.log", "--root", logs.toString());
+        assertEquals(0, r.code(), r.err());
+        assertTrue(r.out().startsWith("Proxy setting: automatic (this computer's network settings, else HTTPS_PROXY)."),
+                r.out());
+        assertTrue(r.out().contains("\nGitHub is reached "), r.out());
+        assertTrue(r.out().contains("\nlogs.example.com is reached "), r.out());
+        assertFalse(r.out().contains("Test"), "nothing tried unless asked: " + r.out());
+        assertTrue(r.out().strip().endsWith("The person changes the proxy in Settings → Network."), r.out());
+        Result bad = cli("", "run", "network_check", "url=not a url", "--root", logs.toString());
+        assertTrue((bad.out() + bad.err()).contains("Not a web address: not a url"), bad.out() + bad.err());
+    }
+
+    @Test
     void readsAnotherLogAtTheSameMoment() throws Exception {
         Path gw = logs.resolve("gateway.log");
         StringBuilder b = new StringBuilder();

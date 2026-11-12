@@ -18,8 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * An office's proxy, for everything Logsift connects to over HTTP (updates, URLs): the one this
  * computer's network settings name (Windows' and macOS's, a PAC file too), else HTTPS_PROXY and
- * NO_PROXY; signed in to as Windows does (NTLM, Kerberos) or, when it asks for a name and password,
- * with the ones the person types, kept only until Logsift quits.
+ * NO_PROXY; or the one chosen in Settings (or none). Signed in to as Windows does (NTLM, Kerberos)
+ * or, when it asks for a name and password, with the ones the person types, kept only until
+ * Logsift quits.
  */
 public final class Proxies {
     private Proxies() {
@@ -45,6 +46,89 @@ public final class Proxies {
     /** Asked again this soon after an answer: the proxy said no to it (not just another connection). */
     static long rejectedWithinMs = 5_000;
     private static final ThreadLocal<Boolean> quiet = new ThreadLocal<>();
+
+    // ---------------------------------------------------------------- the setting
+
+    /** How Logsift finds its proxy (Settings → Network). */
+    public enum Mode {
+        /** This computer's network settings, else HTTPS_PROXY. */
+        AUTOMATIC,
+        /** The one given. */
+        MANUAL,
+        /** Never one. */
+        NONE
+    }
+
+    /**
+     * The proxy setting.
+     *
+     * @param bypass hosts reached directly with a manual proxy ("intranet.example.com, .corp"), as NO_PROXY
+     */
+    public record Setting(Mode mode, String host, int port, String bypass) {
+        public static final Setting AUTOMATIC = new Setting(Mode.AUTOMATIC, "", 0, "");
+
+        public Setting {
+            mode = mode == null ? Mode.AUTOMATIC : mode;
+            host = host == null ? "" : host.strip();
+            bypass = bypass == null ? "" : bypass.strip();
+        }
+
+        /** What's wrong with it, in words, or null: a manual proxy needs its host and port. */
+        public String problem() {
+            if (mode != Mode.MANUAL) {
+                return null;
+            }
+            if (host.isEmpty()) {
+                return "Give the proxy's host name, like proxy.example.com.";
+            }
+            if (!host.matches("[A-Za-z0-9._:\\[\\]-]+")) {
+                return "Give the proxy's host name alone, like proxy.example.com (the port goes beside it).";
+            }
+            if (port < 1 || port > 65535) {
+                return "Give the proxy's port, like 8080.";
+            }
+            return null;
+        }
+    }
+
+    private static volatile Setting setting;
+
+    private static java.util.prefs.Preferences prefs() {
+        return java.util.prefs.Preferences.userRoot().node(System.getProperty("logsift.prefs", "/logsift/ui"));
+    }
+
+    /** The proxy setting (read once, when first needed: a beta's own settings are chosen by then). */
+    public static Setting setting() {
+        Setting s = setting;
+        if (s == null) {
+            java.util.prefs.Preferences p = prefs();
+            Mode m;
+            try {
+                m = Mode.valueOf(p.get("proxy.mode", Mode.AUTOMATIC.name()));
+            } catch (IllegalArgumentException e) {
+                m = Mode.AUTOMATIC;
+            }
+            s = new Setting(m, p.get("proxy.host", ""), p.getInt("proxy.port", 0), p.get("proxy.bypass", ""));
+            if (s.problem() != null) {
+                s = new Setting(Mode.AUTOMATIC, s.host(), s.port(), s.bypass()); // half-typed: as if not chosen
+            }
+            setting = s;
+        }
+        return s;
+    }
+
+    /** Uses {@code s} from now on, and remembers it. A manual proxy without its host or port isn't used. */
+    public static void choose(Setting s) {
+        java.util.prefs.Preferences p = prefs();
+        p.put("proxy.mode", s.mode().name());
+        p.put("proxy.host", s.host());
+        p.putInt("proxy.port", s.port());
+        p.put("proxy.bypass", s.bypass());
+        setting = s.problem() == null ? s : new Setting(Mode.AUTOMATIC, s.host(), s.port(), s.bypass());
+    }
+
+    /** Whether {@code u}'s host is never proxied (this computer itself). Tests turn it off. */
+    static boolean loopbackDirect = true;
 
     /** Before anything connects (the app does it first thing). */
     public static synchronized void init() {
@@ -165,14 +249,22 @@ public final class Proxies {
 
     /** Whether NO_PROXY ("*", "example.com", ".example.com", "10.0.0.1", with or without a port) names {@code host}. */
     static boolean bypassed(String noProxy, String host) {
+        return loopback(host) || listed(noProxy, host);
+    }
+
+    /** This computer itself. */
+    static boolean loopback(String host) {
         String h = host.toLowerCase(Locale.ROOT).replaceAll("^\\[|\\]$", "");
-        if (h.equals("localhost") || h.startsWith("127.") || h.equals("::1")) {
-            return true;
-        }
-        if (noProxy == null) {
+        return h.equals("localhost") || h.startsWith("127.") || h.equals("::1");
+    }
+
+    /** Whether {@code list} (as NO_PROXY) names {@code host}. */
+    static boolean listed(String list, String host) {
+        if (list == null) {
             return false;
         }
-        for (String raw : noProxy.split("[,\\s]+")) {
+        String h = host.toLowerCase(Locale.ROOT).replaceAll("^\\[|\\]$", "");
+        for (String raw : list.split("[,;\\s]+")) {
             String e = raw.strip().toLowerCase(Locale.ROOT);
             if (e.isEmpty()) {
                 continue;
@@ -201,6 +293,14 @@ public final class Proxies {
 
         @Override
         public List<Proxy> select(URI uri) {
+            Setting s = setting();
+            if (s.mode() != Mode.AUTOMATIC) {
+                String host = uri == null || uri.getHost() == null ? "" : uri.getHost();
+                if (s.mode() == Mode.NONE || (loopbackDirect && loopback(host)) || listed(s.bypass(), host)) {
+                    return List.of(Proxy.NO_PROXY);
+                }
+                return List.of(new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(s.host(), s.port())));
+            }
             List<Proxy> l = system.select(uri);
             boolean direct = l == null || l.isEmpty() || l.stream().allMatch(p -> p.type() == Proxy.Type.DIRECT);
             if (direct) {
@@ -285,12 +385,30 @@ public final class Proxies {
         }
     }
 
+    /** For tests: read the setting again from the preferences. */
+    static void forgetSettingForTest() {
+        setting = null;
+    }
+
     /** For tests: forget the names and passwords given. */
     static void forgetForTest() {
         given.clear();
     }
 
     // ---------------------------------------------------------------- what went wrong, in words
+
+    /** Where the proxy is chosen. */
+    public static final String SETTING = "Settings → Network";
+
+    private static boolean manual() {
+        return setting().mode() == Mode.MANUAL;
+    }
+
+    private static String noProxyHint() {
+        return setting().mode() == Mode.NONE
+                ? ", and Logsift is set to use none: choose one in " + SETTING + "."
+                : " this computer isn't set to use: give it in " + SETTING + ".";
+    }
 
     /** The proxy wants a sign-in, and none was given (or the person didn't). */
     public static IOException signInNeeded(Proxy p, String what, IOException cause) {
@@ -317,20 +435,21 @@ public final class Proxies {
         }
         if (e instanceof java.net.UnknownHostException) {
             if (p != null) {
-                return new IOException("The proxy " + name(p) + " this computer is set to use can't be found. "
-                        + "Check this computer's network settings.", e);
+                return new IOException("The proxy " + name(p) + (manual() ? " set in Logsift's Settings"
+                        : " this computer is set to use") + " can't be found. Check its name in " + SETTING
+                        + (manual() ? "." : ", or this computer's network settings."), e);
             }
             return new IOException("Can't find " + host + ". This computer may be offline, or reach the internet only "
-                    + "through a proxy it isn't set to use: Logsift uses the one in this computer's network settings, "
-                    + "or HTTPS_PROXY.", e);
+                    + "through a proxy" + noProxyHint(), e);
         }
         if (e instanceof java.net.ConnectException || e instanceof java.net.SocketTimeoutException
                 || e instanceof java.net.NoRouteToHostException) {
             if (p != null) {
-                return new IOException("No answer from the proxy " + name(p) + " (" + m + ").", e);
+                return new IOException("No answer from the proxy " + name(p) + " (" + m + "). Check it in " + SETTING
+                        + ".", e);
             }
-            return new IOException("No answer from " + host + " (" + m + "). If your office reaches the internet "
-                    + "through a proxy, set it in this computer's network settings (or HTTPS_PROXY): Logsift uses it.", e);
+            return new IOException("No answer from " + host + " (" + m + "). Your office may reach the internet "
+                    + "only through a proxy" + noProxyHint(), e);
         }
         return e;
     }

@@ -95,7 +95,23 @@ In `~/.logsift` (your home folder):
 
 Other preferences (window size, recent files, last folders, servers and users, never passwords) are kept in Java's preferences store for your user.
 
-Logsift never sends your logs anywhere. Its only network connections are the daily update check (if on) and the servers you choose: SSH servers, JMX ports, and web addresses you open. With a Windows dump, it can also download the names of Windows' own files from Microsoft's symbol server, only when you click **Download Windows' Names** or turn that on under Crash Dumps. When you set up a [coding agent](agents.md), what Logsift answers it goes to the agent's AI provider.
+Logsift never sends your logs anywhere. Its only network connections are the update check (if on) and the servers you choose: SSH servers, JMX ports, and web addresses you open. With a Windows dump, it can also download the names of Windows' own files from Microsoft's symbol server, only when you click **Download Windows' Names** or turn that on under Crash Dumps. When you set up a [coding agent](agents.md), what Logsift answers it goes to the agent's AI provider.
+
+## Network
+
+![Settings, Network: a manual proxy with hosts it's not for](../screenshots/network-settings.png)
+
+The proxy Logsift uses for update checks and for logs opened from web addresses (coding agents' too). SSH servers and JMX ports are reached directly.
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Proxy** | Automatic | **Automatic:** the proxy in this computer's network settings (Windows' and macOS's, an automatic configuration script too), else the `HTTPS_PROXY` and `NO_PROXY` environment variables. **Manual:** the proxy your IT team gives. **None:** always connect directly |
+| **Host**, **Port** | | A manual proxy, like `proxy.example.com` and `8080`. Until both are given, Logsift says what's missing and keeps to Automatic |
+| **Not for** | | Hosts reached without the manual proxy, separated by commas: `intranet.example.com` (and its subdomains), `.corp`, `10.1.2.3`, `*` for all. This computer itself never goes through a proxy |
+
+The line beside **Test Connection** says how GitHub is reached now (*directly*, or *through the proxy proxy.example.com:8080*). **Test Connection** reaches GitHub as an update check does and says what happened: *Reached github.com through the proxy …*, or what's wrong (a proxy that can't be found, doesn't answer, wants a sign-in, refuses GitHub, or shows secure connections with a certificate this computer doesn't trust).
+
+When the proxy asks for a name and password, Logsift asks you (**Proxy Sign-In**): the name is remembered, the password only until Logsift quits. A proxy that signs you in as Windows does (NTLM, Kerberos) needs nothing.
 
 ## Crash Dumps
 
