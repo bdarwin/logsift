@@ -181,7 +181,7 @@ The file is plain JSON, if you prefer to write it by hand:
 | **insights** | What happened in the log, most important first (error bursts, new errors, restarts, known problems) |
 | **exceptions** | Exceptions grouped by root cause, with counts and where they first and last appear |
 | **search** | Lines that match a text or regex, in a range of lines if asked |
-| **read_lines** | Lines from a line number on |
+| **read_lines** | Lines from a line number on, or around a time (`at`): what another log was doing when a line was written |
 | **top_messages** | The most frequent messages, with numbers replaced by placeholders |
 | **metrics** | How long things took, and numbers in messages |
 | **query** | A read-only SQL query over a log (the table `log`: line, time, level, logger, message, text…) or a CSV/TSV file (the table `t`): exact counts, groups, time buckets, percentiles. A big table comes from the app's cache, reading only the columns the query names. `tables` adds other CSV files, each named after its file (`customers.csv` → `customers`), to join with. See [Query](query.md) |

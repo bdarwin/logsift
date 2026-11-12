@@ -55,7 +55,12 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private static final Preferences PREFS = AppState.prefs();
     private static final int MENU = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
 
-    private final JTabbedPane tabs = new JTabbedPane();
+    /** After the tabs of each side: + (the start page), and Scroll Together when split. */
+    private final List<javax.swing.JToggleButton> scrollTogetherButtons = new ArrayList<>();
+    /** Whether a line chosen on one side is shown on the other. */
+    private boolean scrollTogether = PREFS.getBoolean("scrollTogether", true);
+    /** The tabs: one group, or two side by side (Split Right, Split Down). */
+    private final TabGroups tabs = new TabGroups(this::tabsTrailing);
     private final JPanel center = new JPanel(new CardLayout());
     private final JLabel status = new JLabel(" ");
     private final JLabel statusRight = new JLabel(" ");
@@ -146,32 +151,19 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         // an office proxy that asks for a name and password: the person is asked (never for a check nobody asked for)
         logsift.core.Proxies.signIn((proxy, again) -> ProxySignIn.ask(isShowing() ? this : null, proxy, again));
 
-        tabs.putClientProperty("JTabbedPane.tabClosable", true);
-        tabs.putClientProperty("JTabbedPane.tabCloseToolTipText", "Close");
-        tabs.putClientProperty("JTabbedPane.tabCloseCallback",
-                (java.util.function.IntConsumer) this::closeTab);
-        tabs.putClientProperty("JTabbedPane.scrollButtonsPolicy", "asNeeded");
+        tabs.onClose(this::closeTab);
+        tabs.onMenu(this::showTabMenu);
+        tabs.onLayout(this::splitChanged);
         // a middle click on a tab closes it, as its ✕ does (not on the empty strip)
         tabs.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mousePressed(java.awt.event.MouseEvent e) {
-                int i = tabs.indexAtLocation(e.getX(), e.getY());
+                int i = tabs.indexAt(e);
                 if (MiddleClick.closes(e, i)) {
                     closeTab(i);
                 }
             }
         });
-        tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
-        // + after the tabs: the start page in a tab (open a log, a folder, a JVM...)
-        JButton plus = new JButton(Icons.of("plus"));
-        plus.setToolTipText("Open something: a log, a folder, a remote log, a JVM…");
-        plus.putClientProperty("JButton.buttonType", "toolBarButton");
-        plus.setFocusable(false);
-        plus.addActionListener(e -> openStartTab());
-        JPanel trailing = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 2, 0));
-        trailing.setOpaque(false);
-        trailing.add(plus);
-        tabs.putClientProperty("JTabbedPane.trailingComponent", trailing);
         // a start tab goes away once something is opened from it (or anywhere)
         tabs.addContainerListener(new java.awt.event.ContainerAdapter() {
             @Override
@@ -203,7 +195,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         });
 
         center.add(startPage, "empty");
-        center.add(tabs, "tabs");
+        center.add(tabs.component(), "tabs");
 
         JPanel root = new JPanel(new BorderLayout());
         mainArea.add(center, BorderLayout.CENTER);
@@ -565,7 +557,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         StartPage p = new StartPage(startHost);
         tabs.addTab("Start", p);
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setSelectedIndex(tabs.lastAdded());
         updateEmptyState();
     }
 
@@ -835,6 +827,18 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     /** Shows a new log tab with the current view settings and the file's remembered state. */
     private void addLogTab(LogTab tab, Path abs) {
+        setUpLogTab(tab);
+        tabs.addTab(tab.title(), tab);
+        int idx = tabs.lastAdded();
+        tabs.setToolTipTextAt(idx, abs.toString());
+        if (restore.takesSelection(abs)) {
+            tabs.setSelectedIndex(idx);
+        }
+        addedLogTab(tab, abs);
+    }
+
+    /** A new log tab's view: the window's font, and the last choices of wrap, stripes, timeline, columns. */
+    private void setUpLogTab(LogTab tab) {
         tab.mainView().setFontSize(fontSize);
         tab.resultsView().setFontSize(fontSize);
         // each log has its own view settings; a new one starts from the last choice
@@ -844,12 +848,9 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tab.setTimelineVisible(PREFS.getBoolean("timeline", true));
         tab.setColumnsDefaults(PREFS.getBoolean("columns", false), PREFS.getBoolean("tableColumns", true));
         tab.setAutoReload(PREFS.getBoolean("autoReload", false));
-        tabs.addTab(tab.title(), tab);
-        int idx = tabs.getTabCount() - 1;
-        tabs.setToolTipTextAt(idx, abs.toString());
-        if (restore.takesSelection(abs)) {
-            tabs.setSelectedIndex(idx);
-        }
+    }
+
+    private void addedLogTab(LogTab tab, Path abs) {
         if (!isOwnCopy(abs)) {
             logsift.core.Archives.Located in = logsift.core.Archives.locate(abs);
             Path dirOf = in != null ? in.zip().getParent() : abs.getParent();
@@ -1051,7 +1052,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     public CompareTab compare(LogTab a, LogTab b) {
         CompareTab tab = new CompareTab(a, b, this);
         tabs.addTab(tab.title(), tab);
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setSelectedIndex(tabs.lastAdded());
         updateEmptyState();
         return tab;
     }
@@ -1087,7 +1088,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         Path near = left != null ? left.toAbsolutePath().getParent() : last != null ? Path.of(last) : null;
         FileCompareTab tab = new FileCompareTab(left, right, near, compareHost);
         tabs.addTab(tab.title(), Icons.of("git-compare"), tab);
-        int i = tabs.getTabCount() - 1;
+        int i = tabs.lastAdded();
         tabs.setToolTipTextAt(i, tab.tooltip());
         tabs.setSelectedIndex(i);
         updateEmptyState();
@@ -1158,7 +1159,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 });
         holder[0] = tab;
         tabs.addTab(tab.title(), Icons.of("git-merge"), tab);
-        int i = tabs.getTabCount() - 1;
+        int i = tabs.lastAdded();
         tabs.setToolTipTextAt(i, "Merging into " + merged);
         tabs.setSelectedIndex(i);
         closeHooks.put(tab, () -> {
@@ -1307,7 +1308,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     public ThreadsTab openThreads(String source, List<logsift.jvm.ThreadDump> dumps, ThreadsTab.Capture capture) {
         ThreadsTab tab = new ThreadsTab(source, dumps, capture);
         tabs.addTab(tab.title(), Icons.of("cpu"), tab);
-        int i = tabs.getTabCount() - 1;
+        int i = tabs.lastAdded();
         tabs.setToolTipTextAt(i, capture != null ? "Threads of " + capture.label() : source);
         tabs.setSelectedIndex(i);
         tab.onChanged(() -> {
@@ -1627,7 +1628,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         tab.onDumpSaved(this::openHeapDump); // a dump just saved is opened to look at
         tab.onDumpOnServer(this::copyDumpFromServer);
         tabs.addTab(tab.title(), Icons.of("memory-stick"), tab);
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setSelectedIndex(tabs.lastAdded());
         tab.onChanged(() -> {
             if (tabs.getSelectedComponent() == tab) {
                 refreshStatus();
@@ -1675,8 +1676,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             }
         });
         tabs.addTab(tab.title(), Icons.of("octagon-alert"), tab);
-        tabs.setToolTipTextAt(tabs.getTabCount() - 1, abs.toString());
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setToolTipTextAt(tabs.lastAdded(), abs.toString());
+        tabs.setSelectedIndex(tabs.lastAdded());
         closeHooks.put(tab, tab::close);
         if (!isOwnCopy(abs)) {
             AppState.addRecent(abs);
@@ -1732,8 +1733,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         HeapDumpTab tab = new HeapDumpTab(abs);
         tabs.addTab(tab.title(), Icons.of("memory-stick"), tab);
-        tabs.setToolTipTextAt(tabs.getTabCount() - 1, abs.toString());
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setToolTipTextAt(tabs.lastAdded(), abs.toString());
+        tabs.setSelectedIndex(tabs.lastAdded());
         tab.onChanged(() -> {
             if (tabs.getSelectedComponent() == tab) {
                 refreshStatus();
@@ -2079,8 +2080,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     private HeapDumpTab openHeapDumpTab(HeapDumpTab.Source source, String tooltip) {
         HeapDumpTab tab = new HeapDumpTab(source);
         tabs.addTab(tab.title(), Icons.of("memory-stick"), tab);
-        tabs.setToolTipTextAt(tabs.getTabCount() - 1, tooltip);
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setToolTipTextAt(tabs.lastAdded(), tooltip);
+        tabs.setSelectedIndex(tabs.lastAdded());
         tab.onChanged(() -> {
             if (tabs.getSelectedComponent() == tab) {
                 refreshStatus();
@@ -2122,8 +2123,8 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     HeapCompareTab openHeapCompare(Path before, Path after) {
         HeapCompareTab tab = new HeapCompareTab(before, after);
         tabs.addTab(tab.title(), Icons.of("git-compare"), tab);
-        tabs.setToolTipTextAt(tabs.getTabCount() - 1, before + " → " + after);
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setToolTipTextAt(tabs.lastAdded(), before + " → " + after);
+        tabs.setSelectedIndex(tabs.lastAdded());
         tab.onChanged(() -> {
             int i = tabs.indexOfComponent(tab);
             if (i >= 0) {
@@ -2271,7 +2272,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     private void addProfileTab(ProfileTab tab) {
         tabs.addTab(tab.title(), Icons.of("flame"), tab);
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setSelectedIndex(tabs.lastAdded());
         tab.onChanged(() -> {
             if (tabs.getSelectedComponent() == tab) {
                 refreshStatus();
@@ -2312,7 +2313,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         return tabs.getSelectedComponent() instanceof ThreadsTab t ? t : null;
     }
 
-    JTabbedPane tabsForTest() {
+    TabGroups tabsForTest() {
         return tabs;
     }
 
@@ -2622,7 +2623,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         tab.resultsView().setFontSize(fontSize);
         tabs.addTab(tab.title(), tab);
-        tabs.setSelectedIndex(tabs.getTabCount() - 1);
+        tabs.setSelectedIndex(tabs.lastAdded());
         updateEmptyState();
         SwingUtilities.invokeLater(tab::focusFind);
         return tab;
@@ -2721,7 +2722,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
                 ArchiveTab tab = new ArchiveTab(zip, archiveHost);
                 tab.setEntries(entries);
                 tabs.addTab(tab.title(), Icons.of("folder-archive"), tab);
-                int i = tabs.getTabCount() - 1;
+                int i = tabs.lastAdded();
                 tabs.setToolTipTextAt(i, zip.toString());
                 tabs.setSelectedIndex(i);
                 updateEmptyState();
@@ -2753,7 +2754,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         ArchiveTab tab = new ArchiveTab(dir, true, folderHost);
         tabs.addTab(tab.title(), Icons.of("folder-open"), tab);
-        int i = tabs.getTabCount() - 1;
+        int i = tabs.lastAdded();
         tabs.setToolTipTextAt(i, dir.toString());
         tabs.setSelectedIndex(i);
         updateEmptyState();
@@ -3120,12 +3121,22 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    /** Whether another tab shows the same log (a clone): only the first one's filters are remembered. */
+    private boolean openTwice(LogTab t) {
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (tabs.getComponentAt(i) instanceof LogTab o && o != t && o.path().equals(t.path())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Remembers open files (and each file's filters and position) for next time. */
     void saveSession() {
         List<Path> files = new ArrayList<>();
         int selected = 0;
         for (int i = 0; i < tabs.getTabCount(); i++) {
-            if (tabs.getComponentAt(i) instanceof LogTab t && t.remembersState()) {
+            if (tabs.getComponentAt(i) instanceof LogTab t && t.remembersState() && !files.contains(t.path())) {
                 AppState.saveFileState(t.path(), t.saveState());
                 if (i == tabs.getSelectedIndex()) {
                     selected = files.size();
@@ -3967,6 +3978,20 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         view.add(check("Line Stripes", "rows-3", null,
                 () -> PREFS.getBoolean("stripes", true), e -> setStripes(!PREFS.getBoolean("stripes", true))));
         view.addSeparator();
+        JMenu splitMenu = submenu("Split", "panel-right");
+        splitMenu.setName("splitMenu");
+        splitMenu.add(item("Clone to the Right / Other Side", "copy", KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SLASH, MENU),
+                e -> cloneToOtherSide(tabs.getSelectedIndex(), tabs.isSplit() && tabs.isDown())));
+        splitMenu.add(item("Clone Below", null, null, e -> cloneToOtherSide(tabs.getSelectedIndex(), true)));
+        splitMenu.add(item("Move to the Right / Other Side", null,
+                KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SLASH, MENU | shift),
+                e -> moveToOtherSide(tabs.getSelectedIndex(), tabs.isSplit() && tabs.isDown())));
+        splitMenu.add(item("Move Below", null, null, e -> moveToOtherSide(tabs.getSelectedIndex(), true)));
+        splitMenu.addSeparator();
+        splitMenu.add(item("Join the Sides", null, null, e -> joinSides()));
+        splitMenu.add(check("Scroll Together", "link", null, () -> scrollTogether, e -> setScrollTogether(!scrollTogether)));
+        view.add(splitMenu);
+        view.addSeparator();
         JMenu format = submenu("Log Format", "braces");
         onOpen(format, () -> fillFormatMenu(format, currentTab()));
         fillFormatMenu(format, currentTab());
@@ -4193,12 +4218,325 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
     }
 
+    // ---------------------------------------------------------------- split view and the tab menu
+
+
+    private javax.swing.JComponent tabsTrailing() {
+        JButton plus = new JButton(Icons.of("plus"));
+        plus.setToolTipText("Open something: a log, a folder, a remote log, a JVM…");
+        plus.putClientProperty("JButton.buttonType", "toolBarButton");
+        plus.setFocusable(false);
+        plus.addActionListener(e -> openStartTab());
+        javax.swing.JToggleButton link = new javax.swing.JToggleButton(Icons.of("link"));
+        link.setName("scrollTogether");
+        link.setToolTipText("Scroll Together: a line chosen on one side is shown on the other (the same line, "
+                + "or the same time in another log)");
+        link.putClientProperty("JButton.buttonType", "toolBarButton");
+        link.setFocusable(false);
+        link.setVisible(tabs != null && tabs.isSplit());
+        link.setSelected(scrollTogether);
+        link.addActionListener(e -> setScrollTogether(link.isSelected()));
+        scrollTogetherButtons.add(link);
+        JPanel trailing = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 2, 0));
+        trailing.setOpaque(false);
+        trailing.add(plus);
+        trailing.add(link);
+        return trailing;
+    }
+
+
+    void setScrollTogether(boolean on) {
+        scrollTogether = on;
+        PREFS.putBoolean("scrollTogether", on);
+        for (javax.swing.JToggleButton b : scrollTogetherButtons) {
+            b.setSelected(on);
+        }
+        seenLines.clear();
+        if (on) {
+            syncSides(true); // the other side comes to this side's line now
+        }
+    }
+
+    boolean isScrollTogether() {
+        return scrollTogether;
+    }
+
+    private void splitChanged() {
+        for (javax.swing.JToggleButton b : scrollTogetherButtons) {
+            b.setVisible(tabs.isSplit());
+        }
+        seenLines.clear();
+        if (tabs.isSplit()) {
+            if (sideSync == null) {
+                sideSync = new Timer(150, e -> syncSides(false));
+                sideSync.start();
+            }
+        } else if (sideSync != null) {
+            sideSync.stop();
+            sideSync = null;
+        }
+    }
+
+    private Timer sideSync;
+    /** The line each log tab had when last looked at: one that changed was moved by the person. */
+    private final java.util.Map<LogTab, Long> seenLines = new java.util.WeakHashMap<>();
+
+    /**
+     * Scroll Together: when the line chosen in the side in use changes, the other side shows it,
+     * or (another log) the line of the same time. {@code now}: whatever the line is.
+     */
+    void syncSides(boolean now) {
+        if (!scrollTogether || !tabs.isSplit()) {
+            return;
+        }
+        if (!(tabs.getSelectedComponent() instanceof LogTab a) || !(tabs.otherSelected() instanceof LogTab b)) {
+            return;
+        }
+        long line = a.currentLine();
+        Long before = seenLines.put(a, line);
+        seenLines.put(b, b.currentLine());
+        if (line < 0 || !now && (before == null || before == line)) {
+            return;
+        }
+        if (a.path().equals(b.path()) && a.document().fileSize() <= b.document().fileSize()
+                || a.document() == b.document()) {
+            b.showNearest(line);
+        } else if (a.hasTimes() && b.hasTimes()) {
+            long t = a.currentLineTime();
+            if (t != logsift.core.TimeFormat.NONE) {
+                b.showNearestTime(t);
+            }
+        } else {
+            return;
+        }
+        seenLines.put(b, b.currentLine());
+    }
+
+    /** Whether {@code c} can be opened a second time (a log read from a file here). */
+    static boolean canClone(java.awt.Component c) {
+        return c instanceof LogTab t && t.sourceLabels() == null && t.remoteLabel() == null
+                && t.document() != null && Files.isRegularFile(t.document().path());
+    }
+
+    /**
+     * The tab, again, on the other side (split right, or {@code down}, when the window isn't): a log
+     * opens a second time with its filters, view and line, then each side changes on its own. A tab
+     * that can't be opened twice moves there instead.
+     */
+    void cloneToOtherSide(int i, boolean down) {
+        if (i < 0 || i >= tabs.getTabCount()) {
+            return;
+        }
+        java.awt.Component c = tabs.getComponentAt(i);
+        if (!canClone(c)) {
+            moveToOtherSide(i, down);
+            return;
+        }
+        LogTab src = (LogTab) c;
+        Path read = src.document().path();
+        java.nio.charset.Charset cs = src.document().charset();
+        java.util.Properties state = src.saveState();
+        boolean wrap = src.isWrap();
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                return LogDocument.open(read, logsift.core.LineIndex.DEFAULT_CHUNK_SIZE, cs);
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        }, OPENER).whenComplete((doc, ex) -> SwingUtilities.invokeLater(() -> {
+            if (ex != null) {
+                Throwable why = ex instanceof java.util.concurrent.CompletionException ce ? ce.getCause() : ex;
+                JOptionPane.showMessageDialog(this, "Couldn't open " + src.path().getFileName() + " again: "
+                        + (why instanceof java.io.UncheckedIOException u ? u.getCause().getMessage() : why.getMessage()),
+                        "Split", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            LogTab tab = new LogTab(doc, src.path(), null, this);
+            if (src.origin() != null) {
+                tab.setOrigin(src.origin());
+            }
+            setUpLogTab(tab);
+            tab.setWrap(wrap);
+            tabs.addToOtherSide(tab.title(), null, tab, src.path().toString(), down);
+            tab.restoreState(state);
+            if (tab.remoteLabel() == null) {
+                SwingUtilities.invokeLater(() -> startJvmBar(tab, null));
+            }
+            updateEmptyState();
+            SwingUtilities.invokeLater(() -> tab.mainView().focusView());
+            cloned = tab;
+        }));
+    }
+
+    private LogTab cloned;
+
+    /** For tests: the tab the last clone made. */
+    LogTab clonedForTest() {
+        return cloned;
+    }
+
+    /** Tab {@code i} to the other side (split right, or {@code down}, when the window isn't). */
+    void moveToOtherSide(int i, boolean down) {
+        if (i < 0 || i >= tabs.getTabCount()) {
+            return;
+        }
+        if (!tabs.isSplit() && tabs.getTabCount() < 2) {
+            status.setText("Split needs a second tab: Clone to the Right opens this log again beside it.");
+            return;
+        }
+        tabs.moveToOtherSide(i, down);
+    }
+
+    /** Both sides' tabs in one again. */
+    void joinSides() {
+        tabs.join();
+    }
+
+    /** The file a tab shows, here (a log in a zip: its path inside the zip), or null. */
+    static Path fileOf(java.awt.Component c) {
+        if (c instanceof LogTab t) {
+            return t.remoteLabel() != null || t.sourceLabels() != null ? null : t.path();
+        }
+        if (c instanceof HeapDumpTab h) {
+            return h.file();
+        }
+        if (c instanceof CrashTab ct) {
+            return ct.file();
+        }
+        if (c instanceof ArchiveTab a) {
+            return a.zip();
+        }
+        return null;
+    }
+
+    /** What Copy Path copies: the file, or a remote log's user@host:path. */
+    static String pathText(java.awt.Component c) {
+        if (c instanceof LogTab t && t.remoteLabel() != null) {
+            return t.remoteLabel();
+        }
+        Path f = fileOf(c);
+        return f == null ? null : f.toString();
+    }
+
+    /** What Reveal shows: the file, or the zip a log came out of; null when it isn't on this computer. */
+    static Path revealable(java.awt.Component c) {
+        Path f = fileOf(c);
+        if (f == null) {
+            return null;
+        }
+        logsift.core.Archives.Located in = logsift.core.Archives.locate(f);
+        Path p = in != null ? in.zip() : f;
+        return Files.exists(p) ? p : null;
+    }
+
+    /** "Reveal in Finder", "Show in Explorer", "Show in File Manager". */
+    static String revealName() {
+        return isMac() ? "Reveal in Finder" : System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT)
+                .contains("win") ? "Show in Explorer" : "Show in File Manager";
+    }
+
+    /** The tab menu: what can be done with tab {@code i}. */
+    javax.swing.JPopupMenu tabMenu(int i) {
+        javax.swing.JPopupMenu m = new javax.swing.JPopupMenu();
+        m.setName("tabMenu");
+        java.awt.Component c = tabs.getComponentAt(i);
+        int side = tabs.sideOf(c);
+        List<java.awt.Component> mine = tabs.tabsOf(side);
+        int at = mine.indexOf(c);
+        m.add(item("Close", "x", KeyStroke.getKeyStroke(KeyEvent.VK_W, MENU), e -> closeTab(tabs.indexOfComponent(c))));
+        JMenuItem others = item("Close Others", null, null, e -> closeAll(t -> t != c && tabs.sideOf(t) == side));
+        others.setEnabled(mine.size() > 1);
+        m.add(others);
+        JMenuItem right = item("Close Tabs to the Right", null, null, e -> {
+                    List<java.awt.Component> now = tabs.tabsOf(side);
+                    int from = now.indexOf(c);
+                    closeAll(t -> now.indexOf(t) > from);
+                });
+        right.setEnabled(at < mine.size() - 1);
+        m.add(right);
+        m.add(item("Close All", null, null, e -> closeAll(t -> true)));
+        m.addSeparator();
+        String text = pathText(c);
+        Path file = fileOf(c);
+        JMenuItem copyPath = item("Copy Path", "copy", null, e -> copy(text));
+        copyPath.setEnabled(text != null);
+        m.add(copyPath);
+        JMenuItem copyName = item("Copy File Name", null, null,
+                e -> copy(file.getFileName() == null ? file.toString() : file.getFileName().toString()));
+        copyName.setEnabled(file != null);
+        m.add(copyName);
+        Path where = revealable(c);
+        JMenuItem reveal = item(revealName(), "folder-open", null, e -> HelpSupport.reveal(this, where));
+        reveal.setEnabled(where != null);
+        m.add(reveal);
+        if (c instanceof LogTab t) {
+            m.addSeparator();
+            m.add(item("Reload", "refresh-cw", null, e -> t.reload()));
+        }
+        m.addSeparator();
+        if (tabs.isSplit()) {
+            JMenuItem clone = item("Clone to Other Side", "copy", KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SLASH, MENU),
+                    e -> cloneToOtherSide(tabs.indexOfComponent(c), tabs.isDown()));
+            clone.setEnabled(canClone(c));
+            m.add(clone);
+            m.add(item("Move to Other Side", "panel-right", KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SLASH, MENU | shift()),
+                    e -> moveToOtherSide(tabs.indexOfComponent(c), tabs.isDown())));
+            m.add(item("Join the Sides", null, null, e -> joinSides()));
+            JCheckBoxMenuItem together = new JCheckBoxMenuItem("Scroll Together", Icons.of("link"), scrollTogether);
+            together.addActionListener(e -> setScrollTogether(together.isSelected()));
+            m.add(together);
+        } else {
+            JMenuItem cloneRight = item("Clone to the Right", "copy", KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SLASH, MENU),
+                    e -> cloneToOtherSide(tabs.indexOfComponent(c), false));
+            JMenuItem cloneDown = item("Clone Below", null, null, e -> cloneToOtherSide(tabs.indexOfComponent(c), true));
+            cloneRight.setEnabled(canClone(c));
+            cloneDown.setEnabled(canClone(c));
+            m.add(cloneRight);
+            m.add(cloneDown);
+            JMenuItem moveRight = item("Move to the Right", "panel-right", KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SLASH,
+                    MENU | shift()), e -> moveToOtherSide(tabs.indexOfComponent(c), false));
+            JMenuItem moveDown = item("Move Below", null, null, e -> moveToOtherSide(tabs.indexOfComponent(c), true));
+            moveRight.setEnabled(tabs.getTabCount() > 1);
+            moveDown.setEnabled(tabs.getTabCount() > 1);
+            m.add(moveRight);
+            m.add(moveDown);
+        }
+        return m;
+    }
+
+    private static int shift() {
+        return InputEvent.SHIFT_DOWN_MASK;
+    }
+
+    private void showTabMenu(int i, javax.swing.JTabbedPane pane, int x, int y) {
+        tabs.setSelectedIndex(i);
+        tabMenu(i).show(pane, x, y);
+    }
+
+    /** Closes the tabs that {@code which} picks. */
+    private void closeAll(java.util.function.Predicate<java.awt.Component> which) {
+        List<java.awt.Component> all = new ArrayList<>();
+        for (int k = 0; k < tabs.getTabCount(); k++) {
+            all.add(tabs.getComponentAt(k));
+        }
+        for (java.awt.Component t : all) {
+            if (which.test(t)) {
+                closeTab(tabs.indexOfComponent(t));
+            }
+        }
+    }
+
+    private static void copy(String text) {
+        java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                .setContents(new java.awt.datatransfer.StringSelection(text), null);
+    }
+
     void closeTab(int index) {
         if (index < 0 || index >= tabs.getTabCount()) {
             return;
         }
         java.awt.Component c = tabs.getComponentAt(index);
-        if (c instanceof LogTab t && t.remembersState()) {
+        if (c instanceof LogTab t && t.remembersState() && !openTwice(t)) {
             AppState.saveFileState(t.path(), t.saveState());
         }
         tabs.removeTabAt(index);

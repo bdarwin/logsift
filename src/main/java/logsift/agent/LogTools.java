@@ -461,25 +461,102 @@ public final class LogTools {
                 return w.finish(b.toString().stripTrailing(), maxChars(a));
             });
 
+    private static final java.util.regex.Pattern AT_TIME = java.util.regex.Pattern.compile(
+            "(?:(\\d{4})-(\\d{2})-(\\d{2})[T ])?(\\d{1,2}):(\\d{2})(?::(\\d{2})(?:[.,](\\d{1,9}))?)?");
+
+    /**
+     * The first line of {@code log} logged at or after {@code at} (0-based; the line count when
+     * none is), read as the log reads its times: as written, zones aside.
+     */
+    static long lineAtTime(LogAnalysis log, String at) throws Exception {
+        var f = log.formats();
+        TimeFormat tf = f == null ? null : f.times();
+        if (tf == null) {
+            throw new Tool.Failure("This log has no timestamps: read it by line (from).");
+        }
+        LogDocument doc = log.document();
+        long t = tf.parse(at);
+        if (t == TimeFormat.NONE) {
+            java.util.regex.Matcher m = AT_TIME.matcher(at);
+            if (!m.find()) {
+                throw new Tool.Failure("Not a time: " + at + " (for example 2026-10-21 10:42:13.512).");
+            }
+            java.time.LocalDate day;
+            if (m.group(1) != null) {
+                day = java.time.LocalDate.of(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)),
+                        Integer.parseInt(m.group(3)));
+            } else {
+                long first = TimeFormat.NONE;
+                for (long l = 0; l < Math.min(500, doc.lineCount()) && first == TimeFormat.NONE; l++) {
+                    String text = doc.line(l);
+                    first = text == null ? TimeFormat.NONE : tf.parse(text);
+                }
+                if (first == TimeFormat.NONE) {
+                    throw new Tool.Failure("Give the date too: 2026-10-21 " + at + ".");
+                }
+                day = java.time.Instant.ofEpochMilli(first).atZone(java.time.ZoneOffset.UTC).toLocalDate();
+            }
+            String frac = m.group(7) == null ? "0" : (m.group(7) + "00").substring(0, 3);
+            t = day.atTime(Integer.parseInt(m.group(4)), Integer.parseInt(m.group(5)),
+                    m.group(6) == null ? 0 : Integer.parseInt(m.group(6))).toInstant(java.time.ZoneOffset.UTC)
+                    .toEpochMilli() + Integer.parseInt(frac);
+        }
+        long total = doc.lineCount();
+        logsift.core.TimeIndex ti = log.timeIndex();
+        long start = ti == null ? 0 : ti.samples().lineBefore(t);
+        // from the sample before it, forward to the first line at or after it (lines without a time are skipped)
+        for (long l = Math.max(0, start); l < total; l++) {
+            String text = doc.line(l);
+            long lt = text == null ? TimeFormat.NONE : tf.parse(text);
+            if (lt != TimeFormat.NONE && lt >= t) {
+                return l;
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException();
+            }
+        }
+        return total;
+    }
+
     static final Tool READ_LINES = new Def("read_lines", "Read lines",
-            "Reads lines of a log by number (at most 200 at a time), for example around a finding or a search hit.",
+            "Reads lines of a log by number (at most 200 at a time), for example around a finding or a search hit. "
+                    + "With at instead of from: the lines logged around a time, for example what another log was "
+                    + "doing when a line of this one was written.",
             new Tool.Schema().string("log", LOG_ARG, true)
-                    .integer("from", "First line (1-based).", true)
+                    .integer("from", "First line (1-based). Give this or at.", false)
+                    .string("at", "A time instead of from (\"2026-10-21 10:42:13.512\", or a line's timestamp as "
+                            + "written; \"10:42:13\" is on the log's first day): the lines around the first line at "
+                            + "or after it.", false)
                     .integer("count", "How many lines (default 50, at most 200).", false)
                     .integer("max_chars", "Longest answer (default 24000).", false).build(),
             (a, w) -> {
                 LogAnalysis log = ready(a, w);
                 LogDocument doc = log.document();
                 long total = doc.lineCount();
-                long from = a.number("from", 1, 1, Long.MAX_VALUE) - 1;
                 int count = (int) a.number("count", 50, 1, 200);
+                String at = a.string("at", null);
+                String head = "";
+                long from;
+                if (at != null && !at.isBlank()) {
+                    long line = lineAtTime(log, at.strip());
+                    from = Math.max(0, line - count / 2);
+                    head = line >= total ? "Nothing was logged at or after " + at.strip() + "; the last lines:\n"
+                            : "Line " + line(line) + " is the first at or after " + at.strip() + ".\n";
+                    if (line >= total) {
+                        from = Math.max(0, total - count);
+                    }
+                } else if (a.has("from")) {
+                    from = a.number("from", 1, 1, Long.MAX_VALUE) - 1;
+                } else {
+                    throw new Tool.Failure("Give from (a line number) or at (a time).");
+                }
                 if (from >= total) {
                     throw new Tool.Failure("The log has " + n(total) + " lines.");
                 }
                 int k = (int) Math.min(count, total - from);
                 String[] out = new String[k];
                 doc.readLines(from, k, out);
-                StringBuilder b = new StringBuilder();
+                StringBuilder b = new StringBuilder(head);
                 for (int i = 0; i < k; i++) {
                     b.append(line(from + i)).append(": ").append(cut(out[i], 2000)).append('\n');
                 }

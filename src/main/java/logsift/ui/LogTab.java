@@ -1335,6 +1335,20 @@ final class LogTab extends JPanel implements FilterPanel.Listener {
     }
 
     /** Goes to the line, or the next one shown if it is filtered out. */
+    /**
+     * Shows the line nearest {@code line} that this tab shows, its filters kept and without taking
+     * the focus: what the other side does when the sides scroll together.
+     */
+    void showNearest(long line) {
+        goNear(Math.max(0, Math.min(line, Math.max(0, doc.lineCount() - 1))));
+        host.tabStatusChanged(this);
+    }
+
+    /** The same, for the first line logged at {@code t} or after. */
+    void showNearestTime(long t) {
+        showNearest(lineAtTime(t));
+    }
+
     private void goNear(long line) {
         long row = matchingOnly ? filterResult.rowAtOrAfter(line) : line;
         main.goToRow((int) Math.min(row, Integer.MAX_VALUE - 1), true);

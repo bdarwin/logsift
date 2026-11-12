@@ -53,6 +53,23 @@ final class HelpSupport {
     /** Opens a web page; if there is no browser, copies the address and says so. */
     /** Shows a file in the Finder, Explorer or the file manager (its folder, where that's all there is). */
     static void reveal(Component parent, java.nio.file.Path file) {
+        List<String> cmd = revealCommand(System.getProperty("os.name", ""), file);
+        if (cmd != null) {
+            try {
+                Process p = new ProcessBuilder(cmd).redirectErrorStream(true)
+                        .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+                // Explorer answers 1 even when it worked; a Linux file manager that isn't there fails
+                if (!cmd.get(0).equals("dbus-send")
+                        || p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) && p.exitValue() == 0) {
+                    return;
+                }
+            } catch (java.io.IOException e) {
+                // the desktop's own way, below
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
         try {
             java.awt.Desktop d = java.awt.Desktop.getDesktop();
             if (d.isSupported(java.awt.Desktop.Action.BROWSE_FILE_DIR)) {
@@ -63,6 +80,25 @@ final class HelpSupport {
         } catch (Exception | Error e) {
             javax.swing.JOptionPane.showMessageDialog(parent, "It's in " + file.getParent());
         }
+    }
+
+    /**
+     * How this system shows a file selected in its folder: Explorer's /select on Windows, the file
+     * manager's ShowItems on Linux; null where Java's own way does it (macOS's Finder).
+     */
+    static List<String> revealCommand(String os, java.nio.file.Path file) {
+        String o = os.toLowerCase(java.util.Locale.ROOT);
+        if (o.contains("win")) {
+            String sys = System.getenv("SystemRoot");
+            String explorer = sys == null || sys.isBlank() ? "explorer.exe" : sys + "\\explorer.exe";
+            return List.of(explorer, "/select,", file.toString());
+        }
+        if (o.contains("linux") || o.contains("bsd")) {
+            return List.of("dbus-send", "--session", "--dest=org.freedesktop.FileManager1", "--type=method_call",
+                    "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1.ShowItems",
+                    "array:string:" + file.toUri(), "string:");
+        }
+        return null;
     }
 
     static void browse(Component parent, String url) {

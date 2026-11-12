@@ -16,6 +16,7 @@ New to Logsift? Start with [Opening logs](opening-logs.md) and [The log view](lo
 |---|---|
 | [Opening logs](opening-logs.md) | Files, folders, zips, `.gz`, web addresses, WSL, piped output, and logs on a server over SSH/SFTP |
 | [The log view](log-view.md) | Lines and columns, level colours, line numbers, the highlight bar, JSON and CSV, the tree of loggers, bookmarks, merged logs |
+| [Split view and tabs](split-view.md) | Two tabs side by side or one above the other, Scroll Together by line or by time, and the tab menu: copy path, reveal, close others |
 | [Find](find.md) | The find bar, Find All, several searches at once, searching within results |
 | [Filters](filters.md) | Show, Hide and Mark filters, the formula, chips, level chips, stack traces, context lines, alerts |
 | [Timeline](timeline.md) | The bar of lines over time, its colours, and picking a time range |

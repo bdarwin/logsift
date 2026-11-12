@@ -77,6 +77,35 @@ class CliTest {
     }
 
     @Test
+    void readsAnotherLogAtTheSameMoment() throws Exception {
+        Path gw = logs.resolve("gateway.log");
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < 60; i++) {
+            b.append(String.format("2026-10-21T09:59:%02d.500Z INFO gw - request %d%n", i, i));
+        }
+        b.append("2026-10-21T10:00:01.200Z WARN gw - upstream slow\n");
+        b.append("2026-10-21T10:00:02.900Z ERROR gw - upstream 502\n");
+        Files.writeString(gw, b);
+        // the moment app.log's second line was written, in gateway.log
+        Result r = cli("", "run", "read_lines", "log=" + gw, "at=2026-10-21 10:00:01.000", "count=2", "--root",
+                logs.toString());
+        assertEquals(0, r.code(), r.err());
+        assertTrue(r.out().startsWith("Line 61 is the first at or after 2026-10-21 10:00:01.000."), r.out());
+        assertTrue(r.out().contains("60: 2026-10-21T09:59:59.500Z INFO gw - request 59"), r.out());
+        assertTrue(r.out().contains("61: 2026-10-21T10:00:01.200Z WARN gw - upstream slow"), r.out());
+        // a line's own timestamp, and a time of day on the log's first day
+        Result t = cli("", "run", "read_lines", "log=" + gw, "at=10:00:02", "count=1", "--root", logs.toString());
+        assertTrue(t.out().contains("62: 2026-10-21T10:00:02.900Z ERROR gw - upstream 502"), t.out());
+        Result late = cli("", "run", "read_lines", "log=" + gw, "at=2026-10-21 11:00", "count=1", "--root",
+                logs.toString());
+        assertTrue(late.out().startsWith("Nothing was logged at or after 2026-10-21 11:00; the last lines:"), late.out());
+        Result neither = cli("", "run", "read_lines", "log=" + gw, "--root", logs.toString());
+        assertTrue(neither.err().contains("Give from (a line number) or at (a time)."), neither.err() + neither.out());
+        Result bad = cli("", "run", "read_lines", "log=" + gw, "at=yesterday", "--root", logs.toString());
+        assertTrue(bad.err().contains("Not a time: yesterday"), bad.err() + bad.out());
+    }
+
+    @Test
     void pivotsWithListsInOneArgument() throws Exception {
         Path csv = logs.resolve("orders.csv");
         Files.writeString(csv, "region,amount\nNorth,12.5\nSouth,3\nNorth,4.5\n");
@@ -155,7 +184,9 @@ class CliTest {
             assertTrue(all.out().contains(t.name() + "  " + t.title()), t.name());
         }
         Result one = cli("", "tools", "read_lines");
-        assertTrue(one.out().contains("from=integer (required)"), one.out());
+        assertTrue(one.out().contains("from=integer ") && !one.out().contains("from=integer (required)"),
+                "from, or at: " + one.out());
+        assertTrue(one.out().contains("at=string "), one.out());
         assertTrue(one.out().contains("count=integer"), one.out());
 
         Result p = cli("", "prompt", "investigate", "problem=orders failing since 10:00");

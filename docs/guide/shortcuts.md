@@ -24,6 +24,9 @@ On macOS, use ⌘ where this page says Ctrl, unless it says otherwise.
 | Compare logs by message | Ctrl+Shift+D |
 | Export lines shown by filters | Ctrl+Shift+E |
 | Close the tab | Ctrl+W, or a middle click on the tab |
+| Clone the tab to the other side (splits the window) | Ctrl+\ |
+| Move the tab to the other side | Ctrl+Shift+\ |
+| The tab menu (close others, copy path, reveal, split) | Right-click the tab |
 | Quit | Ctrl+Q (⌘Q on macOS) |
 | Settings | Ctrl+, |
 

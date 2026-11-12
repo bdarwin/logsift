@@ -3032,6 +3032,221 @@ class VisualTest {
     }
 
     @Test
+    @Order(67)
+    void splitsTheWindowInTwo() throws Exception {
+        // two logs of the same moments: the app's and the gateway's in front of it
+        Path app = dir.resolve("split-app.log");
+        Path gw = dir.resolve("split-gateway.log");
+        StringBuilder a = new StringBuilder();
+        StringBuilder g = new StringBuilder();
+        for (int i = 0; i < 400; i++) {
+            a.append(String.format("2026-11-04 10:%02d:%02d.000 %s [http-%d] com.acme.Checkout - order %d%s%n",
+                    i / 60, i % 60, i % 25 == 0 ? "ERROR" : "INFO ", i % 4, i, i % 25 == 0 ? " failed: db timeout" : " paid"));
+            g.append(String.format("2026-11-04 10:%02d:%02d.500 INFO  gw - POST /checkout %d -> %s%n",
+                    i / 60, i % 60, i, i % 25 == 0 ? "502" : "200"));
+        }
+        Files.writeString(app, a);
+        Files.writeString(gw, g);
+        onEdt(() -> {
+            frame.openFile(app);
+            frame.openFile(gw);
+            return null;
+        });
+        waitForTab("split-gateway.log");
+        TabGroups tabs = onEdt(frame::tabsForTest);
+        LogTab appTab = onEdt(() -> {
+            for (int i = 0; i < tabs.getTabCount(); i++) {
+                if (tabs.getComponentAt(i) instanceof LogTab t && t.title().equals("split-app.log")) {
+                    return t;
+                }
+            }
+            return null;
+        });
+        LogTab gwTab = onEdt(frame::currentTab);
+        // only the errors in the app's log
+        onEdt(() -> {
+            tabs.setSelectedComponent(appTab);
+            appTab.filterPanel().addFilter("ERROR", FilterDef.Action.SHOW);
+            appTab.setMatchingOnly(true);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> appTab.filterResultForTest().count() == 16);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "16 errors");
+
+        // right-click a tab: the usual
+        int appAt = onEdt(() -> tabs.indexOfComponent(appTab));
+        javax.swing.JPopupMenu menu = onEdt(() -> frame.tabMenu(appAt));
+        List<String> items = onEdt(() -> {
+            List<String> out = new ArrayList<>();
+            for (java.awt.Component c : menu.getComponents()) {
+                out.add(c instanceof javax.swing.JMenuItem mi ? mi.getText() + (mi.isEnabled() ? "" : " (off)") : "-");
+            }
+            return out;
+        });
+        assertEquals(List.of("Close", "Close Others", "Close Tabs to the Right", "Close All", "-", "Copy Path",
+                "Copy File Name", MainFrame.revealName(), "-", "Reload", "-", "Clone to the Right", "Clone Below",
+                "Move to the Right", "Move Below"), items);
+        onEdt(() -> {
+            for (java.awt.Component c : menu.getComponents()) {
+                if (c instanceof javax.swing.JMenuItem mi && mi.getText().equals("Copy Path")) {
+                    mi.doClick();
+                }
+            }
+            return null;
+        });
+        assertEquals(app.toAbsolutePath().normalize().toString(), java.awt.Toolkit.getDefaultToolkit()
+                .getSystemClipboard().getData(java.awt.datatransfer.DataFlavor.stringFlavor));
+        assertEquals(app.toAbsolutePath().normalize(), MainFrame.revealable(appTab));
+        // shown on screen, for the guide
+        onEdt(() -> {
+            java.awt.Rectangle r = tabs.paneForTest(0).getBoundsAt(appAt);
+            menu.show(tabs.paneForTest(0), r.x + r.width / 2, r.y + r.height);
+            return null;
+        });
+        settle();
+        shotOf(menu, "132-tab-menu");
+        onEdt(() -> {
+            menu.setVisible(false);
+            return null;
+        });
+
+        // Clone to the Right: the same log again, with its filters, then each side on its own
+        onEdt(() -> {
+            frame.cloneToOtherSide(tabs.indexOfComponent(appTab), false);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.clonedForTest() != null && frame.clonedForTest().title().equals("split-app.log")
+                        && tabs.isSplit());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "the clone");
+        LogTab copy = onEdt(frame::clonedForTest);
+        assertEquals(1, (int) onEdt(() -> tabs.sideOf(copy)), "on the right");
+        assertEquals(0, (int) onEdt(() -> tabs.sideOf(appTab)));
+        waitFor(() -> {
+            try {
+                return onEdt(() -> copy.filterResultForTest().count() == 16 && copy.isMatchingOnly());
+            } catch (Exception e) {
+                return false;
+            }
+        }, 10_000, "the clone has the filters");
+        onEdt(() -> {
+            copy.setMatchingOnly(false); // the whole log on the right
+            return null;
+        });
+        assertTrue(onEdt(appTab::isMatchingOnly), "the left side keeps its own");
+        // Scroll Together: an error chosen on the left is shown in context on the right
+        onEdt(() -> {
+            frame.setScrollTogether(true);
+            tabs.setSelectedComponent(appTab);
+            return null;
+        });
+        settle();
+        onEdt(() -> {
+            appTab.showNearest(175);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> copy.currentLine() == 175);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 5_000, "the right side at line 176");
+        assertEquals(175, (long) onEdt(appTab::currentLine));
+        assertTrue(onEdt(appTab::isMatchingOnly), "still only errors on the left");
+        assertTrue(onEdt(() -> tabs.idleForTest(1) && !tabs.idleForTest(0)), "the side in use stands out");
+        settle();
+        shot("133-split-view");
+
+        // another log on the right: the same moment in it
+        onEdt(() -> {
+            frame.closeTab(tabs.indexOfComponent(copy));
+            return null;
+        });
+        settle();
+        assertFalse(onEdt(tabs::isSplit), "a side with nothing left goes");
+        onEdt(() -> {
+            frame.moveToOtherSide(tabs.indexOfComponent(gwTab), false);
+            tabs.setSelectedComponent(appTab);
+            return null;
+        });
+        settle();
+        assertTrue(onEdt(tabs::isSplit));
+        assertEquals(1, (int) onEdt(() -> tabs.sideOf(gwTab)));
+        onEdt(() -> {
+            appTab.showNearest(250);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> gwTab.currentLine() == 250);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 5_000, "the gateway at 10:04:10, its first line at or after the app's");
+        // and back: a line chosen on the right moves the left
+        onEdt(() -> {
+            tabs.setSelectedComponent(gwTab);
+            return null;
+        });
+        settle();
+        onEdt(() -> {
+            gwTab.showNearest(300);
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> appTab.currentLine() == 325);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 5_000, "the left at the next error after 10:05:00");
+        settle();
+        shot("134-split-two-logs");
+        // off: the sides stay where they are
+        onEdt(() -> {
+            frame.setScrollTogether(false);
+            gwTab.showNearest(10);
+            return null;
+        });
+        settle();
+        Thread.sleep(400);
+        assertEquals(325, (long) onEdt(appTab::currentLine));
+
+        // Join the Sides: one row of tabs again, in the same order
+        onEdt(() -> {
+            frame.joinSides();
+            return null;
+        });
+        assertFalse(onEdt(tabs::isSplit));
+        assertTrue(onEdt(() -> tabs.indexOfComponent(gwTab) > tabs.indexOfComponent(appTab)));
+        // a tab dragged to the window's right edge splits it
+        onEdt(() -> {
+            assertTrue(tabs.drop(tabs.indexOfComponent(appTab), TabGroups.Drop.SPLIT_RIGHT));
+            return null;
+        });
+        assertTrue(onEdt(tabs::isSplit));
+        assertEquals(1, (int) onEdt(() -> tabs.sideOf(appTab)));
+        onEdt(() -> {
+            frame.joinSides();
+            frame.setScrollTogether(true);
+            frame.closeTab(tabs.indexOfComponent(appTab));
+            frame.closeTab(tabs.indexOfComponent(gwTab));
+            return null;
+        });
+        settle();
+    }
+
+    @Test
     @Order(66)
     void chatsWithTheAssistantBesideTheLog() throws Exception {
         // GitHub Copilot beside the log: it reads the lines with Logsift's tools, its answer links them,
@@ -7722,7 +7937,7 @@ class VisualTest {
             return null;
         });
         waitForTab("three.log");
-        JTabbedPane tabs = onEdt(frame::tabsForTest);
+        JTabbedPane tabs = onEdt(() -> frame.tabsForTest().paneForTest(0)); // one group: its strip
         int two = onEdt(() -> {
             for (int i = 0; i < tabs.getTabCount(); i++) {
                 if (tabs.getComponentAt(i) instanceof LogTab t && t.title().equals("two.log")) {
