@@ -12,6 +12,9 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
+import java.awt.font.FontRenderContext;
+import java.awt.font.GlyphVector;
+import java.awt.image.BufferedImage;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -400,12 +403,50 @@ public final class LogView extends JPanel {
 
     public void setFontSize(float size) {
         font = Theme.monoFont(size);
-        metrics = getFontMetrics(font);
+        metrics = measure(font);
         rowHeight = metrics.getHeight() + 2;
         charWidth = Math.max(1, metrics.charWidth('m'));
         ascent = metrics.getAscent() + 1;
         vbar.setUnitIncrement(1);
         rowsChanged();
+    }
+
+    /**
+     * Metrics at 1x, whatever the screen's scale: text is drawn with these advances (see
+     * {@link #drawText}), so at 125% and the like it stays on the character grid.
+     */
+    private static FontMetrics measure(Font font) {
+        Graphics2D g = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
+        try {
+            // the desktop's text hints (subpixel on Windows): drawText draws with this context
+            Object hints = Toolkit.getDefaultToolkit().getDesktopProperty("awt.font.desktophints");
+            if (hints instanceof Map<?, ?> m) {
+                g.addRenderingHints(m);
+            } else {
+                g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            }
+            g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_OFF);
+            return g.getFontMetrics(font);
+        } finally {
+            g.dispose();
+        }
+    }
+
+    /**
+     * Draws text with the advances it was measured with. drawString lays it out again at the
+     * screen's scale, where glyphs are rounded to device pixels: at 125% an 8px character comes
+     * out 7.2px wide and the text drifts off its highlights, selection and caret.
+     */
+    private void drawText(Graphics2D g, String s, int x, int y) {
+        if (s.isEmpty()) {
+            return;
+        }
+        char[] c = s.toCharArray();
+        FontRenderContext frc = metrics.getFontRenderContext();
+        GlyphVector gv = Font.textRequiresLayout(c, 0, c.length)
+                ? font.layoutGlyphVector(frc, c, 0, c.length, Font.LAYOUT_LEFT_TO_RIGHT)
+                : font.createGlyphVector(frc, c);
+        g.drawGlyphVector(gv, x, y);
     }
 
     public float fontSize() {
@@ -2374,11 +2415,11 @@ public final class LogView extends JPanel {
                     gt.setColor(lineFg[k]);
                     if (l.wide || wrap) {
                         if (s1 > s0) {
-                            gt.drawString(l.text.substring(s0, s1), l.segX(seg), y + ascent);
+                            drawText(gt, l.text.substring(s0, s1), l.segX(seg), y + ascent);
                         }
                     } else if (firstCol < l.text.length()) {
                         int end = Math.min(l.text.length(), firstCol + visibleCols);
-                        gt.drawString(l.text.substring(firstCol, end),
+                        drawText(gt, l.text.substring(firstCol, end),
                                 l.segX(seg) + firstCol * charWidth, y + ascent);
                     }
                     paintGutter(g, l, seg, i, y, gutter, fg);
@@ -2520,7 +2561,7 @@ public final class LogView extends JPanel {
                 }
                 String num = lineNo < 0 ? "" : Long.toString(lineNo + 1);
                 g.setColor(l.row == lead ? fg : Theme.gutterForeground());
-                g.drawString(num, gutter - 14 - metrics.stringWidth(num), y + ascent);
+                drawText(g, num, gutter - 14 - metrics.stringWidth(num), y + ascent);
                 Color marker = source.marker(l.row);
                 if (marker != null) {
                     g.setColor(marker);
@@ -2587,7 +2628,7 @@ public final class LogView extends JPanel {
                         cg.clipRect(x, y, Math.max(0, w - charWidth), rowHeight);
                         paintMatches(cg, v, x, y);
                         cg.setColor(cl.isLevel(col) ? levelColor(v, lineFg) : lineFg);
-                        cg.drawString(v, x, y + ascent);
+                        drawText(cg, v, x, y + ascent);
                     } finally {
                         cg.dispose();
                     }
@@ -2612,7 +2653,7 @@ public final class LogView extends JPanel {
             int mx = l.segX(seg);
             paintMatches(gt, part, mx, y);
             gt.setColor(lineFg);
-            gt.drawString(part, mx, y + ascent);
+            drawText(gt, part, mx, y + ascent);
         }
 
         /** Columns view: the selected characters {@code [a, b)} of a line, in its cells and message. */
