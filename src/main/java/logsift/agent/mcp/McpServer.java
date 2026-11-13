@@ -56,6 +56,7 @@ public final class McpServer {
         this.workspace = workspace;
         this.version = version;
         this.out = out;
+        workspace.setGate(windowGate()); // until the agent says it can ask its person itself
     }
 
     /** Reads messages until the input ends, then waits for calls still running. */
@@ -182,8 +183,47 @@ public final class McpServer {
             @Override
             public void approve(String what, String key, String detail) throws logsift.agent.Tool.Failure,
                     InterruptedException {
-                if (!ask("Logsift: an agent wants to " + what + ". " + detail + " Allow it?")) {
+                if (!ask("Logsift: an agent wants to " + what + ". " + detail + (key == null
+                        ? " You're asked each time." : "") + " Allow it?")) {
                     throw new logsift.agent.Tool.Failure("The person said no to: " + what + ".");
+                }
+            }
+        };
+    }
+
+    /** What the person allowed for this agent's session, in Logsift's window. */
+    private final java.util.Set<String> allowedHere = ConcurrentHashMap.newKeySet();
+
+    /** The command a running Logsift is sent to ask its person: ask, the agent, what, the detail, once|session. */
+    public static final String ASK = "ask";
+
+    /**
+     * For an agent that can't ask its person: files as before, a JVM action asked in Logsift's
+     * window when it's open (else refused, saying how to get it asked).
+     */
+    private Workspace.Gate windowGate() {
+        return new Workspace.Gate() {
+            @Override
+            public void allow(String what, java.nio.file.Path where) {
+                // files: as for every agent, within the folders it may read
+            }
+
+            @Override
+            public void approve(String what, String key, String detail) throws logsift.agent.Tool.Failure {
+                if (key != null && allowedHere.contains(key)) {
+                    return;
+                }
+                String who = workspace.client() == null ? "A coding agent" : workspace.client();
+                int code = logsift.core.SingleInstance.command(logsift.core.CacheSettings.home(),
+                        List.of(ASK, who, what, detail == null ? "" : detail, key == null ? "once" : "session"));
+                switch (code) {
+                    case 0 -> {
+                        // allowed this once
+                    }
+                    case 3 -> allowedHere.add(key);
+                    case 2 -> throw new logsift.agent.Tool.Failure("The person said no to: " + what
+                            + ". Don't ask again for it now; work from the logs.");
+                    default -> throw new logsift.agent.Tool.Failure(Workspace.CANT_ASK + what + ".");
                 }
             }
         };

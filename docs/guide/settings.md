@@ -6,7 +6,7 @@ description: Every Logsift setting with its default, log formats, source folders
 
 # Settings
 
-**Edit → Settings…** (Ctrl+,), or **Logsift → Settings** on macOS (⌘,). Changes apply at once. Seven tabs: **General**, **Log Formats**, **Source Code**, **Metrics**, **Agents**, **Assistant**, **Crash Dumps**.
+**Edit → Settings…** (Ctrl+,), or **Logsift → Settings** on macOS (⌘,). Changes apply at once. Eight tabs: **General**, **Log Formats**, **Source Code**, **Metrics**, **Agents**, **Assistant**, **Crash Dumps**, **Network**.
 
 ## General
 
@@ -87,6 +87,8 @@ In `~/.logsift` (your home folder):
 | `stdin/` | Piped output, kept a week |
 | `heap-index/` | Indexes of big heap dumps, removed when their tab closes |
 | `agent.properties` | Settings → Agents: what is masked, which folders agents may read |
+| `agent-jvm.properties` | Settings → Agents → Running JVMs: what agents may do to a running JVM |
+| `heap-dumps/` | Heap dumps agents took (they stay until you remove them) |
 | `agent.log` | Each call coding agents and the assistant made (never the answers) |
 | `chat/` | The [assistant](assistant.md)'s chats (`chats.duckdb`), its settings (who answers, model, the copilot and claude programs: `settings.properties`; where it opens and what it's told: `assistant.properties`), and your own instructions for it (`instructions.md`). Copilot keeps its own sessions in `~/.copilot`, Claude Code in `~/.claude`; `chat/claude-work` is the folder Claude Code works in |
 | `logs.json` | Log Locations for Agents: your services, their log folders and what each file holds |
@@ -128,7 +130,7 @@ Which numbers in messages the [Metrics tab](metrics.md#which-numbers-count) char
 
 ## Agents
 
-How to let a coding agent such as GitHub Copilot ask Logsift about your logs, what is masked in its answers, and which folders it may read. See [Coding agents](agents.md).
+How to let a coding agent such as GitHub Copilot ask Logsift about your logs, what is masked in its answers, which folders it may read, and what it may do to a running JVM (thread dumps, heap histograms, heap dumps). See [Coding agents](agents.md) and [Running JVMs](agents.md#running-jvms).
 
 ## Assistant
 

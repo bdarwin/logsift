@@ -127,7 +127,7 @@ public final class Skill {
                 b.append("  - Notes: ").append(sv.notes().replace('\n', ' ')).append('\n');
             }
             if (!sv.jvms().isEmpty()) {
-                b.append("  - JVMs (thread_dump, heap_histogram): ").append(String.join(", ",
+                b.append("  - JVMs (thread_dump, heap_histogram, heap_dump): ").append(String.join(", ",
                         sv.jvms().stream().map(LogCatalog.JvmPlace::label).toList())).append('\n');
             }
             if (e.project()) {

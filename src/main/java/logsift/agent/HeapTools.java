@@ -14,7 +14,7 @@ import logsift.heap.HeapFindings;
  * Heap dump files (.hprof) for agents, explained as the Heap Dump tab explains them: what fills
  * the memory and what keeps it alive, memory spent for nothing, the biggest classes. Only the
  * explanation goes back, never the objects' values (strings in the waste are cut short and masked
- * like any answer). Logsift never takes a heap dump itself.
+ * like any answer). heap_dump takes one, as the person allows.
  */
 public final class HeapTools {
     private HeapTools() {}
@@ -41,7 +41,7 @@ public final class HeapTools {
                     + "SessionCache.CACHE holds 1.2 GB: mostly 20,000 sessions\") with the chain of references that keeps "
                     + "it alive, memory that isn't strongly reachable, memory spent on copies of the same strings and "
                     + "empty collections, and the classes with the most memory. A big dump takes a while to read: call "
-                    + "again when told. Logsift never takes a heap dump; heap_histogram looks at a running JVM.",
+                    + "again when told. heap_dump takes one of a running JVM (always asked); heap_histogram is quicker.",
             new Tool.Schema().string("path", "The heap dump's path (.hprof).", true)
                     .integer("classes", "How many of the biggest classes to list (default 12).", false)
                     .integer("max_chars", "Longest answer (default 24000).", false).build(),

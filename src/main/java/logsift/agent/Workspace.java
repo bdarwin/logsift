@@ -60,19 +60,18 @@ public final class Workspace implements AutoCloseable {
          */
         void allow(String what, Path where) throws Tool.Failure, InterruptedException;
 
-        /**
-         * Something that touches a running program (a thread dump, a heap histogram): always asked.
-         *
-         * @param key    what "for this chat" allows again without asking
-         * @param detail what it does to the program, for the person
-         */
         /** A web address to download (asked as a file is: the person didn't open it). */
         default void allowUrl(String what, String url) throws Tool.Failure, InterruptedException {
         }
 
+        /**
+         * Something that touches a running program (a thread dump, a heap histogram, a heap dump).
+         *
+         * @param key    what "for this chat" allows again without asking; null: asked every time
+         * @param detail what it does to the program, for the person
+         */
         default void approve(String what, String key, String detail) throws Tool.Failure, InterruptedException {
-            throw new Tool.Failure("This needs the person's OK, and they can't be asked here: " + what
-                    + ". Ask them to use Logsift's assistant, or Logsift's window.");
+            throw new Tool.Failure(CANT_ASK + what + ".");
         }
     }
 
@@ -87,14 +86,50 @@ public final class Workspace implements AutoCloseable {
         gate = g;
     }
 
+    /** Said when nobody can be asked. */
+    public static final String CANT_ASK = "This needs the person's OK, and they can't be asked here (their agent "
+            + "can't show Logsift's question, and Logsift's window isn't open): ask them to open Logsift, which then "
+            + "asks in its window, and try again. Not done: ";
+
+    /** Where the person sets what agents may do to a running JVM. */
+    public static final String JVM_SETTING = "Settings → Agents → Running JVMs";
+
     /** Asks the person's OK for something that touches a running program; a no is a {@link Tool.Failure}. */
     public void approve(String what, String key, String detail) throws Tool.Failure, InterruptedException {
         Gate g = gate;
         if (g == null) {
-            throw new Tool.Failure("This needs the person's OK, and they can't be asked here: " + what
-                    + ". Ask them to use Logsift's assistant, or Logsift's window.");
+            throw new Tool.Failure(CANT_ASK + what + ".");
         }
         g.approve(what, key, detail);
+    }
+
+    /**
+     * As the person's rules for agents say ({@link JvmRules}): asked (a heap dump each time),
+     * allowed, or refused.
+     */
+    public void approve(JvmRules.Action action, String what, String key, String detail)
+            throws Tool.Failure, InterruptedException {
+        JvmRules r = rules();
+        switch (r.rule(action)) {
+            case NEVER -> throw new Tool.Failure("The person doesn't let agents " + action.words() + " (" + JVM_SETTING
+                    + "). Not done: " + what + ". Don't ask again; work from the logs.");
+            case ALLOW -> {
+                // allowed without asking: the agent log still lists the call
+            }
+            case ASK -> approve(what, action == JvmRules.Action.HEAP_DUMP ? null : key, detail);
+        }
+    }
+
+    /** What agents may do to running JVMs, as set now. */
+    public JvmRules rules() {
+        return JvmRules.load(logsift.core.CacheSettings.home());
+    }
+
+    /** Files Logsift wrote for the agent (a heap dump it took): read without asking. */
+    private final java.util.Set<Path> made = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public void made(Path p) {
+        made.add(p.toAbsolutePath().normalize());
     }
 
     private JvmReach jvms;
@@ -136,8 +171,8 @@ public final class Workspace implements AutoCloseable {
      * @param what what the tool would do, for the question: "open", "search the folder", "compare"
      */
     public Path check(Path p, String what) throws java.io.IOException, Tool.Failure, InterruptedException {
-        if (fetched.containsValue(p.toAbsolutePath().normalize())) {
-            return p.toAbsolutePath().normalize(); // downloaded for this session, in Logsift's own folder
+        if (fetched.containsValue(p.toAbsolutePath().normalize()) || made.contains(p.toAbsolutePath().normalize())) {
+            return p.toAbsolutePath().normalize(); // downloaded or written for this session, in Logsift's own folder
         }
         Path real = options.scope().check(p);
         Gate g = gate;

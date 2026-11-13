@@ -243,6 +243,38 @@ class McpServerTest {
     }
 
     @Test
+    void anAgentThatCantAskHasLogsiftsWindowAsk() throws Exception {
+        request("initialize", Map.of("protocolVersion", "2025-06-18", "capabilities", Map.of(),
+                "clientInfo", Map.of("name", "GitHub Copilot", "version", "1.2")));
+        jvmService();
+        List<List<String>> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
+        int[] answer = {2}; // Deny
+        logsift.core.SingleInstance window = logsift.core.SingleInstance.listen(logsift.core.CacheSettings.home(),
+                paths -> { }, (cmd, reply) -> {
+                    asked.add(cmd);
+                    reply.accept(answer[0]);
+                });
+        try {
+            Map<String, Object> r = request("tools/call", Map.of("name", "thread_dump", "arguments", Map.of("jvm", "orders")));
+            assertTrue(String.valueOf(map(r.get("result")).get("content")).contains("The person said no to: take a thread "
+                    + "dump of logsift.jvm.FixtureApp on this computer"), r.toString());
+            assertEquals(List.of(McpServer.ASK, "GitHub Copilot 1.2", "take a thread dump of logsift.jvm.FixtureApp on "
+                    + "this computer"), asked.get(0).subList(0, 3));
+            assertEquals("session", asked.get(0).get(4), "a thread dump may be allowed for the session");
+            answer[0] = 3; // Allow for This Session: past the question (no such JVM runs in this test)
+            r = request("tools/call", Map.of("name", "thread_dump", "arguments", Map.of("jvm", "orders")));
+            assertTrue(String.valueOf(map(r.get("result")).get("content")).contains("isn't running on this computer"),
+                    r.toString());
+            r = request("tools/call", Map.of("name", "thread_dump", "arguments", Map.of("jvm", "orders")));
+            assertTrue(String.valueOf(map(r.get("result")).get("content")).contains("isn't running on this computer"),
+                    r.toString());
+            assertEquals(2, asked.size(), "not asked again this session");
+        } finally {
+            window.close();
+        }
+    }
+
+    @Test
     void aThreadDumpIsRefusedWhenNobodyCanBeAsked() throws Exception {
         request("initialize", Map.of("protocolVersion", "2025-06-18", "capabilities", Map.of()));
         jvmService();
@@ -256,8 +288,8 @@ class McpServerTest {
         assertEquals(List.of("list_logs", "open_log", "list_open", "insights", "exceptions", "search", "read_lines",
                 "top_messages", "metrics", "query", "query_examples", "pivot", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
                 "merge_logs", "analyze_profile", "compare_files", "compare_folders", "compare_logs", "analyze_crash",
-                "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram", "analyze_heap_dump",
-                "network_check"),
+                "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram", "heap_dump",
+                "analyze_heap_dump", "network_check"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
             Map<String, Object> d = map(t);

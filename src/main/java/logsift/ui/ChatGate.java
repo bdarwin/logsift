@@ -115,7 +115,7 @@ final class ChatGate extends JPanel {
 
             @Override
             public void approve(String what, String key, String detail) throws Tool.Failure, InterruptedException {
-                // a running program: always asked, whatever the setting for files
+                // a running program: always asked, whatever the setting for files (a null key: not for the chat)
                 ask(what, what, key, who.get() + " wants to " + what + ".", detail,
                         "Don't ask again for it in this answer; say what it would have shown, or work from the logs.");
             }
@@ -154,7 +154,7 @@ final class ChatGate extends JPanel {
     void ask(String what, String where, String key, String question, String shown, String instead)
             throws Tool.Failure, InterruptedException {
         String id = chatId.get();
-        Set<String> ok = id == null ? Set.of() : allowed.getOrDefault(id, Set.of());
+        Set<String> ok = id == null || key == null ? Set.of() : allowed.getOrDefault(id, Set.of());
         for (String k : ok) {
             if (key.equals(k) || key.startsWith(k + "/") || key.startsWith(k + "\\")) {
                 return; // the same, or in a folder allowed
@@ -168,7 +168,7 @@ final class ChatGate extends JPanel {
             }
             pending = f;
         }
-        SwingUtilities.invokeLater(() -> show(question, shown));
+        SwingUtilities.invokeLater(() -> show(question, shown, key != null));
         Answer a;
         try {
             a = f.get();
@@ -188,7 +188,7 @@ final class ChatGate extends JPanel {
             }
             case ONCE -> note.accept("You allowed: " + what + ".");
             case CHAT -> {
-                if (id != null) {
+                if (id != null && key != null) {
                     allowed.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet()).add(key);
                 }
                 note.accept("You allowed for this chat: " + what + ".");
@@ -196,7 +196,8 @@ final class ChatGate extends JPanel {
         }
     }
 
-    private void show(String question, String shown) {
+    private void show(String question, String shown, boolean forChat) {
+        chat.setVisible(forChat);
         text.setText(question);
         detail.setText(shown == null ? "" : shown);
         detail.setVisible(shown != null && !shown.isEmpty());
@@ -246,6 +247,10 @@ final class ChatGate extends JPanel {
 
     String textForTest() {
         return text.getText() + "\n" + detail.getText();
+    }
+
+    boolean chatButtonShownForTest() {
+        return chat.isVisible();
     }
 
     void answerForTest(Answer a) {

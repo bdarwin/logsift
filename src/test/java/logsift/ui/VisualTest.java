@@ -10806,7 +10806,7 @@ class VisualTest {
         assertTrue(preview.contains("orders — Order service: takes orders from the shop and charges cards"), preview);
         assertTrue(preview.contains("orders/app: app.log — Application log: one line per order"), preview);
         assertTrue(preview.contains("Times in its logs: UTC"), preview);
-        assertTrue(preview.contains("JVMs (thread_dump, heap_histogram): orders.jar on deploy@prod-7 (SSH), "
+        assertTrue(preview.contains("JVMs (thread_dump, heap_histogram, heap_dump): orders.jar on deploy@prod-7 (SSH), "
                 + "orders.jar on prod-7:9010 (JMX)"), preview);
         settle();
         shotOf(d.getRootPane(), "114-log-locations");
@@ -12049,17 +12049,76 @@ class VisualTest {
                 return null;
             });
             assertTrue(Files.readString(props).contains("mask.off=true"), Files.readString(props));
+            // Running JVMs: what an agent may do, saved for logsift-mcp and the assistant
+            Path jvmRules = logsift.agent.JvmRules.file(AppState.home());
+            javax.swing.JComboBox<String> histo = onEdt(() -> ap.jvmBoxForTest(logsift.agent.JvmRules.Action.HISTOGRAM));
+            javax.swing.JComboBox<String> heap = onEdt(() -> ap.jvmBoxForTest(logsift.agent.JvmRules.Action.HEAP_DUMP));
+            assertEquals(List.of("Ask each time", "Never"), onEdt(() -> java.util.stream.IntStream.range(0, heap.getItemCount())
+                    .mapToObj(heap::getItemAt).toList()), "a heap dump is never allowed without asking");
+            onEdt(() -> {
+                histo.setSelectedIndex(1); // Allow without asking
+                ap.maxHeapForTest().setValue(16);
+                heap.scrollRectToVisible(new java.awt.Rectangle(0, 0, heap.getWidth(), heap.getHeight() + 60));
+                return null;
+            });
+            logsift.agent.JvmRules saved2 = logsift.agent.JvmRules.load(AppState.home());
+            assertEquals(logsift.agent.JvmRules.Rule.ALLOW, saved2.histogram());
+            assertEquals(logsift.agent.JvmRules.Rule.ASK, saved2.heapDump());
+            assertEquals(16, saved2.maxHeapGb());
+            settle();
+            shotOf(sd.getRootPane(), "80c-settings-agents-jvms");
+            onEdt(() -> {
+                heap.setSelectedIndex(1);
+                return null;
+            });
+            assertEquals(logsift.agent.JvmRules.Rule.NEVER, logsift.agent.JvmRules.load(AppState.home()).heapDump());
+            Files.deleteIfExists(jvmRules);
             onEdt(() -> {
                 ap.secretsBox().doClick();
                 sd.dispose();
                 return null;
             });
+
+            // an agent outside Logsift that can't ask its person: Logsift asks in its window
+            List<Integer> answers = new java.util.concurrent.CopyOnWriteArrayList<>();
+            AgentAsk heapAsk = onEdt(() -> {
+                AgentAsk a = new AgentAsk(frame, "GitHub Copilot 1.2", "take a heap dump of orders.jar (pid 4242) on "
+                        + "prod-7 (about 2.1 GB)", "The JVM runs a full GC, then pauses while the dump is written "
+                        + "(several seconds per GB). Written on its machine, then copied to ~/.logsift/heap-dumps.",
+                        false, answers::add);
+                a.ask();
+                return a;
+            });
+            settle();
+            assertFalse(onEdt(() -> heapAsk.session.isShowing()), "a heap dump: asked each time");
+            assertTrue(onEdt(() -> heapAsk.allow.isShowing() && heapAsk.deny.isShowing()));
+            shotOf(heapAsk.getRootPane(), "80d-agent-asks");
+            onEdt(() -> {
+                heapAsk.deny.doClick();
+                return null;
+            });
+            assertEquals(List.of(AgentAsk.DENY), answers);
+            assertFalse(onEdt(heapAsk::isDisplayable), "gone once answered");
+            AgentAsk dumpAsk = onEdt(() -> {
+                AgentAsk a = new AgentAsk(frame, "GitHub Copilot 1.2", "take a thread dump of orders.jar", "", true,
+                        answers::add);
+                a.ask();
+                return a;
+            });
+            assertTrue(onEdt(() -> dumpAsk.session.isShowing()), "a thread dump: for the session too");
+            onEdt(() -> {
+                dumpAsk.session.doClick();
+                dumpAsk.deny.doClick(); // answered once only
+                return null;
+            });
+            assertEquals(List.of(AgentAsk.DENY, AgentAsk.SESSION), answers);
             assertTrue(logsift.agent.AgentSettings.load(AppState.home()).masking().custom().isEmpty());
             assertTrue(logsift.agent.AgentSettings.load(AppState.home()).masking().secrets(), "back on");
         } finally {
             System.clearProperty("logsift.mcpLauncher");
             System.clearProperty("logsift.skillsDir");
             Files.deleteIfExists(props);
+            Files.deleteIfExists(logsift.agent.JvmRules.file(AppState.home()));
         }
     }
 

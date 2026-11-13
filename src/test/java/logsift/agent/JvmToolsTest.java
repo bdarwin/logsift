@@ -1,6 +1,7 @@
 package logsift.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -28,6 +29,7 @@ class JvmToolsTest {
     Path dir;
     Workspace w;
     final List<String> asked = new ArrayList<>();
+    final List<String> keys = new ArrayList<>();
 
     @BeforeAll
     static void startApp() throws Exception {
@@ -56,8 +58,13 @@ class JvmToolsTest {
     }
 
     @AfterEach
-    void stop() {
+    void stop() throws Exception {
         w.close();
+        java.nio.file.Files.deleteIfExists(JvmRules.file(logsift.core.CacheSettings.home()));
+    }
+
+    private static void rules(JvmRules r) throws Exception {
+        r.save(logsift.core.CacheSettings.home());
     }
 
     private String call(Tool t, Map<String, Object> args) {
@@ -74,6 +81,7 @@ class JvmToolsTest {
             @Override
             public void approve(String what, String key, String detail) throws Tool.Failure {
                 asked.add(what);
+                keys.add(String.valueOf(key));
                 if (!yes) {
                     throw new Tool.Failure("The person said no to: " + what + ".");
                 }
@@ -107,7 +115,8 @@ class JvmToolsTest {
         String r = call(JvmTools.LIST_JVMS, Map.of("service", "orders"));
         assertTrue(r.startsWith("jvm:1  logsift.jvm.FixtureApp on this computer · service orders"), r);
         assertTrue(r.contains("jvm:2  logsift.jvm.FixtureApp on 127.0.0.1:" + port + " (JMX) · service orders"), r);
-        assertTrue(r.contains("each asks the person first"), r);
+        assertTrue(r.contains("as the person allows: thread dumps asked each time, histograms asked each time, heap dumps "
+                + "asked each time (heaps up to 8 GB)."), r);
     }
 
     @Test
@@ -140,8 +149,62 @@ class JvmToolsTest {
     }
 
     @Test
+    void whatThePersonSetsIsWhatAgentsMayDo() throws Exception {
+        saying(true);
+        rules(JvmRules.DEFAULT.with(JvmRules.Action.THREAD_DUMP, JvmRules.Rule.NEVER));
+        String never = call(JvmTools.THREAD_DUMP, Map.of("jvm", "jvm:1"));
+        assertTrue(never.startsWith("FAILED The person doesn't let agents take thread dumps (Settings → Agents → "
+                + "Running JVMs). Not done: take a thread dump of logsift.jvm.FixtureApp (pid " + app.pid()
+                + ") on this computer."), never);
+        assertTrue(asked.isEmpty(), "not asked: " + asked);
+        rules(JvmRules.DEFAULT.with(JvmRules.Action.HISTOGRAM, JvmRules.Rule.ALLOW));
+        String allowed = call(JvmTools.HEAP_HISTOGRAM, Map.of("jvm", "jvm:1", "top", 3));
+        assertTrue(allowed.contains("| class | objects | size |"), allowed);
+        assertTrue(asked.isEmpty(), "allowed without asking: " + asked);
+        String listed = call(JvmTools.LIST_JVMS, Map.of());
+        assertTrue(listed.contains("histograms allowed"), listed);
+        // a heap dump can't be allowed without asking: read back as asked
+        rules(JvmRules.DEFAULT.with(JvmRules.Action.HEAP_DUMP, JvmRules.Rule.ALLOW).withMaxHeapGb(0));
+        JvmRules back = JvmRules.load(logsift.core.CacheSettings.home());
+        assertEquals(JvmRules.Rule.ASK, back.heapDump());
+        assertEquals(1, back.maxHeapGb(), "at least 1 GB");
+    }
+
+    @Test
+    void aHeapDumpIsAskedEachTimeAndReadAfter() throws Exception {
+        saying(true);
+        String r = call(JvmTools.HEAP_DUMP, Map.of("jvm", "jvm:1"));
+        assertTrue(r.startsWith("Heap dump of logsift.jvm.FixtureApp (pid " + app.pid() + "): "), r);
+        Path file = Path.of(r.replaceAll("(?s)^Heap dump of [^:]+: (\\S+\\.hprof) .*", "$1"));
+        try {
+            assertTrue(java.nio.file.Files.size(file) > 1000, file.toString());
+            assertEquals(logsift.core.CacheSettings.home().resolve("heap-dumps"), file.getParent());
+            assertTrue(asked.get(0).matches("take a heap dump of logsift\\.jvm\\.FixtureApp \\(pid " + app.pid()
+                    + "\\) on this computer \\(about [0-9.]+ MB\\)"), asked.toString());
+            assertEquals(List.of("null"), keys, "no key: never allowed for the rest of a chat");
+            assertTrue(r.contains("analyze_heap_dump path=" + file), r);
+            // outside the agent's folders, but Logsift wrote it for the agent: read without asking
+            String explained = call(HeapTools.all().stream().filter(t -> t.name().equals("analyze_heap_dump")).findFirst()
+                    .orElseThrow(), Map.of("path", file.toString()));
+            assertFalse(explained.startsWith("FAILED"), explained);
+            call(JvmTools.HEAP_DUMP, Map.of("jvm", "jvm:1"));
+            assertEquals(2, asked.size(), "asked again: " + asked);
+        } finally {
+            try (var l = java.nio.file.Files.list(file.getParent())) {
+                for (Path f : l.toList()) {
+                    java.nio.file.Files.deleteIfExists(f);
+                }
+            }
+        }
+        rules(JvmRules.DEFAULT.with(JvmRules.Action.HEAP_DUMP, JvmRules.Rule.NEVER));
+        String never = call(JvmTools.HEAP_DUMP, Map.of("jvm", "jvm:1"));
+        assertTrue(never.startsWith("FAILED The person doesn't let agents take heap dumps"), never);
+        assertEquals(2, asked.size());
+    }
+
+    @Test
     void theAssistantIsToldWhereTheJvmsAre() {
         String text = Skill.locations(w.catalog(), null);
-        assertTrue(text.contains("JVMs (thread_dump, heap_histogram): logsift.jvm.FixtureApp on this computer"), text);
+        assertTrue(text.contains("JVMs (thread_dump, heap_histogram, heap_dump): logsift.jvm.FixtureApp on this computer"), text);
     }
 }

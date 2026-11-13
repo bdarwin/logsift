@@ -61,12 +61,13 @@ final class AgentsPanel extends JPanel {
         JLabel intro = new JLabel("<html>Coding agents such as <b>GitHub Copilot</b> can use Logsift: you ask in the "
                 + "agent's chat (<i>why is orders.log full of timeouts?</i>), the agent calls Logsift, and Logsift "
                 + "reads the logs, GC logs and thread dumps on this computer and answers with short summaries and "
-                + "line numbers. Agents can only read: they can't change files or touch a running service.<br><br>"
+                + "line numbers. Agents can only read: they can't change files, and look into a running JVM only as you "
+                + "allow below.<br><br>"
                 + "<b>What Logsift answers goes to the agent's AI provider</b>, under your agreement with them. "
                 + "Mask what must not leave this computer below.</html>");
         add(intro, BorderLayout.NORTH);
 
-        JPanel center = new JPanel();
+        JPanel center = new FitsWidth();
         center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
         center.add(setup());
         center.add(Box.createVerticalStrut(12));
@@ -75,6 +76,8 @@ final class AgentsPanel extends JPanel {
             center.add(Box.createVerticalStrut(12));
         }
         center.add(rules());
+        center.add(Box.createVerticalStrut(12));
+        center.add(jvms());
         add(new JScrollPane(center, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER) {
             {
@@ -329,7 +332,135 @@ final class AgentsPanel extends JPanel {
         return secrets;
     }
 
+    // ---------------------------------------------------------------- running JVMs
+
+    static final String[] ASK_ALLOW_NEVER = {"Ask each time", "Allow without asking", "Never"};
+    static final String[] ASK_NEVER = {"Ask each time", "Never"};
+    private final java.util.Map<logsift.agent.JvmRules.Action, javax.swing.JComboBox<String>> jvmBoxes =
+            new java.util.EnumMap<>(logsift.agent.JvmRules.Action.class);
+    private javax.swing.JSpinner maxHeap;
+
+    /** What agents may do to a running JVM: thread dumps, histograms, heap dumps, and how big a heap. */
+    private JPanel jvms() {
+        JPanel p = section("Running JVMs");
+        p.add(note("<div style='width:600px'>What an agent may do to a JVM you named in Log Locations (its JVMs) or "
+                + "one running here. Your agent's own chat asks when it can; otherwise Logsift asks in its window "
+                + "(open it first).</div>"));
+        p.add(Box.createVerticalStrut(6));
+        logsift.agent.JvmRules r = logsift.agent.JvmRules.load(AppState.home());
+        JPanel grid = new JPanel(new java.awt.GridBagLayout());
+        grid.setAlignmentX(LEFT_ALIGNMENT);
+        java.awt.GridBagConstraints l = new java.awt.GridBagConstraints();
+        l.gridx = 0;
+        l.anchor = java.awt.GridBagConstraints.WEST;
+        l.insets = new java.awt.Insets(3, 0, 3, 12);
+        java.awt.GridBagConstraints f = new java.awt.GridBagConstraints();
+        f.gridx = 1;
+        f.anchor = java.awt.GridBagConstraints.WEST;
+        f.insets = new java.awt.Insets(3, 0, 3, 12);
+        java.awt.GridBagConstraints n = new java.awt.GridBagConstraints();
+        n.gridx = 2;
+        n.anchor = java.awt.GridBagConstraints.WEST;
+        n.weightx = 1;
+        n.insets = new java.awt.Insets(3, 0, 3, 0);
+        Object[][] rows = {
+            {logsift.agent.JvmRules.Action.THREAD_DUMP, "Thread dumps", "The JVM pauses for a moment."},
+            {logsift.agent.JvmRules.Action.HISTOGRAM, "Heap histograms", "Objects counted by class, without a full "
+                    + "GC; about a second's pause per GB."},
+            {logsift.agent.JvmRules.Action.HEAP_DUMP, "Heap dumps", "A full GC, then seconds per GB. Saved in "
+                    + tilde(AppState.home().resolve("heap-dumps")) + "."},
+        };
+        for (Object[] row : rows) {
+            logsift.agent.JvmRules.Action a = (logsift.agent.JvmRules.Action) row[0];
+            String[] choices = a == logsift.agent.JvmRules.Action.HEAP_DUMP ? ASK_NEVER : ASK_ALLOW_NEVER;
+            javax.swing.JComboBox<String> box = new javax.swing.JComboBox<>(choices);
+            box.setName("jvm." + a.name());
+            logsift.agent.JvmRules.Rule now = r.rule(a);
+            box.setSelectedIndex(now == logsift.agent.JvmRules.Rule.NEVER ? choices.length - 1
+                    : now == logsift.agent.JvmRules.Rule.ALLOW ? 1 : 0);
+            box.addActionListener(e -> saveJvms());
+            jvmBoxes.put(a, box);
+            grid.add(new JLabel((String) row[1]), l);
+            grid.add(box, f);
+            JLabel help = new JLabel("<html>" + row[2] + "</html>");
+            help.setForeground(Theme.uiColor("Label.disabledForeground", java.awt.Color.GRAY));
+            grid.add(help, n);
+        }
+        maxHeap = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(r.maxHeapGb(), 1, 1024, 1));
+        maxHeap.setName("jvm.maxHeapGb");
+        maxHeap.addChangeListener(e -> saveJvms());
+        JPanel heapRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        heapRow.add(maxHeap);
+        heapRow.add(Box.createHorizontalStrut(6));
+        heapRow.add(new JLabel("GB in use"));
+        grid.add(new JLabel("Largest heap"), l);
+        grid.add(heapRow, f);
+        JLabel heapHelp = new JLabel("<html>Bigger heaps are refused for histograms and heap dumps.</html>");
+        heapHelp.setForeground(Theme.uiColor("Label.disabledForeground", java.awt.Color.GRAY));
+        grid.add(heapHelp, n);
+        p.add(grid);
+        return p;
+    }
+
+    /** A path under the home folder as ~/… */
+    private static String tilde(Path p) {
+        String home = System.getProperty("user.home");
+        String s = p.toString();
+        return home != null && s.startsWith(home + java.io.File.separator) ? "~" + s.substring(home.length()) : s;
+    }
+
+    private void saveJvms() {
+        logsift.agent.JvmRules r = logsift.agent.JvmRules.DEFAULT.withMaxHeapGb((Integer) maxHeap.getValue());
+        for (var e : jvmBoxes.entrySet()) {
+            int i = e.getValue().getSelectedIndex();
+            boolean last = i == e.getValue().getItemCount() - 1;
+            r = r.with(e.getKey(), last ? logsift.agent.JvmRules.Rule.NEVER
+                    : i == 1 ? logsift.agent.JvmRules.Rule.ALLOW : logsift.agent.JvmRules.Rule.ASK);
+        }
+        try {
+            r.save(AppState.home());
+        } catch (IOException e) {
+            saveError.setText("Can't save " + logsift.agent.JvmRules.file(AppState.home()) + ": " + e.getMessage());
+        }
+    }
+
+    javax.swing.JComboBox<String> jvmBoxForTest(logsift.agent.JvmRules.Action a) {
+        return jvmBoxes.get(a);
+    }
+
+    javax.swing.JSpinner maxHeapForTest() {
+        return maxHeap;
+    }
+
     // ---------------------------------------------------------------- layout
+
+    /** As wide as the tab, never wider: buttons at the right stay in view. */
+    private static final class FitsWidth extends JPanel implements javax.swing.Scrollable {
+        @Override
+        public java.awt.Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(java.awt.Rectangle r, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(java.awt.Rectangle r, int orientation, int direction) {
+            return Math.max(16, r.height - 32);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
+    }
 
     private static JPanel section(String title) {
         JPanel p = new JPanel();

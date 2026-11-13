@@ -219,7 +219,7 @@ public final class LogTools {
                 b.append("  Times in its logs: ").append(s.timeZone()).append('\n');
             }
             if (!s.jvms().isEmpty()) {
-                b.append("  JVMs (thread_dump, heap_histogram): ").append(String.join(", ",
+                b.append("  JVMs (thread_dump, heap_histogram, heap_dump): ").append(String.join(", ",
                         s.jvms().stream().map(LogCatalog.JvmPlace::label).toList())).append('\n');
             }
             if (!s.notes().isEmpty()) {

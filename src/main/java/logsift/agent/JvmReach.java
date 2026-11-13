@@ -64,8 +64,28 @@ public class JvmReach implements AutoCloseable {
 
         boolean isOpen();
 
+        /**
+         * Writes a heap dump to {@code local} (copied from the JVM's machine when it's another).
+         *
+         * @return a note for the person (where a copy stays), or null; {@code local} isn't written
+         *         when the dump can only stay on the JVM's machine (JMX), and the note says where
+         */
+        default String heapDump(Path local) throws IOException {
+            throw new IOException("Heap dumps can't be taken here.");
+        }
+
         @Override
         void close();
+    }
+
+    /** A heap dump through the Heap tab's own way of taking one. */
+    static String heapDump(logsift.jvm.Profiler.Target t, Path local) throws IOException {
+        try {
+            return t.heapDump(local, f -> { }, () -> Thread.currentThread().isInterrupted());
+        } catch (logsift.jvm.JmxJvms.DumpOnServer e) {
+            return "The heap dump was written on " + e.host() + " at " + e.path() + ", and stays there (over JMX it "
+                    + "can't be copied, and Logsift doesn't remove files on a server). Copy it over to read it.";
+        }
     }
 
     protected final Workspace w;
@@ -166,6 +186,7 @@ public class JvmReach implements AutoCloseable {
         }
         LocalJvms.Session s = LocalJvms.attach(proc.pid(), "");
         long pid = proc.pid();
+        JvmProcess running = proc;
         String label = proc.name() + " (pid " + pid + ")";
         return new Target() {
             @Override
@@ -181,6 +202,11 @@ public class JvmReach implements AutoCloseable {
             @Override
             public String diagnostic(String command, String... args) throws IOException {
                 return s.diagnostic(command, args);
+            }
+
+            @Override
+            public String heapDump(Path local) throws IOException {
+                return JvmReach.heapDump(logsift.jvm.Profiler.local(running, s), local);
             }
 
             @Override
@@ -235,6 +261,11 @@ public class JvmReach implements AutoCloseable {
             }
 
             @Override
+            public String heapDump(Path local) throws IOException {
+                return JvmReach.heapDump(logsift.jvm.Profiler.remote(running, conn, o), local);
+            }
+
+            @Override
             public boolean isOpen() {
                 return conn.isConnected();
             }
@@ -263,6 +294,11 @@ public class JvmReach implements AutoCloseable {
             @Override
             public String diagnostic(String command, String... args) throws IOException {
                 return s.diagnostic(command, args);
+            }
+
+            @Override
+            public String heapDump(Path local) throws IOException {
+                return JvmReach.heapDump(logsift.jvm.Profiler.jmx(s), local);
             }
 
             @Override

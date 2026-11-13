@@ -104,6 +104,18 @@ public final class LogsiftApp {
                                 t.start();
                                 return;
                             }
+                            if (cmd.size() == 5 && cmd.get(0).equals(logsift.agent.mcp.McpServer.ASK)) {
+                                // an agent outside Logsift wants to touch a running JVM, and can't ask its person
+                                SwingUtilities.invokeLater(() -> {
+                                    if (frame == null || !frame.isDisplayable()) {
+                                        reply.accept(1);
+                                        return;
+                                    }
+                                    new AgentAsk(frame, cmd.get(1), cmd.get(2), cmd.get(3), cmd.get(4).equals("session"),
+                                            reply).ask();
+                                });
+                                return;
+                            }
                             SwingUtilities.invokeLater(() -> runTool(cmd, reply));
                         });
                 Runtime.getRuntime().addShutdownHook(new Thread(si::close));

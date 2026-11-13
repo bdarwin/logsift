@@ -201,7 +201,8 @@ The file is plain JSON, if you prefer to write it by hand:
 | **crash_modules** | The DLLs or shared libraries loaded in the crashed process, with versions and paths |
 | **list_jvms** | The JVMs to look into: where you said each service's JVM runs (**Its JVMs**), and those running on this computer, each with a handle (`jvm:1`) |
 | **thread_dump** | A thread dump of a running JVM, **after you say yes**: its threads by state, deadlocks, who blocks whom, the biggest groups doing the same. The whole dump becomes a log to read |
-| **heap_histogram** | A running JVM's objects counted by class, **after you say yes**, without a full GC: what takes the memory. Refused on a heap over 8 GB. Never a heap dump |
+| **heap_histogram** | A running JVM's objects counted by class, **as you allow** (asked by default), without a full GC: what takes the memory. Refused on a heap bigger than you allow (8 GB) |
+| **heap_dump** | A heap dump (`.hprof`) of a running JVM, **asked every time** (or never, as you choose), saved in `~/.logsift/heap-dumps` for `analyze_heap_dump`. Refused on a heap bigger than you allow, or without room for it |
 | **analyze_heap_dump** | Explains a heap dump file (`.hprof`) as the [Heap Dump tab](heap.md) does: what fills the memory in sentences, the chain of references that keeps it alive, memory that isn't strongly reachable or is wasted on copies and empty collections, the biggest classes. A big dump takes a while: the agent is told to ask again. Logsift reads dumps you have; it never takes one |
 | **network_check** | How Logsift reaches the internet: its proxy setting (automatic, manual or none), the proxy GitHub and a web address go through, and with `test` whether GitHub can be reached. For when opening a log from a web address fails |
 | **assistant_audit** | The questions asked to Logsift's own [assistant](assistant.md#the-audit-what-goes-wrong-and-whats-wasted), newest first. For each one: what answering it took (the model, its calls, each tool with its arguments and the size of its answer, the tokens, the time and the cost), what was flagged (failed tools, the same call again, big tool answers, broken links, answers rated bad) and your note. Use it to find what to change. When Logsift is running, it answers this itself |
@@ -227,10 +228,33 @@ Logsift also offers tasks that tell the agent how to go about a job, step by ste
 
 They come with `logsift-mcp`, so there's nothing else to install. Agents without prompts still get the same guidance when they connect.
 
+## Running JVMs
+
+![Settings → Agents → Running JVMs: what an agent may do to a running JVM](../screenshots/agents-jvms.png)
+
+An agent can look into a JVM you named in [Log Locations](#where-your-logs-are) (**Its JVMs**) or one running on this computer. **Settings → Agents → Running JVMs** sets what it may do. The assistant and coding agents follow the same settings:
+
+| | Choices | What it does to the JVM |
+|---|---|---|
+| **Thread dumps** | Ask each time (default), Allow without asking, Never | A pause of a moment |
+| **Heap histograms** | Ask each time (default), Allow without asking, Never | Objects counted by class, without a full GC: about a second's pause per GB of heap |
+| **Heap dumps** | Ask each time (default), Never | A full GC, then a pause of several seconds per GB while the dump is written. Saved in `~/.logsift/heap-dumps` (from a server over SSH it's copied there, and the server's copy stays where it was written; over JMX it stays on the server, and Logsift says where). Logsift checks first that there's room for it. `analyze_heap_dump` then explains it |
+| **Largest heap** | 8 GB | Histograms and heap dumps of a bigger heap are refused: the pause would be too long. Take them yourself in the [Heap tab](heap.md) |
+
+A heap dump is asked for every time; **Allow for This Chat** (or **for This Session**) isn't offered for it.
+
+**Who asks you:**
+
+- **The assistant:** above its box, as for files.
+- **An agent whose app can show Logsift's question** (MCP elicitation, as in VS Code): in that app.
+- **Any other agent** (one that can't show it): Logsift's window asks, in front of your other windows. Choose **Allow**, **Allow for This Session** (not for heap dumps) or **Deny**. No answer in five minutes counts as a no. If Logsift isn't open, the agent is told to ask you to open it.
+
+![Logsift's window asks when the agent can't](../screenshots/agent-asks.png)
+
 ## What it can't do
 
 - Change, move or delete any file.
-- Run commands, or connect to servers by itself. A thread dump or a heap histogram happens only after you say yes: in the assistant, on its question above the box; for an agent whose app can ask you (MCP elicitation), in that app. Otherwise it's refused. Over SSH it signs in with your key and a server you already trust; the assistant asks for anything missing. Never a heap dump, never a profiler.
+- Run commands, or connect to servers by itself. A thread dump, heap histogram or heap dump happens only as you allow under [Running JVMs](#running-jvms). Over SSH it signs in with your key and a server you already trust; the assistant asks for anything missing. Never a profiler.
 - Read outside your home folder, or outside the folders listed under **Folders agents may read**. The current folder also counts when it is outside your home folder.
 - Read files that hold keys or passwords, even through a link:
   - `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`;
