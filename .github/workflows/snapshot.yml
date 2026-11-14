@@ -375,7 +375,10 @@ jobs:
           Start-Sleep -Seconds 2
           $running = @(Get-Process Logsift -ErrorAction SilentlyContinue)
           Write-Host "Logsift windows: $($running.Count)"
-          if ($running.Count -ne 1) { throw "expected one Logsift, found $($running.Count)" }
+          if ($running.Count -ne 1) {
+            $running | ForEach-Object { Write-Host "  pid $($_.Id) started $($_.StartTime.ToString('HH:mm:ss.fff')) window '$($_.MainWindowTitle)'" }
+            throw "expected one Logsift, found $($running.Count)"
+          }
           if ((Get-Content $did | Where-Object { $_ -like 'compare*' }).Count -ne 1) { Get-Content $did; throw "more than one comparison" }
           $running | Stop-Process -Force
           Start-Sleep -Seconds 1

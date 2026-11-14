@@ -95,7 +95,10 @@ public final class LogsiftApp {
                         r -> SwingUtilities.invokeLater(() -> handle(r)), LogsiftApp::instanceCommand,
                         java.time.Duration.ofSeconds(20));
                 if (si == null) {
-                    return; // the running Logsift took the files
+                    // the running Logsift took the files: end now (the launcher's splash screen
+                    // would otherwise keep this process, and its splash, alive)
+                    System.exit(0);
+                    return;
                 }
                 Runtime.getRuntime().addShutdownHook(new Thread(si::close));
             } catch (IOException e) {

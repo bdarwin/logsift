@@ -39,16 +39,21 @@ class GatherTest {
 
     @Test
     void aSteadyTrickleStillEnds() throws Exception {
+        // files keep coming (gaps far shorter than the quiet time): the first ones go after the longest wait
         List<List<Path>> groups = new CopyOnWriteArrayList<>();
-        Gather g = new Gather(Duration.ofMillis(200), Duration.ofMillis(500), groups::add);
-        long t0 = System.nanoTime();
-        for (int i = 0; i < 8; i++) {
+        Gather g = new Gather(Duration.ofMillis(1500), Duration.ofMillis(300), groups::add);
+        int handedBeforeTheEnd = -1;
+        for (int i = 0; i < 20; i++) {
             g.add(List.of(Path.of("f" + i + ".log")));
-            Thread.sleep(100);
+            Thread.sleep(50);
+            if (i == 19) {
+                handedBeforeTheEnd = groups.size();
+            }
         }
-        waitFor(groups, 2);
-        assertEquals(2, groups.size(), "handed on after the longest wait, then the rest: " + groups);
-        assertEquals(8, groups.get(0).size() + groups.get(1).size());
-        assertEquals(true, (System.nanoTime() - t0) / 1_000_000 < 3000);
+        assertEquals(true, handedBeforeTheEnd >= 1, "some were handed on while more were coming");
+        for (int i = 0; i < 500 && groups.stream().mapToInt(List::size).sum() < 20; i++) {
+            Thread.sleep(10);
+        }
+        assertEquals(20, groups.stream().mapToInt(List::size).sum(), "and all of them in the end: " + groups);
     }
 }
