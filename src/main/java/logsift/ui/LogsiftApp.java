@@ -97,6 +97,7 @@ public final class LogsiftApp {
                 if (si == null) {
                     // the running Logsift took the files: end now (the launcher's splash screen
                     // would otherwise keep this process, and its splash, alive)
+                    MainFrame.menuDid("handed over " + action + " (pid " + ProcessHandle.current().pid() + ")");
                     System.exit(0);
                     return;
                 }

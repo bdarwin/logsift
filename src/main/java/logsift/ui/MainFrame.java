@@ -273,7 +273,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
      * For the installer's test: with {@code -Dlogsift.menuLog=FILE}, what the right-click menu's
      * commands did is written there, a line each (the Windows build runs them as Explorer does).
      */
-    private static void menuDid(String what) {
+    static void menuDid(String what) {
         String f = System.getProperty("logsift.menuLog");
         if (f == null) {
             return;

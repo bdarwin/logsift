@@ -372,11 +372,15 @@ jobs:
           # Analyze on a GC log (a .log like any other): straight to the GC view
           Run-Menu '1analyze' (Join-Path $t 'service.log')
           Wait-Did 'analyze GC_LOG service.log'
-          Start-Sleep -Seconds 2
+          Start-Sleep -Seconds 5
           $running = @(Get-Process Logsift -ErrorAction SilentlyContinue)
+          Get-Content $did
           Write-Host "Logsift windows: $($running.Count)"
           if ($running.Count -ne 1) {
-            $running | ForEach-Object { Write-Host "  pid $($_.Id) started $($_.StartTime.ToString('HH:mm:ss.fff')) window '$($_.MainWindowTitle)'" }
+            $running | ForEach-Object {
+              $w = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)"
+              Write-Host "  pid $($_.Id) (parent $($w.ParentProcessId)) started $($_.StartTime.ToString('HH:mm:ss.fff')) window '$($_.MainWindowTitle)' threads $($_.Threads.Count): $($w.CommandLine)"
+            }
             throw "expected one Logsift, found $($running.Count)"
           }
           if ((Get-Content $did | Where-Object { $_ -like 'compare*' }).Count -ne 1) { Get-Content $did; throw "more than one comparison" }
