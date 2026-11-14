@@ -33,21 +33,21 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
 
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Unit tests
         run: ./gradlew --no-daemon test installDist distZip
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: reports-${{ matrix.target }}
           path: |
@@ -393,7 +393,7 @@ jobs:
           if (Test-Path -LiteralPath 'HKCU:\Software\Classes\*\shell\Logsift') { throw "the Logsift menu left behind after uninstall" }
           if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Directory\shell\Logsift') { throw "the folders' Logsift menu left behind after uninstall" }
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: dist/*
@@ -411,14 +411,14 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
 
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Visual tests (Linux, virtual display, 200 MB log)
         if: matrix.target == 'linux-x64'
@@ -435,7 +435,7 @@ jobs:
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: reports-visual-${{ matrix.target }}
           path: |
@@ -450,9 +450,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           path: dist
