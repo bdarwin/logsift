@@ -373,18 +373,22 @@ jobs:
           Run-Menu '1analyze' (Join-Path $t 'service.log')
           Wait-Did 'analyze GC_LOG service.log'
           Start-Sleep -Seconds 5
-          $running = @(Get-Process Logsift -ErrorAction SilentlyContinue)
           Get-Content $did
-          Write-Host "Logsift windows: $($running.Count)"
+          # the launcher (Logsift.exe) runs the app as its child and waits for it: one Logsift is two
+          # processes. Count the apps: Logsift processes that aren't another one's launcher.
+          $all = @(Get-Process Logsift -ErrorAction SilentlyContinue)
+          $parents = @($all | ForEach-Object { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").ParentProcessId })
+          $running = @($all | Where-Object { $parents -notcontains $_.Id })
+          Write-Host "Logsift apps: $($running.Count) ($($all.Count) processes)"
           if ($running.Count -ne 1) {
-            $running | ForEach-Object {
+            $all | ForEach-Object {
               $w = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)"
               Write-Host "  pid $($_.Id) (parent $($w.ParentProcessId)) started $($_.StartTime.ToString('HH:mm:ss.fff')) window '$($_.MainWindowTitle)' threads $($_.Threads.Count): $($w.CommandLine)"
             }
             throw "expected one Logsift, found $($running.Count)"
           }
           if ((Get-Content $did | Where-Object { $_ -like 'compare*' }).Count -ne 1) { Get-Content $did; throw "more than one comparison" }
-          $running | Stop-Process -Force
+          $all | Stop-Process -Force
           Start-Sleep -Seconds 1
           if (-not (Test-Path -LiteralPath 'HKCU:\Software\Classes\.log\OpenWithList\Logsift.exe')) { throw "not in Open with for .log" }
           $log = 'HKCU:\Software\Classes\.log'
