@@ -19,7 +19,11 @@ public final class LogsiftApp {
     private LogsiftApp() {}
 
     private static MainFrame frame;
-    private static final List<Path> pending = new ArrayList<>(); // files that arrive before the window
+    /** Files that arrive before the window, with what to do with them. */
+    private static final List<SingleInstance.Request> pending = new ArrayList<>();
+    /** Compare from Explorer arrives as a launch per file, a moment apart: the two are gathered. */
+    private static final logsift.core.Gather COMPARE = new logsift.core.Gather(java.time.Duration.ofMillis(1500),
+            java.time.Duration.ofSeconds(10), paths -> SwingUtilities.invokeLater(() -> frame.compareFromMenu(paths)));
 
     public static void main(String[] args) throws IOException {
         // an office's proxy, and signing in to it: before anything connects (updates, URLs)
@@ -28,6 +32,7 @@ public final class LogsiftApp {
         List<Path> files = new ArrayList<>();
         boolean stdin = false;
         List<String> tool = null; // diff or merge, for git
+        String action = SingleInstance.OPEN; // or what Explorer's or the Finder's Logsift menu asked
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
             if (a.equals("--diff") && i + 2 < args.length) {
@@ -42,6 +47,9 @@ public final class LogsiftApp {
             }
             switch (a) {
                 case "-", "--stdin" -> stdin = true;
+                case "--analyze" -> action = ANALYZE;
+                case "--compare" -> action = COMPARE_ACTION;
+                case "--search" -> action = SEARCH;
                 case "--version", "-v" -> {
                     System.out.println("Logsift " + Version.current());
                     return;
@@ -50,6 +58,12 @@ public final class LogsiftApp {
                     System.out.println("""
                             Usage: logsift [file...]        open log files
                                    command | logsift -      view another program's output as it is written
+                                   logsift --analyze file...
+                                                            each file in the view that explains it (GC log,
+                                                            thread dump, heap dump, crash, recording)
+                                   logsift --compare A [B]  compare two files or folders (Explorer sends one
+                                                            per launch: they are paired up)
+                                   logsift --search folder  search in a folder
                                    logsift --diff LEFT RIGHT
                                                             compare two files (waits until the comparison is closed)
                                    logsift --merge LOCAL REMOTE BASE MERGED
@@ -74,10 +88,11 @@ public final class LogsiftApp {
             }
         }
         List<String> toolCommand = tool;
+        String startAction = action;
         if (single && !stdin && toolCommand == null) { // a window for piped input (or git) stays separate
             try {
-                SingleInstance si = SingleInstance.openOrListen(AppState.home(), files,
-                        paths -> SwingUtilities.invokeLater(() -> open(paths)), LogsiftApp::instanceCommand,
+                SingleInstance si = SingleInstance.openOrListen(AppState.home(), action, files,
+                        r -> SwingUtilities.invokeLater(() -> handle(r)), LogsiftApp::instanceCommand,
                         java.time.Duration.ofSeconds(20));
                 if (si == null) {
                     return; // the running Logsift took the files
@@ -119,15 +134,14 @@ public final class LogsiftApp {
                 f.restoreSession(); // reopen what was open last time
             }
             if (!files.isEmpty()) {
-                f.openFiles(files);
+                handle(new SingleInstance.Request(startAction, files));
             }
             if (capture != null) {
                 f.openPiped(capture);
             }
-            if (!pending.isEmpty()) {
-                f.openFiles(List.copyOf(pending));
-                pending.clear();
-            }
+            List<SingleInstance.Request> early = List.copyOf(pending);
+            pending.clear();
+            early.forEach(LogsiftApp::handle);
             if (pendingTools.isEmpty() && capture == null) {
                 f.openAssistantAtStart(); // unless Settings → Assistant says not to
             }
@@ -181,12 +195,32 @@ public final class LogsiftApp {
         SwingUtilities.invokeLater(() -> runTool(cmd, reply));
     }
 
+    static final String ANALYZE = "analyze";
+    static final String COMPARE_ACTION = "compare";
+    static final String SEARCH = "search";
+
     /** Files from the system (double-click, Open With, the Dock) or a second launch. */
     private static void open(List<Path> paths) {
+        handle(new SingleInstance.Request(SingleInstance.OPEN, paths));
+    }
+
+    /** Files with what to do with them (open, or the right-click menu's Analyze, Compare, Search). */
+    private static void handle(SingleInstance.Request r) {
         if (frame == null) {
-            pending.addAll(paths);
-        } else {
-            frame.openFiles(paths);
+            pending.add(r);
+            return;
+        }
+        switch (r.action()) {
+            case ANALYZE -> frame.analyzeFiles(r.paths());
+            case COMPARE_ACTION -> {
+                if (r.paths().size() >= 2) {
+                    frame.compareFromMenu(r.paths()); // all in one launch (the Finder sends them together)
+                } else {
+                    COMPARE.add(r.paths());
+                }
+            }
+            case SEARCH -> frame.searchFromMenu(r.paths());
+            default -> frame.openFiles(r.paths());
         }
     }
 

@@ -243,11 +243,16 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
     public void openFiles(List<Path> files) {
         for (Path p : files) {
             if (Files.isDirectory(p)) {
-                openFolder(p); // a folder (Open with Logsift on a folder): its files, in a tab
+                openFolder(p); // a folder (Logsift > Open on a folder in Explorer): its files, in a tab
             } else {
                 openFile(p);
             }
         }
+        comeForward();
+    }
+
+    /** Brings the window to the front (files sent from Explorer, the Finder or another launch). */
+    private void comeForward() {
         if (getExtendedState() == ICONIFIED) {
             setExtendedState(NORMAL);
         }
@@ -256,6 +261,89 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         if (java.awt.Desktop.isDesktopSupported()
                 && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.APP_REQUEST_FOREGROUND)) {
             java.awt.Desktop.getDesktop().requestForeground(true);
+        }
+    }
+
+    // ---------------------------------------------------------------- Explorer's and the Finder's Logsift menu
+
+    /** For tests: what the last Analyze took each file for. */
+    volatile List<FileKind> analyzedForTest = List.of();
+
+    /**
+     * For the installer's test: with {@code -Dlogsift.menuLog=FILE}, what the right-click menu's
+     * commands did is written there, a line each (the Windows build runs them as Explorer does).
+     */
+    private static void menuDid(String what) {
+        String f = System.getProperty("logsift.menuLog");
+        if (f == null) {
+            return;
+        }
+        try {
+            Files.writeString(Path.of(f), what + System.lineSeparator(), java.nio.charset.StandardCharsets.UTF_8,
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            // a test's note only
+        }
+    }
+
+    /**
+     * Analyze (the right-click menu, or {@code logsift --analyze}): each file straight in the view
+     * that explains it: a GC log in the GC view, a thread dump in Threads, a heap dump, a crash
+     * dump, a recording; any other file as a log.
+     */
+    public void analyzeFiles(List<Path> files) {
+        comeForward();
+        Thread t = new Thread(() -> {
+            List<FileKind> kinds = files.stream().map(FileKind::of).toList(); // reads their start: not here
+            SwingUtilities.invokeLater(() -> {
+                for (int i = 0; i < files.size(); i++) {
+                    analyze(files.get(i).toAbsolutePath().normalize(), kinds.get(i));
+                    menuDid("analyze " + kinds.get(i) + " " + files.get(i).getFileName());
+                }
+                analyzedForTest = kinds;
+            });
+        }, "logsift-analyze");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void analyze(Path f, FileKind kind) {
+        switch (kind) {
+            case FOLDER -> openFolder(f);
+            case HEAP_DUMP -> openHeapDump(f);
+            case PROFILE -> openProfileFile(f);
+            case CRASH -> openCrash(f);
+            case THREAD_DUMP -> openFile(f, null, this::analyzeThreads);
+            case GC_LOG -> openGcLog(f);
+            case LOG -> openFile(f);
+        }
+    }
+
+    /** Compare (the right-click menu): two files or folders; with one, the other is chosen in the tab. */
+    public void compareFromMenu(List<Path> files) {
+        comeForward();
+        if (files.isEmpty()) {
+            return;
+        }
+        if (files.size() > 2) {
+            compareNoteForTest = "Compare takes two files or folders; " + files.size() + " were selected.";
+            JOptionPane.showMessageDialog(this, compareNoteForTest, "Compare", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        openCompare(files.get(0), files.size() > 1 ? files.get(1) : null);
+        menuDid("compare " + files.stream().map(f -> String.valueOf(f.getFileName())).sorted()
+                .collect(java.util.stream.Collectors.joining(" ")));
+    }
+
+    /** Search (the right-click menu on a folder): a folder search in each; a file's own folder. */
+    public void searchFromMenu(List<Path> folders) {
+        comeForward();
+        for (Path f : folders) {
+            Path dir = Files.isDirectory(f) ? f : f.toAbsolutePath().getParent();
+            if (dir != null) {
+                openFolderSearch(dir);
+                menuDid("search " + dir.getFileName());
+            }
         }
     }
 

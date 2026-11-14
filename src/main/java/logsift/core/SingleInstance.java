@@ -28,6 +28,13 @@ import java.util.function.Consumer;
  */
 public final class SingleInstance implements AutoCloseable {
     private static final String MAGIC = "logsift-open/1";
+    /** Files with what to do with them: {@code open}, {@code analyze}, {@code compare}, {@code search}. */
+    private static final String MAGIC_ACTION = "logsift-open/2";
+    /** Just open them. */
+    public static final String OPEN = "open";
+
+    /** Files sent by another launch, and what it was asked to do with them. */
+    public record Request(String action, List<Path> paths) {}
     private static final String COMMAND = "logsift-command/1";
 
     /**
@@ -57,7 +64,13 @@ public final class SingleInstance implements AutoCloseable {
      */
     public static SingleInstance openOrListen(Path home, List<Path> paths, Consumer<List<Path>> onOpen,
             Commands commands, java.time.Duration wait) throws IOException {
-        if (forward(home, paths)) {
+        return openOrListen(home, OPEN, paths, opening(onOpen), commands, wait);
+    }
+
+    /** Like {@link #openOrListen(Path, List, Consumer, Commands, java.time.Duration)}, with an action. */
+    public static SingleInstance openOrListen(Path home, String action, List<Path> paths, Consumer<Request> onRequest,
+            Commands commands, java.time.Duration wait) throws IOException {
+        if (forward(home, action, paths)) {
             return null;
         }
         Files.createDirectories(home);
@@ -67,30 +80,35 @@ public final class SingleInstance implements AutoCloseable {
         while (true) {
             if (claim(ch)) {
                 // the one before may have finished starting while we waited for the lock
-                if (forward(home, paths)) {
+                if (forward(home, action, paths)) {
                     ch.close();
                     return null;
                 }
-                SingleInstance si = listen(home, onOpen, commands);
+                SingleInstance si = listenFor(home, onRequest, commands);
                 si.lock = ch;
                 return si;
             }
-            if (forward(home, paths)) {
+            if (forward(home, action, paths)) {
                 ch.close();
                 return null;
             }
             if (System.nanoTime() > until) {
                 ch.close();
-                return listen(home, onOpen, commands); // the other one is stuck: be a window of our own
+                return listenFor(home, onRequest, commands); // the other one is stuck: be a window of our own
             }
             try {
                 Thread.sleep(50);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 ch.close();
-                return listen(home, onOpen, commands);
+                return listenFor(home, onRequest, commands);
             }
         }
+    }
+
+    /** Every request's files go to {@code onOpen}, opened whatever the action. */
+    private static Consumer<Request> opening(Consumer<List<Path>> onOpen) {
+        return r -> onOpen.accept(r.paths());
     }
 
     private static boolean claim(java.nio.channels.FileChannel ch) throws IOException {
@@ -106,6 +124,11 @@ public final class SingleInstance implements AutoCloseable {
      * should then exit), false if none is running.
      */
     public static boolean forward(Path home, List<Path> paths) {
+        return forward(home, OPEN, paths);
+    }
+
+    /** Like {@link #forward(Path, List)}, with what to do with them ({@code analyze}, {@code compare}…). */
+    public static boolean forward(Path home, String action, List<Path> paths) {
         Path f = home.resolve("instance");
         try {
             List<String> lines = Files.readAllLines(f, StandardCharsets.UTF_8);
@@ -118,7 +141,8 @@ public final class SingleInstance implements AutoCloseable {
                 s.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 1000);
                 s.setSoTimeout(3000);
                 Writer w = new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8);
-                w.write(MAGIC + "\n" + secret + "\n");
+                w.write(action.equals(OPEN) ? MAGIC + "\n" + secret + "\n"
+                        : MAGIC_ACTION + "\n" + secret + "\n" + action.replace("\n", " ") + "\n");
                 for (Path p : paths) {
                     w.write(p.toAbsolutePath().toString() + "\n");
                 }
@@ -178,6 +202,11 @@ public final class SingleInstance implements AutoCloseable {
 
     /** Like {@link #listen(Path, Consumer)}, also taking commands that wait for an answer. */
     public static SingleInstance listen(Path home, Consumer<List<Path>> onOpen, Commands commands) throws IOException {
+        return listenFor(home, opening(onOpen), commands);
+    }
+
+    /** Becomes the running instance: files from later launches, with their action, go to {@code onRequest}. */
+    public static SingleInstance listenFor(Path home, Consumer<Request> onRequest, Commands commands) throws IOException {
         Files.createDirectories(home);
         ServerSocket server = new ServerSocket();
         server.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 10);
@@ -194,13 +223,13 @@ public final class SingleInstance implements AutoCloseable {
         Files.writeString(f, server.getLocalPort() + "\n" + secret + "\n", StandardCharsets.UTF_8,
                 StandardOpenOption.TRUNCATE_EXISTING);
         SingleInstance si = new SingleInstance(server, f);
-        Thread t = new Thread(() -> si.serve(secret, onOpen, commands), "logsift-single-instance");
+        Thread t = new Thread(() -> si.serve(secret, onRequest, commands), "logsift-single-instance");
         t.setDaemon(true);
         t.start();
         return si;
     }
 
-    private void serve(String secret, Consumer<List<Path>> onOpen, Commands commands) {
+    private void serve(String secret, Consumer<Request> onRequest, Commands commands) {
         while (!server.isClosed()) {
             Socket s;
             try {
@@ -240,7 +269,15 @@ public final class SingleInstance implements AutoCloseable {
                     });
                     continue;
                 }
-                if (!MAGIC.equals(magic)) {
+                String action;
+                if (MAGIC.equals(magic)) {
+                    action = OPEN;
+                } else if (MAGIC_ACTION.equals(magic)) {
+                    action = r.readLine();
+                    if (action == null || action.isBlank()) {
+                        continue;
+                    }
+                } else {
                     continue;
                 }
                 List<Path> paths = new ArrayList<>();
@@ -251,7 +288,7 @@ public final class SingleInstance implements AutoCloseable {
                 Writer w = new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8);
                 w.write("ok\n");
                 w.flush();
-                onOpen.accept(paths);
+                onRequest.accept(new Request(action, paths));
             } catch (IOException | RuntimeException e) {
                 // a broken or foreign connection: ignore it and keep listening
             } finally {

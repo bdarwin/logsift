@@ -4,8 +4,8 @@ Usage: add-open-with.py <jpackage's main.wxs> <patched main.wxs> [x64|arm64]
 
 Instead of taking over .log files (their icon, double-click and type name stay as they
 are), the installer adds:
-  - "Open with Logsift" to the right-click menu of files and folders (a folder opens a
-    search in it)
+  - a Logsift menu to the right-click menu of files (Analyze: straight to the GC, Threads,
+    heap or crash view the file needs; Open; Compare two) and folders (Open, Search, Compare)
   - Logsift to the "Open with" list of .log, .txt and .out files
 Everything is under HKCU and is removed again on uninstall.
 
@@ -21,23 +21,46 @@ be run").
 import re
 import sys
 
-EXE = '&quot;[INSTALLDIR]Logsift.exe&quot; &quot;%1&quot;'
+def exe(flag=''):
+    """Logsift.exe with a file from Explorer: one per launch (Explorer starts one per selected file)."""
+    return '&quot;[INSTALLDIR]Logsift.exe&quot; ' + (flag + ' ' if flag else '') + '&quot;%1&quot;'
+
+
+EXE = exe()
+
+# Explorer's right-click menu: Logsift ▸ Analyze / Open / Compare (files), Open / Search / Compare
+# (folders). The names sort the entries; Windows 11 shows them under "Show more options".
+FILE_ITEMS = [('1analyze', 'Analyze', '--analyze'), ('2open', 'Open', ''), ('3compare', 'Compare', '--compare')]
+FOLDER_ITEMS = [('1open', 'Open', ''), ('2search', 'Search', '--search'), ('3compare', 'Compare', '--compare')]
+
+
+def menu(classes_key, items):
+    base = f'Software\\Classes\\{classes_key}\\shell\\Logsift'
+    out = [
+        f'<RegistryValue Root="HKCU" Key="{base}" Name="MUIVerb" Type="string" Value="Logsift"/>',
+        f'<RegistryValue Root="HKCU" Key="{base}" Name="Icon" Type="string" Value="[INSTALLDIR]Logsift.exe"/>',
+        f'<RegistryValue Root="HKCU" Key="{base}" Name="SubCommands" Type="string" Value=""/>',
+    ]
+    for key, label, flag in items:
+        k = f'{base}\\shell\\{key}'
+        out += [
+            f'<RegistryValue Root="HKCU" Key="{k}" Name="MUIVerb" Type="string" Value="{label}"/>',
+            # any number of files: one launch each (they meet in the running Logsift)
+            f'<RegistryValue Root="HKCU" Key="{k}" Name="MultiSelectModel" Type="string" Value="Player"/>',
+            f'<RegistryValue Root="HKCU" Key="{k}\\command" Type="string" Value="{exe(flag)}"/>',
+        ]
+    # an older install's single "Open with Logsift" command: a menu has none
+    out.append(f'<RemoveRegistryKey Action="removeOnInstall" Root="HKCU" Key="{base}\\command"/>')
+    return '\n        '.join(out)
+
 
 COMPONENT = f'''
     <DirectoryRef Id="TARGETDIR">
-      <Component Id="LogsiftOpenWith" Guid="{{6F1B7C1E-2B3A-4C55-9E57-6A0C9E1D4B21}}">
-        <RegistryValue Root="HKCU" Key="Software\\Classes\\*\\shell\\Logsift" Type="string"
-                       Value="Open with Logsift" KeyPath="yes"/>
-        <RegistryValue Root="HKCU" Key="Software\\Classes\\*\\shell\\Logsift" Name="Icon" Type="string"
-                       Value="[INSTALLDIR]Logsift.exe"/>
-        <RegistryValue Root="HKCU" Key="Software\\Classes\\*\\shell\\Logsift\\command" Type="string"
-                       Value="{EXE}"/>
-        <RegistryValue Root="HKCU" Key="Software\\Classes\\Directory\\shell\\Logsift" Type="string"
-                       Value="Open with Logsift"/>
-        <RegistryValue Root="HKCU" Key="Software\\Classes\\Directory\\shell\\Logsift" Name="Icon" Type="string"
-                       Value="[INSTALLDIR]Logsift.exe"/>
-        <RegistryValue Root="HKCU" Key="Software\\Classes\\Directory\\shell\\Logsift\\command" Type="string"
-                       Value="{EXE}"/>
+      <Component Id="LogsiftOpenWith" Guid="{{0B6E2C55-7A1D-4F3E-9C8B-2D5E6F7A8B91}}">
+        <RegistryValue Root="HKCU" Key="Software\\Logsift" Name="ExplorerMenu" Type="integer" Value="2"
+                       KeyPath="yes"/>
+        {menu('*', FILE_ITEMS)}
+        {menu('Directory', FOLDER_ITEMS)}
         <RegistryValue Root="HKCU" Key="Software\\Classes\\Applications\\Logsift.exe" Name="FriendlyAppName"
                        Type="string" Value="Logsift"/>
         <RegistryValue Root="HKCU" Key="Software\\Classes\\Applications\\Logsift.exe\\shell\\open\\command"
@@ -51,6 +74,8 @@ COMPONENT = f'''
         <RegistryValue Root="HKCU" Key="Software\\Classes\\.log\\OpenWithList\\Logsift.exe" Type="string" Value=""/>
         <RegistryValue Root="HKCU" Key="Software\\Classes\\.txt\\OpenWithList\\Logsift.exe" Type="string" Value=""/>
         <RegistryValue Root="HKCU" Key="Software\\Classes\\.out\\OpenWithList\\Logsift.exe" Type="string" Value=""/>
+        <RemoveRegistryKey Action="removeOnUninstall" Root="HKCU" Key="Software\\Classes\\*\\shell\\Logsift"/>
+        <RemoveRegistryKey Action="removeOnUninstall" Root="HKCU" Key="Software\\Classes\\Directory\\shell\\Logsift"/>
       </Component>
     </DirectoryRef>
 '''

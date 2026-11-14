@@ -54,17 +54,27 @@ class SingleInstanceTest {
     @Test
     void severalStartedTogetherMakeOneWindow(@TempDir Path dir) throws Exception {
         // Explorer starts one Logsift per selected file, all at once: one window must take them all
-        int n = 6;
+        startTogether(dir, 6, SingleInstance.OPEN);
+    }
+
+    @Test
+    void compareFromExplorerArrivesAsCompare(@TempDir Path dir) throws Exception {
+        // Compare on two files: two launches, each with one file; both reach the window as "compare"
+        startTogether(dir, 2, "compare");
+    }
+
+    private static void startTogether(Path dir, int n, String action) throws Exception {
         Path h = Files.createDirectories(dir.resolve("home"));
         Path out = Files.createDirectories(dir.resolve("out"));
         String launcher = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-        java.util.Set<String> files = new java.util.TreeSet<>();
+        java.util.Set<String> expected = new java.util.TreeSet<>();
         List<Process> ps = new java.util.ArrayList<>();
         for (int i = 0; i < n; i++) {
             Path f = dir.resolve("app-" + i + ".log").toAbsolutePath();
-            files.add(f.toString());
-            ps.add(new ProcessBuilder(launcher, "-cp", System.getProperty("java.class.path"), OpensTogether.class.getName(),
-                    h.toString(), f.toString(), out.toString(), Integer.toString(n)).redirectErrorStream(true).start());
+            expected.add(action + " " + f);
+            ps.add(new ProcessBuilder(launcher, "-cp", System.getProperty("java.class.path"),
+                    OpensTogether.class.getName(), h.toString(), f.toString(), out.toString(), Integer.toString(n), action)
+                    .redirectErrorStream(true).start());
         }
         List<String> said = new java.util.ArrayList<>();
         for (Process p : ps) {
@@ -76,7 +86,7 @@ class SingleInstanceTest {
             listeners = s.toList();
         }
         assertEquals(1, listeners.size(), "one window, not several: " + said);
-        assertEquals(files, new java.util.TreeSet<>(Files.readAllLines(listeners.get(0))), "it has every file");
+        assertEquals(expected, new java.util.TreeSet<>(Files.readAllLines(listeners.get(0))), "it has every file");
         assertEquals(n - 1, said.stream().filter("forwarded"::equals).count(), said.toString());
     }
 

@@ -28,16 +28,31 @@ Under them, **Search in Folder…** (Ctrl+Shift+F) searches every log in a folde
 ## Files
 
 - **File → Open…** (Ctrl+O), or drag files onto the window. A file that is already open is just selected.
-- **Windows:** right-click a file or folder → **Open with Logsift** (a folder opens as a tab of its files, below). Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does.
+- **Windows:** right-click files or a folder → **Logsift** (on Windows 11, under **Show more options**). Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does. See [Right-click menu](#right-click-menu) below.
 - **macOS:** Open With, or drop files on the Dock icon.
 - **One window:** if Logsift is already running, files open in the same window. Several opened at once (selected in Explorer or the Finder and opened together) open as tabs in one window too.
 - **File → Open Recent** lists the last 15 files. **File → Reopen Last Session** reopens the logs that were open last time; Logsift also does that at start (you can turn it off in [Settings](settings.md)). Each file remembers its filters, formula, level buttons, Matching only and position.
 
 A big file shows its first lines at once and is indexed in the background; the status bar says *indexing…*, then *indexed in N ms*. A file on a slow network or cloud drive shows *Waiting for the file…* with **Cancel**.
 
+## Right-click menu
+
+On Windows, Explorer's right-click menu has a **Logsift** menu (Windows 11 shows it under **Show more options**):
+
+| On | Item | What it does |
+|---|---|---|
+| Files | **Analyze** | Opens each file straight in the view that explains it, told by what's in it, not its name: a GC log in the [GC view](gc.md), a Java or Python thread dump in [Threads](threads.md), a heap dump (`.hprof`) in [Heap](heap.md), a crash (`.dmp`, `.mdmp`, `hs_err_pid…`, from any program, .NET too) in [Crash dumps](crash-dumps.md), a Flight Recorder recording in [Profile](profiling.md). Anything else opens as a log. |
+| Files | **Open** | Opens them as logs, in tabs. |
+| Files | **Compare** | Select two files and choose Compare: one comparison of the two ([Compare](compare.md)). With one file, choose the other in the Compare tab. |
+| Folders | **Open** | The folder's files in a tab (below). |
+| Folders | **Search** | A [folder search](folder-search.md) in it. |
+| Folders | **Compare** | Two folders compared. |
+
+However many files are selected, they open in one Logsift window. The same is there from the command line: `logsift --analyze FILE…`, `logsift --compare A B`, `logsift --search FOLDER`.
+
 ## Folders
 
-**File → Open Folder…** (or the start page's **Open Folder…**, dropping a folder on the window, or **Open with Logsift** on a folder) shows a folder's files in a tab, as a tree with their sizes: subfolders first, then files. It works like a zip's tab:
+**File → Open Folder…** (or the start page's **Open Folder…**, dropping a folder on the window, or **Logsift → Open** on a folder in Explorer) shows a folder's files in a tab, as a tree with their sizes: subfolders first, then files. It works like a zip's tab:
 
 ![A folder's files as a tree: a subfolder with a .gz and a zip, a CSV, and two logs](../screenshots/folder-tab.png)
 

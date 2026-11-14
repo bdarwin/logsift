@@ -130,9 +130,10 @@ jobs:
               grep -q 'jdk.crypto.mscapi' pkg/Logsift/runtime/release || { echo "no Windows certificates in the runtime"; exit 1; }
               pwsh -NoProfile -Command "Compress-Archive -Path pkg/Logsift -DestinationPath dist/$NAME.zip"
               if [ ${#BETA[@]} -gt 0 ]; then ls -l dist; exit 0; fi
-              # Installer: per user (no admin rights needed), Start menu entry, "Open with Logsift"
-              # on files and folders (not taking over .log files). jpackage can't add that, so its
-              # installer script is built once, patched, and used for the real build.
+              # Installer: per user (no admin rights needed), Start menu entry, a Logsift menu on
+              # files and folders (Analyze, Open, Compare, Search), not taking over .log files.
+              # jpackage can't add that, so its installer script is built once, patched, and used
+              # for the real build.
               MSI=(--app-version "$VERSION" --icon packaging/icons/logsift.ico
                    --win-per-user-install --win-menu --win-menu-group Logsift --win-shortcut-prompt
                    --win-upgrade-uuid 2cf55e2a-4bbe-4a4c-8397-7b68517646a0)
@@ -328,10 +329,56 @@ jobs:
           Write-Host "Installed: $($exe.FullName)"
           $out = & $exe.FullName --version | Out-String
           Write-Host "Reports: $out"
-          $cmd = 'HKCU:\Software\Classes\*\shell\Logsift\command'
-          if (-not (Test-Path -LiteralPath $cmd)) { throw "no Open with Logsift on files" }
-          Write-Host "Open with Logsift: $((Get-ItemProperty -LiteralPath $cmd).'(default)')"
-          if (-not (Test-Path -LiteralPath 'HKCU:\Software\Classes\Directory\shell\Logsift\command')) { throw "no Open with Logsift on folders" }
+          # the right-click menu: Logsift > Analyze, Open, Compare on files; Open, Search, Compare on folders
+          $menus = @{ '*' = @('1analyze', '2open', '3compare'); 'Directory' = @('1open', '2search', '3compare') }
+          foreach ($on in $menus.Keys) {
+            $menu = "HKCU:\Software\Classes\$on\shell\Logsift"
+            if ((Get-ItemProperty -LiteralPath $menu).MUIVerb -ne 'Logsift') { throw "no Logsift menu on $on" }
+            if (Test-Path -LiteralPath "$menu\command") { throw "the old single command is still on $on" }
+            foreach ($k in $menus[$on]) {
+              $c = "$menu\shell\$k\command"
+              if (-not (Test-Path -LiteralPath $c)) { throw "no $k in the menu on $on" }
+              Write-Host "$on > ${k}: $((Get-ItemProperty -LiteralPath $c).'(default)')"
+            }
+          }
+          # run the menu's commands as Explorer does: one Logsift per selected file, all at once
+          $t = Join-Path $env:RUNNER_TEMP 'menu'
+          New-Item -ItemType Directory -Force $t | Out-Null
+          $did = Join-Path $t 'did.txt'
+          $cfg = Join-Path $exe.Directory.FullName 'app\Logsift.cfg'
+          $own = "java-options=-Dlogsift.home=$($t -replace '\\','/')/home`njava-options=-Dlogsift.prefs=/logsift-test/menu`njava-options=-Dlogsift.updateUrl=none`njava-options=-Dlogsift.menuLog=$($did -replace '\\','/')"
+          (Get-Content $cfg -Raw) -replace '\[JavaOptions\]', "[JavaOptions]`n$own" | Set-Content $cfg
+          Set-Content (Join-Path $t 'a.log') "2026-11-14 10:00:00 INFO one`n2026-11-14 10:00:01 INFO two"
+          Set-Content (Join-Path $t 'b.log') "2026-11-14 10:00:00 INFO one`n2026-11-14 10:00:01 WARN three"
+          $gz = [IO.Compression.GZipStream]::new([IO.File]::OpenRead("$PWD/src/test/resources/gc/j17-g1-time.log.gz"), [IO.Compression.CompressionMode]::Decompress)
+          $gcOut = [IO.File]::Create((Join-Path $t 'service.log')); $gz.CopyTo($gcOut); $gcOut.Close(); $gz.Close()
+          function Run-Menu($key, $file) {
+            $line = (Get-ItemProperty -LiteralPath "HKCU:\Software\Classes\*\shell\Logsift\shell\$key\command").'(default)'
+            if ($line -notmatch '^"([^"]+)"\s*(.*)$') { throw "can't read the command: $line" }
+            Start-Process -FilePath $Matches[1] -ArgumentList ($Matches[2].Replace('%1', $file))
+          }
+          function Wait-Did($what) {
+            for ($i = 0; $i -lt 120; $i++) {
+              if ((Test-Path $did) -and ((Get-Content $did) -contains $what)) { Write-Host "did: $what"; return }
+              Start-Sleep -Milliseconds 500
+            }
+            if (Test-Path $did) { Get-Content $did }
+            throw "the menu didn't: $what"
+          }
+          # Compare on two files with no Logsift running: two launches at once, one window, one comparison
+          Run-Menu '3compare' (Join-Path $t 'a.log')
+          Run-Menu '3compare' (Join-Path $t 'b.log')
+          Wait-Did 'compare a.log b.log'
+          # Analyze on a GC log (a .log like any other): straight to the GC view
+          Run-Menu '1analyze' (Join-Path $t 'service.log')
+          Wait-Did 'analyze GC_LOG service.log'
+          Start-Sleep -Seconds 2
+          $running = @(Get-Process Logsift -ErrorAction SilentlyContinue)
+          Write-Host "Logsift windows: $($running.Count)"
+          if ($running.Count -ne 1) { throw "expected one Logsift, found $($running.Count)" }
+          if ((Get-Content $did | Where-Object { $_ -like 'compare*' }).Count -ne 1) { Get-Content $did; throw "more than one comparison" }
+          $running | Stop-Process -Force
+          Start-Sleep -Seconds 1
           if (-not (Test-Path -LiteralPath 'HKCU:\Software\Classes\.log\OpenWithList\Logsift.exe')) { throw "not in Open with for .log" }
           $log = 'HKCU:\Software\Classes\.log'
           $default = (Get-ItemProperty -LiteralPath $log -ErrorAction SilentlyContinue).'(default)'
@@ -343,7 +390,8 @@ jobs:
           $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
           if (Test-Path $exe.FullName) { throw "still there after uninstall" }
-          if (Test-Path -LiteralPath 'HKCU:\Software\Classes\*\shell\Logsift') { throw "Open with Logsift left behind after uninstall" }
+          if (Test-Path -LiteralPath 'HKCU:\Software\Classes\*\shell\Logsift') { throw "the Logsift menu left behind after uninstall" }
+          if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Directory\shell\Logsift') { throw "the folders' Logsift menu left behind after uninstall" }
 
       - uses: actions/upload-artifact@v5
         with:

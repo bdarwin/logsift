@@ -7659,6 +7659,78 @@ class VisualTest {
     }
 
     @Test
+    @Order(48)
+    void analyzeFromTheRightClickMenuOpensItsView() throws Exception {
+        // Explorer's or the Finder's Logsift ▸ Analyze: each file straight in the view that explains it
+        Path gc = dir.resolve("menu-gc.log");
+        try (var in = new java.util.zip.GZIPInputStream(getClass().getResourceAsStream("/gc/j17-g1-time.log.gz"))) {
+            Files.write(gc, in.readAllBytes());
+        }
+        Path stuck = dir.resolve("menu-stuck.log");
+        try (var in = getClass().getResourceAsStream("/threaddumps/jstack-21.txt")) {
+            Files.write(stuck, in.readAllBytes());
+        }
+        int tabs0 = onEdt(() -> frame.tabsForTest().getTabCount());
+        GcTab gcBefore = onEdt(frame::currentGcTabForTest);
+        onEdt(() -> {
+            frame.analyzeFiles(List.of(gc));
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentGcTabForTest() != null && frame.currentGcTabForTest() != gcBefore);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the GC view of the GC log");
+        assertEquals(List.of(FileKind.GC_LOG), onEdt(() -> frame.analyzedForTest));
+
+        ThreadsTab threadsBefore = onEdt(frame::currentThreadsTab);
+        onEdt(() -> {
+            frame.analyzeFiles(List.of(stuck));
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> frame.currentThreadsTab() != null && frame.currentThreadsTab() != threadsBefore);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 60_000, "the Threads view of the thread dump");
+        assertEquals(List.of(FileKind.THREAD_DUMP), onEdt(() -> frame.analyzedForTest));
+
+        // Compare on two selected files: one comparison of the two
+        onEdt(() -> {
+            frame.compareFromMenu(List.of(gc, stuck));
+            return null;
+        });
+        FileCompareTab compared = onEdt(() -> frame.tabsForTest().getSelectedComponent() instanceof FileCompareTab f ? f
+                : null);
+        assertTrue(compared != null, "a Compare tab");
+        waitFor(() -> {
+            try {
+                return onEdt(compared::tooltip).contains("menu-stuck.log");
+            } catch (Exception e) {
+                return false;
+            }
+        }, 30_000, "the two files compared");
+        assertTrue(onEdt(compared::tooltip).contains("menu-gc.log"), onEdt(compared::tooltip));
+
+        // Search on a folder: a folder search there
+        onEdt(() -> {
+            frame.searchFromMenu(List.of(dir));
+            return null;
+        });
+        assertTrue(onEdt(() -> frame.tabsForTest().getSelectedComponent() instanceof FolderSearchTab), "a folder search");
+        onEdt(() -> {
+            while (frame.tabsForTest().getTabCount() > tabs0) {
+                frame.closeTab(frame.tabsForTest().getTabCount() - 1);
+            }
+            return null;
+        });
+    }
+
+    @Test
     @Order(49)
     void heapDumpOverJmxIsCopiedFromTheServer() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "the test SSH server runs commands with /bin/sh");
