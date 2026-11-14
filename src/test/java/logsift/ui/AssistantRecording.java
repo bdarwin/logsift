@@ -98,7 +98,7 @@ class AssistantRecording extends Recording {
         ask("Take a thread dump of the FixtureApp JVM running on this computer: is anything stuck?",
                 "A running JVM: a thread dump only after you say yes");
 
-        say("Logsift: free and open source, for Windows, macOS and Linux · logsift.dev");
+        say("Logsift: free and open source, for Windows, macOS and Linux · bdarwin.github.io/logsift");
         showCursor = false;
         hold(4000);
     }

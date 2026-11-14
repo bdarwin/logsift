@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **New web address:** the website and user guide moved to https://logsift.dev (the old address forwards there). **Help → Documentation** opens it.
+- **Web address:** the website and user guide are at https://bdarwin.github.io/logsift again, which more office networks allow; logsift.dev forwards there. **Help → Documentation** opens it.
 - **Check for Updates at the office:** the new self-update didn't use the proxy this computer is set to use, so behind an office proxy it couldn't reach GitHub. It does now, from the moment Logsift starts. It also no longer asks GitHub's API, which answers only 60 checks an hour from one network (an office's is shared by everyone): it reads the latest release from GitHub's page and a snapshot's commit from a small `BUILD.txt` beside it. When GitHub or a proxy refuses, it says why (the hourly limit and when to try again, or a proxy that wants a sign-in), instead of *GitHub answered 403*.
 - **Updates at an office on Windows (*PKIX path building failed*):** the Windows app's own Java was built without the part that reads Windows' certificates, so Logsift trusted only Java's list and never the certificate an office proxy signs GitHub with, even when Windows (and the browser) trusted it. It's included now, and the build checks it's there. If this computer's certificates still can't be read, the message says so. Updating from an older version still fails once: download this one in your browser.
 - **Remote folders over SFTP:** browsing folders on a fast server could break the connection (*Pipe closed*) when you typed a folder or opened one right after another: each step ran on a new thread, and the SSH library lost track of who was reading. Every step now runs on one thread per connection.

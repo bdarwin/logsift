@@ -32,7 +32,7 @@ final class HelpSupport {
 
     static final String REPO = "https://github.com/bdarwin/logsift";
     /** The user guide (docs/guide, published with GitHub Pages). */
-    static final String DOCS = "https://logsift.dev/guide/";
+    static final String DOCS = "https://bdarwin.github.io/logsift/guide/";
     static final String ISSUES = REPO + "/issues";
 
     /** A page of the user guide: {@code guide("gc")} is the GC page. */

@@ -289,7 +289,7 @@ class TourRecording extends Recording {
         hold(4500);
         still("heap");
 
-        say("Logsift: free and open source, for Windows, macOS and Linux · logsift.dev");
+        say("Logsift: free and open source, for Windows, macOS and Linux · bdarwin.github.io/logsift");
         showCursor = false;
         hold(4000);
     }
