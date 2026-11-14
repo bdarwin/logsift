@@ -99,6 +99,7 @@ jobs:
           MODULES=java.base,java.desktop,java.prefs,java.logging,java.net.http,java.sql,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets,jdk.attach,java.management,java.management.rmi,jdk.naming.rmi,jdk.jfr,jdk.management.jfr
           # Windows' own certificates (an office proxy's): without it HTTPS trusts only Java's list
           case "${{ matrix.target }}" in windows-*) MODULES="$MODULES,jdk.crypto.mscapi" ;; esac
+          echo "$MODULES" > build/runtime-modules.txt # the same runtime, for the certificate check
           COMMON=(--name Logsift --input build/install/logsift/lib
                   --main-jar "logsift-$VERSION.jar" --main-class logsift.ui.LogsiftApp
                   --java-options "-Xmx2g $GC --enable-native-access=ALL-UNNAMED"
@@ -155,6 +156,19 @@ jobs:
               ;;
           esac
           ls -l dist
+
+      - name: Windows' certificates are trusted (an office proxy's), with the app's own modules
+        if: startsWith(matrix.target, 'windows-')
+        run: |
+          jlink --add-modules "$(cat build/runtime-modules.txt)" --output build/tls-runtime
+          packaging/tls-trust-check.sh make build/tls-check
+          CP="build/classes/java/main;build/classes/java/test"
+          # not in Windows' store yet: refused (and Windows' certificates could be read)
+          packaging/tls-trust-check.sh check build/tls-runtime/bin/java.exe "$CP" build/tls-check untrusted
+          # where an office's IT puts theirs: the computer's trusted roots
+          MSYS_NO_PATHCONV=1 certutil -addstore -f Root build/tls-check/ca.pem
+          packaging/tls-trust-check.sh check build/tls-runtime/bin/java.exe "$CP" build/tls-check trusted
+          MSYS_NO_PATHCONV=1 certutil -delstore Root "Logsift Test Office CA"
 
       - name: The launchers' garbage collector (ZGC doesn't start on Windows Server 2016)
         run: |
