@@ -30,7 +30,7 @@ Under them, **Search in Folder…** (Ctrl+Shift+F) searches every log in a folde
 - **File → Open…** (Ctrl+O), or drag files onto the window. A file that is already open is just selected.
 - **Windows:** right-click a file or folder → **Open with Logsift** (a folder opens as a tab of its files, below). Logsift is also in the **Open with** list of `.log`, `.txt` and `.out` files, without taking over what double-click does.
 - **macOS:** Open With, or drop files on the Dock icon.
-- **One window:** if Logsift is already running, files open in the same window.
+- **One window:** if Logsift is already running, files open in the same window. Several opened at once (selected in Explorer or the Finder and opened together) open as tabs in one window too.
 - **File → Open Recent** lists the last 15 files. **File → Reopen Last Session** reopens the logs that were open last time; Logsift also does that at start (you can turn it off in [Settings](settings.md)). Each file remembers its filters, formula, level buttons, Matching only and position.
 
 A big file shows its first lines at once and is indexed in the background; the status bar says *indexing…*, then *indexed in N ms*. A file on a slow network or cloud drive shows *Waiting for the file…* with **Cancel**.

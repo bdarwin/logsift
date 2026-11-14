@@ -74,8 +74,18 @@ public final class LogsiftApp {
             }
         }
         List<String> toolCommand = tool;
-        if (single && !stdin && SingleInstance.forward(AppState.home(), files)) {
-            return;
+        if (single && !stdin && toolCommand == null) { // a window for piped input (or git) stays separate
+            try {
+                SingleInstance si = SingleInstance.openOrListen(AppState.home(), files,
+                        paths -> SwingUtilities.invokeLater(() -> open(paths)), LogsiftApp::instanceCommand,
+                        java.time.Duration.ofSeconds(20));
+                if (si == null) {
+                    return; // the running Logsift took the files
+                }
+                Runtime.getRuntime().addShutdownHook(new Thread(si::close));
+            } catch (IOException e) {
+                // can't listen: still works, just as separate windows
+            }
         }
         Path capture = stdin ? StdinCapture.start(System.in, AppState.home().resolve("stdin")) : null;
 
@@ -89,39 +99,6 @@ public final class LogsiftApp {
         if (java.awt.Taskbar.isTaskbarSupported()
                 && java.awt.Taskbar.getTaskbar().isSupported(java.awt.Taskbar.Feature.ICON_IMAGE)) {
             java.awt.Taskbar.getTaskbar().setIconImage(logsift.tools.IconGenerator.render(512));
-        }
-        if (single && !stdin && toolCommand == null) { // a window for piped input (or git) stays separate
-            try {
-                SingleInstance si = SingleInstance.listen(AppState.home(),
-                        paths -> SwingUtilities.invokeLater(() -> open(paths)),
-                        (cmd, reply) -> {
-                            if (!cmd.isEmpty() && cmd.get(0).equals("audit")) {
-                                // an agent reading the assistant's audit: answered quietly, the window stays as it is
-                                Thread t = new Thread(() -> reply.accept(logsift.chat.AuditTools.run(
-                                        logsift.chat.ChatService.get().home(), logsift.chat.ChatService.get().store(), cmd)),
-                                        "logsift-audit-answer");
-                                t.setDaemon(true);
-                                t.start();
-                                return;
-                            }
-                            if (cmd.size() == 5 && cmd.get(0).equals(logsift.agent.mcp.McpServer.ASK)) {
-                                // an agent outside Logsift wants to touch a running JVM, and can't ask its person
-                                SwingUtilities.invokeLater(() -> {
-                                    if (frame == null || !frame.isDisplayable()) {
-                                        reply.accept(1);
-                                        return;
-                                    }
-                                    new AgentAsk(frame, cmd.get(1), cmd.get(2), cmd.get(3), cmd.get(4).equals("session"),
-                                            reply).ask();
-                                });
-                                return;
-                            }
-                            SwingUtilities.invokeLater(() -> runTool(cmd, reply));
-                        });
-                Runtime.getRuntime().addShutdownHook(new Thread(si::close));
-            } catch (IOException e) {
-                // can't listen: still works, just as separate windows
-            }
         }
         SwingUtilities.invokeLater(() -> {
             boolean dark = AppState.prefs().getBoolean("dark", false);
@@ -176,6 +153,32 @@ public final class LogsiftApp {
         } else {
             frame.runTool(cmd, reply);
         }
+    }
+
+    /** A command from another Logsift process: an agent's audit or question, or git's diff and merge. */
+    private static void instanceCommand(List<String> cmd, java.util.function.IntConsumer reply) {
+        if (!cmd.isEmpty() && cmd.get(0).equals("audit")) {
+            // an agent reading the assistant's audit: answered quietly, the window stays as it is
+            Thread t = new Thread(() -> reply.accept(logsift.chat.AuditTools.run(
+                    logsift.chat.ChatService.get().home(), logsift.chat.ChatService.get().store(), cmd)),
+                    "logsift-audit-answer");
+            t.setDaemon(true);
+            t.start();
+            return;
+        }
+        if (cmd.size() == 5 && cmd.get(0).equals(logsift.agent.mcp.McpServer.ASK)) {
+            // an agent outside Logsift wants to touch a running JVM, and can't ask its person
+            SwingUtilities.invokeLater(() -> {
+                if (frame == null || !frame.isDisplayable()) {
+                    reply.accept(1);
+                    return;
+                }
+                new AgentAsk(frame, cmd.get(1), cmd.get(2), cmd.get(3), cmd.get(4).equals("session"),
+                        reply).ask();
+            });
+            return;
+        }
+        SwingUtilities.invokeLater(() -> runTool(cmd, reply));
     }
 
     /** Files from the system (double-click, Open With, the Dock) or a second launch. */

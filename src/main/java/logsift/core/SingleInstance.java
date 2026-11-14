@@ -41,10 +41,64 @@ public final class SingleInstance implements AutoCloseable {
 
     private final ServerSocket server;
     private final Path file;
+    /** Held while this is the running instance (see {@link #openOrListen}); null for {@link #listen}. */
+    private java.nio.channels.FileChannel lock;
 
     private SingleInstance(ServerSocket server, Path file) {
         this.server = server;
         this.file = file;
+    }
+
+    /**
+     * Hands {@code paths} to the running Logsift (returns null: this process should exit), or
+     * becomes it (returns the instance; the caller opens its own paths). Several launched at once
+     * (Windows starts one per file when several are opened from Explorer) don't each become one:
+     * the first takes a lock, the others wait up to {@code wait} for it to listen and hand theirs over.
+     */
+    public static SingleInstance openOrListen(Path home, List<Path> paths, Consumer<List<Path>> onOpen,
+            Commands commands, java.time.Duration wait) throws IOException {
+        if (forward(home, paths)) {
+            return null;
+        }
+        Files.createDirectories(home);
+        java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(home.resolve("instance.lock"),
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        long until = System.nanoTime() + wait.toNanos();
+        while (true) {
+            if (claim(ch)) {
+                // the one before may have finished starting while we waited for the lock
+                if (forward(home, paths)) {
+                    ch.close();
+                    return null;
+                }
+                SingleInstance si = listen(home, onOpen, commands);
+                si.lock = ch;
+                return si;
+            }
+            if (forward(home, paths)) {
+                ch.close();
+                return null;
+            }
+            if (System.nanoTime() > until) {
+                ch.close();
+                return listen(home, onOpen, commands); // the other one is stuck: be a window of our own
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                ch.close();
+                return listen(home, onOpen, commands);
+            }
+        }
+    }
+
+    private static boolean claim(java.nio.channels.FileChannel ch) throws IOException {
+        try {
+            return ch.tryLock() != null;
+        } catch (java.nio.channels.OverlappingFileLockException e) {
+            return false; // this program holds it already
+        }
     }
 
     /**
@@ -217,6 +271,9 @@ public final class SingleInstance implements AutoCloseable {
         try {
             server.close();
             Files.deleteIfExists(file);
+            if (lock != null) {
+                lock.close(); // releases it
+            }
         } catch (IOException e) {
             // best effort
         }
