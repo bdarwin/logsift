@@ -23,6 +23,7 @@ import javax.swing.JSpinner;
 import javax.swing.JTabbedPane;
 import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingUtilities;
 
 /**
  * Settings: how logs look, how files are read, updates, and the user's log formats. Changes
@@ -665,6 +666,15 @@ final class SettingsDialog extends JDialog {
             logsift.core.Proxies.Setting c = new logsift.core.Proxies.Setting(
                     logsift.core.Proxies.Mode.values()[mode.getSelectedIndex()], host.getText(), n, bypass.getText());
             logsift.core.Proxies.choose(c);
+            if (manual && !c.host().equals(host.getText().strip())) {
+                // pasted whole: shown split into host and port (not while this change is being made)
+                SwingUtilities.invokeLater(() -> {
+                    host.setText(c.host());
+                    if (c.port() > 0 && port.getText().isBlank()) {
+                        port.setText(String.valueOf(c.port()));
+                    }
+                });
+            }
             String problem = c.problem();
             result.setForeground(problem == null ? Theme.uiColor("Label.foreground", Color.BLACK)
                     : Theme.uiColor("Component.error.focusedBorderColor", new Color(0xDC2626)));

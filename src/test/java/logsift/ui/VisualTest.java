@@ -2265,6 +2265,8 @@ class VisualTest {
         } finally {
             MainFrame.answerUpdateForTest = null;
             MainFrame.keepRunningForTest = false;
+            // a check started by changing the channel answers before the update is hidden (slow machines)
+            waitFor(() -> frame.updateChecksRunningForTest() == 0, 30_000, "update checks answered");
             server.stop(0);
             System.clearProperty("logsift.updateBase");
             System.clearProperty("logsift.version");
@@ -2375,6 +2377,16 @@ class VisualTest {
             assertFalse(net.lastReachForTest().ok());
             waitFor(test::isEnabled, 5_000, "the button again");
             assertTrue(onEdt(result::getText).contains("update checks are turned off"), onEdt(result::getText));
+            // a proxy pasted whole into Host: split into its host and port
+            onEdt(() -> {
+                port.setText("");
+                host.setText("http://proxy.corp:3128/");
+                return null;
+            });
+            settle();
+            assertEquals("proxy.corp", onEdt(host::getText));
+            assertEquals("3128", onEdt(port::getText));
+            assertEquals("GitHub is reached through the proxy proxy.corp:3128.", onEdt(result::getText));
             onEdt(() -> {
                 mode.setSelectedIndex(2);
                 return null;
@@ -3258,6 +3270,15 @@ class VisualTest {
         assertTrue(onEdt(tabs::isSplit));
         assertEquals(1, (int) onEdt(() -> tabs.sideOf(gwTab)));
         onEdt(() -> {
+            // the moved tab takes the focus a moment later (Windows): the app's side is the one in use now
+            appTab.requestFocusInWindow();
+            tabs.activate(0);
+            return null;
+        });
+        settle();
+        onEdt(() -> {
+            tabs.activate(0);
+            assertEquals(0, tabs.activeSide());
             appTab.showNearest(250);
             return null;
         });

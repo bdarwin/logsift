@@ -32,7 +32,7 @@ class PackagedModulesTest {
     @Test
     void aJmxPortIsReachedWithThePackagedModules() throws Exception {
         String workflow = Files.readString(Path.of(".github/workflows/snapshot.yml"));
-        Matcher m = Pattern.compile("--add-modules\\s+(\\S+)").matcher(workflow);
+        Matcher m = Pattern.compile("MODULES=(\\S+)").matcher(workflow);
         assertTrue(m.find(), "the module list");
         int port;
         try (var s = new java.net.ServerSocket(0)) {
@@ -45,5 +45,13 @@ class PackagedModulesTest {
         String out = new String(p.getInputStream().readAllBytes()).trim();
         assertEquals(0, p.waitFor(), out);
         assertTrue(out.startsWith("nothing answers on that port"), out);
+    }
+
+    @Test
+    void windowsBuildsReadWindowsCertificates() throws Exception {
+        // without it HTTPS trusts only Java's list, never an office proxy's certificate in Windows' store
+        String workflow = Files.readString(Path.of(".github/workflows/snapshot.yml"));
+        assertTrue(workflow.contains("windows-*) MODULES=\"$MODULES,jdk.crypto.mscapi\""), "added for Windows");
+        assertTrue(workflow.contains("grep -q 'jdk.crypto.mscapi' pkg/Logsift/runtime/release"), "and checked in the app");
     }
 }

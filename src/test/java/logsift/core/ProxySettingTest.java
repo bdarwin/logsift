@@ -104,6 +104,8 @@ class ProxySettingTest {
         assertEquals(Proxy.NO_PROXY, ProxySelector.getDefault().select(URI.create("https://wiki.intranet.example.com/x"))
                 .get(0), "and its subdomains");
         assertEquals(Proxy.Type.HTTP, ProxySelector.getDefault().select(URI.create("https://github.com/")).get(0).type());
+        assertEquals(Proxy.NO_PROXY, ProxySelector.getDefault().select(URI.create("socket://prod-7:22")).get(0),
+                "SSH and JMX connections never go through a web proxy");
     }
 
     @Test
@@ -124,8 +126,15 @@ class ProxySettingTest {
         assertEquals("Give the proxy's port, like 8080.",
                 new Proxies.Setting(Proxies.Mode.MANUAL, "proxy.corp", 0, "").problem());
         assertEquals("Give the proxy's host name alone, like proxy.example.com (the port goes beside it).",
-                new Proxies.Setting(Proxies.Mode.MANUAL, "http://proxy.corp", 8080, "").problem());
+                new Proxies.Setting(Proxies.Mode.MANUAL, "proxy corp", 8080, "").problem());
         assertNull(new Proxies.Setting(Proxies.Mode.MANUAL, "proxy.corp", 8080, "").problem());
+        // pasted whole, as an address: its host, and its port
+        assertEquals(new Proxies.Setting(Proxies.Mode.MANUAL, "proxy.corp", 8080, ""),
+                new Proxies.Setting(Proxies.Mode.MANUAL, "http://proxy.corp:8080/", 0, ""));
+        assertEquals(new Proxies.Setting(Proxies.Mode.MANUAL, "proxy.corp", 3128, ""),
+                new Proxies.Setting(Proxies.Mode.MANUAL, "http://ann@proxy.corp:8080", 3128, ""), "a port given wins");
+        assertEquals("[::1]", new Proxies.Setting(Proxies.Mode.MANUAL, "[::1]:8080", 0, "").host());
+        assertEquals("fe80::1", new Proxies.Setting(Proxies.Mode.MANUAL, "fe80::1", 8080, "").host(), "IPv6 left whole");
         Proxies.choose(new Proxies.Setting(Proxies.Mode.MANUAL, "proxy.corp", 0, ""));
         assertEquals(Proxies.Mode.AUTOMATIC, Proxies.setting().mode(), "not usable yet: as if not chosen");
         Proxies.forgetSettingForTest();

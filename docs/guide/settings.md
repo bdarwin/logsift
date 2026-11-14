@@ -108,7 +108,7 @@ The proxy Logsift uses for update checks and for logs opened from web addresses 
 | Setting | Default | What it does |
 |---|---|---|
 | **Proxy** | Automatic | **Automatic:** the proxy in this computer's network settings (Windows' and macOS's, an automatic configuration script too), else the `HTTPS_PROXY` and `NO_PROXY` environment variables. **Manual:** the proxy your IT team gives. **None:** always connect directly |
-| **Host**, **Port** | | A manual proxy, like `proxy.example.com` and `8080`. Until both are given, Logsift says what's missing and keeps to Automatic |
+| **Host**, **Port** | | A manual proxy, like `proxy.example.com` and `8080` (pasting `http://proxy.example.com:8080` fills both). It's an ordinary HTTP proxy: `https://` addresses go through it as a tunnel. Until both are given, Logsift says what's missing and keeps to Automatic |
 | **Not for** | | Hosts reached without the manual proxy, separated by commas: `intranet.example.com` (and its subdomains), `.corp`, `10.1.2.3`, `*` for all. This computer itself never goes through a proxy |
 
 The line beside **Test Connection** says how GitHub is reached now (*directly*, or *through the proxy proxy.example.com:8080*). **Test Connection** reaches GitHub as an update check does and says what happened: *Reached github.com through the proxy …*, or what's wrong (a proxy that can't be found, doesn't answer, wants a sign-in, refuses GitHub, or shows secure connections with a certificate this computer doesn't trust).

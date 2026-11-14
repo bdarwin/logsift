@@ -24,6 +24,18 @@ final class Tls {
 
     private static volatile SSLSocketFactory checked;
     private static volatile SSLSocketFactory unchecked;
+    /** The computer's stores that couldn't be read (a runtime without their module), in words; or empty. */
+    private static volatile List<String> unreadable = List.of();
+
+    /**
+     * Said after a trust problem when this computer's certificates couldn't be read at all: then an
+     * office's certificate there can't help, and it's Logsift's fault, not the network's. Else "".
+     */
+    static String unreadableNote() {
+        List<String> u = unreadable;
+        return u.isEmpty() ? "" : " (This Logsift couldn't read this computer's certificates: " + String.join("; ", u)
+                + ". Download the latest Logsift from its page in your browser.)";
+    }
 
     static void apply(HttpsURLConnection c, boolean anyCertificate) {
         try {
@@ -58,23 +70,34 @@ final class Tls {
         if (f == null) {
             List<X509TrustManager> all = new ArrayList<>();
             all.add(managerOf(null)); // Java's own
-            for (String type : systemStores()) {
-                try {
-                    KeyStore ks = KeyStore.getInstance(type);
-                    ks.load(null, null);
-                    if (ks.size() > 0) { // an empty store can't check anything (and its manager throws)
-                        all.add(managerOf(ks));
-                    }
-                } catch (Exception e) {
-                    // not on this system
-                }
-            }
+            List<String> problems = new ArrayList<>();
+            List<String> stores = systemStores();
+            all.addAll(systemManagers(stores, problems));
+            // one store this Java doesn't have is fine; none read at all is the problem
+            unreadable = problems.size() == stores.size() ? List.copyOf(problems) : List.of();
             SSLContext ctx = SSLContext.getInstance("TLS");
             ctx.init(null, new TrustManager[] {new AnyOf(all)}, null);
             f = ctx.getSocketFactory();
             checked = f;
         }
         return f;
+    }
+
+    /** Trust managers of the computer's stores; each one that can't be read is said in {@code problems}. */
+    static List<X509TrustManager> systemManagers(List<String> types, List<String> problems) {
+        List<X509TrustManager> out = new ArrayList<>();
+        for (String type : types) {
+            try {
+                KeyStore ks = KeyStore.getInstance(type);
+                ks.load(null, null);
+                if (ks.size() > 0) { // an empty store can't check anything (and its manager throws)
+                    out.add(managerOf(ks));
+                }
+            } catch (Exception e) {
+                problems.add(type + ": " + e.getMessage());
+            }
+        }
+        return out;
     }
 
     private static List<String> systemStores() {

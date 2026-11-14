@@ -246,7 +246,7 @@ public final class SelfUpdate {
                 return new Reach(false, "Reached " + host + " " + Proxies.how(u) + ", but with a certificate neither Java "
                         + "nor this computer trusts (an office proxy that looks inside secure connections does this). "
                         + "Checks still work; updates have to be downloaded in your browser until your IT team adds "
-                        + "their certificate to this computer.");
+                        + "their certificate to this computer." + Tls.unreadableNote());
             }
             return new Reach(false, Proxies.explain(e, u, "Logsift").getMessage());
         }
@@ -553,7 +553,7 @@ public final class SelfUpdate {
                 throw new IOException("Your network shows GitHub with a certificate neither Java nor this computer "
                         + "trusts (an office proxy that looks inside secure connections does this), so " + a.title()
                         + " can't be downloaded safely. Ask your IT team to add their certificate to this computer, "
-                        + "or download it from its page in your browser: " + a.page(), e);
+                        + "or download it from its page in your browser: " + a.page() + Tls.unreadableNote(), e);
             }
             throw Proxies.explain(e, URI.create(download()), a.title());
         }

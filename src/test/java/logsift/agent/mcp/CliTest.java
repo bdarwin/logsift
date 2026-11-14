@@ -319,7 +319,7 @@ class CliTest {
     @Test
     void printsOnlyTheAnswerOnStandardOutput() throws Exception {
         String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-        java.util.regex.Matcher modules = java.util.regex.Pattern.compile("--add-modules\\s+(\\S+)")
+        java.util.regex.Matcher modules = java.util.regex.Pattern.compile("MODULES=(\\S+)")
                 .matcher(Files.readString(Path.of(".github/workflows/snapshot.yml")));
         assertTrue(modules.find(), "the module list");
         Process p = new ProcessBuilder(javaBin, "--limit-modules", modules.group(1),

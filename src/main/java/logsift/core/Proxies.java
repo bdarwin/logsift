@@ -71,6 +71,19 @@ public final class Proxies {
             mode = mode == null ? Mode.AUTOMATIC : mode;
             host = host == null ? "" : host.strip();
             bypass = bypass == null ? "" : bypass.strip();
+            // a proxy pasted whole ("http://proxy.corp:8080/"): its host, and its port when none is given
+            int scheme = host.indexOf("://");
+            if (scheme >= 0) {
+                host = host.substring(scheme + 3);
+            }
+            host = host.replaceAll("/.*$", "").replaceAll("^.*@", "");
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(.*[^:]):(\\d{1,5})").matcher(host);
+            if (m.matches() && (host.startsWith("[") || m.group(1).indexOf(':') < 0)) {
+                host = m.group(1);
+                if (port <= 0) {
+                    port = Integer.parseInt(m.group(2));
+                }
+            }
         }
 
         /** What's wrong with it, in words, or null: a manual proxy needs its host and port. */
@@ -296,7 +309,10 @@ public final class Proxies {
             Setting s = setting();
             if (s.mode() != Mode.AUTOMATIC) {
                 String host = uri == null || uri.getHost() == null ? "" : uri.getHost();
-                if (s.mode() == Mode.NONE || (loopbackDirect && loopback(host)) || listed(s.bypass(), host)) {
+                String scheme = uri == null || uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+                // a web proxy is for the web: SSH and JMX (Java asks for "socket://") go direct
+                boolean web = scheme.equals("http") || scheme.equals("https");
+                if (s.mode() == Mode.NONE || !web || (loopbackDirect && loopback(host)) || listed(s.bypass(), host)) {
                     return List.of(Proxy.NO_PROXY);
                 }
                 return List.of(new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(s.host(), s.port())));

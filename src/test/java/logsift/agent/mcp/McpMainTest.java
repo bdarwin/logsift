@@ -35,7 +35,7 @@ class McpMainTest {
                 + "2026-10-21 10:00:01.000 INFO [main] App - ok\n");
         String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
         // on exactly the Java modules the installed app has
-        java.util.regex.Matcher modules = java.util.regex.Pattern.compile("--add-modules\\s+(\\S+)")
+        java.util.regex.Matcher modules = java.util.regex.Pattern.compile("MODULES=(\\S+)")
                 .matcher(Files.readString(Path.of(".github/workflows/snapshot.yml")));
         assertTrue(modules.find(), "the module list");
         Process p = new ProcessBuilder(javaBin, "--limit-modules", modules.group(1),

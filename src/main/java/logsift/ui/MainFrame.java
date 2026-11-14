@@ -342,6 +342,7 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
         }
         logsift.core.SelfUpdate.Channel channel = updateChannel();
         logsift.core.SelfUpdate.Build b = build();
+        checksRunning.incrementAndGet();
         Thread t = new Thread(() -> {
             java.util.Optional<logsift.core.SelfUpdate.Available> r = java.util.Optional.empty();
             String error = null;
@@ -357,7 +358,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
             java.util.Optional<logsift.core.SelfUpdate.Available> result = r;
             String err = error;
             boolean ok = answered;
-            SwingUtilities.invokeLater(() -> updateChecked(result, ok, err, manual, channel));
+            SwingUtilities.invokeLater(() -> {
+                try {
+                    updateChecked(result, ok, err, manual, channel);
+                } finally {
+                    checksRunning.decrementAndGet();
+                }
+            });
         }, "logsift-update-check");
         t.setDaemon(true);
         t.start();
@@ -618,6 +625,13 @@ public final class MainFrame extends JFrame implements LogTab.Host, FolderSearch
 
     StartPage startPageForTest() {
         return startPage;
+    }
+
+    /** Update checks started and not yet answered. */
+    private final java.util.concurrent.atomic.AtomicInteger checksRunning = new java.util.concurrent.atomic.AtomicInteger();
+
+    int updateChecksRunningForTest() {
+        return checksRunning.get();
     }
 
     void hideUpdateForTest() {

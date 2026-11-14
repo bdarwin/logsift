@@ -14,7 +14,12 @@ import java.util.Locale;
 import java.util.Vector;
 import java.util.function.Predicate;
 
-/** Lists folders on another machine over SFTP, to pick a log to open. */
+/**
+ * Lists folders on another machine over SFTP, to pick a log to open. Every call on the channel
+ * runs on one thread of its own: JSch's channel reads through a pipe that breaks ("Pipe closed")
+ * when the thread that read last has ended and a reply comes before the next one reads, and
+ * {@code realpath} doesn't say which thread reads.
+ */
 public final class RemoteBrowser implements AutoCloseable {
 
     /** A file or folder. {@code modified} is in epoch milliseconds. */
@@ -22,22 +27,69 @@ public final class RemoteBrowser implements AutoCloseable {
 
     private final Session session;
     private final ChannelSftp sftp;
+    private final java.util.concurrent.ExecutorService one;
 
-    private RemoteBrowser(Session session, ChannelSftp sftp) {
+    private RemoteBrowser(Session session, ChannelSftp sftp, java.util.concurrent.ExecutorService one) {
         this.session = session;
         this.sftp = sftp;
+        this.one = one;
+    }
+
+    private interface SftpCall<T> {
+        T call() throws SftpException;
+    }
+
+    /** Runs {@code c} on the channel's own thread; its SftpException comes back as is. */
+    private <T> T on(SftpCall<T> c) throws SftpException, IOException {
+        try {
+            return one.submit(() -> {
+                try {
+                    return c.call();
+                } catch (SftpException e) {
+                    throw new java.util.concurrent.CompletionException(e);
+                }
+            }).get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new java.io.InterruptedIOException("stopped");
+        } catch (java.util.concurrent.ExecutionException e) {
+            Throwable t = e.getCause() instanceof java.util.concurrent.CompletionException ce ? ce.getCause() : e.getCause();
+            if (t instanceof SftpException se) {
+                throw se;
+            }
+            if (t instanceof RuntimeException re) {
+                throw re;
+            }
+            throw new IOException(t);
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            throw new IOException("closed");
+        }
     }
 
     /** Connects (the target's path is not used). */
     public static RemoteBrowser connect(RemoteMirror.Target target, Path knownHosts,
                                         Predicate<String> trustNewHost) throws IOException {
         Session s = null;
+        java.util.concurrent.ExecutorService one = java.util.concurrent.Executors.newSingleThreadExecutor(
+                LogDocument.daemon("logsift-sftp"));
         try {
             s = RemoteMirror.openSession(target, knownHosts, trustNewHost);
             ChannelSftp c = (ChannelSftp) s.openChannel("sftp");
-            c.connect(15_000);
-            return new RemoteBrowser(s, c);
+            try {
+                // connected on the thread that then does every call
+                one.submit(() -> {
+                    c.connect(15_000);
+                    return null;
+                }).get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new JSchException("stopped");
+            } catch (java.util.concurrent.ExecutionException e) {
+                throw e.getCause() instanceof JSchException je ? je : new JSchException(String.valueOf(e.getCause()), e.getCause());
+            }
+            return new RemoteBrowser(s, c, one);
         } catch (JSchException e) {
+            one.shutdownNow();
             if (s != null) {
                 s.disconnect();
             }
@@ -48,7 +100,7 @@ public final class RemoteBrowser implements AutoCloseable {
     /** The user's home folder on the server. */
     public synchronized String home() throws IOException {
         try {
-            return sftp.getHome();
+            return on(sftp::getHome);
         } catch (SftpException e) {
             throw new IOException(RemoteMirror.describe(e), e);
         }
@@ -69,7 +121,8 @@ public final class RemoteBrowser implements AutoCloseable {
             p = home() + "/" + p;
         }
         try {
-            return sftp.realpath(p);
+            String path = p;
+            return on(() -> sftp.realpath(path));
         } catch (SftpException e) {
             throw new IOException(p + ": " + RemoteMirror.describe(e), e);
         }
@@ -77,7 +130,7 @@ public final class RemoteBrowser implements AutoCloseable {
 
     public synchronized boolean isDirectory(String path) throws IOException {
         try {
-            return sftp.stat(path).isDir(); // follows links
+            return on(() -> sftp.stat(path).isDir()); // follows links
         } catch (SftpException e) {
             throw new IOException(path + ": " + RemoteMirror.describe(e), e);
         }
@@ -87,7 +140,7 @@ public final class RemoteBrowser implements AutoCloseable {
     public synchronized List<Entry> list(String dir) throws IOException {
         Vector<ChannelSftp.LsEntry> raw;
         try {
-            raw = sftp.ls(dir);
+            raw = on(() -> sftp.ls(dir));
         } catch (SftpException e) {
             throw new IOException(dir + ": " + RemoteMirror.describe(e), e);
         }
@@ -101,8 +154,8 @@ public final class RemoteBrowser implements AutoCloseable {
             boolean isDir = a.isDir();
             if (a.isLink()) {
                 try {
-                    isDir = sftp.stat(dir + "/" + name).isDir(); // where the link points
-                } catch (SftpException ex) {
+                    isDir = on(() -> sftp.stat(dir + "/" + name).isDir()); // where the link points
+                } catch (SftpException | IOException ex) {
                     // a broken link: show it as a file
                 }
             }
@@ -129,6 +182,7 @@ public final class RemoteBrowser implements AutoCloseable {
 
     @Override
     public synchronized void close() {
+        one.shutdownNow();
         sftp.disconnect();
         session.disconnect();
     }

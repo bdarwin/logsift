@@ -96,11 +96,14 @@ jobs:
           DESCRIPTION="${DESCRIPTION:-Logsift}"
           # splash screen, shown by the launcher before Java starts
           cp packaging/splash/splash.png packaging/splash/splash@2x.png build/install/logsift/lib/
+          MODULES=java.base,java.desktop,java.prefs,java.logging,java.net.http,java.sql,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets,jdk.attach,java.management,java.management.rmi,jdk.naming.rmi,jdk.jfr,jdk.management.jfr
+          # Windows' own certificates (an office proxy's): without it HTTPS trusts only Java's list
+          case "${{ matrix.target }}" in windows-*) MODULES="$MODULES,jdk.crypto.mscapi" ;; esac
           COMMON=(--name Logsift --input build/install/logsift/lib
                   --main-jar "logsift-$VERSION.jar" --main-class logsift.ui.LogsiftApp
                   --java-options "-Xmx2g $GC --enable-native-access=ALL-UNNAMED"
                   --java-options '-splash:$APPDIR/splash.png'
-                  --add-modules java.base,java.desktop,java.prefs,java.logging,java.net.http,java.sql,jdk.unsupported,jdk.accessibility,java.security.jgss,jdk.crypto.ec,jdk.charsets,jdk.attach,java.management,java.management.rmi,jdk.naming.rmi,jdk.jfr,jdk.management.jfr
+                  --add-modules "$MODULES"
                   --add-launcher "logsift-mcp=$MCP_PROPS" ${BETA[@]+"${BETA[@]}"}
                   --vendor bdarwin --description "$DESCRIPTION")
           mkdir -p dist
@@ -123,6 +126,7 @@ jobs:
               ;;
             windows-*)
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.ico "${COMMON[@]}"
+              grep -q 'jdk.crypto.mscapi' pkg/Logsift/runtime/release || { echo "no Windows certificates in the runtime"; exit 1; }
               pwsh -NoProfile -Command "Compress-Archive -Path pkg/Logsift -DestinationPath dist/$NAME.zip"
               if [ ${#BETA[@]} -gt 0 ]; then ls -l dist; exit 0; fi
               # Installer: per user (no admin rights needed), Start menu entry, "Open with Logsift"

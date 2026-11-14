@@ -161,4 +161,12 @@ class UrlFetchTest {
             https.stop(0);
         }
     }
+
+    @Test
+    void aCertificateStoreThatCantBeReadIsSaid() throws Exception {
+        List<String> problems = new java.util.ArrayList<>();
+        assertTrue(Tls.systemManagers(List.of("No-Such-Store"), problems).isEmpty());
+        assertEquals(1, problems.size(), problems.toString());
+        assertTrue(problems.get(0).startsWith("No-Such-Store: "), problems.toString());
+    }
 }
