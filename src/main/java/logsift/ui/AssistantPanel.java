@@ -83,7 +83,7 @@ final class AssistantPanel extends JPanel {
         load();
     }
 
-    /** Who answers: Copilot or Claude Code, each through the person's own program and sign-in. */
+    /** Who answers: Copilot (as it comes with Logsift) or Claude Code (the person's own program), signed in as them. */
     private JPanel who() {
         JPanel p = section("Who answers");
         ButtonGroup g = new ButtonGroup();
@@ -91,11 +91,12 @@ final class AssistantPanel extends JPanel {
         g.add(claude);
         copilot.setName("engineCopilot");
         claude.setName("engineClaude");
-        copilot.setToolTipText("The copilot program (npm install -g @github/copilot), signed in to GitHub");
+        copilot.setToolTipText("GitHub Copilot as it comes with Logsift: nothing to install. Signed in to GitHub "
+                + "as you are in Copilot or the GitHub CLI");
         claude.setToolTipText("The claude program, signed in with claude auth login. It gets Logsift's tools only: "
                 + "no files, shell or web of its own");
-        JLabel note = new JLabel("<html>Each uses its own program on this computer, signed in as you. Chats go on "
-                + "with the other one, told what was said.</html>");
+        JLabel note = new JLabel("<html>Copilot comes with Logsift; Claude Code is your own program on this computer. "
+                + "Each is signed in as you. Chats go on with the other one, told what was said.</html>");
         note.setForeground(Theme.dimmedForeground());
         for (JComponent c : List.of(copilot, claude, note)) {
             c.setAlignmentX(LEFT_ALIGNMENT);

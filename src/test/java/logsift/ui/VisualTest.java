@@ -4122,6 +4122,31 @@ class VisualTest {
         }, 20_000, "not connected");
         onEdt(() -> {
             none.close();
+            return null;
+        });
+        // a Copilot program chosen once that doesn't start (another protocol since Copilot CLI
+        // 1.0.113): it offers the Copilot that comes with Logsift, and that's used from then on
+        logsift.chat.ChatService service = logsift.chat.ChatService.get();
+        service.saveSettings(service.settings().withCopilot(dir.resolve("old-copilot").toString()));
+        ChatPanel chosen = onEdt(() -> new ChatPanel(chatHostForTest(), service));
+        onEdt(() -> {
+            chosen.connect();
+            return null;
+        });
+        waitFor(() -> {
+            try {
+                return onEdt(() -> findNamed(chosen, "useOwnCopilot") != null);
+            } catch (Exception e) {
+                return false;
+            }
+        }, 20_000, "Use Logsift's Copilot offered");
+        onEdt(() -> {
+            ((javax.swing.JButton) findNamed(chosen, "useOwnCopilot")).doClick();
+            return null;
+        });
+        assertNull(service.settings().copilot(), "the chosen program is forgotten");
+        onEdt(() -> {
+            chosen.close();
             frame.hideChat();
             frame.closeTab(frame.tabsForTest().indexOfComponent(tab));
             return null;

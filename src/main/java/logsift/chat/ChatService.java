@@ -46,8 +46,8 @@ public final class ChatService {
         ChatEngine make(ChatSettings settings, Path home);
 
         default String missing() {
-            return "GitHub Copilot isn't installed. Install it (npm install -g @github/copilot), then try again: "
-                    + "you can sign in from here.";
+            return "GitHub Copilot isn't installed, and this Logsift came without its own. Install Copilot "
+                    + "(npm install -g @github/copilot, or run gh copilot once), then try again: you can sign in from here.";
         }
 
         /** Why there's no assistant with these settings. */
@@ -56,13 +56,22 @@ public final class ChatService {
         }
     }
 
-    /** The real one: the person's own copilot program, in its own folder (~/.copilot), where its sign-in is. */
+    /**
+     * The real one: the Copilot runtime Logsift brings, or the copilot program chosen in the window;
+     * Copilot's folder is the person's own (~/.copilot), where its sign-in is. With no runtime of
+     * its own (a build without it), an installed copilot program, as gh copilot leaves it too.
+     */
     public static final EngineFactory COPILOT = (settings, home) -> {
-        Path cli = CopilotLocator.find(settings.copilot());
         // logsift.copilotHome: another folder for Copilot's own (its sign-in), to try signing in apart from ~/.copilot
         String own = System.getProperty("logsift.copilotHome");
-        return cli == null ? null : new CopilotEngine(cli, own == null || own.isBlank() ? null : Path.of(own),
-                home.resolve("chat").resolve("work"));
+        Path copilotHome = own == null || own.isBlank() ? null : Path.of(own);
+        Path work = home.resolve("chat").resolve("work");
+        boolean chosen = settings.copilot() != null && !settings.copilot().isBlank();
+        if (!chosen && CopilotLocator.bundled()) {
+            return new CopilotEngine(null, copilotHome, work);
+        }
+        Path cli = CopilotLocator.find(settings.copilot());
+        return cli == null ? null : new CopilotEngine(cli, copilotHome, work);
     };
 
     /** Claude: the person's own claude program, signed in with their Claude account. */

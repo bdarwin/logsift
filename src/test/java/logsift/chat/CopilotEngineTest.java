@@ -8,11 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.copilot.generated.SessionEvent;
-import com.github.copilot.rpc.ModelInfo;
+import com.microsoft.copilot.generated.SessionEvent;
+import com.microsoft.copilot.generated.rpc.Model;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -26,8 +27,13 @@ class CopilotEngineTest {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private static ChatEvent event(String type, String data) throws Exception {
+        return event(type, data, "");
+    }
+
+    /** {@code more}: fields of the event itself, such as the subagent it comes from. */
+    private static ChatEvent event(String type, String data, String more) throws Exception {
         SessionEvent e = JSON.readValue("{\"type\":\"" + type + "\",\"id\":\"" + UUID.randomUUID()
-                + "\",\"timestamp\":\"2026-11-04T10:00:00Z\",\"data\":" + data + "}", SessionEvent.class);
+                + "\",\"timestamp\":\"2026-11-04T10:00:00Z\"" + more + ",\"data\":" + data + "}", SessionEvent.class);
         return CopilotEngine.event(e);
     }
 
@@ -50,9 +56,9 @@ class CopilotEngineTest {
     void theAnswerStreamsAsText() throws Exception {
         ChatEvent e = event("assistant.message_delta", "{\"messageId\":\"m1\",\"deltaContent\":\"There are 17\"}");
         assertEquals(new ChatEvent.Text("m1", "There are 17"), e);
-        // a subagent's words aren't the answer
-        assertNull(event("assistant.message_delta",
-                "{\"messageId\":\"m2\",\"deltaContent\":\"x\",\"parentToolCallId\":\"t9\"}"));
+        // a subagent's words aren't the answer (protocol 4 says whose they are on the event)
+        assertNull(event("assistant.message_delta", "{\"messageId\":\"m2\",\"deltaContent\":\"x\"}",
+                ",\"agentId\":\"explore-1\""));
     }
 
     @Test
@@ -98,15 +104,13 @@ class CopilotEngineTest {
     }
 
     @Test
-    void aModelsPricesAreCreditsPerMillionTokens() {
-        ModelInfo m = new ModelInfo().setId("claude-haiku-5.5").setName("Claude Haiku 5.5")
-                .setPolicy(new com.github.copilot.rpc.ModelPolicy().setState("enabled"))
-                .setCapabilities(new com.github.copilot.rpc.ModelCapabilities()
-                        .setLimits(new com.github.copilot.rpc.ModelLimits().setMaxContextWindowTokens(1_000_000)))
-                .setBilling(new com.github.copilot.rpc.ModelBilling().setTokenPrices(
-                        new com.github.copilot.generated.rpc.ModelBillingTokenPrices(10.0, 50.0, 1.0, null, null, null,
-                                1_000_000L, null, null, null)))
-                .setSupportedReasoningEfforts(List.of("low", "medium", "high")).setDefaultReasoningEffort("medium");
+    void aModelsPricesAreCreditsPerMillionTokens() throws Exception {
+        // as Copilot lists them
+        Model m = JSON.readValue("""
+                {"id":"claude-haiku-5.5","name":"Claude Haiku 5.5","policy":{"state":"enabled"},
+                 "capabilities":{"supports":{},"limits":{"max_context_window_tokens":1000000}},
+                 "billing":{"tokenPrices":{"inputPrice":10.0,"outputPrice":50.0,"cacheReadPrice":1.0,"batchSize":1000000}},
+                 "supportedReasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"medium"}""", Model.class);
         ChatEngine.Model x = CopilotEngine.model(m);
         assertEquals("Claude Haiku 5.5", x.name());
         assertEquals(10.0, x.inputPrice());
@@ -115,8 +119,8 @@ class CopilotEngineTest {
         assertEquals(List.of("low", "medium", "high"), x.efforts());
         assertEquals("medium", x.effort());
         assertTrue(x.enabled());
-        ChatEngine.Model off = CopilotEngine.model(new ModelInfo().setId("grok-4.6")
-                .setPolicy(new com.github.copilot.rpc.ModelPolicy().setState("disabled")));
+        ChatEngine.Model off = CopilotEngine.model(JSON.readValue(
+                "{\"id\":\"grok-4.6\",\"policy\":{\"state\":\"disabled\"}}", Model.class));
         assertFalse(off.enabled());
         assertEquals("grok-4.6", off.name());
         assertEquals(0, off.inputPrice());
@@ -145,12 +149,12 @@ class CopilotEngineTest {
         assertNull(CopilotEngine.stepStatus(java.util.Map.of("kind", "awaiting")));
         assertEquals("none", CopilotEngine.stepKind(null));
 
-        com.github.copilot.generated.rpc.AuthLoginStepOpenUrl typed = new com.github.copilot.generated.rpc.AuthLoginStepOpenUrl();
+        com.microsoft.copilot.generated.rpc.AuthLoginStepOpenUrl typed = new com.microsoft.copilot.generated.rpc.AuthLoginStepOpenUrl();
         typed.setUrl("https://github.com/login");
         assertEquals("https://github.com/login", CopilotEngine.stepField(typed, "url"));
-        com.github.copilot.generated.rpc.AuthLoginStepCompleted done = new com.github.copilot.generated.rpc.AuthLoginStepCompleted();
-        done.setResult(new com.github.copilot.generated.rpc.AuthLoginResultDto(
-                com.github.copilot.generated.rpc.AuthLoginResultStatus.COMPLETED, "github.com", "bdarwin", List.of()));
+        com.microsoft.copilot.generated.rpc.AuthLoginStepCompleted done = new com.microsoft.copilot.generated.rpc.AuthLoginStepCompleted();
+        done.setResult(new com.microsoft.copilot.generated.rpc.AuthLoginResultDto(
+                com.microsoft.copilot.generated.rpc.AuthLoginResultStatus.COMPLETED, "github.com", "bdarwin", List.of()));
         assertEquals("completed", CopilotEngine.stepKind(done));
         assertEquals("completed", CopilotEngine.stepStatus(done));
     }
@@ -172,6 +176,68 @@ class CopilotEngineTest {
             } else {
                 System.setProperty("logsift.copilotHome", old);
             }
+        }
+    }
+
+    @Test
+    void logsiftsOwnCopilotAnswersUnlessAProgramIsChosen(@TempDir Path dir) throws Exception {
+        // a Copilot program people install changes its protocol (CLI 1.0.113 broke SDK 1.x), so
+        // the one that comes with Logsift answers
+        CopilotEngine own = assertInstanceOf(CopilotEngine.class,
+                ChatService.COPILOT.make(new ChatSettings(null, null, null), dir.resolve("home")));
+        assertNull(own.cli());
+        assertEquals(Path.of(System.getProperty("user.home"), ".copilot"), own.copilotHome(),
+                "the person's own Copilot folder, where its sign-in is");
+        Path cli = Files.createFile(dir.resolve("copilot"));
+        CopilotEngine chosen = assertInstanceOf(CopilotEngine.class,
+                ChatService.COPILOT.make(new ChatSettings(null, null, cli.toString()), dir.resolve("home")));
+        assertEquals(cli, chosen.cli());
+        assertNull(ChatService.COPILOT.make(new ChatSettings(null, null, dir.resolve("gone").toString()), dir.resolve("home")),
+                "a chosen program that isn't there anymore");
+    }
+
+    @Test
+    void aCopilotOfAnotherProtocolSaysWhatToDo() {
+        Exception mismatch = new java.util.concurrent.ExecutionException(new RuntimeException(
+                "SDK protocol version mismatch: SDK supports versions 4-4, but server reports version 3. Please update"));
+        String chosen = CopilotEngine.startFailed(mismatch, Path.of("/usr/local/bin/copilot"));
+        assertTrue(chosen.contains("/usr/local/bin/copilot") && chosen.contains("Use Logsift's Copilot")
+                && chosen.contains("copilot update"), chosen);
+        assertFalse(chosen.contains("SDK"), "no SDK talk: " + chosen);
+        assertTrue(CopilotEngine.startFailed(mismatch, null).contains("Install Logsift again"));
+        assertEquals("Copilot didn't start: no answer in time",
+                CopilotEngine.startFailed(new java.util.concurrent.TimeoutException(), null));
+    }
+
+    @Test
+    void logsiftsOwnCopilotStartsWithNothingInstalledAndNoSignIn(@TempDir Path dir) throws Exception {
+        // the real runtime, on each system the build runs on: started, asked who's signed in (no one:
+        // every way to a sign-in points at empty folders), stopped. No model, no tokens.
+        Path empty = Files.createDirectories(dir.resolve("nobody"));
+        Map<String, String> noSignIn = new java.util.HashMap<>();
+        for (String k : List.of("HOME", "USERPROFILE", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA",
+                "LOCALAPPDATA")) {
+            noSignIn.put(k, empty.toString());
+        }
+        for (String k : List.of("GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
+                "GITHUB_ENTERPRISE_TOKEN")) {
+            noSignIn.put(k, null);
+        }
+        CopilotEngine e = new CopilotEngine(null, dir.resolve("copilot-home"), dir.resolve("work"))
+                .withEnvironmentChanges(noSignIn);
+        // the SDK unpacks the runtime under user.home: the build's folder, not the person's
+        String userHome = System.getProperty("user.home");
+        Path unpacked = Path.of(System.getProperty("logsift.home", dir.toString())).resolveSibling("test-copilot-runtime");
+        try {
+            System.setProperty("user.home", unpacked.toString());
+            e.start();
+        } finally {
+            System.setProperty("user.home", userHome);
+        }
+        try {
+            assertNull(e.user(), "signed out");
+        } finally {
+            e.close();
         }
     }
 }

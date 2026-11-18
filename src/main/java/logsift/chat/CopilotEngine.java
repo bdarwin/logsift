@@ -1,23 +1,30 @@
 package logsift.chat;
 
-import com.github.copilot.CopilotClient;
-import com.github.copilot.CopilotSession;
-import com.github.copilot.generated.AssistantMessageDeltaEvent;
-import com.github.copilot.generated.AssistantReasoningDeltaEvent;
-import com.github.copilot.generated.AssistantUsageEvent;
-import com.github.copilot.generated.SessionErrorEvent;
-import com.github.copilot.generated.SessionEvent;
-import com.github.copilot.generated.SessionIdleEvent;
-import com.github.copilot.generated.SessionTitleChangedEvent;
-import com.github.copilot.generated.ToolExecutionCompleteEvent;
-import com.github.copilot.generated.ToolExecutionStartEvent;
-import com.github.copilot.rpc.CopilotClientOptions;
-import com.github.copilot.rpc.ModelInfo;
-import com.github.copilot.rpc.PermissionRequestResult;
-import com.github.copilot.rpc.ResumeSessionConfig;
-import com.github.copilot.rpc.SessionConfig;
-import com.github.copilot.rpc.SystemMessageConfig;
-import com.github.copilot.rpc.ToolDefinition;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.generated.AssistantMessageDeltaEvent;
+import com.microsoft.copilot.generated.AssistantReasoningDeltaEvent;
+import com.microsoft.copilot.generated.AssistantUsageEvent;
+import com.microsoft.copilot.generated.SessionErrorEvent;
+import com.microsoft.copilot.generated.SessionEvent;
+import com.microsoft.copilot.generated.SessionIdleEvent;
+import com.microsoft.copilot.generated.SessionTitleChangedEvent;
+import com.microsoft.copilot.generated.ToolExecutionCompleteEvent;
+import com.microsoft.copilot.generated.ToolExecutionStartEvent;
+import com.microsoft.copilot.rpc.ClientGitHubOptions;
+import com.microsoft.copilot.rpc.ClientInfo;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.PermissionRequestResult;
+import com.microsoft.copilot.rpc.ResumeSessionOptions;
+import com.microsoft.copilot.rpc.RuntimeConnection;
+import com.microsoft.copilot.rpc.SessionEventOptions;
+import com.microsoft.copilot.rpc.SessionInferenceOptions;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
+import com.microsoft.copilot.rpc.SessionToolOptions;
+import com.microsoft.copilot.rpc.SystemMessageConfig;
+import com.microsoft.copilot.rpc.ToolDefinition;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,10 +35,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * GitHub Copilot, through its SDK and the person's own Copilot program ({@code copilot}), signed
- * in as they are there: their subscription pays. Its sessions are kept in Logsift's folder, not
- * with the person's own Copilot sessions. Only Logsift's tools are offered: no shell, no file
- * writes, no web.
+ * GitHub Copilot, through its SDK and the Copilot runtime Logsift brings (made with that SDK), or
+ * a {@code copilot} program the person chose. Signed in as they are in Copilot (its {@code /login},
+ * a GitHub CLI login or a token): their subscription pays. Only Logsift's tools are offered: no
+ * shell, no file writes, no web.
+ *
+ * <p>Logsift brings its own runtime because Copilot programs people install change their protocol:
+ * Copilot CLI 1.0.113 talks protocol 4, which no 1.x SDK can start, and SDK 2 can't start a CLI
+ * older than that.
  */
 public final class CopilotEngine implements ChatEngine {
     /** How long starting may take before it's given up. */
@@ -48,7 +59,7 @@ public final class CopilotEngine implements ChatEngine {
     });
 
     /**
-     * @param cli  the {@code copilot} program
+     * @param cli  the {@code copilot} program chosen, or null for the runtime Logsift brings
      * @param home Copilot's own folder, or null for the person's ({@code ~/.copilot}), where the
      *             program keeps its sign-in: a folder of its own would leave it signed out
      * @param work the folder Copilot works in, in Logsift's: never one of the person's projects
@@ -74,26 +85,71 @@ public final class CopilotEngine implements ChatEngine {
         return "GitHub Copilot";
     }
 
+    /** The {@code copilot} program chosen, or null for the runtime Logsift brings. */
+    Path cli() {
+        return cli;
+    }
+
+    /** Copilot's folder: the one given, else the person's own ({@code ~/.copilot}), where its sign-in is. */
+    Path copilotHome() {
+        return home != null ? home : Path.of(System.getProperty("user.home"), ".copilot");
+    }
+
+    /** Variables changed for Copilot's process (null: removed), for tests to keep it from any sign-in. */
+    private Map<String, String> environmentChanges = Map.of();
+
+    CopilotEngine withEnvironmentChanges(Map<String, String> changes) {
+        environmentChanges = java.util.Objects.requireNonNull(changes);
+        return this;
+    }
+
+    private Map<String, String> environment() {
+        Map<String, String> env = cli == null ? CopilotLocator.environment() : CopilotLocator.environment(cli);
+        environmentChanges.forEach((k, v) -> {
+            env.keySet().removeIf(old -> old.equalsIgnoreCase(k));
+            if (v != null) {
+                env.put(k, v);
+            }
+        });
+        return env;
+    }
+
     @Override
     public synchronized void start() throws Exception {
         if (client != null) {
             return;
         }
-        CopilotClientOptions o = new CopilotClientOptions()
-                .setCliPath(cli.toString())
-                .setUseLoggedInUser(true)
-                .setEnvironment(CopilotLocator.environment(cli));
-        if (home != null) {
-            o.setCopilotHome(home.toString());
+        // its own process: a crash in Copilot can't take Logsift down
+        var runtime = RuntimeConnection.forSpawnedStdio()
+                .setEnvironment(environment())
+                .setBaseDirectory(copilotHome().toString());
+        if (cli != null) {
+            runtime.setPath(cli.toString());
         }
+        // EMPTY: nothing of Copilot's coding agent (its tools, plugins, instructions); only what's asked for
+        CopilotClientOptions o = new CopilotClientOptions().setMode(CopilotClientMode.EMPTY).setRuntime(runtime)
+                .setGitHub(new ClientGitHubOptions().setUseLoggedInUser(true))
+                .setClientInfo(new ClientInfo().setApplicationName("Logsift"));
         CopilotClient c = new CopilotClient(o);
         try {
             c.start().get(START_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             c.close();
-            throw new Exception("Copilot didn't start: " + why(e), e);
+            throw new Exception(startFailed(e, cli), e);
         }
         client = c;
+    }
+
+    /** Why Copilot didn't start, in words the person can act on. */
+    static String startFailed(Throwable e, Path cli) {
+        String why = why(e);
+        if (why.toLowerCase(java.util.Locale.ROOT).contains("protocol version mismatch")) {
+            return cli == null
+                    ? "Copilot didn't start: its runtime doesn't match this Logsift. Install Logsift again."
+                    : "Copilot didn't start: the program chosen (" + cli + ") is a version this Logsift can't talk to. "
+                    + "Choose Use Logsift's Copilot, or update the program (copilot update), then try again.";
+        }
+        return "Copilot didn't start: " + why;
     }
 
     private synchronized CopilotClient client() throws Exception {
@@ -129,12 +185,14 @@ public final class CopilotEngine implements ChatEngine {
     public SignIn signIn() throws Exception {
         CopilotClient c = client();
         java.nio.file.Files.createDirectories(work);
-        CopilotSession s = c.createSession(new SessionConfig().setWorkingDirectory(work.toString())
-                .setOnPermissionRequest(CopilotEngine::permission)).get(60, TimeUnit.SECONDS);
+        CopilotSession s = c.createSession(new CreateSessionOptions().setWorkingDirectory(work.toString())
+                .setTools(new SessionToolOptions().setAvailableTools(List.of()))
+                .setPermissions(new SessionPermissionOptions().setOnRequest(CopilotEngine::permission)))
+                .get(60, TimeUnit.SECONDS);
         try {
-            var begun = s.getRpc().accounts.login.begin(
-                    new com.github.copilot.generated.rpc.SessionAccountsLoginBeginRequest(
-                            com.github.copilot.generated.rpc.LoginProviderKind.GITHUBDOTCOM)).get(60, TimeUnit.SECONDS);
+            var begun = s.getRpc().accounts.login.begin(new com.microsoft.copilot.generated.rpc.SessionAccountsLoginBeginParams(
+                    s.getSessionId(), com.microsoft.copilot.generated.rpc.LoginProviderKind.GITHUBDOTCOM, null, null, null))
+                    .get(60, TimeUnit.SECONDS);
             Object step = begun.step();
             String kind = stepKind(step);
             String url = switch (kind) {
@@ -156,7 +214,7 @@ public final class CopilotEngine implements ChatEngine {
 
     /** A step of Copilot's sign-in, as it comes: its kind ("open-url", "awaiting", "completed", "error"…). */
     static String stepKind(Object step) {
-        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStep st) {
+        if (step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStep st) {
             return st.getKind();
         }
         if (step instanceof java.util.Map<?, ?> m && m.get("kind") != null) {
@@ -171,13 +229,13 @@ public final class CopilotEngine implements ChatEngine {
             Object v = m.get(name);
             return v == null ? null : v.toString();
         }
-        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStepOpenUrl u && name.equals("url")) {
+        if (step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStepOpenUrl u && name.equals("url")) {
             return u.getUrl();
         }
-        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStepError e && name.equals("message")) {
+        if (step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStepError e && name.equals("message")) {
             return e.getMessage();
         }
-        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStepInputRequired i && name.equals("prompt")) {
+        if (step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStepInputRequired i && name.equals("prompt")) {
             return i.getPrompt();
         }
         return null;
@@ -185,7 +243,7 @@ public final class CopilotEngine implements ChatEngine {
 
     /** What a finished step says of how it ended: "completed", "declined"…, or null when it doesn't say. */
     static String stepStatus(Object step) {
-        if (step instanceof com.github.copilot.generated.rpc.AuthLoginStepCompleted d && d.getResult() != null
+        if (step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStepCompleted d && d.getResult() != null
                 && d.getResult().status() != null) {
             return d.getResult().status().getValue();
         }
@@ -238,7 +296,7 @@ public final class CopilotEngine implements ChatEngine {
                     }
                     if (next == null && stepsWork) {
                         next = session.getRpc().accounts.login.advance(
-                                new com.github.copilot.generated.rpc.SessionAccountsLoginAdvanceParams(
+                                new com.microsoft.copilot.generated.rpc.SessionAccountsLoginAdvanceParams(
                                         session.getSessionId(), flow, null));
                     }
                     if (next != null) {
@@ -292,7 +350,7 @@ public final class CopilotEngine implements ChatEngine {
             if (!done) {
                 try {
                     session.getRpc().accounts.login.cancel(
-                            new com.github.copilot.generated.rpc.SessionAccountsLoginCancelParams(session.getSessionId(), flow))
+                            new com.microsoft.copilot.generated.rpc.SessionAccountsLoginCancelParams(session.getSessionId(), flow))
                             .get(10, TimeUnit.SECONDS);
                 } catch (Exception e) {
                     // gone already
@@ -305,29 +363,30 @@ public final class CopilotEngine implements ChatEngine {
     @Override
     public List<Model> models() throws Exception {
         List<Model> out = new ArrayList<>();
-        for (ModelInfo m : client().listModels().get(30, TimeUnit.SECONDS)) {
+        for (com.microsoft.copilot.generated.rpc.Model m : client().listModels().get(30, TimeUnit.SECONDS)) {
             out.add(model(m));
         }
         return out;
     }
 
-    static Model model(ModelInfo m) {
+    static Model model(com.microsoft.copilot.generated.rpc.Model m) {
         double in = 0;
         double outPrice = 0;
-        if (m.getBilling() != null && m.getBilling().getTokenPrices() != null) {
-            var p = m.getBilling().getTokenPrices();
+        if (m.billing() != null && m.billing().tokenPrices() != null) {
+            var p = m.billing().tokenPrices();
             double per = p.batchSize() == null || p.batchSize() == 0 ? 1_000_000 : p.batchSize();
             in = p.inputPrice() == null ? 0 : p.inputPrice() * 1_000_000 / per;
             outPrice = p.outputPrice() == null ? 0 : p.outputPrice() * 1_000_000 / per;
         }
-        long ctx = m.getCapabilities() != null && m.getCapabilities().getLimits() != null
-                ? m.getCapabilities().getLimits().getMaxContextWindowTokens() : 0;
-        List<String> efforts = m.getSupportedReasoningEfforts() == null ? List.of() : m.getSupportedReasoningEfforts();
+        long ctx = m.capabilities() != null && m.capabilities().limits() != null
+                && m.capabilities().limits().maxContextWindowTokens() != null
+                ? m.capabilities().limits().maxContextWindowTokens() : 0;
+        List<String> efforts = m.supportedReasoningEfforts() == null ? List.of() : m.supportedReasoningEfforts();
         // "auto" has no policy; others say "enabled" when the person may use them
-        boolean enabled = m.getPolicy() == null || m.getPolicy().getState() == null
-                || "enabled".equalsIgnoreCase(m.getPolicy().getState());
-        return new Model(m.getId(), m.getName() == null ? m.getId() : m.getName(), in, outPrice, ctx, efforts,
-                m.getDefaultReasoningEffort(), enabled);
+        boolean enabled = m.policy() == null || m.policy().state() == null
+                || "enabled".equalsIgnoreCase(m.policy().state().getValue());
+        return new Model(m.id(), m.name() == null ? m.id() : m.name(), in, outPrice, ctx, efforts,
+                m.defaultReasoningEffort(), enabled);
     }
 
     @Override
@@ -366,29 +425,32 @@ public final class CopilotEngine implements ChatEngine {
                     }
                 });
                 return f;
-            }).defer(t.often() ? com.github.copilot.rpc.ToolDefer.NEVER : com.github.copilot.rpc.ToolDefer.AUTO));
+            }).defer(t.often() ? com.microsoft.copilot.rpc.ToolDefer.NEVER : com.microsoft.copilot.rpc.ToolDefer.AUTO));
             names.add(t.name());
         }
         // Logsift's own instructions instead of Copilot's coding-agent ones: shorter, and about logs
-        SystemMessageConfig system = new SystemMessageConfig().setMode(com.github.copilot.SystemMessageMode.REPLACE)
+        SystemMessageConfig system = new SystemMessageConfig().setMode(com.microsoft.copilot.SystemMessageMode.REPLACE)
                 .setContent(setup.instructions());
         Path work = work();
         CopilotSession s;
+        SessionToolOptions toolOptions = new SessionToolOptions().setDefinitions(defs).setAvailableTools(names);
+        SessionPermissionOptions permissions = new SessionPermissionOptions().setOnRequest(CopilotEngine::permission);
+        SessionInferenceOptions inference = setup.effort() == null ? null
+                : new SessionInferenceOptions().setReasoningEffort(setup.effort());
         if (setup.resume() != null) {
-            ResumeSessionConfig r = new ResumeSessionConfig().setModel(setup.model()).setTools(defs)
-                    .setAvailableTools(names).setSystemMessage(system);
-            r.setOnPermissionRequest(CopilotEngine::permission);
-            r.setStreaming(true);
-            if (setup.effort() != null) {
-                r.setReasoningEffort(setup.effort());
+            ResumeSessionOptions r = new ResumeSessionOptions().setModel(setup.model()).setTools(toolOptions)
+                    .setSystemMessage(system).setPermissions(permissions)
+                    .setEvents(new SessionEventOptions().setStreaming(true));
+            if (inference != null) {
+                r.setInference(inference);
             }
             s = c.resumeSession(setup.resume(), r).get(60, TimeUnit.SECONDS);
         } else {
-            SessionConfig cfg = new SessionConfig().setModel(setup.model()).setTools(defs).setAvailableTools(names)
-                    .setSystemMessage(system).setStreaming(true).setWorkingDirectory(work.toString())
-                    .setOnPermissionRequest(CopilotEngine::permission);
-            if (setup.effort() != null) {
-                cfg.setReasoningEffort(setup.effort());
+            CreateSessionOptions cfg = new CreateSessionOptions().setModel(setup.model()).setTools(toolOptions)
+                    .setSystemMessage(system).setWorkingDirectory(work.toString()).setPermissions(permissions)
+                    .setEvents(new SessionEventOptions().setStreaming(true));
+            if (inference != null) {
+                cfg.setInference(inference);
             }
             s = c.createSession(cfg).get(60, TimeUnit.SECONDS);
         }
@@ -427,8 +489,8 @@ public final class CopilotEngine implements ChatEngine {
     }
 
     /** Only Logsift's own tools run, and they ask nothing: anything else the model tries is refused. */
-    private static CompletableFuture<PermissionRequestResult> permission(com.github.copilot.rpc.PermissionRequest r,
-                                                                         com.github.copilot.rpc.PermissionInvocation i) {
+    private static CompletableFuture<PermissionRequestResult> permission(com.microsoft.copilot.rpc.PermissionRequest r,
+                                                                         com.microsoft.copilot.rpc.PermissionInvocation i) {
         if ("custom-tool".equals(r.getKind())) {
             return CompletableFuture.completedFuture(PermissionRequestResult.approveOnce());
         }
@@ -439,7 +501,7 @@ public final class CopilotEngine implements ChatEngine {
     /** What an SDK event means here, or null for one the window doesn't show. */
     static ChatEvent event(SessionEvent e) {
         if (e instanceof AssistantMessageDeltaEvent d && d.getData() != null && d.getData().deltaContent() != null
-                && d.getData().parentToolCallId() == null) {
+                && e.getAgentId() == null) { // a subagent's words aren't the answer
             return new ChatEvent.Text(d.getData().messageId(), d.getData().deltaContent());
         }
         if (e instanceof AssistantReasoningDeltaEvent d && d.getData() != null && d.getData().deltaContent() != null) {

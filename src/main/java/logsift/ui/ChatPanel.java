@@ -1181,6 +1181,19 @@ final class ChatPanel extends JPanel {
         JButton choose = new JButton("Choose " + (claude() ? "Claude" : "Copilot") + " Program…");
         choose.addActionListener(e -> chooseProgram());
         b.add(choose);
+        if (!claude() && service.settings().copilot() != null && logsift.chat.CopilotLocator.bundled()) {
+            // a program chosen once (before Logsift brought its own) that no longer fits
+            JButton own = new JButton("Use Logsift's Copilot");
+            own.setName("useOwnCopilot");
+            own.setToolTipText("Copilot as it comes with Logsift, instead of " + service.settings().copilot());
+            own.addActionListener(e -> {
+                service.saveSettings(service.settings().withCopilot(null));
+                showMessage("Connecting to " + engineName() + "…", null);
+                service.state().thenAccept(st -> SwingUtilities.invokeLater(() -> connected(st)));
+            });
+            b.add(Box.createHorizontalStrut(6));
+            b.add(own);
+        }
         p.add(b);
         p.add(Box.createVerticalStrut(12));
         JLabel help = new JLabel("<html><a href=''>How to set up the assistant</a></html>");

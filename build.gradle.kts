@@ -23,6 +23,20 @@ val duckdbClassifier: String = run {
     }
 }
 
+/** Copilot's SDK and the runtime it was made with: always the same version. */
+val copilotSdk = "2.0.1"
+
+/** Copilot's runtime for the system building (and later running) this. */
+val copilotClassifier: String = run {
+    val os = System.getProperty("os.name").lowercase()
+    val arm = System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm") }
+    when {
+        os.contains("mac") -> if (arm) "darwin-arm64" else "darwin-x64"
+        os.contains("win") -> if (arm) "win32-arm64" else "win32-x64"
+        else -> if (arm) "linux-arm64" else "linux-x64"
+    }
+}
+
 dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
     // SVG icons (menus, toolbar) in the theme's colors
@@ -36,9 +50,11 @@ dependencies {
     // every system's native library)
     implementation("io.github.bdarwin:quackjvm-core:1.6.1") { exclude(group = "org.duckdb") }
     implementation("io.github.bdarwin:quackjvm-agent:1.6.1") { exclude(group = "org.duckdb") }
-    // GitHub Copilot's SDK (MIT) for the assistant in the window. It runs the person's own Copilot
-    // program; its native runtime isn't bundled.
-    implementation("com.github:copilot-sdk-java:1.0.28")
+    // GitHub Copilot's SDK (MIT) for the assistant in the window, with the Copilot runtime it was
+    // made with, for this system only. Copilot programs people install change their protocol
+    // (CLI 1.0.113 broke every 1.x SDK), so Logsift runs its own unless asked otherwise.
+    implementation("com.microsoft:copilot-sdk:$copilotSdk")
+    runtimeOnly("com.microsoft:copilot-sdk-runtime:$copilotSdk:$copilotClassifier")
     // Markdown (BSD-2) for the assistant's answers, with tables
     implementation("org.commonmark:commonmark:0.24.0")
     implementation("org.commonmark:commonmark-ext-gfm-tables:0.24.0")

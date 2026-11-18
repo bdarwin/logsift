@@ -19,6 +19,25 @@ public final class CopilotLocator {
     private CopilotLocator() {
     }
 
+    /** Whether Logsift brings its own Copilot runtime (for this system), so nothing needs installing. */
+    public static boolean bundled() {
+        return bundled(CopilotLocator.class.getClassLoader(), runtimeClassifier());
+    }
+
+    static boolean bundled(ClassLoader loader, String classifier) {
+        return classifier != null && loader.getResource("native/" + classifier + "/platform.properties") != null;
+    }
+
+    /** The SDK's name for this system's runtime ("darwin-arm64", "win32-x64", "linux-x64"…), or null. */
+    static String runtimeClassifier() {
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        String arch = System.getProperty("os.arch", "").toLowerCase(java.util.Locale.ROOT);
+        String cpu = arch.contains("aarch64") || arch.contains("arm") ? "arm64"
+                : arch.contains("amd64") || arch.contains("x86_64") ? "x64" : null;
+        String system = os.contains("mac") ? "darwin" : os.contains("win") ? "win32" : os.contains("linux") ? "linux" : null;
+        return system == null || cpu == null ? null : system + "-" + cpu;
+    }
+
     /** The program, or null if it isn't installed. {@code chosen}: the person's own choice, first. */
     public static Path find(String chosen) {
         return find(chosen, System.getenv("PATH"), Path.of(System.getProperty("user.home")), windows(),
@@ -65,6 +84,9 @@ public final class CopilotLocator {
                 }
             }
         }
+        if (name.equals("copilot")) {
+            dirs.add(ghCopilot(home, windows, localAppData, System.getenv("XDG_DATA_HOME")));
+        }
         if (windows) {
             dirs.add(home.resolve(".local").resolve("bin"));
             if (appData != null) {
@@ -93,6 +115,23 @@ public final class CopilotLocator {
             }
         }
         return out;
+    }
+
+    /**
+     * Where {@code gh copilot} (GitHub CLI) downloads Copilot when it isn't installed: gh's data
+     * folder ({@code XDG_DATA_HOME/gh}, {@code %LOCALAPPDATA%\GitHub CLI} on Windows, else
+     * {@code ~/.local/share/gh}), then {@code copilot}.
+     */
+    static Path ghCopilot(Path home, boolean windows, String localAppData, String xdgDataHome) {
+        Path data;
+        if (xdgDataHome != null && !xdgDataHome.isBlank()) {
+            data = Path.of(xdgDataHome, "gh");
+        } else if (windows && localAppData != null && !localAppData.isBlank()) {
+            data = Path.of(localAppData, "GitHub CLI");
+        } else {
+            data = home.resolve(".local").resolve("share").resolve("gh");
+        }
+        return data.resolve("copilot");
     }
 
     /** nvm's Node versions, newest first. */
@@ -124,6 +163,13 @@ public final class CopilotLocator {
             v = v * 100_000 + Math.min(n, 99_999);
         }
         return v;
+    }
+
+    /** The environment to start Logsift's own Copilot runtime in: this one, telemetry off. */
+    public static Map<String, String> environment() {
+        Map<String, String> env = new LinkedHashMap<>(System.getenv());
+        env.put("COPILOT_TELEMETRY_DISABLED", "true"); // Logsift sends nothing of its own either
+        return env;
     }
 
     /**

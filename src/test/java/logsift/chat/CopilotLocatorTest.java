@@ -91,4 +91,32 @@ class CopilotLocatorTest {
         Path mine = program(dir.resolve(".local/bin"), "claude");
         assertEquals(mine, CopilotLocator.find("claude", null, null, dir, false, null, null));
     }
+
+    @Test
+    void theCopilotThatGhCopilotDownloadedIsFound() throws Exception {
+        // gh copilot, with no copilot installed, downloads it into gh's data folder: people with
+        // only the GitHub CLI have it there, and Logsift didn't look
+        Path home = dir.resolve("home");
+        Path gh = program(home.resolve(".local/share/gh/copilot"), "copilot");
+        if (System.getenv("XDG_DATA_HOME") == null) {
+            Path found = CopilotLocator.find(null, null, home, false, null, null);
+            assertTrue(found != null && (found.equals(gh) || found.startsWith("/opt/homebrew") || found.startsWith("/usr")),
+                    String.valueOf(found));
+        }
+        assertEquals(home.resolve(".local/share/gh/copilot"), CopilotLocator.ghCopilot(home, false, null, null));
+        assertEquals(Path.of("/x/data", "gh", "copilot"), CopilotLocator.ghCopilot(home, false, null, "/x/data"));
+        assertEquals(Path.of("C:\\Users\\a\\AppData\\Local", "GitHub CLI", "copilot"),
+                CopilotLocator.ghCopilot(home, true, "C:\\Users\\a\\AppData\\Local", null));
+        var c = CopilotLocator.candidates(null, dir, true, null, "C:\\Users\\a\\AppData\\Local");
+        assertTrue(c.stream().anyMatch(p -> p.toString().replace('\\', '/').endsWith("Local/GitHub CLI/copilot/copilot.exe")),
+                c.toString());
+    }
+
+    @Test
+    void logsiftBringsItsOwnCopilotForThisSystem() {
+        // the runtime Logsift is built with (one per system); nothing to install
+        assertTrue(CopilotLocator.bundled(), "no Copilot runtime for " + CopilotLocator.runtimeClassifier());
+        assertTrue(!CopilotLocator.bundled(getClass().getClassLoader(), "plan9-x64"));
+        assertTrue(!CopilotLocator.bundled(getClass().getClassLoader(), null));
+    }
 }
