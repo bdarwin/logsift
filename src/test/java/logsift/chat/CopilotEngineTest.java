@@ -200,8 +200,10 @@ class CopilotEngineTest {
     void aCopilotOfAnotherProtocolSaysWhatToDo() {
         Exception mismatch = new java.util.concurrent.ExecutionException(new RuntimeException(
                 "SDK protocol version mismatch: SDK supports versions 4-4, but server reports version 3. Please update"));
-        String chosen = CopilotEngine.startFailed(mismatch, Path.of("/usr/local/bin/copilot"));
-        assertTrue(chosen.contains("/usr/local/bin/copilot") && chosen.contains("Use Logsift's Copilot")
+        Path program = Path.of("/usr/local/bin/copilot");
+        String chosen = CopilotEngine.startFailed(mismatch, program);
+        // the path as this system writes it (backslashes on Windows)
+        assertTrue(chosen.contains(program.toString()) &&chosen.contains("Use Logsift's Copilot")
                 && chosen.contains("copilot update"), chosen);
         assertFalse(chosen.contains("SDK"), "no SDK talk: " + chosen);
         assertTrue(CopilotEngine.startFailed(mismatch, null).contains("Install Logsift again"));
