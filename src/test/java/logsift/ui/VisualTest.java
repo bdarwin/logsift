@@ -12058,12 +12058,27 @@ class VisualTest {
         }
     }
 
+    /** What the window's thread is doing now: why it didn't get there in time. */
+    private static String edtNow() {
+        StringBuilder b = new StringBuilder();
+        for (Map.Entry<Thread, StackTraceElement[]> e : Thread.getAllStackTraces().entrySet()) {
+            if (e.getKey().getName().startsWith("AWT-EventQueue")) {
+                b.append("\n").append(e.getKey().getName()).append(" (").append(e.getKey().getState()).append("):");
+                StackTraceElement[] st = e.getValue();
+                for (int i = 0; i < Math.min(st.length, 40); i++) {
+                    b.append("\n    at ").append(st[i]);
+                }
+            }
+        }
+        return b.toString();
+    }
+
     private static void waitFor(BooleanSupplier cond, long timeoutMs, String what)
             throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (!cond.getAsBoolean()) {
             if (System.currentTimeMillis() > deadline) {
-                throw new AssertionError("Timed out waiting for: " + what);
+                throw new AssertionError("Timed out waiting for: " + what + edtNow());
             }
             Thread.sleep(20);
         }

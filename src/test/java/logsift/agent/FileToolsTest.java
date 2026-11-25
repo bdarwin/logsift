@@ -269,8 +269,9 @@ class FileToolsTest {
         String r = run(FileTools.MERGE_TABLES, "files", List.of(logs.resolve("a.csv").toString(),
                 logs.resolve("b.csv").toString()).toString());
         assertTrue(r.contains("Merged 2 tables") && r.contains("one file after the other"), r);
-        String json = run(FileTools.MERGE_TABLES, "files", "[\"" + logs.resolve("a.csv") + "\", \""
-                + logs.resolve("b.csv") + "\"]");
+        // as JSON writes paths: a Windows path's backslashes escaped
+        String json = run(FileTools.MERGE_TABLES, "files", logsift.agent.JsonWriter.write(List.of(
+                logs.resolve("a.csv").toString(), logs.resolve("b.csv").toString())));
         assertTrue(json.contains("Merged 2 tables"), json);
         assertTrue(fail(FileTools.MERGE_TABLES, "files", logs.resolve("a.csv").toString()).contains("two or more"));
         assertTrue(fail(FileTools.MERGE_TABLES, "files", logs.resolve("a.csv") + "," + logs.resolve("app.log"))
