@@ -251,9 +251,46 @@ A heap dump is asked for every time; **Allow for This Chat** (or **for This Sess
 
 ![Logsift's window asks when the agent can't](../screenshots/agent-asks.png)
 
+## Letting agents change things
+
+By default agents only read. To let them save what they make and keep notes in Logsift, turn on **Settings → Agents → Let agents change things**. A program that runs `logsift-mcp` can turn it on too, with `--allow-changes`. Then agents can also:
+
+- save new files: exported lines, a comparison, the result of a three-way merge;
+- add and remove bookmarks;
+- add a log format, and describe where a service's logs are (Log Locations).
+
+They save only inside the folders agents may read, and never replace a file that is there: they choose a new name. The window's assistant offers these tools from the next chat on.
+
+## Embedding Logsift in your own program
+
+Another program, such as your own assistant, can use every Logsift tool:
+
+- **Any language:** start `logsift-mcp` and talk MCP to it over standard input and output. The options above (`--root`, `--allow-changes`, masking) apply.
+- **Java:** put the jars from Logsift's `lib` folder (in the "any Java" zip) on the class path and call the tools in the same process:
+
+```java
+try (LogsiftTools logsift = LogsiftTools.builder()
+        .root(Path.of("/var/log/orders"))    // folders the tools may read
+        .allowChanges(true)                  // or leave it to Settings → Agents
+        .approver((what, detail) -> askThePerson(what, detail))  // thread dumps, heap dumps, changes
+        .client("office assistant")
+        .build()) {
+    String instructions = logsift.guide();   // give this to your model
+    for (LogsiftTools.ToolInfo t : logsift.tools()) {
+        // register t.name(), t.description(), t.inputSchemaJson() as a tool of your model
+    }
+    LogsiftTools.Result r = logsift.callJson("search", "{\"log\": \"/var/log/orders/app.log\", \"query\": \"timed out\"}");
+    // give r.text() back to the model; r.error() says it was a mistake the model can fix
+}
+```
+
+`LogsiftTools` is `logsift.embed.LogsiftTools`. One instance keeps open logs (handles like `log:1`) between calls, and several threads may call it at once. `serveMcp(in, out)` speaks MCP over your own streams instead.
+
+**The guide.** Small models do much better with instructions. `guide()` in Java, the `guide` tool over MCP and `logsift-mcp skill` give the same text: which tool for which question, the order to call them in, an example call for every tool, and the mistakes to avoid.
+
 ## What it can't do
 
-- Change, move or delete any file.
+- Replace, move or delete any file. Without **Let agents change things**, change anything at all.
 - Run commands, or connect to servers by itself. A thread dump, heap histogram or heap dump happens only as you allow under [Running JVMs](#running-jvms). Over SSH it signs in with your key and a server you already trust; the assistant asks for anything missing. Never a profiler.
 - Read outside your home folder, or outside the folders listed under **Folders agents may read**. The current folder also counts when it is outside your home folder.
 - Read files that hold keys or passwords, even through a link:

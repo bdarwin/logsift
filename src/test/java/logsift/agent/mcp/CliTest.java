@@ -164,7 +164,7 @@ class CliTest {
         Files.writeString(dir.resolve("secret.log"), "not for agents\n");
         Result tool = cli("", "run", "serch", "log=" + log);
         assertEquals(2, tool.code());
-        assertTrue(tool.err().contains("no tool serch; there are list_logs"), tool.err());
+        assertTrue(tool.err().contains("no tool serch; there are guide, list_logs"), tool.err());
         assertEquals("", tool.out());
 
         Result arg = cli("", "run", "search", "log=" + log, "text=x", "--root", logs.toString());
@@ -275,7 +275,7 @@ class CliTest {
                 + "  - Folders: `/srv/billing/logs`\n"), md);
         assertTrue(md.contains("`log=orders/app`"), md);
         assertTrue(md.contains("run search_folder folder=orders query="), md);
-        assertTrue(md.indexOf("## Where the logs are") < md.indexOf("## How to go about it"));
+        assertTrue(md.indexOf("## Where the logs are") < md.indexOf("## The seven rules"));
         // agents on MCP are told the same names
         assertTrue(McpServer.instructions(logsift.agent.LogCatalog.load(home, null, List.of()))
                 .endsWith("these services are: orders and billing. For those, start with list_logs even without a path."));

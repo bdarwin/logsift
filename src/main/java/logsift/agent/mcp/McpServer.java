@@ -28,7 +28,10 @@ public final class McpServer {
 
     static final String INSTRUCTIONS = """
             Logsift reads logs, tables (CSV), GC logs, thread dumps, crash files and profiles on this computer, fast on \
-            gigabytes, and answers with short summaries and 1-based line numbers. Everything is read-only.
+            gigabytes, and answers with short summaries and 1-based line numbers. It only reads, unless the person \
+            allowed changes (then tools that save new files, bookmarks or log formats are offered too).
+            New to Logsift, or a call didn't do what you expected? Call the guide tool first: which tool for \
+            which question, an example call for each, and the mistakes to avoid.
             Without a path, call list_logs first: it names the person's services, where their logs are and what \
             each file holds; open_log takes a name like "orders/app".
             For a problem: insights (what happened), exceptions (root causes), query (exact counts over time with \

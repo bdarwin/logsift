@@ -117,7 +117,10 @@ public final class McpMain {
     public static List<logsift.agent.Tool> tools(Path home) {
         List<logsift.agent.Tool> all = new ArrayList<>(LogTools.all());
         all.addAll(logsift.chat.AuditTools.all(logsift.chat.AuditTools.fromHome(home)));
-        return List.copyOf(all);
+        List<logsift.agent.Tool> done = new ArrayList<>();
+        done.add(logsift.agent.Guide.tool(() -> done)); // first: how to use the others
+        done.addAll(all);
+        return java.util.Collections.unmodifiableList(done);
     }
 
     /** Logsift's own folder (settings, the audit log). */

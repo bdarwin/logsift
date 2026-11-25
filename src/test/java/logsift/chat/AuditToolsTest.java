@@ -86,7 +86,8 @@ class AuditToolsTest {
     void logsiftMcpOffersThemAfterTheLogsTools() {
         List<String> names = logsift.agent.mcp.McpMain.tools(home).stream().map(Tool::name).toList();
         assertEquals(List.of(AuditTools.LIST, AuditTools.QUESTION), names.subList(names.size() - 2, names.size()));
-        assertEquals(logsift.agent.LogTools.all().size() + 2, names.size());
+        assertEquals("guide", names.get(0), "how to use the others, first");
+        assertEquals(logsift.agent.LogTools.all().size() + 3, names.size());
         assertTrue(logsift.agent.LogTools.all().stream().noneMatch(t -> t.name().startsWith("assistant_")),
                 "not for the window's own assistant");
     }
