@@ -77,7 +77,8 @@ class WorkspaceChangesTest {
         List<Tool> all = new ArrayList<>(LogTools.all());
         all.add(SAVE);
         assertFalse(ToolCall.offered(all, w).contains(SAVE));
-        assertEquals(LogTools.all().size(), ToolCall.offered(all, w).size(), "every reading tool still offered");
+        assertEquals(LogTools.all().stream().filter(Tool::readOnly).toList(), ToolCall.offered(all, w),
+                "every reading tool still offered");
         ToolCall c = ToolCall.run(SAVE, new Tool.Args(Map.of("to", logs.resolve("n.txt").toString())), w);
         assertTrue(c.failed() && c.text().contains("Let agents change things"), c.text());
         assertFalse(Files.exists(logs.resolve("n.txt")));

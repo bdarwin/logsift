@@ -1,16 +1,11 @@
 package logsift.ui;
 
 import java.io.IOException;
-import java.io.Reader;
-import java.io.Writer;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Properties;
 import java.util.TreeMap;
 
 /**
@@ -107,50 +102,13 @@ final class Bookmarks {
 
     // ---------------------------------------------------------------- storage
 
-    private Path store() {
-        return AppState.home().resolve("bookmarks").resolve(AppState.key(file) + ".properties");
-    }
-
     private void load() {
-        Path p = store();
-        if (!Files.exists(p)) {
-            return;
-        }
-        Properties props = new Properties();
-        try (Reader r = Files.newBufferedReader(p, StandardCharsets.UTF_8)) {
-            props.load(r);
-            long savedSize = Long.parseLong(props.getProperty("size", "0"));
-            if (size.getAsLong() < savedSize) {
-                Files.deleteIfExists(p); // truncated or replaced: the lines moved
-                return;
-            }
-            for (String k : props.stringPropertyNames()) {
-                if (k.startsWith("line.")) {
-                    marks.put(Long.parseLong(k.substring(5)), props.getProperty(k));
-                }
-            }
-        } catch (IOException | RuntimeException e) {
-            // unreadable: start without bookmarks
-        }
+        marks.putAll(logsift.core.BookmarkStore.load(AppState.home(), file, size.getAsLong()));
     }
 
     private void save() {
-        Path p = store();
         try {
-            if (marks.isEmpty()) {
-                Files.deleteIfExists(p);
-                return;
-            }
-            Files.createDirectories(p.getParent());
-            Properties props = new Properties();
-            props.setProperty("file", file.toAbsolutePath().toString());
-            props.setProperty("size", Long.toString(size.getAsLong()));
-            for (Map.Entry<Long, String> e : marks.entrySet()) {
-                props.setProperty("line." + e.getKey(), e.getValue());
-            }
-            try (Writer w = Files.newBufferedWriter(p, StandardCharsets.UTF_8)) {
-                props.store(w, "Logsift bookmarks");
-            }
+            logsift.core.BookmarkStore.save(AppState.home(), file, size.getAsLong(), marks);
         } catch (IOException | RuntimeException e) {
             // not fatal: bookmarks just won't be remembered
         }

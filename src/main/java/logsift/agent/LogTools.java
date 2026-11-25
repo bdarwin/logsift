@@ -49,6 +49,7 @@ public final class LogTools {
         all.addAll(JvmTools.all());
         all.addAll(HeapTools.all());
         all.addAll(NetworkTools.all());
+        all.addAll(ChangeTools.all());
         return List.copyOf(all);
     }
 
@@ -180,7 +181,7 @@ public final class LogTools {
     }
 
     static String catalogText(Workspace w, String only) {
-        return catalogText(w.catalog(), w.options().scope(), w.options().formats(), only);
+        return catalogText(w.catalog(), w.options().scope(), w.formats(), only);
     }
 
     /** What list_logs answers, for these locations (the window shows it as a preview). */
