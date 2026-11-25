@@ -74,8 +74,30 @@ public class JvmReach implements AutoCloseable {
             throw new IOException("Heap dumps can't be taken here.");
         }
 
+        /**
+         * Records what the JVM does for a while with Flight Recorder (never async-profiler): one
+         * profile per thing measured, the one asked for first; null if cancelled.
+         */
+        default List<logsift.jvm.Profile> record(logsift.jvm.Profiler.Request r, java.util.function.BooleanSupplier cancel)
+                throws IOException {
+            throw new IOException("Recordings can't be made here.");
+        }
+
         @Override
         void close();
+    }
+
+    /** A recording through the Profile tab's own way of making one: Flight Recorder only. */
+    static List<logsift.jvm.Profile> record(logsift.jvm.Profiler.Target t, logsift.jvm.Profiler.Request r,
+                                            java.util.function.BooleanSupplier cancel) throws IOException {
+        if (r.engine() != logsift.jvm.Profiler.Engine.JFR) {
+            throw new IOException("Agents only record with Flight Recorder.");
+        }
+        String problem = r.problem();
+        if (problem != null) {
+            throw new IOException(problem);
+        }
+        return t.run(r, null, cancel);
     }
 
     /** A heap dump through the Heap tab's own way of taking one. */
@@ -210,6 +232,12 @@ public class JvmReach implements AutoCloseable {
             }
 
             @Override
+            public List<logsift.jvm.Profile> record(logsift.jvm.Profiler.Request r,
+                                                    java.util.function.BooleanSupplier cancel) throws IOException {
+                return JvmReach.record(logsift.jvm.Profiler.local(running, s), r, cancel);
+            }
+
+            @Override
             public boolean isOpen() {
                 return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
             }
@@ -266,6 +294,12 @@ public class JvmReach implements AutoCloseable {
             }
 
             @Override
+            public List<logsift.jvm.Profile> record(logsift.jvm.Profiler.Request r,
+                                                    java.util.function.BooleanSupplier cancel) throws IOException {
+                return JvmReach.record(logsift.jvm.Profiler.remote(running, conn, o), r, cancel);
+            }
+
+            @Override
             public boolean isOpen() {
                 return conn.isConnected();
             }
@@ -299,6 +333,12 @@ public class JvmReach implements AutoCloseable {
             @Override
             public String heapDump(Path local) throws IOException {
                 return JvmReach.heapDump(logsift.jvm.Profiler.jmx(s), local);
+            }
+
+            @Override
+            public List<logsift.jvm.Profile> record(logsift.jvm.Profiler.Request r,
+                                                    java.util.function.BooleanSupplier cancel) throws IOException {
+                return JvmReach.record(logsift.jvm.Profiler.jmx(s), r, cancel);
             }
 
             @Override

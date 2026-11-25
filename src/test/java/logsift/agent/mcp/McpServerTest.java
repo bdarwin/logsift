@@ -289,7 +289,8 @@ class McpServerTest {
                 "top_messages", "metrics", "query", "query_examples", "pivot", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
                 "merge_logs", "analyze_profile", "compare_files", "compare_folders", "compare_logs", "analyze_crash",
                 "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram", "heap_dump",
-                "analyze_heap_dump", "network_check"),
+                "analyze_heap_dump", "network_check", "compare_heap_dumps", "compare_histograms", "compare_profiles",
+                "compare_thread_dumps", "record_profile"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
             Map<String, Object> d = map(t);

@@ -199,7 +199,9 @@ public final class Workspace implements AutoCloseable {
             case ALLOW -> {
                 // allowed without asking: the agent log still lists the call
             }
-            case ASK -> approve(what, action == JvmRules.Action.HEAP_DUMP ? null : key, detail);
+            // heap dumps and recordings: asked every time, never "for this chat"
+            case ASK -> approve(what, action == JvmRules.Action.HEAP_DUMP || action == JvmRules.Action.PROFILE
+                    ? null : key, detail);
         }
     }
 
