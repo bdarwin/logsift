@@ -78,8 +78,8 @@ jobs:
             LABEL=snapshot
           fi
           NAME=Logsift-$LABEL-${{ matrix.target }}
-          # A beta: its own settings, window and app name; no installers or file associations,
-          # so it never replaces or takes over from the normal Logsift.
+          # A beta: its own settings, window and app name; no file associations or Explorer menu, and
+          # on Windows its own installer, so it never replaces or takes over from the normal Logsift.
           # ZGC needs Windows 10 1803 / Server 2019 or later (Java won't start with it on Server 2016):
           # Windows uses G1, which runs on every Windows that Java 21 supports.
           case "${{ matrix.target }}" in windows-*) GC=-XX:+UseG1GC ;; *) GC=-XX:+UseZGC ;; esac
@@ -129,17 +129,26 @@ jobs:
               jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.ico "${COMMON[@]}"
               grep -q 'jdk.crypto.mscapi' pkg/Logsift/runtime/release || { echo "no Windows certificates in the runtime"; exit 1; }
               pwsh -NoProfile -Command "Compress-Archive -Path pkg/Logsift -DestinationPath dist/$NAME.zip"
-              if [ ${#BETA[@]} -gt 0 ]; then ls -l dist; exit 0; fi
               # Installer: per user (no admin rights needed), Start menu entry, a Logsift menu on
               # files and folders (Analyze, Open, Compare, Search), not taking over .log files.
               # jpackage can't add that, so its installer script is built once, patched, and used
               # for the real build.
-              MSI=(--app-version "$VERSION" --icon packaging/icons/logsift.ico
-                   --win-per-user-install --win-menu --win-menu-group Logsift --win-shortcut-prompt
-                   --win-upgrade-uuid 2cf55e2a-4bbe-4a4c-8397-7b68517646a0)
+              if [ ${#BETA[@]} -gt 0 ]; then
+                # Logsift Beta: its own folder, Start menu group, name in Apps and upgrade code, so
+                # installing or removing it never touches Logsift; no menu, no desktop shortcut
+                MSI=(--app-version "$VERSION" --icon packaging/icons/logsift.ico
+                     --win-per-user-install --win-menu --win-menu-group "Logsift Beta" --install-dir "Logsift Beta"
+                     --win-upgrade-uuid 740b2b78-f689-45fd-b938-7a06abf54a3f)
+                EDITION=beta
+              else
+                MSI=(--app-version "$VERSION" --icon packaging/icons/logsift.ico
+                     --win-per-user-install --win-menu --win-menu-group Logsift --win-shortcut-prompt
+                     --win-upgrade-uuid 2cf55e2a-4bbe-4a4c-8397-7b68517646a0)
+                EDITION=
+              fi
               jpackage --type msi --dest msi-first --temp msi-temp "${MSI[@]}" "${COMMON[@]}"
               mkdir -p msi-res
-              python packaging/windows/add-open-with.py msi-temp/config/main.wxs msi-res/main.wxs "${{ matrix.target == 'windows-arm64' && 'arm64' || 'x64' }}"
+              python packaging/windows/add-open-with.py msi-temp/config/main.wxs msi-res/main.wxs "${{ matrix.target == 'windows-arm64' && 'arm64' || 'x64' }}" $EDITION
               jpackage --type msi --dest dist --resource-dir msi-res "${MSI[@]}" "${COMMON[@]}"
               mv dist/Logsift-*.msi "dist/$NAME.msi"
               ;;
@@ -308,6 +317,34 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Remove-Item -Recurse -Force skill-try, "$HOME\logs\orders.log"
           $global:LASTEXITCODE = 0 # the step ends with the last program's exit code
+
+      - name: Try the Logsift Beta installer (install, check it's apart from Logsift, uninstall)
+        if: startsWith(matrix.target, 'windows-') && startsWith(github.ref_name, 'beta/')
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem dist/*.msi | Select-Object -First 1
+          if (-not $msi) { throw "no beta installer" }
+          $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 40; throw "install failed: $($p.ExitCode)" }
+          $dir = Join-Path $env:LOCALAPPDATA 'Logsift Beta'
+          $exe = Join-Path $dir 'Logsift.exe'
+          if (-not (Test-Path $exe)) { Get-ChildItem $env:LOCALAPPDATA | Out-String | Write-Host; throw "not installed in $dir" }
+          if (Test-Path (Join-Path $env:LOCALAPPDATA 'Logsift\Logsift.exe')) { throw "the beta went into Logsift's folder" }
+          if (-not ((Get-Content (Join-Path $dir 'app\Logsift.cfg') -Raw) -match 'logsift.channel=beta')) { throw "not a beta (no channel=beta)" }
+          if (-not (Test-Path (Join-Path $dir 'logsift-mcp.exe'))) { throw "logsift-mcp.exe not installed" }
+          Write-Host "Reports: $(& $exe --version | Out-String)"
+          $apps = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -like 'Logsift*' }
+          $apps | ForEach-Object { Write-Host "In Apps: $($_.DisplayName) $($_.DisplayVersion)" }
+          if (-not ($apps | Where-Object { $_.DisplayName -eq 'Logsift Beta' })) { throw "not shown as Logsift Beta in Apps" }
+          foreach ($k in 'HKCU:\Software\Classes\*\shell\Logsift', 'HKCU:\Software\Classes\Directory\shell\Logsift', 'HKCU:\Software\Classes\.log\OpenWithList\Logsift.exe') {
+            if (Test-Path -LiteralPath $k) { throw "the beta registered $k" }
+          }
+          $menu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Logsift Beta'
+          if (-not (Test-Path $menu)) { throw "no Start menu group Logsift Beta" }
+          Get-ChildItem $menu | ForEach-Object { Write-Host "Start menu: Logsift Beta\$($_.Name)" }
+          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
+          if (Test-Path $exe) { throw "still there after uninstall" }
 
       - name: Try the Windows installer (install, check, uninstall)
         if: startsWith(matrix.target, 'windows-') && !startsWith(github.ref_name, 'beta/')
@@ -509,7 +546,8 @@ jobs:
           | File | For |
           |---|---|
           | \`Logsift-$B-macos-arm64.dmg\` / \`-macos-x64.dmg\` | macOS: drag **Logsift Beta** to Applications. If it says the app is damaged, run \`xattr -dr com.apple.quarantine \"/Applications/Logsift Beta.app\"\` |
-          | \`Logsift-$B-windows-x64.zip\` / \`-windows-arm64.zip\` | Windows: unzip anywhere, run \`Logsift\\Logsift.exe\` |
+          | \`Logsift-$B-windows-x64.msi\` / \`-windows-arm64.msi\` | Windows installer (no admin rights needed): installs **Logsift Beta** in its own folder and Start menu group, next to Logsift |
+          | \`Logsift-$B-windows-x64.zip\` / \`-windows-arm64.zip\` | Windows without installing: unzip anywhere, run \`Logsift\\Logsift.exe\` |
           | \`Logsift-$B-linux-x64.tar.gz\` / \`-linux-arm64.tar.gz\` | Linux: unpack, run \`Logsift/bin/Logsift\` |
           | \`Logsift-$B-any-java21.zip\` | Any OS with Java 21+: run \`bin/logsift\` (its own settings only when started with \`-Dlogsift.channel=beta\`, see JAVA_OPTS) |"
 

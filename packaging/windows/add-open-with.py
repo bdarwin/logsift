@@ -1,6 +1,6 @@
 """Adds "Open with Logsift" to the Windows installer that jpackage makes.
 
-Usage: add-open-with.py <jpackage's main.wxs> <patched main.wxs> [x64|arm64]
+Usage: add-open-with.py <jpackage's main.wxs> <patched main.wxs> [x64|arm64] [beta]
 
 Instead of taking over .log files (their icon, double-click and type name stay as they
 are), the installer adds:
@@ -12,6 +12,10 @@ Everything is under HKCU and is removed again on uninstall.
 It also makes every build replace the one installed (snapshots share a version number, so
 each build gets its own product code and same-version upgrades are allowed), and closes a
 running Logsift before its files are replaced or removed.
+
+With "beta" (a Logsift Beta) it adds no menu or "Open with" and closes nothing (the beta's
+program is Logsift.exe too: closing by name would close the normal Logsift), and names the
+product "Logsift Beta", so Apps & features shows the two apart.
 
 For arm64 it marks the package as an Arm64 one: jpackage always says x64, and its helper
 DLL (built for Arm64 by an Arm64 JDK) then can't be loaded by the x64 helper process that
@@ -93,12 +97,20 @@ CLOSE = '''
 '''
 
 
-def main(src, dst, arch='x64'):
+def main(src, dst, arch='x64', edition=''):
     s = open(src, encoding='utf-8').read()
     if '</Product>' not in s or '</Feature>' not in s or 'INSTALLDIR' not in s:
         sys.exit(f'{src}: not the main.wxs this script knows (no Product, Feature or INSTALLDIR)')
-    s = s.replace('</Feature>', '  <ComponentRef Id="LogsiftOpenWith"/>\n    </Feature>', 1)
-    s = s.replace('</Product>', COMPONENT + CLOSE + '  </Product>', 1)
+    if edition not in ('', 'beta'):
+        sys.exit(f'unknown edition: {edition}')
+    beta = edition == 'beta'
+    if beta:
+        s, n = re.subn(r'(<Product\b[^>]*?\bName=)"[^"]*"', r'\1"Logsift Beta"', s, count=1, flags=re.S)
+        if n != 1:
+            sys.exit(f'{src}: no Product Name to replace')
+    else:
+        s = s.replace('</Feature>', '  <ComponentRef Id="LogsiftOpenWith"/>\n    </Feature>', 1)
+        s = s.replace('</Product>', COMPONENT + CLOSE + '  </Product>', 1)
 
     # a new product code for every build: installing the same version again is an upgrade
     s, n = re.subn(r'(<Product\b[^>]*?\bId=)"[^"]*"', r'\1"*"', s, count=1, flags=re.S)
@@ -137,8 +149,11 @@ def main(src, dst, arch='x64'):
         if n != 1:
             sys.exit(f'{src}: no Wix element')
     open(dst, 'w', encoding='utf-8').write(s)
-    print(f'{dst}: added Open with Logsift, same-version upgrades, closing a running Logsift ({arch})')
+    if beta:
+        print(f'{dst}: named Logsift Beta, same-version upgrades, no menu ({arch})')
+    else:
+        print(f'{dst}: added Open with Logsift, same-version upgrades, closing a running Logsift ({arch})')
 
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2], *sys.argv[3:4])
+    main(sys.argv[1], sys.argv[2], *sys.argv[3:5])
