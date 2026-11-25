@@ -18,6 +18,9 @@ public record ToolCall(String text, boolean failed, String outcome) {
         boolean failed = false;
         String outcome;
         try {
+            if (!tool.readOnly() && !w.changesAllowed()) {
+                throw new Tool.Failure(Workspace.CHANGES_OFF);
+            }
             text = tool.run(args, w);
             outcome = "ok";
         } catch (Workspace.StillWorking e) {
@@ -41,5 +44,10 @@ public record ToolCall(String text, boolean failed, String outcome) {
             text = w.masking().mask(text, null);
         }
         return new ToolCall(text, failed, outcome);
+    }
+
+    /** The tools an agent is offered in {@code w}: those that change something only when changes are allowed. */
+    public static java.util.List<Tool> offered(java.util.List<Tool> tools, Workspace w) {
+        return w.changesAllowed() ? java.util.List.copyOf(tools) : tools.stream().filter(Tool::readOnly).toList();
     }
 }

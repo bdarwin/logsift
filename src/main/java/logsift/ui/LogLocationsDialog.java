@@ -1160,7 +1160,7 @@ final class LogLocationsDialog extends JDialog {
             }
         }
         try {
-            new AgentSettings(a.masking(), roots).save(home);
+            new AgentSettings(a.masking(), roots, a.allowChanges()).save(home);
         } catch (java.io.IOException e) {
             JOptionPane.showMessageDialog(this, "Logsift couldn't save the agent settings: " + e.getMessage(), getTitle(),
                     JOptionPane.WARNING_MESSAGE);

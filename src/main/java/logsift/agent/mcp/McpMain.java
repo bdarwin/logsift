@@ -94,10 +94,12 @@ public final class McpMain {
 
     static final String USAGE = """
             usage: logsift-mcp [--root FOLDER]... [--mask-emails] [--mask-ips] [--mask REGEX]... [--no-mask] \
-            [--max-chars N] [--logs FILE]...
+            [--max-chars N] [--logs FILE]... [--allow-changes]
               --root FOLDER   allow reading under FOLDER (default: your home folder and the current folder)
               --mask-emails   also mask email addresses; --mask-ips: IP addresses; --mask REGEX: your own
               --no-mask       don't mask secrets (passwords, tokens, keys) in answers
+              --allow-changes offer the tools that change something (save new files, bookmarks, log formats,
+                              log locations); they never replace or remove a file
               --logs FILE     also read log locations from FILE (like a project's .logsift/logs.json)""";
 
     /** The --logs files. */
@@ -136,6 +138,7 @@ public final class McpMain {
         List<String> custom = new ArrayList<>(settings.masking().custom());
         List<Path> roots = new ArrayList<>(settings.roots());
         int maxChars = Workspace.DEFAULT_MAX_CHARS;
+        boolean changes = settings.allowChanges();
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
             switch (a) {
@@ -144,6 +147,7 @@ public final class McpMain {
                 case "--mask-ips" -> ips = true;
                 case "--mask" -> custom.add(value(args, ++i, a));
                 case "--no-mask" -> secrets = false;
+                case "--allow-changes" -> changes = true;
                 case "--logs" -> value(args, ++i, a); // read by logFiles
                 case "--max-chars" -> {
                     try {
@@ -166,7 +170,7 @@ public final class McpMain {
         return new Workspace.Options(new Scope(roots, userHome), masking,
                 Math.max(500, Math.min(maxChars, Workspace.HARD_MAX_CHARS)), 25_000,
                 logsift.core.CustomFormat.load(logsiftHome.resolve("formats.properties")),
-                logsiftHome.resolve("agent.log"), logsiftHome);
+                logsiftHome.resolve("agent.log"), logsiftHome, changes);
     }
 
     private static String value(String[] args, int i, String option) {

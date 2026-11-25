@@ -34,6 +34,8 @@ final class AgentsPanel extends JPanel {
     private final JCheckBox secrets = new JCheckBox("Secrets: passwords, tokens, keys, card numbers");
     private final JCheckBox emails = new JCheckBox("Email addresses");
     private final JCheckBox ips = new JCheckBox("IP addresses");
+    private final JCheckBox changes = new JCheckBox("Let agents change things: save new files (exported lines, "
+            + "merge results), bookmarks, log formats, log locations");
     private final JTextArea custom = new JTextArea(3, 30);
     private final DefaultListModel<Path> roots = new DefaultListModel<>();
     private final JComboBox<AgentSettings.Agent> agent = new JComboBox<>(AgentSettings.Agent.values());
@@ -283,6 +285,11 @@ final class AgentsPanel extends JPanel {
         folders.add(buttons, BorderLayout.EAST);
         folders.setAlignmentX(LEFT_ALIGNMENT);
         p.add(folders);
+        p.add(Box.createVerticalStrut(10));
+        changes.setAlignmentX(LEFT_ALIGNMENT);
+        changes.addActionListener(e -> save());
+        p.add(changes);
+        p.add(note("Only in the folders above. Agents never replace or remove a file; without this they only read."));
         saveError.setForeground(new Color(0xDC2626));
         saveError.setAlignmentX(LEFT_ALIGNMENT);
         p.add(saveError);
@@ -298,6 +305,7 @@ final class AgentsPanel extends JPanel {
             secrets.setSelected(s.masking().secrets());
             emails.setSelected(s.masking().emails());
             ips.setSelected(s.masking().ips());
+            changes.setSelected(s.allowChanges());
             custom.setText(String.join("\n", s.masking().custom()));
             roots.clear();
             s.roots().forEach(roots::addElement);
@@ -318,7 +326,7 @@ final class AgentsPanel extends JPanel {
             }
         }
         AgentSettings s = new AgentSettings(new Masking.Options(secrets.isSelected(), emails.isSelected(),
-                ips.isSelected(), patterns), Collections.list(roots.elements()));
+                ips.isSelected(), patterns), Collections.list(roots.elements()), changes.isSelected());
         List<String> bad = new Masking(s.masking()).badPatterns();
         try {
             s.save(AppState.home());
@@ -326,6 +334,10 @@ final class AgentsPanel extends JPanel {
         } catch (IOException e) {
             saveError.setText("Can't save " + AgentSettings.file(AppState.home()) + ": " + e.getMessage());
         }
+    }
+
+    JCheckBox changesBox() {
+        return changes;
     }
 
     JCheckBox secretsBox() {

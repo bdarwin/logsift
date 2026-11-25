@@ -159,7 +159,7 @@ final class Cli {
         Workspace.Options o = McpMain.options(optionArgs.toArray(String[]::new), logsiftHome, cwd);
         // a terminal waits for slow work rather than being told to ask again
         o = new Workspace.Options(o.scope(), o.masking(), o.maxChars(), WAIT_MILLIS, o.formats(), o.auditLog(),
-                o.logsiftHome());
+                o.logsiftHome(), o.allowChanges());
         List<Path> logFiles = McpMain.logFiles(optionArgs.toArray(String[]::new));
         Tool.Args a = new Tool.Args(args);
         try (Workspace w = new Workspace(o)) {

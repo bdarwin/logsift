@@ -35,12 +35,88 @@ public final class Workspace implements AutoCloseable {
      * @param formats   the user's own log formats
      * @param auditLog  where each call is recorded (null: nowhere)
      * @param logsiftHome Logsift's folder, for settings such as where crash dumps find names (null: none)
+     * @param allowChanges whether tools that change something (save a file, add a bookmark, a log format)
+     *                     may run: off unless the person turned it on (Settings → Agents) or the host did
      */
     public record Options(Scope scope, Masking.Options masking, int maxChars, long waitMillis,
-                          List<CustomFormat> formats, Path auditLog, Path logsiftHome) {
+                          List<CustomFormat> formats, Path auditLog, Path logsiftHome, boolean allowChanges) {
+        public Options(Scope scope, Masking.Options masking, int maxChars, long waitMillis, List<CustomFormat> formats,
+                       Path auditLog, Path logsiftHome) {
+            this(scope, masking, maxChars, waitMillis, formats, auditLog, logsiftHome, false);
+        }
+
         public Options(Scope scope, Masking.Options masking, int maxChars, long waitMillis, List<CustomFormat> formats,
                        Path auditLog) {
             this(scope, masking, maxChars, waitMillis, formats, auditLog, null);
+        }
+
+        /** The same, with changes allowed or not. */
+        public Options withChanges(boolean allowed) {
+            return new Options(scope, masking, maxChars, waitMillis, formats, auditLog, logsiftHome, allowed);
+        }
+    }
+
+    /** What a tool that changes something says when changes are off. */
+    public static final String CHANGES_OFF = "Changing things is off. The person can turn it on in Logsift "
+            + "(Settings → Agents → Let agents change things), or the program running Logsift's tools can "
+            + "(logsift-mcp --allow-changes). Until then, tell the person what you would change.";
+
+    private volatile Boolean changes;
+
+    /** Whether tools that change something may run. */
+    public boolean changesAllowed() {
+        Boolean c = changes;
+        return c != null ? c : options.allowChanges();
+    }
+
+    /** Turns changes on or off from now (the person changed Settings → Agents). */
+    public void setChangesAllowed(boolean allowed) {
+        changes = allowed;
+    }
+
+    /**
+     * Where a tool may save a new file: changes allowed, inside the folders agents may read, and
+     * nothing there yet (a tool never replaces or removes a file). Asks the person first in the
+     * window, as for reading. Gives the real path; the file is then readable by the tools.
+     *
+     * @param what what the tool would do, for the question: "save the lines to"
+     */
+    public Path checkNew(Path p, String what) throws java.io.IOException, Tool.Failure, InterruptedException {
+        if (!changesAllowed()) {
+            throw new Tool.Failure(CHANGES_OFF);
+        }
+        Path abs = p.toAbsolutePath().normalize();
+        if (Files.exists(abs, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            throw new Tool.Failure("There is a file there already: " + abs + ". Logsift never replaces files: "
+                    + "choose a new name.");
+        }
+        Path parent = abs.getParent();
+        if (parent == null || !Files.isDirectory(parent)) {
+            throw new Tool.Failure("No such folder: " + parent + ". Save into a folder that exists.");
+        }
+        Path realParent = options.scope().check(parent);
+        Path real = realParent.resolve(abs.getFileName());
+        Gate g = gate;
+        if (g != null) {
+            g.allowChange(what + " " + abs.getFileName(), real);
+        }
+        made(real);
+        return real;
+    }
+
+    /**
+     * Before a change to Logsift's own records (a bookmark, a log format, a service's log
+     * locations): changes allowed, and the person asked in the window.
+     *
+     * @param what the change, for the question: "add a bookmark at line 12 of app.log"
+     */
+    public void checkChange(String what) throws Tool.Failure, InterruptedException {
+        if (!changesAllowed()) {
+            throw new Tool.Failure(CHANGES_OFF);
+        }
+        Gate g = gate;
+        if (g != null) {
+            g.allowChange(what, null);
         }
     }
 
@@ -72,6 +148,13 @@ public final class Workspace implements AutoCloseable {
          */
         default void approve(String what, String key, String detail) throws Tool.Failure, InterruptedException {
             throw new Tool.Failure(CANT_ASK + what + ".");
+        }
+
+        /**
+         * A change: a new file saved ({@code where}), or one of Logsift's own records ({@code where}
+         * null). The person allowed changes already; the window may still ask. Allowed by default.
+         */
+        default void allowChange(String what, Path where) throws Tool.Failure, InterruptedException {
         }
     }
 

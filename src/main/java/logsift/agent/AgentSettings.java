@@ -15,15 +15,27 @@ import java.util.Properties;
  * What the user chose for coding agents (Settings → Agents), kept in {@code agent.properties}
  * in Logsift's folder, and how to set up each agent to start {@code logsift-mcp}.
  *
- * @param masking what is hidden in answers
- * @param roots   folders agents may read (empty: the home folder)
+ * @param masking      what is hidden in answers
+ * @param roots        folders agents may read (empty: the home folder)
+ * @param allowChanges whether agents may use the tools that change something (save files they
+ *                     make, bookmarks, log formats, log locations): off by default; they never
+ *                     replace or remove a file
  */
-public record AgentSettings(Masking.Options masking, List<Path> roots) {
+public record AgentSettings(Masking.Options masking, List<Path> roots, boolean allowChanges) {
 
-    public static final AgentSettings DEFAULT = new AgentSettings(Masking.Options.DEFAULT, List.of());
+    public static final AgentSettings DEFAULT = new AgentSettings(Masking.Options.DEFAULT, List.of(), false);
 
     public AgentSettings {
         roots = List.copyOf(roots);
+    }
+
+    public AgentSettings(Masking.Options masking, List<Path> roots) {
+        this(masking, roots, false);
+    }
+
+    /** The same, with changes allowed or not. */
+    public AgentSettings withChanges(boolean allowed) {
+        return new AgentSettings(masking, roots, allowed);
     }
 
     public static Path file(Path logsiftHome) {
@@ -52,7 +64,8 @@ public record AgentSettings(Masking.Options masking, List<Path> roots) {
         }
         return new AgentSettings(new Masking.Options(!Boolean.parseBoolean(p.getProperty("mask.off", "false")),
                 Boolean.parseBoolean(p.getProperty("mask.emails", "false")),
-                Boolean.parseBoolean(p.getProperty("mask.ips", "false")), custom), roots);
+                Boolean.parseBoolean(p.getProperty("mask.ips", "false")), custom), roots,
+                Boolean.parseBoolean(p.getProperty("changes.allowed", "false")));
     }
 
     public void save(Path logsiftHome) throws IOException {
@@ -66,6 +79,7 @@ public record AgentSettings(Masking.Options masking, List<Path> roots) {
         for (int i = 0; i < roots.size(); i++) {
             p.setProperty("root." + (i + 1), roots.get(i).toString());
         }
+        p.setProperty("changes.allowed", String.valueOf(allowChanges));
         Files.createDirectories(logsiftHome);
         try (Writer out = Files.newBufferedWriter(file(logsiftHome), StandardCharsets.UTF_8)) {
             p.store(out, "Logsift for coding agents (Settings → Agents). Read when an agent starts logsift-mcp.");

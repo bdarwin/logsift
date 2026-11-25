@@ -264,7 +264,7 @@ public final class McpServer {
 
     private List<Object> toolList() {
         List<Object> list = new ArrayList<>();
-        for (Tool t : tools) {
+        for (Tool t : logsift.agent.ToolCall.offered(tools, workspace)) {
             Map<String, Object> d = new LinkedHashMap<>();
             d.put("name", t.name());
             d.put("title", t.title());
@@ -274,7 +274,7 @@ public final class McpServer {
             ann.put("title", t.title());
             ann.put("readOnlyHint", t.readOnly());
             ann.put("destructiveHint", false);
-            ann.put("idempotentHint", true);
+            ann.put("idempotentHint", t.readOnly()); // saving again makes another file
             ann.put("openWorldHint", false);
             d.put("annotations", ann);
             list.add(d);
@@ -284,9 +284,11 @@ public final class McpServer {
 
     private void call(Object id, Map<String, Object> params) {
         String name = String.valueOf(params.get("name"));
-        Tool tool = tools.stream().filter(t -> t.name().equals(name)).findFirst().orElse(null);
+        Tool tool = logsift.agent.ToolCall.offered(tools, workspace).stream().filter(t -> t.name().equals(name))
+                .findFirst().orElse(null);
         if (tool == null) {
-            error(id, -32602, "Unknown tool: " + name);
+            boolean off = tools.stream().anyMatch(t -> t.name().equals(name));
+            error(id, -32602, off ? name + ": " + Workspace.CHANGES_OFF : "Unknown tool: " + name);
             return;
         }
         @SuppressWarnings("unchecked")

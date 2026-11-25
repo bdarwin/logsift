@@ -1405,8 +1405,10 @@ final class ChatPanel extends JPanel {
         ws.setGate(gate.files());
         ws.setAnswerCap(ANSWER_CAP);
         if (session == null) {
-            session = new ChatSession(store, state.engine(), chat, ChatTools.of(logsift.agent.LogTools.all(),
-                    host.workspace()), logsift.chat.ChatInstructions.text(service.options(), host.catalog()), m.id(), (String) effort.getSelectedItem(),
+            // Settings → Agents → Let agents change things, as it is when this chat starts
+            ws.setChangesAllowed(logsift.agent.AgentSettings.load(AppState.home()).allowChanges());
+            session = new ChatSession(store, state.engine(), chat, ChatTools.of(logsift.agent.ToolCall.offered(
+                    logsift.agent.LogTools.all(), host.workspace()), host.workspace()), logsift.chat.ChatInstructions.text(service.options(), host.catalog()), m.id(), (String) effort.getSelectedItem(),
                     view());
         }
         session.keepSent(service.audit().keepSent());
