@@ -32,6 +32,12 @@ A Logsift run from a source build has no `logsift-mcp`, so the tab says so and *
 
 Other agents: add a local (stdio) MCP server called `logsift` that runs `logsift-mcp`, with no arguments.
 
+**Without installing Logsift:** with Node.js on the computer, `npx -y logsift-mcp` runs the same server. It's listed in the MCP Registry as `io.github.bdarwin/logsift`, so VS Code's **MCP: Browse MCP Servers** finds it. Its first start downloads Logsift for your system from the GitHub release (about 150 MB, Java included), checks it against the release's checksums and keeps it in `~/.logsift/mcp-runtime`. Run `npx -y logsift-mcp --version` once beforehand, so your agent's first start isn't slow. Behind an office proxy, set `HTTPS_PROXY`.
+
+```json
+{ "servers": { "logsift": { "command": "npx", "args": ["-y", "logsift-mcp"] } } }
+```
+
 ## GitHub Copilot CLI
 
 1. Add Logsift with one command in a terminal, giving the path of `logsift-mcp` after `--` (see the table above; **Settings → Agents** shows it):

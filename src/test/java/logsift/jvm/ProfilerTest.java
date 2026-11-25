@@ -239,10 +239,10 @@ class ProfilerTest {
     void findsMemoryLeaks() throws Exception {
         assumeTrue(asyncProfilerHere(), "async-profiler runs here");
         // live objects: the kept byte arrays, allocated by the leaking thread
-        // a short run on a busy machine sometimes keeps no sample: try a few times
+        // a short run on a busy machine (CI's Intel Macs) sometimes keeps no sample: try a few times, longer
         Profile live = null;
-        for (int i = 0; i < 3 && (live == null || weight(live, "logsift.jvm.FixtureApp.lambda$main$9") == 0); i++) {
-            live = run(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.LIVE, 2).get(0);
+        for (int i = 0; i < 5 && (live == null || weight(live, "logsift.jvm.FixtureApp.lambda$main$9") == 0); i++) {
+            live = run(Profiler.Engine.ASYNC_PROFILER, Profiler.Mode.LIVE, 2 + i).get(0);
         }
         assertTrue(live.total() > 0, "live objects: " + live.warnings());
         assertTrue(weight(live, "logsift.jvm.FixtureApp.lambda$main$9") > 0, live.hottest(5).toString());

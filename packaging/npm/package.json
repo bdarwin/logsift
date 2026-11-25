@@ -1,0 +1,25 @@
+{
+  "name": "logsift-mcp",
+  "version": "0.0.0",
+  "description": "Logsift's MCP server: logs, CSV tables, GC logs, thread and heap dumps, crash files and profiles for AI agents, fast on gigabytes",
+  "mcpName": "io.github.bdarwin/logsift",
+  "bin": {
+    "logsift-mcp": "bin/logsift-mcp.js"
+  },
+  "files": [
+    "bin/logsift-mcp.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["mcp", "model-context-protocol", "logs", "log-analysis", "csv", "java", "gc", "thread-dump", "heap-dump", "agents"],
+  "homepage": "https://bdarwin.github.io/logsift",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bdarwin/logsift.git"
+  },
+  "bugs": "https://github.com/bdarwin/logsift/issues",
+  "author": "bdarwin",
+  "license": "MIT"
+}

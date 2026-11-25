@@ -78,6 +78,8 @@ jobs:
             LABEL=snapshot
           fi
           NAME=Logsift-$LABEL-${{ matrix.target }}
+          # installers take plain numbers only (Windows Installer, macOS bundles): 1.5.0 for 1.5.0-beta.1
+          APPV=${VERSION%%-*}
           # A beta: its own settings, window and app name; no file associations or Explorer menu, and
           # on Windows its own installer, so it never replaces or takes over from the normal Logsift.
           # ZGC needs Windows 10 1803 / Server 2019 or later (Java won't start with it on Server 2016):
@@ -112,21 +114,23 @@ jobs:
           case "${{ matrix.target }}" in
             macos-*)
               if [ ${#BETA[@]} -gt 0 ]; then
-                jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.icns \
+                jpackage --type app-image --dest pkg --app-version "$APPV" --icon packaging/icons/logsift.icns \
                   --mac-package-identifier io.github.bdarwin.logsift.beta --mac-package-name "Logsift Beta" "${COMMON[@]}"
                 mv pkg/Logsift.app "pkg/Logsift Beta.app"
-                jpackage --type dmg --dest dist --app-image "pkg/Logsift Beta.app" --name "Logsift Beta" --app-version "$VERSION"
+                jpackage --type dmg --dest dist --app-image "pkg/Logsift Beta.app" --name "Logsift Beta" --app-version "$APPV"
                 mv dist/*.dmg "dist/$NAME.dmg"
+                tar -C pkg -czf "dist/$NAME.tar.gz" "Logsift Beta.app" # for logsift-mcp from npm
                 ls -l dist
                 exit 0
               fi
-              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.icns "${ASSOC[@]}" "${COMMON[@]}"
+              jpackage --type app-image --dest pkg --app-version "$APPV" --icon packaging/icons/logsift.icns "${ASSOC[@]}" "${COMMON[@]}"
               packaging/macos-file-types.sh pkg/Logsift.app
-              jpackage --type dmg --dest dist --app-image pkg/Logsift.app --name Logsift --app-version "$VERSION"
+              jpackage --type dmg --dest dist --app-image pkg/Logsift.app --name Logsift --app-version "$APPV"
               mv dist/Logsift-*.dmg "dist/$NAME.dmg"
+              tar -C pkg -czf "dist/$NAME.tar.gz" Logsift.app # for logsift-mcp from npm
               ;;
             windows-*)
-              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.ico "${COMMON[@]}"
+              jpackage --type app-image --dest pkg --app-version "$APPV" --icon packaging/icons/logsift.ico "${COMMON[@]}"
               grep -q 'jdk.crypto.mscapi' pkg/Logsift/runtime/release || { echo "no Windows certificates in the runtime"; exit 1; }
               pwsh -NoProfile -Command "Compress-Archive -Path pkg/Logsift -DestinationPath dist/$NAME.zip"
               # Installer: per user (no admin rights needed), Start menu entry, a Logsift menu on
@@ -136,12 +140,12 @@ jobs:
               if [ ${#BETA[@]} -gt 0 ]; then
                 # Logsift Beta: its own folder, Start menu group, name in Apps and upgrade code, so
                 # installing or removing it never touches Logsift; no menu, no desktop shortcut
-                MSI=(--app-version "$VERSION" --icon packaging/icons/logsift.ico
+                MSI=(--app-version "$APPV" --icon packaging/icons/logsift.ico
                      --win-per-user-install --win-menu --win-menu-group "Logsift Beta" --install-dir "Logsift Beta"
                      --win-upgrade-uuid 740b2b78-f689-45fd-b938-7a06abf54a3f)
                 EDITION=beta
               else
-                MSI=(--app-version "$VERSION" --icon packaging/icons/logsift.ico
+                MSI=(--app-version "$APPV" --icon packaging/icons/logsift.ico
                      --win-per-user-install --win-menu --win-menu-group Logsift --win-shortcut-prompt
                      --win-upgrade-uuid 2cf55e2a-4bbe-4a4c-8397-7b68517646a0)
                 EDITION=
@@ -153,12 +157,12 @@ jobs:
               mv dist/Logsift-*.msi "dist/$NAME.msi"
               ;;
             linux-*)
-              jpackage --type app-image --dest pkg --app-version "$VERSION" --icon packaging/icons/logsift.png "${COMMON[@]}"
+              jpackage --type app-image --dest pkg --app-version "$APPV" --icon packaging/icons/logsift.png "${COMMON[@]}"
               tar -C pkg -czf "dist/$NAME.tar.gz" Logsift
               if [ "${{ matrix.target }}" = linux-x64 ] && [ ${#BETA[@]} -gt 0 ]; then
                 cp "build/distributions/logsift-$VERSION.zip" "dist/Logsift-$LABEL-any-java21.zip"
               elif [ "${{ matrix.target }}" = linux-x64 ]; then
-                jpackage --type deb --dest dist --app-version "$VERSION" --linux-shortcut --icon packaging/icons/logsift.png "${ASSOC[@]}" "${COMMON[@]}"
+                jpackage --type deb --dest dist --app-version "$APPV" --linux-shortcut --icon packaging/icons/logsift.png "${ASSOC[@]}" "${COMMON[@]}"
                 mv dist/*.deb "dist/$NAME.deb"
                 # Plain zip that runs anywhere with Java 21+ installed.
                 cp "build/distributions/logsift-$VERSION.zip" "dist/Logsift-$LABEL-any-java21.zip"
@@ -445,6 +449,29 @@ jobs:
           if (Test-Path -LiteralPath 'HKCU:\Software\Classes\*\shell\Logsift') { throw "the Logsift menu left behind after uninstall" }
           if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Directory\shell\Logsift') { throw "the folders' Logsift menu left behind after uninstall" }
 
+      - name: Try logsift-mcp from npm (download, check, unpack, run)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(./gradlew -q properties | sed -n 's/^version: //p' | tr -d '\r')
+          if [ "$GITHUB_REF_TYPE" = tag ]; then LABEL=$VERSION
+          elif [[ "$GITHUB_REF_NAME" == beta/* ]]; then LABEL=beta-${GITHUB_REF_NAME#beta/}
+          else LABEL=snapshot; fi
+          T=${{ matrix.target }}
+          case "$T" in windows-*) EXT=zip ;; *) EXT=tar.gz ;; esac
+          A="Logsift-$LABEL-$T.$EXT"
+          [ -f "dist/$A" ] || { ls dist; echo "no $A for the npm launcher"; exit 1; }
+          W="$RUNNER_TEMP/npm-try"; rm -rf "$W"; mkdir -p "$W/dl" "$W/pkg/bin"
+          cp "dist/$A" "$W/dl/"
+          (cd "$W/dl" && sha256sum "$A" > SHA256SUMS.txt)
+          cp packaging/npm/bin/logsift-mcp.js "$W/pkg/bin/"
+          sed "s/\"0.0.0\"/\"$LABEL\"/" packaging/npm/package.json > "$W/pkg/package.json"
+          OUT=$(LOGSIFT_MCP_DOWNLOADS="$W/dl" LOGSIFT_MCP_CACHE="$W/cache" node "$W/pkg/bin/logsift-mcp.js" --version)
+          echo "$OUT"
+          echo "$OUT" | grep -q "^logsift-mcp " || { echo "the launcher didn't run logsift-mcp"; exit 1; }
+          # the second start uses what's there
+          LOGSIFT_MCP_DOWNLOADS="$W/nothing-here" LOGSIFT_MCP_CACHE="$W/cache" node "$W/pkg/bin/logsift-mcp.js" --version
+
       - uses: actions/upload-artifact@v5
         with:
           name: dist-${{ matrix.target }}
@@ -529,8 +556,14 @@ jobs:
           V=${GITHUB_REF_NAME#v}
           NOTES=docs/releases/$GITHUB_REF_NAME.md
           [ -f "$NOTES" ] || { echo "Missing $NOTES"; exit 1; }
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
-            --title "Logsift $V" --notes-file "$NOTES"
+          if [[ "$V" == *-* ]]; then
+            # a pre-release (1.5.0-beta.1): never "latest", so no one is offered it as an update
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --prerelease --latest=false \
+              --title "Logsift $V" --notes-file "$NOTES"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
+              --title "Logsift $V" --notes-file "$NOTES"
+          fi
 
       - name: Publish beta release
         if: startsWith(github.ref, 'refs/heads/beta/')
@@ -581,3 +614,70 @@ jobs:
           The native builds include their own Java runtime. They are not code-signed:
           - macOS: if it says the app is damaged or can't be opened, run \`xattr -dr com.apple.quarantine /Applications/Logsift.app\`.
           - Windows: SmartScreen may warn; choose More info → Run anyway."
+
+  # A release tag also publishes logsift-mcp: the npm launcher (npx -y logsift-mcp), then its entry
+  # in the MCP Registry (io.github.bdarwin/logsift), signed in with this workflow's GitHub identity.
+  publish-mcp:
+    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance and the registry's GitHub sign-in (no secret for the registry)
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish logsift-mcp to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$NODE_AUTH_TOKEN" ] || { echo "No NPM_TOKEN secret: add an npm token that may publish logsift-mcp"; exit 1; }
+          V=${GITHUB_REF_NAME#v}
+          cd packaging/npm
+          npm version "$V" --no-git-tag-version
+          # a pre-release goes to the beta tag: plain "npx logsift-mcp" keeps the last release
+          TAG=latest; [[ "$V" == *-* ]] && TAG=beta
+          npm publish --access public --tag "$TAG" --provenance
+
+      - name: Publish to the MCP Registry
+        env:
+          PUBLISHER: v1.8.9
+        run: |
+          set -euo pipefail
+          V=${GITHUB_REF_NAME#v}
+          P=${PUBLISHER#v}
+          base=https://github.com/modelcontextprotocol/registry/releases/download/$PUBLISHER
+          curl -fsSL -o mcp-publisher_linux_amd64.tar.gz "$base/mcp-publisher_linux_amd64.tar.gz"
+          curl -fsSL -o checksums.txt "$base/registry_${P}_checksums.txt"
+          grep ' mcp-publisher_linux_amd64.tar.gz$' checksums.txt | sha256sum -c -
+          tar xzf mcp-publisher_linux_amd64.tar.gz mcp-publisher
+          cat > server.json <<JSON
+          {
+            "\$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+            "name": "io.github.bdarwin/logsift",
+            "title": "Logsift",
+            "description": "Logs, CSV tables, GC logs, thread and heap dumps, crashes and profiles, fast on gigabytes",
+            "websiteUrl": "https://bdarwin.github.io/logsift",
+            "repository": { "url": "https://github.com/bdarwin/logsift", "source": "github" },
+            "version": "$V",
+            "packages": [
+              {
+                "registryType": "npm",
+                "registryBaseUrl": "https://registry.npmjs.org",
+                "identifier": "logsift-mcp",
+                "version": "$V",
+                "runtimeHint": "npx",
+                "transport": { "type": "stdio" }
+              }
+            ]
+          }
+          JSON
+          cat server.json
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

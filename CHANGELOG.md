@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Every feature for agents, and a guide that small models can follow:** 21 new tools, so a coding agent, or your own program, can do by tool calls what you do in the window:
+  - filter like the Filters panel, with the same engine, and see a timeline of a log;
+  - follow a growing log, and show a whole entry;
+  - list a folder's or a zip's files, profile a table's columns and merge tables;
+  - show a three-way merge's conflicts;
+  - compare two heap dumps, two histograms, two profiles or several thread dumps;
+  - make a short Flight Recorder recording (asked every time);
+  - list bookmarks and log formats.
+
+  The `guide` tool, first in the list, says which tool to use for which question, with an example call for every tool and the mistakes to avoid. The skill (`logsift-mcp skill`) holds the same guide.
+- **Agents may change things, if you let them:** **Settings → Agents → Let agents change things** (or `logsift-mcp --allow-changes`) adds tools that save lines, a comparison or a merge result as new files, set bookmarks, add log formats and describe where a service's logs are. They write only new files inside the folders agents may read, and never replace or delete a file. Off by default.
+- **Logsift in your own program:** start `logsift-mcp` and speak MCP to it, or, from Java, call the same tools in-process with `logsift.embed.LogsiftTools`. Either way you choose the folders, masking and changes, and the person is asked before thread dumps, heap dumps, recordings and changes.
+- **`npx -y logsift-mcp`:** Logsift's MCP server from npm and the MCP Registry (`io.github.bdarwin/logsift`). The first start downloads Logsift for your system from its GitHub release and checks it against the release's checksums.
+- **A Windows installer for Logsift Beta:** it installs next to Logsift, in its own folder and Start menu group, under its own name in Apps.
+
 - **The assistant comes with Copilot, so a Copilot update can't break it:** Copilot CLI 1.0.113 (November 17) changed how apps talk to it, and the assistant stopped with *SDK protocol version mismatch* as soon as Copilot updated itself, which it does on its own. Logsift now brings its own Copilot, made with the same version of GitHub's SDK as Logsift, and runs it in a process of its own. Nothing needs installing: people who had only the GitHub CLI's `gh copilot`, or no Copilot at all, can use the assistant too. The sign-in is the one you already have (Copilot's `/login`, or the GitHub CLI's). A Copilot program chosen in the assistant is still used; if it can't talk to Logsift, the assistant says so and offers **Use Logsift's Copilot**. Each installer is about 80 MB bigger.
 - **A Logsift menu in Explorer:** right-click files → **Logsift** → **Analyze** opens each straight in the view that explains it, told by what's in the file rather than its name: a GC log in the GC view, a Java or Python thread dump in Threads, a heap dump, a crash dump (any program's, .NET too) or a Flight Recorder recording in theirs; anything else as a log. **Compare** on two selected files (or folders) compares them; **Open** opens them as tabs; on a folder, **Search** searches in it. It replaces *Open with Logsift*. On Windows 11 it's under **Show more options**. From the command line: `logsift --analyze`, `--compare`, `--search`.
 - **One window when several logs are opened at once:** selecting several logs in Explorer and opening them (or double-clicking one while Logsift was still starting) could open a window for each: Windows starts a Logsift per file, all at the same moment, and none saw the others. The first now takes the window and the others hand their files to it, as tabs.
