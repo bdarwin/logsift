@@ -333,9 +333,13 @@ jobs:
           if (-not ((Get-Content (Join-Path $dir 'app\Logsift.cfg') -Raw) -match 'logsift.channel=beta')) { throw "not a beta (no channel=beta)" }
           if (-not (Test-Path (Join-Path $dir 'logsift-mcp.exe'))) { throw "logsift-mcp.exe not installed" }
           Write-Host "Reports: $(& $exe --version | Out-String)"
-          $apps = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -like 'Logsift*' }
-          $apps | ForEach-Object { Write-Host "In Apps: $($_.DisplayName) $($_.DisplayVersion)" }
-          if (-not ($apps | Where-Object { $_.DisplayName -eq 'Logsift Beta' })) { throw "not shown as Logsift Beta in Apps" }
+          # the name Apps & features shows: the product's, as Windows Installer has it (per-user
+          # installs aren't under the Uninstall key)
+          $wi = New-Object -ComObject WindowsInstaller.Installer
+          $codes = $wi.GetType().InvokeMember('Products', 'GetProperty', $null, $wi, $null)
+          $names = @(foreach ($c in $codes) { $wi.GetType().InvokeMember('ProductInfo', 'GetProperty', $null, $wi, @($c, 'ProductName')) })
+          $names | Where-Object { $_ -like 'Logsift*' } | ForEach-Object { Write-Host "In Apps: $_" }
+          if ($names -notcontains 'Logsift Beta') { throw "not shown as Logsift Beta in Apps" }
           foreach ($k in 'HKCU:\Software\Classes\*\shell\Logsift', 'HKCU:\Software\Classes\Directory\shell\Logsift', 'HKCU:\Software\Classes\.log\OpenWithList\Logsift.exe') {
             if (Test-Path -LiteralPath $k) { throw "the beta registered $k" }
           }
