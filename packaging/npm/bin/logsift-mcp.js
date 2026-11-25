@@ -161,7 +161,7 @@ async function install() {
       if (!fs.existsSync(exe)) throw e; // another start got there first
     }
     say(`Logsift ${VERSION} is in ${dir}`);
-    return exe;
+    return launcher(dir, t); // as unpacked (the beta's app has its own name)
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
