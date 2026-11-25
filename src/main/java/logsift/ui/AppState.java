@@ -68,13 +68,7 @@ final class AppState {
 
     /** A short stable name for a file path (for per-file storage). */
     static String key(Path file) {
-        try {
-            byte[] h = MessageDigest.getInstance("SHA-1").digest(
-                    file.toAbsolutePath().normalize().toString().getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(h, 0, 10);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        return logsift.core.BookmarkStore.key(file);
     }
 
     // ---------------------------------------------------------------- log formats

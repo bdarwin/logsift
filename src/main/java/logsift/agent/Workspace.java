@@ -327,6 +327,23 @@ public final class Workspace implements AutoCloseable {
     private final Map<String, logsift.core.Sql.LogTable> sqlTables = new LinkedHashMap<>();
     private volatile String client = "agent";
     private volatile java.util.function.Supplier<LogCatalog> catalog = () -> LogCatalog.EMPTY;
+    private volatile List<CustomFormat> formats;
+
+    /** The person's own log formats, as they are now (a tool may have added one). */
+    public List<CustomFormat> formats() {
+        List<CustomFormat> f = formats;
+        return f != null ? f : options.formats();
+    }
+
+    /** Logs opened from now on are read with these formats (one was added or changed). */
+    public void setFormats(List<CustomFormat> f) {
+        formats = List.copyOf(f);
+    }
+
+    /** Logsift's own folder: settings, bookmarks, log formats, log locations. */
+    public Path logsiftHome() {
+        return options.logsiftHome() != null ? options.logsiftHome() : logsift.core.CacheSettings.home();
+    }
 
     public Workspace(Options options) {
         this.options = options;
@@ -441,7 +458,7 @@ public final class Workspace implements AutoCloseable {
                 }
             }
             String h = "log:" + nextLog++;
-            logs.put(h, LogAnalysis.open(read, options.formats()));
+            logs.put(h, LogAnalysis.open(read, formats()));
             shown.put(h, abs);
             return h;
         }
@@ -462,7 +479,7 @@ public final class Workspace implements AutoCloseable {
                 }
             }
             String h = "log:" + nextLog++;
-            logs.put(h, LogAnalysis.borrowed(doc, abs, options.formats()));
+            logs.put(h, LogAnalysis.borrowed(doc, abs, formats()));
             this.shown.put(h, abs);
             return h;
         }
@@ -511,7 +528,7 @@ public final class Workspace implements AutoCloseable {
         Path abs = file.toAbsolutePath().normalize();
         synchronized (this) {
             String h = "log:" + nextLog++;
-            logs.put(h, LogAnalysis.open(abs, options.formats()));
+            logs.put(h, LogAnalysis.open(abs, formats()));
             shown.put(h, abs);
             generated.add(abs);
             return h;
@@ -576,6 +593,12 @@ public final class Workspace implements AutoCloseable {
         public StillWorking(String message) {
             super(message);
         }
+    }
+
+    /** Whether {@link #await} has work under {@code key}: running, or done and kept. */
+    public synchronized boolean hasWork(String key) {
+        Future<?> f = work.get(key);
+        return f != null && !f.isCancelled();
     }
 
     /**

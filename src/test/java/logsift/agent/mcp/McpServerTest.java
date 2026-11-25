@@ -289,13 +289,35 @@ class McpServerTest {
                 "top_messages", "metrics", "query", "query_examples", "pivot", "search_folder", "analyze_gc", "analyze_threads", "follow_request",
                 "merge_logs", "analyze_profile", "compare_files", "compare_folders", "compare_logs", "analyze_crash",
                 "crash_threads", "crash_modules", "list_jvms", "thread_dump", "heap_histogram", "heap_dump",
-                "analyze_heap_dump", "network_check"),
+                "analyze_heap_dump", "network_check", "merge3", "list_bookmarks", "list_log_formats"),
                 tools.stream().map(t -> map(t).get("name")).toList());
         for (Object t : tools) {
             Map<String, Object> d = map(t);
             assertEquals("object", map(d.get("inputSchema")).get("type"), d.get("name") + "");
             assertEquals(Boolean.TRUE, map(d.get("annotations")).get("readOnlyHint"), d.get("name") + "");
             assertFalse(((String) d.get("description")).isBlank());
+        }
+    }
+
+    @Test
+    void theToolsThatChangeThingsAreListedOnlyWhenAllowed() throws Exception {
+        List<String> changing = List.of("export_lines", "export_diff", "save_merge3", "set_bookmark", "save_log_format",
+                "save_log_location");
+        List<Object> off = list(map(request("tools/list", Map.of()).get("result")).get("tools"));
+        assertTrue(off.stream().map(t -> map(t).get("name")).noneMatch(changing::contains));
+        Map<String, Object> refused = request("tools/call", Map.of("name", "set_bookmark", "arguments",
+                Map.of("log", "x.log", "line", 1)));
+        assertTrue(String.valueOf(map(refused.get("error")).get("message")).contains("Let agents change things"),
+                refused.toString());
+
+        workspace.setChangesAllowed(true);
+        List<Object> on = list(map(request("tools/list", Map.of()).get("result")).get("tools"));
+        for (String name : changing) {
+            Map<String, Object> d = on.stream().map(McpServerTest::map).filter(t -> name.equals(t.get("name")))
+                    .findFirst().orElseThrow(() -> new AssertionError(name + " listed when allowed"));
+            assertEquals(Boolean.FALSE, map(d.get("annotations")).get("readOnlyHint"), name);
+            assertEquals(Boolean.FALSE, map(d.get("annotations")).get("destructiveHint"), name + ": never replaces");
+            assertTrue(((String) d.get("description")).startsWith("CHANGES SOMETHING"), name);
         }
     }
 

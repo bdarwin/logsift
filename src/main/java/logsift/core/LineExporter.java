@@ -24,10 +24,22 @@ public final class LineExporter {
     /** Exports every run of lines; returns the number of lines written. */
     public static long export(LogDocument doc, Runs runs, Path out, DoubleConsumer progress,
                               BooleanSupplier cancelled) throws IOException {
+        return export(doc, runs, out, progress, cancelled, false);
+    }
+
+    /**
+     * Exports every run of lines; returns the number of lines written.
+     *
+     * @param createNew only into a new file: fails if {@code out} is there already
+     */
+    public static long export(LogDocument doc, Runs runs, Path out, DoubleConsumer progress,
+                              BooleanSupplier cancelled, boolean createNew) throws IOException {
         LineIndex.Snapshot s = doc.snapshot();
         long[] lines = {0};
-        try (FileChannel dst = FileChannel.open(out, StandardOpenOption.CREATE,
-                StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
+        try (FileChannel dst = createNew
+                ? FileChannel.open(out, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
+                : FileChannel.open(out, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                        StandardOpenOption.TRUNCATE_EXISTING);
              FileChannel src = FileChannel.open(doc.path(), StandardOpenOption.READ)) {
             long total = Math.max(1, s.lineCount);
             runs.forEach((from, to) -> {

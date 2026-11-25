@@ -148,61 +148,9 @@ public final class CompareTools {
             return null;
         }
         try (l; r) {
-            ColumnMap map = ColumnMap.byName(l.header(), r.header());
-            List<Integer> keys = new ArrayList<>();
-            String why;
-            if (a.has("keys")) {
-                for (String k : a.string("keys").split(",")) {
-                    if (k.isBlank()) {
-                        continue;
-                    }
-                    int pair = map.pairNamed(k.strip());
-                    if (pair < 0) {
-                        List<String> names = new ArrayList<>();
-                        for (int i = 0; i < map.pairs().size(); i++) {
-                            names.add(map.name(i));
-                        }
-                        throw new Tool.Failure("No column " + k.strip() + " in both files. The columns: "
-                                + String.join(", ", names) + ".");
-                    }
-                    keys.add(pair);
-                }
-                why = "the key asked for";
-            } else {
-                KeySuggester.Suggestion s = KeySuggester.suggest(l, r, map, INTERRUPTED);
-                if (s.found()) {
-                    keys.addAll(s.pairs());
-                    why = "suggested: " + s.reason();
-                } else {
-                    why = "no column (or few together) is a key in both files: " + s.reason();
-                }
-            }
-            DiffOptions o = DiffOptions.DEFAULT.withIgnoreCase(a.bool("ignore_case", false));
-            if (a.has("tolerance")) {
-                String t = a.string("tolerance").strip();
-                boolean pct = t.endsWith("%");
-                try {
-                    double v = Double.parseDouble(pct ? t.substring(0, t.length() - 1).strip() : t);
-                    o = o.withNumbers(true, v, pct);
-                } catch (NumberFormatException e) {
-                    throw new Tool.Failure("tolerance must be a number like 0.01 or 1%, not " + t);
-                }
-            }
-            List<logsift.core.diff.RowFilter> where = new ArrayList<>();
-            if (a.has("where")) {
-                for (String c : a.string("where").split("(?i)\\s+and\\s+")) {
-                    if (c.isBlank()) {
-                        continue;
-                    }
-                    try {
-                        where.add(logsift.core.diff.RowFilter.parse(c, map));
-                    } catch (IllegalArgumentException e) {
-                        throw new Tool.Failure(e.getMessage() + ".");
-                    }
-                }
-            }
-            TableDiffResult res = TableDiff.compare(l, r, new TableDiff.Spec(map, keys, java.util.Set.of(), o, where),
-                    null, INTERRUPTED);
+            String[] whyOut = new String[1];
+            TableDiffResult res = tableResult(l, r, a, whyOut);
+            String why = whyOut[0];
             StringBuilder b = new StringBuilder();
             b.append("Tables: ").append(res.summary().strip()).append('\n');
             b.append("Rows matched ").append(res.matchedBy()).append(" (").append(why).append(").\n");
@@ -217,6 +165,66 @@ public final class CompareTools {
             list(b, res, DiffStatus.DUPLICATE, "Rows whose key repeats (not matched)", limit);
             return b.toString().stripTrailing();
         }
+    }
+
+    /**
+     * Two tables compared as compare_files does: the key asked for (else the one suggested, else
+     * row order), case, tolerance and where as given. {@code why[0]} says how rows were matched.
+     */
+    static TableDiffResult tableResult(CsvFile l, CsvFile r, Tool.Args a, String[] why) throws Exception {
+        ColumnMap map = ColumnMap.byName(l.header(), r.header());
+        List<Integer> keys = new ArrayList<>();
+        if (a.has("keys")) {
+            for (String k : a.string("keys").split(",")) {
+                if (k.isBlank()) {
+                    continue;
+                }
+                int pair = map.pairNamed(k.strip());
+                if (pair < 0) {
+                    List<String> names = new ArrayList<>();
+                    for (int i = 0; i < map.pairs().size(); i++) {
+                        names.add(map.name(i));
+                    }
+                    throw new Tool.Failure("No column " + k.strip() + " in both files. The columns: "
+                            + String.join(", ", names) + ".");
+                }
+                keys.add(pair);
+            }
+            why[0] = "the key asked for";
+        } else {
+            KeySuggester.Suggestion s = KeySuggester.suggest(l, r, map, INTERRUPTED);
+            if (s.found()) {
+                keys.addAll(s.pairs());
+                why[0] = "suggested: " + s.reason();
+            } else {
+                why[0] = "no column (or few together) is a key in both files: " + s.reason();
+            }
+        }
+        DiffOptions o = DiffOptions.DEFAULT.withIgnoreCase(a.bool("ignore_case", false));
+        if (a.has("tolerance")) {
+            String t = a.string("tolerance").strip();
+            boolean pct = t.endsWith("%");
+            try {
+                double v = Double.parseDouble(pct ? t.substring(0, t.length() - 1).strip() : t);
+                o = o.withNumbers(true, v, pct);
+            } catch (NumberFormatException e) {
+                throw new Tool.Failure("tolerance must be a number like 0.01 or 1%, not " + t);
+            }
+        }
+        List<logsift.core.diff.RowFilter> where = new ArrayList<>();
+        if (a.has("where")) {
+            for (String c : a.string("where").split("(?i)\\s+and\\s+")) {
+                if (c.isBlank()) {
+                    continue;
+                }
+                try {
+                    where.add(logsift.core.diff.RowFilter.parse(c, map));
+                } catch (IllegalArgumentException e) {
+                    throw new Tool.Failure(e.getMessage() + ".");
+                }
+            }
+        }
+        return TableDiff.compare(l, r, new TableDiff.Spec(map, keys, java.util.Set.of(), o, where), null, INTERRUPTED);
     }
 
     private static void list(StringBuilder b, TableDiffResult res, DiffStatus status, String title, int limit)
@@ -273,7 +281,7 @@ public final class CompareTools {
     }
 
     /** A text file's lines; null if it is binary. */
-    private static List<String> lines(Path p) throws IOException {
+    static List<String> lines(Path p) throws IOException {
         long size = Files.size(p);
         if (size > MAX_TEXT_BYTES) {
             throw new IOException(p.getFileName() + " is " + LogTools.size(size) + ": text is compared up to "
