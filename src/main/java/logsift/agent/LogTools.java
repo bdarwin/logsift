@@ -49,6 +49,7 @@ public final class LogTools {
         all.addAll(JvmTools.all());
         all.addAll(HeapTools.all());
         all.addAll(NetworkTools.all());
+        all.addAll(FilterTools.all());
         all.addAll(FileTools.all());
         all.addAll(JvmCompareTools.all());
         all.addAll(ChangeTools.all());
@@ -473,6 +474,14 @@ public final class LogTools {
      * none is), read as the log reads its times: as written, zones aside.
      */
     static long lineAtTime(LogAnalysis log, String at) throws Exception {
+        return lineAtOrAfter(log, timeOf(log, at));
+    }
+
+    /**
+     * A time an agent wrote ("2026-10-21 10:42:13.512", "10:42", or as the log writes it) as the
+     * log's milliseconds (UTC, zones aside, as the log reads its own times).
+     */
+    static long timeOf(LogAnalysis log, String at) throws Exception {
         var f = log.formats();
         TimeFormat tf = f == null ? null : f.times();
         if (tf == null) {
@@ -505,6 +514,16 @@ public final class LogTools {
                     m.group(6) == null ? 0 : Integer.parseInt(m.group(6))).toInstant(java.time.ZoneOffset.UTC)
                     .toEpochMilli() + Integer.parseInt(frac);
         }
+        return t;
+    }
+
+    /** The first line logged at or after {@code t} (0-based; the line count when none is). */
+    static long lineAtOrAfter(LogAnalysis log, long t) throws Exception {
+        TimeFormat tf = log.formats() == null ? null : log.formats().times();
+        if (tf == null) {
+            throw new Tool.Failure("This log has no timestamps: read it by line (from).");
+        }
+        LogDocument doc = log.document();
         long total = doc.lineCount();
         logsift.core.TimeIndex ti = log.timeIndex();
         long start = ti == null ? 0 : ti.samples().lineBefore(t);

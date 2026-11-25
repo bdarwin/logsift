@@ -126,6 +126,45 @@ public interface Tool {
             }
         }
 
+        /**
+         * A list argument: a JSON array (["a", "b"]), a JSON array written as text, or text with one
+         * value per line (as a terminal passes it). Empty when not given; blank values are skipped.
+         */
+        public List<String> list(String name) throws Failure {
+            Object v = map.get(name);
+            List<String> out = new ArrayList<>();
+            if (v == null) {
+                return out;
+            }
+            if (v instanceof java.util.Collection<?> c) {
+                for (Object o : c) {
+                    if (o != null && !o.toString().isBlank()) {
+                        out.add(o.toString());
+                    }
+                }
+                return out;
+            }
+            String text = v.toString().strip();
+            if (text.startsWith("[")) {
+                Object parsed = logsift.core.Json.parseValue(text, null);
+                if (!(parsed instanceof java.util.Collection<?> c)) {
+                    throw new Failure(name + " must be a list like [\"timeout\", \"refused\"], not " + text);
+                }
+                for (Object o : c) {
+                    if (o != null && !o.toString().isBlank()) {
+                        out.add(o.toString());
+                    }
+                }
+                return out;
+            }
+            for (String line : text.split("\\R")) {
+                if (!line.isBlank()) {
+                    out.add(line.strip());
+                }
+            }
+            return out;
+        }
+
         public boolean bool(String name, boolean or) {
             Object v = map.get(name);
             return v == null ? or : Boolean.parseBoolean(v.toString());
