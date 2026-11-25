@@ -79,6 +79,51 @@ public final class Guide {
                 "https://logs.example.com/app.log"));
         put("assistant_audit", "questions the in-window assistant was asked", args("days", 7));
         put("assistant_audit_question", "one audited question in full", args("id", "chat:12"));
+        // filters and time
+        put("filter", "only errors and warnings in a quarter of an hour, with 2 lines around each", args("log", LOG,
+                "levels", List.of("ERROR", "WARN"), "from_time", "2026-10-21 10:30", "to_time", "2026-10-21 10:45",
+                "hide", List.of("health check"), "context", 2));
+        put("timeline", "errors per 5 minutes, to see when it started", args("log", LOG, "bucket", "5m", "level",
+                "ERROR"));
+        put("follow", "what was added after line 52000, waiting up to 30 seconds", args("log", LOG, "after_line",
+                52000, "wait_seconds", 30));
+        // files and tables
+        put("list_files", "what is in a folder, newest first", args("path", "~/logs/orders", "sort", "newest"));
+        put("profile_columns", "what each column of a table holds", args("log", "~/data/orders.csv"));
+        put("merge_tables", "one table from several CSV files", args("files", "~/data/jan.csv,~/data/feb.csv"));
+        put("show_entry", "a whole entry (with its stack trace and fields) at line 1200", args("log", LOG, "line",
+                1200));
+        // JVM comparisons
+        put("compare_heap_dumps", "what grew between two heap dumps (a leak)", args("before",
+                "~/dumps/orders-1.hprof", "after", "~/dumps/orders-2.hprof"));
+        put("compare_histograms", "what grew between two heap histograms", args("before", "~/dumps/histo-1.txt",
+                "after", "~/dumps/histo-2.txt"));
+        put("compare_profiles", "what got slower between two profiles", args("before", "~/profiles/v1.jfr", "after",
+                "~/profiles/v2.jfr"));
+        put("compare_thread_dumps", "what stayed stuck across thread dumps taken seconds apart", args("logs",
+                "~/dumps/threads-1.txt,~/dumps/threads-2.txt,~/dumps/threads-3.txt"));
+        put("record_profile", "a 30-second CPU recording of a running program (asks the person)", args("jvm",
+                "jvm:1", "mode", "cpu", "seconds", 30));
+        // merges, bookmarks, formats
+        put("merge3", "the conflicts of a three-way merge", args("base", "~/src/config.base.yml", "yours",
+                "~/src/config.mine.yml", "theirs", "~/src/config.theirs.yml"));
+        put("list_bookmarks", "the bookmarks of a log", args("log", LOG));
+        put("list_log_formats", "the log formats Logsift knows, with their fields", args());
+        // tools that change something
+        put("export_lines", "save the lines about one order to a new file", args("log", LOG, "query", "order 4711",
+                "whole_entries", true, "save_to", "~/logs/orders/order-4711.log"));
+        put("export_diff", "save the differences of two tables as a new CSV file", args("left", "~/data/old.csv",
+                "right", "~/data/new.csv", "keys", "id", "save_to", "~/data/changes.csv"));
+        put("save_merge3", "save a merge, taking their side in every conflict", args("base", "~/src/config.base.yml",
+                "yours", "~/src/config.mine.yml", "theirs", "~/src/config.theirs.yml", "prefer", "theirs", "save_to",
+                "~/src/config.merged.yml"));
+        put("set_bookmark", "mark the line where the problem starts", args("log", LOG, "line", 1200, "note",
+                "first timeout"));
+        put("save_log_format", "teach Logsift a log format, tried on a real line first", args("name", "Orders app",
+                "pattern", "{time} [{thread}] {level} {logger} - {message}", "sample",
+                "2026-10-21 10:42:13.512 [main] ERROR o.Orders - order 17 timed out"));
+        put("save_log_location", "remember where a service's logs are", args("name", "billing", "description",
+                "The billing service", "folders", "/var/log/billing", "files", "app*.log=Application log; gc*.log=GC log"));
     }
 
     private static void put(String tool, String purpose, Map<String, Object> args) {
@@ -97,8 +142,13 @@ public final class Guide {
         }
         StringBuilder b = new StringBuilder(cmd).append(" run ").append(tool);
         for (Map.Entry<String, Object> e : args.entrySet()) {
-            String v = String.valueOf(e.getValue());
-            boolean quote = v.isEmpty() || v.chars().anyMatch(c -> c == ' ' || c == '\'' || c == '(' || c == '*');
+            String v = e.getValue() instanceof List<?> l ? String.join("\n", l.stream().map(String::valueOf).toList())
+                    : String.valueOf(e.getValue());
+            if (e.getValue() instanceof List<?> l && l.size() > 1) {
+                v = JsonWriter.write(l); // a list on the command line: as JSON
+            }
+            boolean quote = v.isEmpty() || v.chars().anyMatch(c -> c == ' ' || c == '\'' || c == '(' || c == '*'
+                    || c == '"' || c == '{' || c == ';' || c == '[');
             b.append(' ').append(e.getKey()).append('=');
             if (quote) {
                 b.append('"').append(v.replace("\"", "\\\"")).append('"');
@@ -188,6 +238,7 @@ public final class Guide {
         row(b, tools, "\"Find X\" / \"Where does it say X?\"", "search", "the first matching lines and the total");
         row(b, tools, "\"Only errors between 10:00 and 10:15\"", "filter", "levels, times, include/exclude, context lines");
         row(b, tools, "\"Show me line 1200\" / \"what came before?\"", "read_lines", "`from=1190 count=30`, or `at=10:42:13`");
+        row(b, tools, "\"Show that whole entry\" (stack trace, JSON fields)", "show_entry", "any line of the entry");
         row(b, tools, "\"How many per minute/hour?\" / exact numbers", "query", "SQL; see `query_examples` first");
         row(b, tools, "\"When did it start? Is it getting worse?\"", "timeline", "counts per time bucket, by level");
         row(b, tools, "\"What is slow?\"", "metrics", "durations and numbers found in the lines");

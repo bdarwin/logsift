@@ -175,6 +175,7 @@ The file is plain JSON, if you prefer to write it by hand:
 
 | Tool | What it does |
 |---|---|
+| **guide** | How to use the tools: which tool for which question, the order to call them in, an example call for every tool and the mistakes to avoid. Small models do much better after reading it |
 | **list_logs** | Your services and where their logs are (see [Where your logs are](#where-your-logs-are)): each kind of log with what it holds, rotated copies counted together, sizes and when they last changed |
 | **open_log** | Opens a log (also a `.gz` file, a file inside a zip, or a web address, downloaded once to Logsift's temporary folder), by its path or by a name from `list_logs` (`orders/app` opens the newest `app.log`), and gives back a short name for it (`log:1`), its format, size, line count and time range |
 | **list_open** | The logs open so far |
@@ -182,10 +183,17 @@ The file is plain JSON, if you prefer to write it by hand:
 | **exceptions** | Exceptions grouped by root cause, with counts and where they first and last appear |
 | **search** | Lines that match a text or regex, in a range of lines if asked |
 | **read_lines** | Lines from a line number on, or around a time (`at`): what another log was doing when a line was written |
+| **filter** | Keeps only some lines, as the [Filters](filters.md) panel does, with the same engine: lines with any of some words (`show`), without others (`hide`), or a combination (`terms` with a `formula` like `(A OR B) AND NOT C`); only some levels; a time range (`from_time`, `to_time`); rows whose column matches (`status = 500`); lines of context; stack traces kept with their entry. The count, then the lines, with `Next: from_line=N` for more |
+| **timeline** | Lines, errors and warnings per time bucket (`5m`, `1h`, or chosen to fit), and with `query` or `level` the matching lines too, as the [timeline](timeline.md) shows them. Names the busiest bucket and the one with most errors, with their first lines: when a problem started |
+| **follow** | A growing log, like `tail -f`: the last lines and `after_line=N` first, then what was added after that line, waiting up to 60 seconds for more. Says when the file was replaced or emptied (rotated) and starts again from line 1 |
+| **show_entry** | One entry in full, as the Details pane shows it: the line with the lines that belong to it (a stack trace, a wrapped message), the fields its format reads, and JSON in it laid out |
+| **list_files** | What's in a folder (with its subfolders) or a zip (zips in zips too), as the folder and zip tabs show it: each file's path, size, last change, what it is (log, table, GC log, thread dump, crash file, heap dump, profile) and which tool reads it. `pattern` like `*.log` or `**/gc/*.log`; newest or largest first |
 | **top_messages** | The most frequent messages, with numbers replaced by placeholders |
 | **metrics** | How long things took, and numbers in messages |
 | **query** | A read-only SQL query over a log (the table `log`: line, time, level, logger, message, text…) or a CSV/TSV file (the table `t`): exact counts, groups, time buckets, percentiles. A big table comes from the app's cache, reading only the columns the query names. `tables` adds other CSV files, each named after its file (`customers.csv` → `customers`), to join with. See [Query](query.md) |
 | **query_examples** | Queries to start from, made for the file's columns: the Query tab's **Examples**, with those for wide tables (`COLUMNS('^cpu_[0-9]+$')`) |
+| **profile_columns** | Each column of a table, or of a log with columns, as the [Profile](profile.md) tab: its kind, filled and empty values, how many differ, the range of numbers or times, and the most frequent values. Gives the exact column names `pivot` and `query` need |
+| **merge_tables** | Two or more CSV/TSV files as one table, as File → Merge does for tables: columns matched by name, a `source` column for each row's file, in time order when every file has times. A temporary copy in Logsift's folder, never next to your files, to use with `query`, `pivot` and `profile_columns` |
 | **pivot** | Pivot a table (CSV/TSV) or a log's columns, as the Pivot tab: rows by fields (`host`, `time:hour`), columns by another, values like `count`, `sum(ms)`, `p95(ms)`, `sum(cpu_*)`, filters and percentages. See [Pivot](pivot.md#for-coding-agents) |
 | **search_folder** | Every file in a folder that contains a text, inside zips and `.gz` files too; give a service's name to search all its folders |
 | **analyze_gc** | Explains a GC log: pauses, time stopped, heap after collections, and what to tune |
@@ -196,6 +204,7 @@ The file is plain JSON, if you prefer to write it by hand:
 | **compare_files** | Two files (paths, open logs or web addresses): CSV/TSV as tables matched by a key (added, removed and changed rows, old → new), only the rows `where` says if asked (`region = EU and amount > 100`), anything else line by line (times, numbers or IDs masked if asked) |
 | **compare_folders** | Two folders or zips, file by file: the same, different, only on one side |
 | **compare_logs** | A bad run against a good one, by kinds of message: new, gone, much more or less often |
+| **merge3** | A three-way merge (base, yours, theirs), as in [Compare](diff.md): the conflicts, numbered, with each side's lines. Only reads |
 | **analyze_crash** | Explains a crash file: a Windows dump (`.dmp`, `.mdmp`) or a Java `hs_err_pid` file. What happened, the code to blame, the crashed thread's stack, what other threads and libraries may have caused it, and what to try |
 | **crash_threads** | The threads of a crash file with their stacks, threads with the same stack together; filter by name, state or function |
 | **crash_modules** | The DLLs or shared libraries loaded in the crashed process, with versions and paths |
@@ -204,9 +213,27 @@ The file is plain JSON, if you prefer to write it by hand:
 | **heap_histogram** | A running JVM's objects counted by class, **as you allow** (asked by default), without a full GC: what takes the memory. Refused on a heap bigger than you allow (8 GB) |
 | **heap_dump** | A heap dump (`.hprof`) of a running JVM, **asked every time** (or never, as you choose), saved in `~/.logsift/heap-dumps` for `analyze_heap_dump`. Refused on a heap bigger than you allow, or without room for it |
 | **analyze_heap_dump** | Explains a heap dump file (`.hprof`) as the [Heap Dump tab](heap.md) does: what fills the memory in sentences, the chain of references that keeps it alive, memory that isn't strongly reachable or is wasted on copies and empty collections, the biggest classes. A big dump takes a while: the agent is told to ask again. Logsift reads dumps you have; it never takes one |
+| **compare_heap_dumps** | Two heap dumps of the same program taken some time apart, as the Heap compare tab: what grew and what keeps it alive (a static field, a cache, a collection), then each class's objects and bytes before and after. How agents find a memory leak |
+| **compare_histograms** | The quick leak check: two heap histograms some minutes apart (from `heap_histogram`, `jcmd GC.class_histogram` or `jmap -histo`), the classes that grew most and those that shrank |
+| **compare_profiles** | Two profiles of the same program (`.jfr` or collapsed stacks), say before and after a release: the methods whose share of time, allocations or lock waits grew or shrank. Shares compare fairly even when the recordings differ in length |
+| **compare_thread_dumps** | Thread dumps from separate files taken seconds apart: threads stuck in the same place in every dump, who holds the locks others wait for, threads new, gone or doing something else |
+| **record_profile** | A short Flight Recorder recording (5 to 60 seconds) of a running JVM: CPU, wall clock, allocations or lock waits, **asked every time** (or never, as you choose under Running JVMs → Recordings). One at a time; the program runs a few percent slower meanwhile. Explained like a profile and saved in `~/.logsift/profiles` for `compare_profiles`. Only Flight Recorder: never async-profiler or method tracing |
+| **list_bookmarks** | The bookmarks of a log, with their notes, or which logs have bookmarks |
+| **list_log_formats** | The log formats Logsift knows, built in and your own, with their columns |
 | **network_check** | How Logsift reaches the internet: its proxy setting (automatic, manual or none), the proxy GitHub and a web address go through, and with `test` whether GitHub can be reached. For when opening a log from a web address fails |
 | **assistant_audit** | The questions asked to Logsift's own [assistant](assistant.md#the-audit-what-goes-wrong-and-whats-wasted), newest first. For each one: what answering it took (the model, its calls, each tool with its arguments and the size of its answer, the tokens, the time and the cost), what was flagged (failed tools, the same call again, big tool answers, broken links, answers rated bad) and your note. Use it to find what to change. When Logsift is running, it answers this itself |
 | **assistant_audit_question** | One of those questions in full: what went with it, each step with the start of each tool's answer, and the answer. On request, the instructions the assistant had too |
+
+These change something, and are offered only when you [let agents change things](#letting-agents-change-things):
+
+| Tool | What it does |
+|---|---|
+| **export_lines** | Saves lines of a log to a new file, byte for byte: every line, a range, or the lines that match a search, with their stack traces if asked |
+| **export_diff** | Saves a comparison to a new file: for two tables a CSV with a row per difference (its status, its line on each side, the key, each column's old and new value); for other files a unified diff |
+| **save_merge3** | Saves a three-way merge as a new file: every conflict resolved one way (`prefer`), each one as chosen (`choices` like `1=yours,2=theirs`), or left with git's markers for you. Keeps your file's encoding and line ends |
+| **set_bookmark** | Adds or removes a bookmark, with a note, where the window keeps them: the agent marks what it found, you go there with F2. The log isn't changed. A log open in the window shows it the next time it's opened |
+| **save_log_format** | Adds or changes one of your log formats. The pattern is tried on real lines first and saved only when one matches; the answer shows how they split. Logs opened afterwards use it (the window, after a restart) |
+| **save_log_location** | Adds a service to [Log Locations](#where-your-logs-are), or folders and kinds of file to one that's there. It never removes anything, and a folder outside the ones agents may read stays closed until you add it under **Folders agents may read** |
 
 Line numbers in answers start at 1, like in the log view. Times are the log's own times.
 
@@ -239,9 +266,10 @@ An agent can look into a JVM you named in [Log Locations](#where-your-logs-are) 
 | **Thread dumps** | Ask each time (default), Allow without asking, Never | A pause of a moment |
 | **Heap histograms** | Ask each time (default), Allow without asking, Never | Objects counted by class, without a full GC: about a second's pause per GB of heap |
 | **Heap dumps** | Ask each time (default), Never | A full GC, then a pause of several seconds per GB while the dump is written. Saved in `~/.logsift/heap-dumps` (from a server over SSH it's copied there, and the server's copy stays where it was written; over JMX it stays on the server, and Logsift says where). Logsift checks first that there's room for it. `analyze_heap_dump` then explains it |
+| **Recordings** | Ask each time (default), Never | A Flight Recorder recording of 5 to 60 seconds (`record_profile`): the program runs a few percent slower meanwhile. One at a time. Saved in `~/.logsift/profiles` |
 | **Largest heap** | 8 GB | Histograms and heap dumps of a bigger heap are refused: the pause would be too long. Take them yourself in the [Heap tab](heap.md) |
 
-A heap dump is asked for every time; **Allow for This Chat** (or **for This Session**) isn't offered for it.
+A heap dump and a recording are asked for every time; **Allow for This Chat** (or **for This Session**) isn't offered for them.
 
 **Who asks you:**
 
@@ -291,7 +319,7 @@ try (LogsiftTools logsift = LogsiftTools.builder()
 ## What it can't do
 
 - Replace, move or delete any file. Without **Let agents change things**, change anything at all.
-- Run commands, or connect to servers by itself. A thread dump, heap histogram or heap dump happens only as you allow under [Running JVMs](#running-jvms). Over SSH it signs in with your key and a server you already trust; the assistant asks for anything missing. Never a profiler.
+- Run commands, or connect to servers by itself. A thread dump, heap histogram or heap dump happens only as you allow under [Running JVMs](#running-jvms). Over SSH it signs in with your key and a server you already trust; the assistant asks for anything missing. A recording only as you allow, and only Flight Recorder: never async-profiler or method tracing.
 - Read outside your home folder, or outside the folders listed under **Folders agents may read**. The current folder also counts when it is outside your home folder.
 - Read files that hold keys or passwords, even through a link:
   - `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`;

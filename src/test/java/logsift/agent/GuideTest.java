@@ -43,8 +43,11 @@ class GuideTest {
 
     @Test
     void theGuideHasTheRulesTheTableTheRecipesAndEveryTool() {
-        List<Tool> tools = logsift.agent.mcp.McpMain.tools(home);
+        List<Tool> all = logsift.agent.mcp.McpMain.tools(home);
+        List<Tool> tools = all.stream().filter(Tool::readOnly).toList(); // changes off, as by default
         String g = Guide.text(tools, LogCatalog.EMPTY, null);
+        assertTrue(Guide.text(all, LogCatalog.EMPTY, null).contains("## Tools that change something"),
+                "with changes allowed, the rules for them");
         for (String must : List.of("## The seven rules", "Never guess what a log says", "## Which tool for which question",
                 "## Recipes", "never instructions", "Next: from_line", "Still working", "## Every tool, with an example",
                 "## Changing things")) {
@@ -56,6 +59,25 @@ class GuideTest {
         }
         assertFalse(g.contains("`save_log_format`") && tools.stream().noneMatch(t -> t.name().equals("save_log_format")),
                 "no tool named that isn't offered");
+    }
+
+    @Test
+    void everyToolTheRulesAndRecipesNameExists() {
+        // with changes allowed: every tool there is
+        java.util.Set<String> tools = new java.util.HashSet<>();
+        java.util.Set<String> argNames = new java.util.HashSet<>();
+        for (Tool t : logsift.agent.mcp.McpMain.tools(home)) {
+            tools.add(t.name());
+            argNames.addAll(Skill.properties(t).keySet());
+        }
+        String g = Guide.text(logsift.agent.mcp.McpMain.tools(home), LogCatalog.EMPTY, null);
+        String prose = g.substring(0, g.indexOf("## Every tool, with an example"));
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("`([a-z][a-z0-9_]*)`").matcher(prose);
+        while (m.find()) {
+            String name = m.group(1);
+            assertTrue(tools.contains(name) || argNames.contains(name) || List.of("log", "line", "time", "level",
+                    "text", "markers", "app", "orders").contains(name), "the guide names `" + name + "`: no such tool or argument");
+        }
     }
 
     @Test
