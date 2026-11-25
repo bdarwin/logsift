@@ -381,10 +381,13 @@ final class AgentsPanel extends JPanel {
                     + "GC; about a second's pause per GB."},
             {logsift.agent.JvmRules.Action.HEAP_DUMP, "Heap dumps", "A full GC, then seconds per GB. Saved in "
                     + tilde(AppState.home().resolve("heap-dumps")) + "."},
+            {logsift.agent.JvmRules.Action.PROFILE, "Recordings", "Flight Recorder for up to a minute, a few percent "
+                    + "slower meanwhile. Saved in " + tilde(AppState.home().resolve("profiles")) + "."},
         };
         for (Object[] row : rows) {
             logsift.agent.JvmRules.Action a = (logsift.agent.JvmRules.Action) row[0];
-            String[] choices = a == logsift.agent.JvmRules.Action.HEAP_DUMP ? ASK_NEVER : ASK_ALLOW_NEVER;
+            String[] choices = a == logsift.agent.JvmRules.Action.HEAP_DUMP || a == logsift.agent.JvmRules.Action.PROFILE
+                    ? ASK_NEVER : ASK_ALLOW_NEVER;
             javax.swing.JComboBox<String> box = new javax.swing.JComboBox<>(choices);
             box.setName("jvm." + a.name());
             logsift.agent.JvmRules.Rule now = r.rule(a);

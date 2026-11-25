@@ -11,18 +11,20 @@ import java.util.Properties;
 
 /**
  * What agents may do to a running JVM (Settings → Agents → Running JVMs): a thread dump and a heap
- * histogram asked each time, allowed, or never; a heap dump asked each time or never (never
- * allowed without asking); and the biggest heap to count or dump. Read at each call, so a change
- * applies at once, to the window's assistant and to logsift-mcp alike.
+ * histogram asked each time, allowed, or never; a heap dump and a short recording (Flight
+ * Recorder, never async-profiler) asked each time or never (never allowed without asking); and the
+ * biggest heap to count or dump. Read at each call, so a change applies at once, to the window's
+ * assistant and to logsift-mcp alike.
  */
-public record JvmRules(Rule threadDump, Rule histogram, Rule heapDump, int maxHeapGb) {
+public record JvmRules(Rule threadDump, Rule histogram, Rule heapDump, int maxHeapGb, Rule profile) {
     public enum Rule { ASK, ALLOW, NEVER }
 
     /** What an agent wants to do. */
     public enum Action {
         THREAD_DUMP("take thread dumps"),
         HISTOGRAM("count the objects on a heap"),
-        HEAP_DUMP("take heap dumps");
+        HEAP_DUMP("take heap dumps"),
+        PROFILE("record what a JVM does (Flight Recorder)");
 
         private final String words;
 
@@ -35,13 +37,18 @@ public record JvmRules(Rule threadDump, Rule histogram, Rule heapDump, int maxHe
         }
     }
 
-    public static final JvmRules DEFAULT = new JvmRules(Rule.ASK, Rule.ASK, Rule.ASK, 8);
+    public static final JvmRules DEFAULT = new JvmRules(Rule.ASK, Rule.ASK, Rule.ASK, 8, Rule.ASK);
 
     public JvmRules {
         threadDump = threadDump == null ? Rule.ASK : threadDump;
         histogram = histogram == null ? Rule.ASK : histogram;
         heapDump = heapDump == null || heapDump == Rule.ALLOW ? Rule.ASK : heapDump; // always asked
+        profile = profile == null || profile == Rule.ALLOW ? Rule.ASK : profile; // always asked
         maxHeapGb = Math.max(1, Math.min(maxHeapGb, 1024));
+    }
+
+    public JvmRules(Rule threadDump, Rule histogram, Rule heapDump, int maxHeapGb) {
+        this(threadDump, histogram, heapDump, maxHeapGb, Rule.ASK);
     }
 
     public Rule rule(Action a) {
@@ -49,16 +56,17 @@ public record JvmRules(Rule threadDump, Rule histogram, Rule heapDump, int maxHe
             case THREAD_DUMP -> threadDump;
             case HISTOGRAM -> histogram;
             case HEAP_DUMP -> heapDump;
+            case PROFILE -> profile;
         };
     }
 
     public JvmRules with(Action a, Rule r) {
         return new JvmRules(a == Action.THREAD_DUMP ? r : threadDump, a == Action.HISTOGRAM ? r : histogram,
-                a == Action.HEAP_DUMP ? r : heapDump, maxHeapGb);
+                a == Action.HEAP_DUMP ? r : heapDump, maxHeapGb, a == Action.PROFILE ? r : profile);
     }
 
     public JvmRules withMaxHeapGb(int gb) {
-        return new JvmRules(threadDump, histogram, heapDump, gb);
+        return new JvmRules(threadDump, histogram, heapDump, gb, profile);
     }
 
     public long maxHeapBytes() {
@@ -87,7 +95,7 @@ public record JvmRules(Rule threadDump, Rule histogram, Rule heapDump, int maxHe
         } catch (NumberFormatException e) {
             gb = 8;
         }
-        return new JvmRules(rule(p, "threadDump"), rule(p, "histogram"), rule(p, "heapDump"), gb);
+        return new JvmRules(rule(p, "threadDump"), rule(p, "histogram"), rule(p, "heapDump"), gb, rule(p, "profile"));
     }
 
     private static Rule rule(Properties p, String key) {
@@ -104,6 +112,7 @@ public record JvmRules(Rule threadDump, Rule histogram, Rule heapDump, int maxHe
         p.setProperty("histogram", histogram.name());
         p.setProperty("heapDump", heapDump.name());
         p.setProperty("maxHeapGb", String.valueOf(maxHeapGb));
+        p.setProperty("profile", profile.name());
         Files.createDirectories(logsiftHome);
         try (Writer out = Files.newBufferedWriter(file(logsiftHome), StandardCharsets.UTF_8)) {
             p.store(out, "What coding agents may do to a running JVM (Settings → Agents → Running JVMs)");
