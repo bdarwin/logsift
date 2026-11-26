@@ -1101,7 +1101,8 @@ final class ChatPanel extends JPanel {
                     showProblem(why == null ? "The sign-in didn't finish. Try again." : why, true);
                 } else {
                     showMessage("Signed in. Connecting to GitHub Copilot…", null);
-                    service.reconnect().thenAccept(st -> SwingUtilities.invokeLater(() -> connected(st)));
+                    // the Copilot that just signed in: a new one might not see the sign-in yet
+                    service.signedIn().thenAccept(st -> SwingUtilities.invokeLater(() -> connected(st)));
                 }
             });
         }, "logsift-sign-in");

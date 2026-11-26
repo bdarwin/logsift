@@ -254,6 +254,19 @@ public final class ChatService {
         return state();
     }
 
+    /**
+     * After signing in: who's signed in, asked of the Copilot that just signed in (a new one might
+     * not see the sign-in yet), with its models and allowance.
+     */
+    public synchronized CompletableFuture<State> signedIn() {
+        CompletableFuture<State> old = state;
+        if (old == null) {
+            return state();
+        }
+        state = old.thenApplyAsync(s -> s.engine() == null ? connect() : check(s.engine()), work);
+        return state;
+    }
+
     private State connect() {
         ChatSettings s = settings();
         EngineFactory f = factory;
@@ -273,6 +286,11 @@ public final class ChatService {
         } catch (IllegalStateException alreadyStopping) {
             // quitting now
         }
+        return check(e);
+    }
+
+    /** Who's signed in to a started engine, and what it offers. */
+    private State check(ChatEngine e) {
         try {
             e.start();
             String user = e.user();

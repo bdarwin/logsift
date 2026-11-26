@@ -207,6 +207,11 @@ class CopilotEngineTest {
                 && chosen.contains("copilot update"), chosen);
         assertFalse(chosen.contains("SDK"), "no SDK talk: " + chosen);
         assertTrue(CopilotEngine.startFailed(mismatch, null).contains("Install Logsift again"));
+        String newer = CopilotEngine.startFailed(new RuntimeException(
+                "SDK protocol version mismatch: SDK supports versions 4-4, but server reports version 5"), program);
+        assertTrue(newer.contains("newer than this Logsift") && newer.contains("Use Logsift's Copilot")
+                && !newer.contains("copilot update"), "updating a newer one doesn't help: " + newer);
+        assertTrue(chosen.contains("older than this Logsift"), chosen);
         assertEquals("Copilot didn't start: no answer in time",
                 CopilotEngine.startFailed(new java.util.concurrent.TimeoutException(), null));
     }
