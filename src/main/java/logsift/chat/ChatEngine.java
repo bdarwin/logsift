@@ -58,6 +58,15 @@ public interface ChatEngine extends AutoCloseable {
          */
         String await(java.util.function.BooleanSupplier stop) throws Exception;
 
+        /**
+         * The same, asking the person when the sign-in needs their decision: {@code ask} gets the
+         * question and answers true for yes (it may wait for them).
+         */
+        default String await(java.util.function.BooleanSupplier stop, java.util.function.Predicate<String> ask)
+                throws Exception {
+            return await(stop);
+        }
+
         /** Stops it, if it isn't done. */
         @Override
         void close();

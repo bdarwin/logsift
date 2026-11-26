@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Signing in to Copilot from the assistant:** after GitHub's page said *authorized*, the assistant could go straight back to **Sign In**. It connected through a new Copilot that didn't see the sign-in yet. It now asks the Copilot that just signed in, and has Copilot keep the sign-in where its own `/login` does, so it's there next time too. With several GitHub accounts it uses the one you authorized. When a sign-in still doesn't stay, the assistant says why, and `sign-in.log` in Logsift's `chat` folder has each step (no tokens).
+- **Signing in to Copilot from the assistant:** after GitHub's page said *authorized*, the assistant could go straight back to **Sign In**. It connected through a new Copilot that didn't see the sign-in yet. It now asks the Copilot that just signed in. With several GitHub accounts it uses the one you authorized. Where Copilot can't use the computer's credential store (it said *consent needed* for plain text), Logsift asks whether Copilot may keep the sign-in in a file in your `.copilot` folder, as its `/login` does then. When a sign-in still doesn't stay, the assistant says why, and `sign-in.log` in Logsift's `chat` folder has each step (no tokens).
 - **A Copilot program of your own that doesn't fit:** the assistant now says whether it's older than this Logsift (update it) or newer (use Logsift's own Copilot).
 - **Every feature for agents, and a guide that small models can follow:** 21 new tools, so a coding agent, or your own program, can do by tool calls what you do in the window:
   - filter like the Filters panel, with the same engine, and see a timeline of a log;

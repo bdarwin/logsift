@@ -229,6 +229,41 @@ public final class CopilotEngine implements ChatEngine {
         }
     }
 
+    /** What Copilot is told when the person lets it keep the sign-in in a file. */
+    static final String ALLOW = "allow";
+
+    static final String PLAINTEXT_QUESTION = "Copilot can't use this computer's credential store, so it can keep "
+            + "your GitHub sign-in only in a file in your Copilot folder (.copilot in your home folder), as its own "
+            + "/login does then. Programs running as you can read that file. Keep the sign-in there?";
+
+    /**
+     * The answer to give Copilot when a finished sign-in step still waits for a decision
+     * ({@code needs-plaintext-consent}: the person's yes; {@code needs-account-selection}: the
+     * account just authorized), or null when it doesn't.
+     */
+    static String decision(Object step, String status, java.util.function.Predicate<String> ask,
+                           java.util.function.Consumer<String> note) throws Exception {
+        if (status.contains("plaintext")) {
+            note.accept("Copilot asks to keep the sign-in in a file (no credential store here)");
+            if (!ask.test(PLAINTEXT_QUESTION)) {
+                note.accept("the person said no");
+                throw new Exception("Not signed in: the sign-in wasn't kept. Copilot can't use this computer's "
+                        + "credential store, and keeping it in a file was declined.");
+            }
+            note.accept("the person said yes: keeping it in a file");
+            return ALLOW;
+        }
+        if (status.contains("account") && step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStepCompleted d
+                && d.getResult() != null && d.getResult().accounts() != null && !d.getResult().accounts().isEmpty()) {
+            var result = d.getResult();
+            var pick = result.accounts().stream().filter(a -> a.login() != null && a.login().equals(result.login()))
+                    .findFirst().orElse(result.accounts().get(0));
+            note.accept("several accounts (" + result.accounts().size() + "): choosing " + pick.login() + " on " + pick.host());
+            return pick.selectionId();
+        }
+        return null;
+    }
+
     /** Where the last sign-in's steps are written (no tokens): Logsift's chat folder. */
     Path signInLog() {
         Path chat = work.getParent() == null ? work : work.getParent();
@@ -246,18 +281,6 @@ public final class CopilotEngine implements ChatEngine {
         } catch (java.io.IOException e) {
             // only a log
         }
-    }
-
-    /** The login in an account's description (a map from Copilot), or null. */
-    static String accountLogin(Object authInfo) {
-        if (authInfo instanceof java.util.Map<?, ?> m) {
-            for (String k : List.of("login", "user", "username")) {
-                if (m.get(k) != null) {
-                    return m.get(k).toString();
-                }
-            }
-        }
-        return null;
     }
 
     /** A step of Copilot's sign-in, as it comes: its kind ("open-url", "awaiting", "completed", "error"…). */
@@ -311,7 +334,8 @@ public final class CopilotEngine implements ChatEngine {
     private final class CopilotSignIn implements SignIn {
         private final CopilotClient client;
         private final CopilotSession session;
-        private String flow; // a new one when an account is chosen
+        private final String flow;
+        private volatile String answer; // the person's decision, for the next step
         private final String url;
         private volatile boolean done;
         private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
@@ -329,6 +353,20 @@ public final class CopilotEngine implements ChatEngine {
             return url;
         }
 
+        /** Asks the person (none: no). */
+        private java.util.function.Predicate<String> ask = q -> false;
+
+        @Override
+        public String await(java.util.function.BooleanSupplier stop, java.util.function.Predicate<String> ask)
+                throws Exception {
+            this.ask = ask == null ? q -> false : ask;
+            return await(stop);
+        }
+
+        private String decide(Object step, String status) throws Exception {
+            return decision(step, status, ask, CopilotEngine.this::note);
+        }
+
         @Override
         public String await(java.util.function.BooleanSupplier stop) throws Exception {
             long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(SIGN_IN_MINUTES);
@@ -343,9 +381,11 @@ public final class CopilotEngine implements ChatEngine {
                         throw new Exception("The sign-in took too long. Try again.");
                     }
                     if (next == null && stepsWork) {
+                        String input = answer;
+                        answer = null;
                         next = session.getRpc().accounts.login.advance(
                                 new com.microsoft.copilot.generated.rpc.SessionAccountsLoginAdvanceParams(
-                                        session.getSessionId(), flow, null));
+                                        session.getSessionId(), flow, input));
                     }
                     if (next != null) {
                         try {
@@ -353,13 +393,15 @@ public final class CopilotEngine implements ChatEngine {
                             next = null;
                             switch (stepKind(step)) {
                                 case "completed" -> {
-                                    String status = stepStatus(step);
+                                    // Copilot writes them with hyphens: needs-plaintext-consent, needs-account-selection
+                                    String status = stepStatus(step) == null ? null
+                                            : stepStatus(step).toLowerCase(java.util.Locale.ROOT).replace('_', '-');
                                     note("step completed: " + status);
+                                    String decision = status == null ? null : decide(step, status);
                                     if (status == null || status.equals("completed")) {
-                                        done = true;
-                                        keep(step);
-                                    } else if (status.equals("needs_account_selection") && chooseAccount(step)) {
-                                        // signed in on GitHub with several accounts: the one just authorized, again
+                                        done = true; // Copilot kept the sign-in (completed means saved)
+                                    } else if (decision != null) {
+                                        answer = decision; // given with the next step
                                     } else if (status.equals("declined")) {
                                         throw new Exception("The sign-in was declined on GitHub.");
                                     } else {
@@ -405,63 +447,6 @@ public final class CopilotEngine implements ChatEngine {
                     next.cancel(true);
                 }
                 close();
-            }
-        }
-
-        /** The account just authorized, when GitHub has several: begins again with it. */
-        private boolean chooseAccount(Object step) throws Exception {
-            if (!(step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStepCompleted d) || d.getResult() == null
-                    || d.getResult().accounts() == null || d.getResult().accounts().isEmpty()) {
-                return false;
-            }
-            var result = d.getResult();
-            var pick = result.accounts().stream().filter(a -> a.login() != null && a.login().equals(result.login()))
-                    .findFirst().orElse(result.accounts().get(0));
-            note("several accounts (" + result.accounts().size() + "): choosing " + pick.login() + " on " + pick.host());
-            var begun = session.getRpc().accounts.login.begin(new com.microsoft.copilot.generated.rpc.SessionAccountsLoginBeginParams(
-                    session.getSessionId(), com.microsoft.copilot.generated.rpc.LoginProviderKind.GITHUBDOTCOM, null,
-                    com.microsoft.copilot.generated.rpc.AuthLoginMode.SELECTACCOUNT, pick.selectionId()))
-                    .get(60, TimeUnit.SECONDS);
-            flow = begun.flowId();
-            if ("completed".equals(stepKind(begun.step())) && (stepStatus(begun.step()) == null
-                    || "completed".equals(stepStatus(begun.step())))) {
-                done = true;
-                keep(begun.step());
-            }
-            return true;
-        }
-
-        /**
-         * Keeps the sign-in where Copilot's own /login does (the system's credential store), so the
-         * next start of Copilot finds it too: a sign-in made in a session may otherwise last only as
-         * long as this process. The token goes from Copilot to Copilot; Logsift keeps none of it.
-         */
-        private void keep(Object step) {
-            try {
-                String login = step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStepCompleted d
-                        && d.getResult() != null ? d.getResult().login() : null;
-                String host = step instanceof com.microsoft.copilot.generated.rpc.AuthLoginStepCompleted d
-                        && d.getResult() != null ? d.getResult().host() : null;
-                note("signed in as " + login + " on " + host);
-                var users = client.getRpc().account.getAllUsers().get(30, TimeUnit.SECONDS);
-                note("Copilot knows " + users.size() + " account(s)");
-                for (var u : users) {
-                    if (u.token() == null || u.token().isBlank()) {
-                        continue;
-                    }
-                    String who = accountLogin(u.authInfo());
-                    if (login != null && who != null && !login.equals(who)) {
-                        continue;
-                    }
-                    var r = client.getRpc().account.login(new com.microsoft.copilot.generated.rpc.AccountLoginParams(
-                            host == null ? "https://github.com" : host, login == null ? who : login, u.token()))
-                            .get(30, TimeUnit.SECONDS);
-                    note("kept for the next start: in the system's credential store=" + r.storedInVault());
-                    return;
-                }
-                note("no account with a token to keep");
-            } catch (Exception e) {
-                note("couldn't keep the sign-in: " + why(e));
             }
         }
 

@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -86,9 +85,28 @@ class ChatServiceSignInTest {
     }
 
     @Test
-    void anAccountsLoginIsReadFromCopilotsDescription() {
-        assertEquals("bdarwin", CopilotEngine.accountLogin(Map.of("login", "bdarwin", "host", "https://github.com")));
-        assertNull(CopilotEngine.accountLogin("not a map"));
+    void copilotsQuestionsAreAnsweredAsThePersonDecides() throws Exception {
+        java.util.List<String> notes = new java.util.ArrayList<>();
+        java.util.List<String> asked = new java.util.ArrayList<>();
+        // no credential store: kept in a file only when the person says yes
+        assertEquals("allow", CopilotEngine.decision(null, "needs-plaintext-consent", q -> asked.add(q), notes::add));
+        assertTrue(asked.get(0).contains("Programs running as you can read that file"), asked.get(0));
+        Exception no = org.junit.jupiter.api.Assertions.assertThrows(Exception.class,
+                () -> CopilotEngine.decision(null, "needs-plaintext-consent", q -> false, notes::add));
+        assertTrue(no.getMessage().contains("declined"), no.getMessage());
+        // several accounts: the one just authorized
+        var done = new com.microsoft.copilot.generated.rpc.AuthLoginStepCompleted();
+        done.setResult(new com.microsoft.copilot.generated.rpc.AuthLoginResultDto(
+                com.microsoft.copilot.generated.rpc.AuthLoginResultStatus.NEEDS_ACCOUNT_SELECTION, "https://github.com",
+                "bdarwin", List.of(
+                        new com.microsoft.copilot.generated.rpc.AuthLoginAccount("acc-1", "https://github.com", "work-me", null),
+                        new com.microsoft.copilot.generated.rpc.AuthLoginAccount("acc-2", "https://github.com", "bdarwin", null))));
+        assertEquals("acc-2", CopilotEngine.decision(done, "needs-account-selection", q -> false, notes::add));
+        assertNull(CopilotEngine.decision(done, "completed", q -> false, notes::add), "nothing to decide");
+        assertTrue(String.join("\n", notes).contains("choosing bdarwin"), notes.toString());
+        assertEquals("needs-plaintext-consent",
+                com.microsoft.copilot.generated.rpc.AuthLoginResultStatus.NEEDS_PLAINTEXT_CONSENT.getValue(),
+                "Copilot's own word for it, with hyphens");
     }
 
     @Test

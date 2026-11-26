@@ -1084,7 +1084,8 @@ final class ChatPanel extends JPanel {
                         }
                     });
                 }
-                user = si.await(stop::get);
+                // Copilot may need the person's word: keep the sign-in in a file when there's no credential store
+                user = si.await(stop::get, question -> askOnEdt(question));
             } catch (Exception ex) {
                 failed = ex.getMessage() == null ? ex.toString() : ex.getMessage();
             }
@@ -1108,6 +1109,24 @@ final class ChatPanel extends JPanel {
         }, "logsift-sign-in");
         t.setDaemon(true);
         t.start();
+    }
+
+    /** Asks the person from the sign-in's thread, and waits for their answer: true for yes. */
+    private boolean askOnEdt(String question) {
+        java.util.concurrent.atomic.AtomicBoolean yes = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                Object[] choices = {"Keep It in a File", "Don't Keep It"};
+                int r = javax.swing.JOptionPane.showOptionDialog(SwingUtilities.getWindowAncestor(this),
+                        "<html><body style='width:420px'>" + ChatMarkdownEsc.esc(question) + "</body></html>",
+                        "Keep the Copilot Sign-In", javax.swing.JOptionPane.YES_NO_OPTION,
+                        javax.swing.JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
+                yes.set(r == 0);
+            });
+        } catch (Exception e) {
+            return false;
+        }
+        return yes.get();
     }
 
     /** While the person signs in in the browser: what to do there, and Cancel. */
